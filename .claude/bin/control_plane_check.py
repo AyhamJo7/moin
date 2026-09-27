@@ -5,7 +5,7 @@ Run from anywhere inside the repository (it is the first gate in .claude/gates.j
 
   kit-manifest   every file in .claude/kit-manifest.json exists with the recorded sha256
   settings       .claude/settings.json parses; attribution object hides commit/PR text and the
-                 session URL; bypass mode disabled; core deny rules present; every hook path
+                 session URL; no ask rules (bypass sessions); core deny rules present; every hook path
                  exists and is executable; no repo hook runs with --skip-headless
   claude-md      CLAUDE.md < 200 lines, no @PLAN.md / @BLUEPRINT.md import, and its INV index
                  equals the invariant table in PLAN.md
@@ -36,6 +36,15 @@ from typing import Any
 EXIT_OK, EXIT_FAIL = 0, 1
 MAX_CLAUDE_MD_LINES = 200
 REQUIRED_DENY = (
+    "Edit(/.claude/settings.json)",
+    "Write(/.claude/settings.json)",
+    "Edit(/.claude/hooks/**)",
+    "Write(/.claude/hooks/**)",
+    "Edit(/.claude/policy/**)",
+    "Write(/.claude/policy/**)",
+    "Write(/.claude/settings.local.json)",
+    "Bash(terraform plan *)",
+    "Bash(claude *)",
     "Read(.env)",
     "Read(.env.*)",
     "Read(!.env.example)",
@@ -120,8 +129,10 @@ def check_settings(c: Check) -> None:
     if attribution != {"commit": "", "pr": "", "sessionUrl": False}:
         problems.append("attribution must be the object form {commit:'', pr:'', sessionUrl:false}")
     perms = settings.get("permissions") or {}
-    if perms.get("disableBypassPermissionsMode") != "disable":
-        problems.append("permissions.disableBypassPermissionsMode must be 'disable'")
+    if perms.get("ask"):
+        problems.append(
+            "permissions.ask must stay empty: bypass sessions treat ask as allow, so every rule is allow or deny"
+        )
     deny = set(perms.get("deny") or [])
     problems += [f"deny rule missing: {r}" for r in REQUIRED_DENY if r not in deny]
     hooks = hook_paths(settings)

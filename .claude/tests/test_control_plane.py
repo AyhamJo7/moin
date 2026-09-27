@@ -66,11 +66,11 @@ class ControlPlaneCheckTest(unittest.TestCase):
         settings = json.loads(path.read_text())
         settings["attribution"] = False
         settings["permissions"]["deny"].remove("Read(!.env.example)")
-        settings["permissions"]["disableBypassPermissionsMode"] = None
+        settings["permissions"]["ask"] = ["Bash(git push *)"]
         path.write_text(json.dumps(settings))
         code, out = self.check()
         self.assertEqual(code, 1)
-        for needle in ("attribution", "disableBypassPermissionsMode", "Read(!.env.example)"):
+        for needle in ("attribution", "permissions.ask", "Read(!.env.example)"):
             self.assertIn(needle, out)
 
     def test_non_executable_hook_is_caught(self) -> None:
@@ -230,7 +230,7 @@ class HookWiringTest(unittest.TestCase):
             },
         )
         self.assertEqual(res.returncode, 2)
-        self.assertIn("bypasses the permission prompt", res.stderr)
+        self.assertIn("hides its target", res.stderr)
         self.assertTrue((self.state / "hooks.log").is_file())
 
     def test_hooks_are_executable_and_kit_state_stays_out_of_git(self) -> None:

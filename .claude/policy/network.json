@@ -1,0 +1,19 @@
+{
+  "_doc": "curl/wget policy for unattended sessions: GET/HEAD only, to these hosts (exact, or any subdomain for entries starting with '*.'), never piped into a shell or interpreter. Local dev hosts (localhost, 127.0.0.1, ::1, host.docker.internal) allow any method so API routes can be exercised. Everything else is blocked. Other network clients (ssh, scp, sftp, nc, socat, telnet, ftp) are blocked outright.",
+  "local_hosts": ["localhost", "127.0.0.1", "::1", "0.0.0.0", "host.docker.internal"],
+  "allowed_hosts": [
+    "registry.npmjs.org", "nodejs.org", "pypi.org", "files.pythonhosted.org",
+    "proxy.golang.org", "sum.golang.org", "releases.hashicorp.com", "registry.terraform.io",
+    "checkpoint-api.hashicorp.com", "github.com", "api.github.com", "raw.githubusercontent.com",
+    "objects.githubusercontent.com", "codeload.github.com", "registry-1.docker.io", "hub.docker.com",
+    "ghcr.io", "public.ecr.aws",
+    "code.claude.com", "docs.github.com", "developer.hashicorp.com", "docs.aws.amazon.com",
+    "www.twilio.com", "docs.stripe.com", "platform.openai.com", "developers.openai.com",
+    "developer.mozilla.org", "www.typescriptlang.org", "nextjs.org", "fastify.dev", "docs.nestjs.com",
+    "orm.drizzle.team", "vitest.dev", "playwright.dev", "turbo.build", "turborepo.com", "pnpm.io", "zod.dev",
+    "opentelemetry.io", "getpino.io", "www.postgresql.org", "valkey.io", "docs.docker.com",
+    "semgrep.dev", "aquasecurity.github.io", "owasp.org", "cheatsheetseries.owasp.org", "www.w3.org",
+    "eur-lex.europa.eu", "www.gesetze-im-internet.de", "www.bfdi.bund.de", "www.datenschutzkonferenz-online.de"
+  ],
+  "blocked_clients": ["ssh", "scp", "sftp", "nc", "ncat", "netcat", "socat", "telnet", "ftp"]
+}

@@ -88,19 +88,113 @@ TERRAFORM_BLOCKED = frozenset(
     {"apply", "destroy", "import", "state", "force-unlock", "taint", "untaint", "login"}
 )
 PROVIDER_CLIS = frozenset({"stripe", "twilio"})
+DESTROYERS = frozenset({"rm", "rmdir", "unlink", "shred", "truncate"})
+MODE_CHANGERS = frozenset({"chmod", "chown", "chgrp", "chattr", "setfacl"})
+COPIERS = frozenset({"cp", "mv", "install", "ln", "rsync"})
+GIT_PLUMBING = frozenset(
+    {
+        "update-index",
+        "read-tree",
+        "checkout-index",
+        "commit-tree",
+        "update-ref",
+        "symbolic-ref",
+        "replace",
+        "filter-branch",
+        "filter-repo",
+        "fast-import",
+    }
+)
+GIT_VALUE_FLAGS = frozenset(
+    {
+        "-m",
+        "--message",
+        "-F",
+        "--file",
+        "--conflict",
+        "-s",
+        "--strategy",
+        "-X",
+        "--strategy-option",
+        "--source",
+        "-U",
+        "--unified",
+        "--onto",
+        "-o",
+        "--push-option",
+    }
+)
+SENSITIVE_GIT_CONFIG = (
+    "core.fsmonitor",
+    "core.sshcommand",
+    "core.editor",
+    "core.pager",
+    "filter.",
+    "include.",
+    "includeif.",
+    "credential.",
+    "alias.",
+    "diff.external",
+    "sequence.editor",
+    "gpg.program",
+)
+SEND_FLAGS = (
+    "-d",
+    "--data",
+    "--data-raw",
+    "--data-binary",
+    "--data-urlencode",
+    "--json",
+    "-F",
+    "--form",
+    "-T",
+    "--upload-file",
+    "--post-data",
+    "--post-file",
+)
+GH_BLOCKED = frozenset(
+    {
+        ("pr", "merge"),
+        ("pr", "ready"),
+        ("release", "*"),
+        ("secret", "*"),
+        ("variable", "*"),
+        ("ruleset", "*"),
+        ("auth", "*"),
+        ("repo", "delete"),
+        ("repo", "edit"),
+        ("repo", "archive"),
+        ("repo", "rename"),
+        ("workflow", "run"),
+        ("workflow", "enable"),
+        ("workflow", "disable"),
+    }
+)
+GH_API_WRITE_ALLOWED = (
+    ("PATCH", r"repos/[^/]+/[^/]+/pulls/\d+"),
+    ("POST", r"repos/[^/]+/[^/]+/(?:issues|pulls)/\d+/comments"),
+    ("POST", r"repos/[^/]+/[^/]+/pulls"),
+)
+PATCH_FILE_RE = re.compile(r"^(?:\+\+\+ |--- |diff --git a/)(?:[ab]/)?(\S+)", re.MULTILINE)
+PROTECTED_TEXT_RE = re.compile(
+    r"\.claude/(?:settings(?:\.local)?\.json|hooks|agents|policy|gates\.json|bin|kit-manifest\.json|kit)\b"
+    r"|['\"]\.claude['\"]|~/\.(?:bashrc|profile|bash_profile|zshrc)\b"
+)
+WRITE_CODE_RE = re.compile(
+    r"open\([^)]*['\"][wax]b?\+?['\"]|write_text|write_bytes|writeFile|appendFile|\.unlink\(|rmtree"
+    r"|os\.remove|os\.rename|os\.replace|shutil\.(?:copy|move)|\bchmod\b|\bsed\s+(?:-[a-zA-Z]*i|--in-place)"
+    r"|\btee\b|\brm\s|\bmv\s|\bcp\s|\bln\s|fs\.(?:rm|unlink|rename|copyFile|chmod|write)"
+    r"|>>?\s*['\"]?[^\s'\"]*\.claude"
+)
+PIPE_TO_SHELL_RE = re.compile(
+    r"\b(?:curl|wget)\b[^|;&\n]*\|\s*(?:sudo\s+)?(?:(?:ba|z|da|k)?sh|python3?|node|perl|ruby|bun|deno)\b"
+)
+SUBST_TO_SHELL_RE = re.compile(
+    r"(?:(?:ba|z|da|k)?sh|source|\.|eval)\s+(?:-c\s+)?['\"]?(?:<\(|\$\(|`)\s*(?:curl|wget)\b"
+)
 PG_CLIENTS = frozenset({"psql", "pg_dump", "pg_dumpall", "pg_restore", "pgcli"})
 LOCAL_DB_HOSTS = frozenset(
     {"", "localhost", "127.0.0.1", "::1", "0.0.0.0", "host.docker.internal"}  # noqa: S104
-)
-AWS_BLOCKED = frozenset(
-    {
-        ("configure", "*"),
-        ("sso", "*"),
-        ("secretsmanager", "get-secret-value"),
-        ("iam", "create-access-key"),
-        ("ssm", "get-parameter"),
-        ("ssm", "get-parameters"),
-    }
 )
 MESSAGE_GIT_SUBS = frozenset({"commit", "tag", "merge", "notes", "commit-tree"})
 KNOWN_GIT_SUBS = frozenset({"push", "commit", "tag", "merge", "notes", "commit-tree", "add"})
@@ -122,7 +216,6 @@ GH_TEXT_FLAGS = frozenset({"--title", "-t", "--body", "-b", "--notes", "-n"})
 GH_FILE_FLAGS = frozenset({"--body-file", "-F", "--notes-file", "--input"})
 GH_API_FIELD_FLAGS = frozenset({"-f", "-F", "--field", "--raw-field"})
 HOOK_BYPASS_ENV = ("HUSKY", "LEFTHOOK", "SKIP", "PRE_COMMIT_ALLOW_NO_CONFIG")
-PROD_PROFILE_RE = re.compile(r"prod", re.IGNORECASE)
 DOLLAR_VAR_RE = re.compile(r"\$(?:\{[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)")
 CAT_INNER_RE = re.compile(r"^\s*cat\s+([^\s<]+)\s*$")
 SUBST_TOKEN_RE = re.compile(r"\$\(__S([0-9]+)__\)")
@@ -144,6 +237,13 @@ class Policy:
     basename_exceptions: list[str]
     home_paths: list[str]
     absolute_globs: list[str]
+    protected_globs: list[tuple[str, re.Pattern[str]]] = field(default_factory=list)
+    home_protected: list[str] = field(default_factory=list)
+    trunk_refs: list[str] = field(default_factory=list)
+    evasion_markers: list[str] = field(default_factory=list)
+    net_allowed: list[str] = field(default_factory=list)
+    net_local: list[str] = field(default_factory=list)
+    blocked_clients: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -163,6 +263,7 @@ class Context:
     reasons: list[str] = field(default_factory=list)
     substs: list[str] = field(default_factory=list)
     executed_heredocs: list[str] = field(default_factory=list)
+    root: Path = field(default_factory=Path.cwd)
 
     def block(self, reason: str) -> None:
         if reason not in self.reasons:
@@ -176,6 +277,8 @@ def load_policy(directory: Path = POLICY_DIR) -> Policy:
     try:
         ai = json.loads((directory / "no-ai-mentions.json").read_text(encoding="utf-8"))
         sec = json.loads((directory / "secret-paths.json").read_text(encoding="utf-8"))
+        prot = json.loads((directory / "protected-paths.json").read_text(encoding="utf-8"))
+        net = json.loads((directory / "network.json").read_text(encoding="utf-8"))
         patterns = [(str(p["id"]), re.compile(str(p["regex"]))) for p in ai["patterns"]]
         return Policy(
             ai_patterns=patterns,
@@ -183,6 +286,13 @@ def load_policy(directory: Path = POLICY_DIR) -> Policy:
             basename_exceptions=[str(g) for g in sec["basename_exceptions"]],
             home_paths=[str(g) for g in sec["home_paths"]],
             absolute_globs=[str(g) for g in sec["absolute_globs"]],
+            protected_globs=[(str(g), glob_regex(str(g))) for g in prot["repo_globs"]],
+            home_protected=[str(g) for g in prot["home_paths"]],
+            trunk_refs=[str(g) for g in prot["trunk_refs"]],
+            evasion_markers=[str(g) for g in prot["evasion_markers"]],
+            net_allowed=[str(h).lower() for h in net["allowed_hosts"]],
+            net_local=[str(h).lower() for h in net["local_hosts"]],
+            blocked_clients=[str(c) for c in net["blocked_clients"]],
         )
     except (OSError, ValueError, KeyError, TypeError, re.error) as exc:
         raise PolicyError(f"{type(exc).__name__}: {exc}") from exc
@@ -383,6 +493,7 @@ def unmask(ctx: Context, text: str) -> str:
 
 
 def resolve(cwd: Path, token: str) -> Path:
+    token = token.replace("${PWD}", str(cwd)).replace("$PWD", str(cwd))
     path = Path(os.path.expanduser(expand(token, {})))
     return path if path.is_absolute() else cwd / path
 
@@ -473,6 +584,651 @@ def message_value(ctx: Context, cwd: Path, value: str, env: dict[str, str]) -> s
     if DOLLAR_VAR_RE.search(expanded):
         return None
     return expanded
+
+
+# --------------------------------------------------------------------------- self-protection
+
+
+def glob_regex(pattern: str) -> re.Pattern[str]:
+    out = []
+    i = 0
+    while i < len(pattern):
+        if pattern.startswith("**", i):
+            out.append(".*")
+            i += 2
+        elif pattern[i] == "*":
+            out.append("[^/]*")
+            i += 1
+        else:
+            out.append(re.escape(pattern[i]))
+            i += 1
+    return re.compile("".join(out) + r"\Z")
+
+
+def glob_base(pattern: str) -> str:
+    return pattern.split("*", 1)[0].rstrip("/")
+
+
+def path_forms(path: Path) -> set[Path]:
+    forms = {Path(os.path.normpath(path))}
+    with contextlib.suppress(OSError, RuntimeError):
+        forms.add(path.resolve())
+    return forms
+
+
+def relative_forms(ctx: Context, path: Path) -> set[str]:
+    rels: set[str] = set()
+    for form in path_forms(path):
+        for root in path_forms(ctx.root):
+            with contextlib.suppress(ValueError):
+                rel = form.relative_to(root).as_posix()
+                rels.add("." if rel in ("", ".") else rel)
+    return rels
+
+
+def protected_reason(ctx: Context, path: Path) -> str | None:
+    """Why `path` itself is a protected control-plane file (or protected directory)."""
+    for rel in relative_forms(ctx, path):
+        for pattern, rx in ctx.policy.protected_globs:
+            if rx.match(rel) or (rel == glob_base(pattern) and "*" in pattern):
+                return f"`{rel}` is a protected control-plane path"
+    home = Path(os.path.expanduser("~"))
+    for form in path_forms(path):
+        for rel_home in ctx.policy.home_protected:
+            base = home / rel_home
+            if form == base or base in form.parents:
+                return f"`~/{rel_home}` is a protected settings path"
+    return None
+
+
+def contains_protected(ctx: Context, path: Path) -> bool:
+    """`path` is an ancestor directory of protected content (e.g. `.`, `.claude`, `~`)."""
+    for rel in relative_forms(ctx, path):
+        for pattern, _ in ctx.policy.protected_globs:
+            base = glob_base(pattern)
+            if rel == "." or base.startswith(rel + "/"):
+                return True
+    home = Path(os.path.expanduser("~"))
+    for form in path_forms(path):
+        for rel_home in ctx.policy.home_protected:
+            if form in (home / rel_home).parents:
+                return True
+    return False
+
+
+def protect_block(ctx: Context, what: str, why: str) -> None:
+    ctx.block(
+        f"{what}: {why}. Guardrail files are founder-only (.claude/policy/protected-paths.json): "
+        "read them freely, but ask the founder to change them."
+    )
+
+
+def positionals(args: list[str], with_value: frozenset[str] = frozenset()) -> list[str]:
+    out: list[str] = []
+    i = 0
+    after_dashes = False
+    while i < len(args):
+        arg = args[i]
+        if after_dashes or not arg.startswith("-") or arg == "-":
+            out.append(arg)
+        elif arg == "--":
+            after_dashes = True
+        elif arg in with_value:
+            i += 1
+        i += 1
+    return out
+
+
+def recursive_flag(args: list[str]) -> bool:
+    return any(
+        a in ("--recursive", "-R", "-r")
+        or (a.startswith("-") and not a.startswith("--") and ("r" in a[1:] or "R" in a[1:]))
+        for a in args
+    )
+
+
+def check_protected_paths(ctx: Context, cmd: SimpleCommand, cwd: Path) -> None:
+    head = os.path.basename(cmd.words[0])
+    args = cmd.words[1:]
+    for op, target in cmd.redirects:
+        if not op.startswith("<") and (why := protected_reason(ctx, resolve(cwd, target))):
+            protect_block(ctx, f"redirect `{op} {target}`", why)
+    if head in DESTROYERS:
+        recursive = head in ("rmdir",) or recursive_flag(args)
+        for arg in positionals(args, frozenset({"-s", "--size"})):
+            path = resolve(cwd, arg)
+            if why := protected_reason(ctx, path):
+                protect_block(ctx, f"`{head} {arg}`", why)
+            elif recursive and contains_protected(ctx, path):
+                protect_block(ctx, f"`{head} {arg}`", "it contains protected control-plane paths")
+    elif head in MODE_CHANGERS:
+        for arg in positionals(args, frozenset({"--reference"})):
+            path = resolve(cwd, arg)
+            if (why := protected_reason(ctx, path)) or (
+                recursive_flag(args) and contains_protected(ctx, path)
+            ):
+                protect_block(ctx, f"`{head} {arg}`", why or "it contains protected paths")
+    elif head in COPIERS:
+        check_copy(ctx, head, args, cwd)
+    elif head == "tee":
+        for arg in positionals(args):
+            if why := protected_reason(ctx, resolve(cwd, arg)):
+                protect_block(ctx, f"`tee {arg}`", why)
+    elif head == "dd":
+        for arg in args:
+            if arg.startswith("of=") and (why := protected_reason(ctx, resolve(cwd, arg[3:]))):
+                protect_block(ctx, f"`dd {arg}`", why)
+    elif head in INPLACE_EDITORS and any(
+        a == "--in-place"
+        or a.startswith("--in-place=")
+        or (a.startswith("-") and not a.startswith("--") and "i" in a[1:])
+        for a in args
+    ):
+        for arg in positionals(args, frozenset({"-e", "--expression", "-f", "--file"})):
+            if why := protected_reason(ctx, resolve(cwd, arg)):
+                protect_block(ctx, f"`{head} -i {arg}`", why)
+    elif head == "patch":
+        texts = [
+            *ctx.heredocs,
+            *[read_text_file(resolve(cwd, a)) or "" for a in positionals(args)],
+        ]
+        for text in texts:
+            for rel in PATCH_FILE_RE.findall(text):
+                if why := protected_reason(ctx, resolve(ctx.root, rel)):
+                    protect_block(ctx, "`patch`", why)
+    elif head == "find":
+        check_find(ctx, args, cwd)
+    elif head in ("curl", "wget"):
+        for i, arg in enumerate(args):
+            is_output = arg in ("-o", "--output", "-O", "--output-document") and i + 1 < len(args)
+            if is_output and (why := protected_reason(ctx, resolve(cwd, args[i + 1]))):
+                protect_block(ctx, f"`{head} {arg} {args[i + 1]}`", why)
+    elif head in ("docker", "podman"):
+        check_container(ctx, args, cwd)
+
+
+def check_copy(ctx: Context, head: str, args: list[str], cwd: Path) -> None:
+    target_dir = next(
+        (args[i + 1] for i, a in enumerate(args[:-1]) if a in ("-t", "--target-directory")),
+        None,
+    )
+    pos = positionals(
+        args, frozenset({"-t", "--target-directory", "-S", "--suffix", "-m", "--mode"})
+    )
+    if head == "mv":
+        for arg in pos:
+            path = resolve(cwd, arg)
+            if (why := protected_reason(ctx, path)) or contains_protected(ctx, path):
+                protect_block(ctx, f"`mv {arg}`", why or "it contains protected paths")
+    if target_dir is None and len(pos) < 2:
+        return
+    dest = resolve(cwd, target_dir if target_dir is not None else pos[-1])
+    sources = pos if target_dir is not None else pos[:-1]
+    candidates = [dest]
+    if dest.is_dir() or (target_dir is None and pos[-1].endswith("/")) or target_dir is not None:
+        candidates += [dest / Path(s.rstrip("/")).name for s in sources]
+    for path in candidates:
+        if why := protected_reason(ctx, path):
+            protect_block(ctx, f"`{head}` onto `{path}`", why)
+            return
+    if head == "rsync" and "--delete" in " ".join(args) and contains_protected(ctx, dest):
+        protect_block(ctx, "`rsync --delete`", "the destination contains protected paths")
+
+
+def check_find(ctx: Context, args: list[str], cwd: Path) -> None:
+    actions = {
+        "-delete",
+        "-exec",
+        "-execdir",
+        "-ok",
+        "-okdir",
+        "-fprint",
+        "-fprintf",
+        "-fls",
+    }
+    if not actions & set(args):
+        return
+    roots = []
+    for arg in args:
+        if arg.startswith(("-", "(", "!")):
+            break
+        roots.append(arg)
+    for root in roots or ["."]:
+        path = resolve(cwd, root)
+        if protected_reason(ctx, path) or contains_protected(ctx, path):
+            protect_block(ctx, f"`find {root} ... -delete/-exec`", "it reaches protected paths")
+
+
+def check_container(ctx: Context, args: list[str], cwd: Path) -> None:
+    sub = args[0] if args else ""
+    local_dest = sub == "cp" and len(args) >= 3 and ":" not in args[-1]
+    if local_dest and (why := protected_reason(ctx, resolve(cwd, args[-1]))):
+        protect_block(ctx, "`docker cp`", why)
+    if sub not in ("run", "create"):
+        return
+    if "--privileged" in args:
+        ctx.block("`docker run --privileged` is not allowed in sessions.")
+    for i, arg in enumerate(args):
+        spec = ""
+        if arg in ("-v", "--volume", "--mount") and i + 1 < len(args):
+            spec = args[i + 1]
+        elif arg.startswith(("--volume=", "--mount=")):
+            spec = arg.split("=", 1)[1]
+        if not spec:
+            continue
+        m = re.search(r"(?:^|,)(?:source|src)=([^,]+)", spec)
+        source = m.group(1) if m else spec.split(":", 1)[0]
+        if not source.startswith(("/", ".", "~", "$")):
+            continue  # named volume
+        path = resolve(cwd, source)
+        why = protected_reason(ctx, path) or secret_path(ctx.policy, path)
+        if why or contains_protected(ctx, path):
+            ctx.block(
+                f"`docker {sub}` mounts `{source}`, which holds protected or secret paths; mount a "
+                "narrower directory (never the repository root, .claude or $HOME)."
+            )
+
+
+def read_text_file(path: Path) -> str | None:
+    try:
+        if path.is_file():
+            with path.open("rb") as fh:
+                return fh.read(MAX_MESSAGE_FILE_BYTES).decode("utf-8", errors="replace")
+    except OSError:
+        return None
+    return None
+
+
+def check_executed_code(ctx: Context, what: str, text: str) -> None:
+    for line in text.splitlines():
+        if PROTECTED_TEXT_RE.search(line) and WRITE_CODE_RE.search(line):
+            protect_block(ctx, what, f"it writes a protected path (`{line.strip()[:80]}`)")
+            return
+
+
+def script_texts(ctx: Context, cmd: SimpleCommand, cwd: Path) -> list[tuple[str, str]]:
+    """(label, text) of code this command executes: inline code, script files, npm scripts."""
+    head = os.path.basename(cmd.words[0])
+    base = re.sub(r"[0-9.]+$", "", head)
+    args = cmd.words[1:]
+    found: list[tuple[str, str]] = []
+    if base in INTERPRETERS or head in INTERPRETERS or head in SHELLS or head in ("source", "."):
+        if any(a in ("-c", "-e", "--eval", "-p", "--print") for a in args):
+            found.append((f"inline `{head}` code", " ".join(args)))
+        else:
+            for arg in args:
+                if arg.startswith("-"):
+                    continue
+                text = read_text_file(resolve(cwd, arg))
+                if text is not None:
+                    found.append((f"script `{arg}`", text))
+                break
+    elif "/" in cmd.words[0]:
+        text = read_text_file(resolve(cwd, cmd.words[0]))
+        if text is not None:
+            found.append((f"script `{cmd.words[0]}`", text))
+    elif head in ("pnpm", "npm", "yarn") and len(args) >= 1:
+        name = args[1] if args[0] == "run" and len(args) > 1 else args[0]
+        package = read_text_file(cwd / "package.json") or read_text_file(ctx.root / "package.json")
+        with contextlib.suppress(ValueError, AttributeError, TypeError):
+            scripts = json.loads(package or "{}").get("scripts", {})
+            if isinstance(scripts.get(name), str):
+                found.append((f"package script `{name}`", scripts[name]))
+    return found
+
+
+def check_nested_and_evasion(ctx: Context, cmd: SimpleCommand) -> None:
+    head = os.path.basename(cmd.words[0])
+    if head == "claude" and not set(cmd.words[1:]) <= {
+        "--version",
+        "-v",
+        "--help",
+        "-h",
+    }:
+        ctx.block(
+            "starting another session (`claude ...`) is not allowed: a nested session can load "
+            "different settings and run without these guards."
+        )
+
+
+# --------------------------------------------------------------------------- git control-plane rules
+
+
+def protected_specs(ctx: Context) -> list[str]:
+    return sorted({glob_base(p) for p, _ in ctx.policy.protected_globs})
+
+
+def ref_exists(cwd: Path, ref: str) -> bool:
+    proc = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(cwd),
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            f"{ref}^{{commit}}",
+        ],
+        capture_output=True,
+        check=False,
+        timeout=10,
+    )
+    return proc.returncode == 0
+
+
+def trunk_ok(ctx: Context, cwd: Path, ref: str) -> bool:
+    if ref not in ctx.policy.trunk_refs:
+        return False
+    proc = subprocess.run(
+        ["git", "-C", str(cwd), "cat-file", "-e", f"{ref}:.claude/settings.json"],
+        capture_output=True,
+        check=False,
+        timeout=10,
+    )
+    return proc.returncode == 0
+
+
+def protected_diff(ctx: Context, cwd: Path, *revs: str) -> list[str]:
+    return git_out(cwd, "diff", "--name-only", *revs, "--", *protected_specs(ctx))
+
+
+def guard_target(
+    ctx: Context, cwd: Path, what: str, target: str, *, three_dot: bool = False
+) -> None:
+    if not ref_exists(cwd, target):
+        return  # git will fail on an unknown ref
+    changed = protected_diff(
+        ctx,
+        cwd,
+        f"HEAD...{target}" if three_dot else "HEAD",
+        *(() if three_dot else (target,)),
+    )
+    if changed and not trunk_ok(ctx, cwd, target):
+        protect_block(
+            ctx,
+            f"`git {what}`",
+            f"it would change protected files ({', '.join(changed[:4])}); only the founder-merged "
+            f"trunk ({', '.join(ctx.policy.trunk_refs)}) may bring control-plane changes",
+        )
+
+
+def pathspec_hits(ctx: Context, cwd: Path, specs: list[str]) -> bool:
+    return any(
+        s in (".", ":/", "*", ":(top)")
+        or protected_reason(ctx, resolve(cwd, s))
+        or contains_protected(ctx, resolve(cwd, s))
+        for s in specs
+    )
+
+
+def check_git_control_plane(ctx: Context, sub: str, args: list[str], cwd: Path) -> None:
+    pos = positionals(args, GIT_VALUE_FLAGS)
+    if sub in GIT_PLUMBING and not (
+        sub == "update-index" and set(args) <= {"-q", "--refresh", "--really-refresh"}
+    ):
+        ctx.block(
+            f"`git {sub}` can rewrite the working tree or history behind the guards; not allowed."
+        )
+        return
+    if sub in ("rm", "mv") and pathspec_hits(ctx, cwd, pos):
+        protect_block(ctx, f"`git {sub} {' '.join(pos)}`", "it removes or moves protected paths")
+    elif sub == "restore":
+        source = next((a.split("=", 1)[1] for a in args if a.startswith("--source=")), None)
+        for i, a in enumerate(args[:-1]):
+            if a in ("-s", "--source"):
+                source = args[i + 1]
+        if source and pathspec_hits(ctx, cwd, pos) and protected_diff(ctx, cwd, "HEAD", source):
+            protect_block(
+                ctx,
+                f"`git restore --source {source}`",
+                "it would restore other versions of protected files",
+            )
+    elif sub in ("checkout", "switch"):
+        check_git_switch(ctx, sub, args, cwd)
+    elif sub == "reset" and {"--hard", "--merge", "--keep"} & set(args):
+        guard_target(ctx, cwd, f"reset {' '.join(args)}", pos[0] if pos else "HEAD")
+    elif sub == "merge" and not {"--abort", "--continue", "--quit"} & set(args):
+        for target in pos:
+            guard_target(ctx, cwd, f"merge {target}", target, three_dot=True)
+    elif sub == "rebase" and not {"--abort", "--continue", "--skip", "--quit"} & set(args):
+        onto = next((args[i + 1] for i, a in enumerate(args[:-1]) if a == "--onto"), None)
+        target = onto or (pos[0] if pos else "@{u}")
+        guard_target(ctx, cwd, f"rebase {target}", target, three_dot=True)
+    elif sub == "pull":
+        target = f"{pos[0]}/{pos[1]}" if len(pos) >= 2 else "@{u}"
+        resolved = (
+            git_out(cwd, "rev-parse", "--abbrev-ref", target) if target == "@{u}" else [target]
+        )
+        guard_target(
+            ctx,
+            cwd,
+            f"pull {' '.join(pos)}".strip(),
+            resolved[0].strip() if resolved else target,
+            three_dot=True,
+        )
+    elif sub in ("cherry-pick", "revert") and not {
+        "--abort",
+        "--continue",
+        "--skip",
+        "--quit",
+    } & set(args):
+        for spec in pos:
+            commits = git_out(cwd, "rev-list", spec) if ".." in spec else [spec]
+            for commit in commits[:200]:
+                if ref_exists(cwd, commit) and protected_diff(ctx, cwd, f"{commit}^", commit):
+                    protect_block(
+                        ctx,
+                        f"`git {sub} {spec}`",
+                        "a picked commit changes protected files",
+                    )
+                    return
+    elif sub == "stash" and pos[:1] in (["pop"], ["apply"]):
+        ref = pos[1] if len(pos) > 1 else "stash@{0}"
+        files = git_out(cwd, "stash", "show", "--name-only", "--include-untracked", ref)
+        if any(protected_reason(ctx, resolve(ctx.root, f)) for f in files):
+            protect_block(ctx, f"`git stash {pos[0]}`", "the stash changes protected files")
+    elif sub in ("apply", "am"):
+        texts = [read_text_file(resolve(cwd, p)) for p in pos] if pos else list(ctx.heredocs)
+        if not texts or any(t is None for t in texts):
+            ctx.block(f"`git {sub}`: the patch content cannot be checked; use a patch file.")
+            return
+        for text in texts:
+            for rel in PATCH_FILE_RE.findall(text or ""):
+                if why := protected_reason(ctx, resolve(ctx.root, rel)):
+                    protect_block(ctx, f"`git {sub}`", why)
+                    return
+    elif sub == "clean" and any(
+        ("x" in a[1:] or "X" in a[1:]) for a in args if a.startswith("-") and not a.startswith("--")
+    ):
+        local = ctx.root / ".claude" / "settings.local.json"
+        if local.exists() and (not pos or pathspec_hits(ctx, cwd, pos)):
+            protect_block(ctx, "`git clean -x`", "it would delete .claude/settings.local.json")
+    elif sub == "config":
+        check_git_config(ctx, args)
+
+
+def check_git_switch(ctx: Context, sub: str, args: list[str], cwd: Path) -> None:
+    if "--" in args:
+        idx = args.index("--")
+        before = positionals(args[:idx], GIT_VALUE_FLAGS | {"-b", "-B", "-c", "-C", "--orphan"})
+        specs = args[idx + 1 :]
+        if (
+            before
+            and pathspec_hits(ctx, cwd, specs)
+            and protected_diff(ctx, cwd, "HEAD", before[0])
+        ):
+            protect_block(
+                ctx,
+                f"`git {sub} {before[0]} -- ...`",
+                "it would check out other versions of protected files",
+            )
+        return
+    start = None
+    for i, a in enumerate(args[:-1]):
+        if a in ("-b", "-B", "-c", "-C", "--orphan"):
+            rest = positionals(args[i + 2 :], GIT_VALUE_FLAGS)
+            start = rest[0] if rest else None
+            break
+    else:
+        pos = positionals(args, GIT_VALUE_FLAGS | {"-b", "-B", "-c", "-C", "--orphan"})
+        if not pos:
+            return
+        if ref_exists(cwd, pos[0]):
+            if len(pos) > 1:
+                if pathspec_hits(ctx, cwd, pos[1:]) and protected_diff(ctx, cwd, "HEAD", pos[0]):
+                    protect_block(
+                        ctx,
+                        f"`git {sub} {pos[0]} <paths>`",
+                        "it would check out other versions of protected files",
+                    )
+                return
+            start = pos[0]
+    if start and start not in ("-",):
+        guard_target(ctx, cwd, f"{sub} {start}", start)
+
+
+def check_git_config(ctx: Context, args: list[str]) -> None:
+    reading = {
+        "--get",
+        "--get-all",
+        "--get-regexp",
+        "--list",
+        "-l",
+        "--show-origin",
+        "--show-scope",
+    }
+    if reading & set(args):
+        return
+    pos = positionals(args, frozenset({"--file", "-f", "--blob", "--type"}))
+    if not pos:
+        return
+    key = pos[0].lower()
+    if "--global" in args or "--system" in args:
+        ctx.block("`git config --global/--system` changes other repositories; not allowed.")
+    elif key == "core.hookspath" or key.startswith(SENSITIVE_GIT_CONFIG):
+        ctx.block(
+            f"`git config {pos[0]}` can run code or bypass hooks behind the guards; not allowed."
+        )
+
+
+# --------------------------------------------------------------------------- unattended permission table
+
+
+def url_host(token: str) -> str | None:
+    m = re.match(r"^(?:[a-zA-Z][a-zA-Z0-9+.-]*://)?(?:[^@/\s]*@)?(\[[^\]]+\]|[^:/\s?#]+)", token)
+    if not m:
+        return None
+    host = m.group(1).strip("[]").lower()
+    return host if ("." in host or host in ("localhost", "::1")) else None
+
+
+def host_allowed(allowed: list[str], host: str) -> bool:
+    for entry in allowed:
+        if entry.startswith("*.") and (host == entry[2:] or host.endswith(entry[1:])):
+            return True
+        if host == entry:
+            return True
+    return False
+
+
+def check_network(ctx: Context, cmd: SimpleCommand) -> None:
+    head = os.path.basename(cmd.words[0])
+    args = cmd.words[1:]
+    if args and set(args) <= {"--version", "-V", "--help", "-h"}:
+        return
+    value_flags = {
+        "-o",
+        "--output",
+        "-O",
+        "--output-document",
+        "-H",
+        "--header",
+        "-A",
+        "--user-agent",
+        "-e",
+        "--referer",
+        "-m",
+        "--max-time",
+        "--connect-timeout",
+        "-w",
+        "--write-out",
+        "-u",
+        "--user",
+        "--retry",
+        "-x",
+        "--proxy",
+        "-X",
+        "--request",
+        "--method",
+        "-d",
+        "--data",
+        "--data-raw",
+        "--data-binary",
+        "--data-urlencode",
+        "--json",
+        "-F",
+        "--form",
+        "-T",
+        "--upload-file",
+        "--post-data",
+        "--post-file",
+        "-P",
+        "--directory-prefix",
+    }
+    urls = [a for a in positionals(args, frozenset(value_flags)) if url_host(a)]
+    method = next(
+        (
+            args[i + 1].upper()
+            for i, a in enumerate(args[:-1])
+            if a in ("-X", "--request", "--method")
+        ),
+        "GET",
+    )
+    sends = any(a in SEND_FLAGS or a.startswith(tuple(f + "=" for f in SEND_FLAGS)) for a in args)
+    if not urls:
+        ctx.block(
+            f"`{head}`: no checkable URL. Give an explicit https:// URL on the allowlist (.claude/policy/network.json)."
+        )
+        return
+    for url in urls:
+        host = url_host(url) or ""
+        if host in ctx.policy.net_local:
+            continue
+        if not host_allowed(ctx.policy.net_allowed, host):
+            ctx.block(
+                f"`{head}` to `{host}` is not on the network allowlist (.claude/policy/network.json)."
+            )
+        elif method not in ("GET", "HEAD") or sends:
+            ctx.block(
+                f"`{head}` may only GET/HEAD remote hosts (no uploads or {method}); `{host}` is remote."
+            )
+
+
+def check_piped_network(ctx: Context) -> None:
+    raw = strip_heredocs(ctx.raw)
+    if PIPE_TO_SHELL_RE.search(raw) or SUBST_TO_SHELL_RE.search(raw):
+        ctx.block("downloading code and piping it into a shell or interpreter is not allowed.")
+
+
+def check_unattended_table(ctx: Context, cmd: SimpleCommand) -> None:
+    head = os.path.basename(cmd.words[0])
+    args = cmd.words[1:]
+    if head in ("curl", "wget"):
+        check_network(ctx, cmd)
+    elif head in ctx.policy.blocked_clients:
+        ctx.block(f"`{head}` opens remote shells or raw connections; not allowed in sessions.")
+    elif head == "npx" or head == "bunx" or (head == "pnpm" and args[:1] == ["dlx"]):
+        ctx.block(
+            f"`{head}` downloads and runs unpinned packages; use `pnpm exec` with a declared devDependency."
+        )
+    elif (
+        head == "npm"
+        and args[:1]
+        and args[0] in ("install", "i", "ci", "add", "exec", "x", "uninstall")
+    ):
+        ctx.block("this repository uses pnpm (A-22); `npm install/exec` is not allowed.")
+    elif head == "aws":
+        ctx.block("the AWS CLI is founder-only (EXT-09; no AWS credentials in sessions).")
 
 
 # --------------------------------------------------------------------------- Bash rules
@@ -603,9 +1359,9 @@ def check_push(
     redirected_repo = any(k in cmd.env for k in ("GIT_DIR", "GIT_WORK_TREE"))
     if nested or cmd.words[0] != "git" or globals_ or redirected_repo:
         ctx.block(
-            "this push form bypasses the permission prompt (git -C/-c/--git-dir, an absolute "
-            "git path, sh -c or eval). Push with the plain form from the repository root: "
-            "`git push -u origin <branch>`; it asks the founder for approval."
+            "this push form hides its target (git -C/-c/--git-dir, an absolute git path, sh -c or "
+            "eval). Push with the plain form from the repository root: `git push -u origin <branch>` "
+            "(any branch except main/master)."
         )
     opts, refspecs = refspec_targets(args)
     if "--no-verify" in opts:
@@ -622,6 +1378,9 @@ def check_push(
         ctx.block("push of all refs, tags, mirrors or deletions is founder-only.")
     targets: list[str] = []
     for spec in refspecs:
+        if spec.startswith(":"):
+            ctx.block(f"`{spec}` deletes a remote branch; branch deletion is founder-only.")
+            continue
         if spec.startswith("+"):
             ctx.block(f"`{spec}` is a forced refspec; not allowed.")
             spec = spec[1:]
@@ -667,12 +1426,22 @@ def check_git(ctx: Context, cmd: SimpleCommand, cwd: Path, nested: bool) -> None
         check_git_message(ctx, cmd, sub, args, call_cwd)
     elif sub == "add":
         check_add(ctx, args, call_cwd)
+    check_git_control_plane(ctx, sub, args, call_cwd)
 
 
 def check_gh(ctx: Context, cmd: SimpleCommand, cwd: Path) -> None:
     words = cmd.words
     group = words[1] if len(words) > 1 else ""
     action = words[2] if len(words) > 2 and group != "api" else ""
+    if (group, action) in GH_BLOCKED or (group, "*") in GH_BLOCKED:
+        ctx.block(f"`gh {group} {action}`".replace(" `", "`") + " is founder-only.")
+        return
+    if (group, action) == ("pr", "create") and not {"--draft", "-d"} & set(words[3:]):
+        ctx.block(
+            "`gh pr create` must open a draft (`--draft`); the founder marks PRs ready and merges."
+        )
+    if group == "api":
+        check_gh_api(ctx, words[2:])
     if (group, action) not in GH_TEXT_COMMANDS:
         return
     args = words[2:] if group == "api" else words[3:]
@@ -703,6 +1472,52 @@ def check_gh(ctx: Context, cmd: SimpleCommand, cwd: Path) -> None:
             i += 1
 
 
+def check_gh_api(ctx: Context, args: list[str]) -> None:
+    value_flags = frozenset(
+        {
+            "-X",
+            "--method",
+            "-f",
+            "-F",
+            "--field",
+            "--raw-field",
+            "-H",
+            "--header",
+            "--input",
+            "-q",
+            "--jq",
+            "-t",
+            "--template",
+            "--hostname",
+            "--cache",
+        }
+    )
+    pos = positionals(args, value_flags)
+    endpoint = (pos[0] if pos else "").lstrip("/")
+    fields = [
+        args[i + 1] for i, a in enumerate(args[:-1]) if a in ("-f", "-F", "--field", "--raw-field")
+    ]
+    fields += [a.split("=", 1)[1] for a in args if a.startswith(("--field=", "--raw-field="))]
+    explicit = next(
+        (args[i + 1].upper() for i, a in enumerate(args[:-1]) if a in ("-X", "--method")), None
+    )
+    method = explicit or ("POST" if fields or "--input" in args else "GET")
+    if endpoint == "graphql":
+        if any(re.search(r"\bmutation\b", f) for f in fields):
+            ctx.block("`gh api graphql` mutations are not allowed; use the documented gh commands.")
+        return
+    if method in ("GET", "HEAD"):
+        return
+    allowed = any(method == m and re.fullmatch(rx, endpoint) for m, rx in GH_API_WRITE_ALLOWED)
+    if allowed and re.fullmatch(r"repos/[^/]+/[^/]+/pulls", endpoint):
+        allowed = any(re.fullmatch(r"draft=true", f.strip()) for f in fields)
+    if not allowed:
+        ctx.block(
+            f"`gh api -X {method} {endpoint}` is not allowed; sessions may only edit PR title/body, "
+            "comment, or open draft PRs through the API."
+        )
+
+
 def check_terraform(ctx: Context, cmd: SimpleCommand) -> None:
     args = [a for a in cmd.words[1:]]
     if any(a in ("-auto-approve", "--auto-approve") for a in args):
@@ -714,31 +1529,16 @@ def check_terraform(ctx: Context, cmd: SimpleCommand) -> None:
     if sub in TERRAFORM_BLOCKED or (sub == "workspace" and "delete" in positionals[1:2]):
         ctx.block(
             f"`terraform {' '.join(positionals[:2])}` changes real infrastructure or state and is "
-            "founder-only (QG-05). Allowed: fmt, validate, init -backend=false; plan asks first."
+            "founder-only (QG-05). Allowed: fmt, validate, init -backend=false."
         )
-
-
-def aws_profile(cmd: SimpleCommand) -> str:
-    words = cmd.words
-    for i, arg in enumerate(words):
-        if arg == "--profile" and i + 1 < len(words):
-            return words[i + 1]
-        if arg.startswith("--profile="):
-            return arg.split("=", 1)[1]
-    return cmd.env.get("AWS_PROFILE") or os.environ.get("AWS_PROFILE", "")
-
-
-def check_aws(ctx: Context, cmd: SimpleCommand) -> None:
-    profile = aws_profile(cmd)
-    if PROD_PROFILE_RE.search(profile):
-        ctx.block(f"AWS profile `{profile}` is production; never used from a session (INV-16).")
-    positionals = [a for a in cmd.words[1:] if not a.startswith("-")]
-    service = positionals[0] if positionals else ""
-    op = positionals[1] if len(positionals) > 1 else ""
-    if (service, "*") in AWS_BLOCKED or (service, op) in AWS_BLOCKED:
-        ctx.block(f"`aws {service} {op}` handles credentials or secrets; founder-only (INV-15).")
-    if op.startswith(("delete-", "terminate-", "put-secret", "deregister-")):
-        ctx.block(f"`aws {service} {op}` is destructive; founder-only.")
+    elif sub == "plan":
+        ctx.block(
+            "`terraform plan` needs AWS credentials and is founder-only; use `terraform validate`."
+        )
+    elif sub == "init" and "-backend=false" not in args:
+        ctx.block(
+            "`terraform init` with a backend needs credentials; use `terraform init -backend=false`."
+        )
 
 
 def db_hosts(cmd: SimpleCommand) -> list[str]:
@@ -862,13 +1662,22 @@ def check_bash(ctx: Context) -> None:
             check_terraform(ctx, cmd)
         elif head in PROVIDER_CLIS:
             ctx.block(f"the `{head}` CLI acts on live provider accounts; founder-only.")
-        elif head == "aws":
-            check_aws(ctx, cmd)
         elif head in PG_CLIENTS:
             check_db(ctx, cmd)
         check_secret_tokens(ctx, cmd, cwd)
         check_inline_code(ctx, cmd)
         check_spec_files(ctx, cmd, cwd)
+        check_protected_paths(ctx, cmd, cwd)
+        check_nested_and_evasion(ctx, cmd)
+        check_unattended_table(ctx, cmd)
+        for label, text in script_texts(ctx, cmd, cwd):
+            check_executed_code(ctx, label, text)
+    for body in ctx.executed_heredocs:
+        check_executed_code(ctx, "a heredoc script", body)
+    check_piped_network(ctx)
+    for marker in ctx.policy.evasion_markers:
+        if marker in ctx.raw:
+            ctx.block(f"`{marker}` would weaken or skip the session guards; not allowed.")
     for body in ctx.executed_heredocs:
         for m in INLINE_SECRET_RE.finditer(body):
             if secret_name(ctx.policy, os.path.basename(m.group(1))) and re.search(
@@ -893,6 +1702,9 @@ def check_file_tool(ctx: Context, tool: str, tool_input: dict[str, Any]) -> None
     why = secret_path(ctx.policy, path)
     if why:
         ctx.block(f"{tool} `{raw}`: {why} (INV-15). Use `.env.example` for variable names.")
+        return
+    if tool in WRITE_TOOLS and (why := protected_reason(ctx, path)):
+        protect_block(ctx, f"{tool} `{raw}`", why)
         return
     if tool in WRITE_TOOLS and path.name == READ_ONLY_SPEC:
         ctx.block("BLUEPRINT.md is read-only (only the founder changes it).")
@@ -944,22 +1756,28 @@ def block(message: str, log: str | None, subject: str) -> int:
     return EXIT_BLOCK
 
 
+def project_toplevel(cwd: Path) -> str:
+    out = git_out(cwd, "rev-parse", "--show-toplevel") if cwd.is_dir() else []
+    return out[0].strip() if out else str(cwd)
+
+
 def evaluate(payload: dict[str, Any], policy: Policy) -> list[str]:
     tool = payload.get("tool_name")
     tool_input = payload.get("tool_input")
     if not isinstance(tool, str) or not isinstance(tool_input, dict):
         return ["hook input has no tool_name/tool_input; blocking to fail closed."]
     cwd = Path(str(payload.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()))
+    root = Path(os.environ.get("CLAUDE_PROJECT_DIR") or project_toplevel(cwd))
     if tool == "Bash":
         command = tool_input.get("command")
         if not isinstance(command, str):
             return ["hook input has no Bash command string; blocking to fail closed."]
         docs = heredoc_bodies(command)
-        ctx = Context(policy, cwd, command, [body for _, body in docs])
+        ctx = Context(policy, cwd, command, [body for _, body in docs], root=root)
         ctx.executed_heredocs = [body for executed, body in docs if executed]
         check_bash(ctx)
         return ctx.reasons
-    ctx = Context(policy, cwd, "", [])
+    ctx = Context(policy, cwd, "", [], root=root)
     if tool in FILE_TOOLS:
         check_file_tool(ctx, tool, tool_input)
     elif tool.startswith("mcp__"):

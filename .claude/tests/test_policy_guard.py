@@ -254,7 +254,7 @@ class NoAiMentionsTest(PolicyGuardCase):
             "git commit -m 'feat(ai): add model gateway with EU routing'",
             heredoc,
             "git add docs/notes.md && git commit -m 'docs: add notes'",
-            "gh pr create --title 'feat(api): add health route' --body-file body-ok.md",
+            "gh pr create --draft --title 'feat(api): add health route' --body-file body-ok.md",
             "gh pr view 2",
         ]:
             with self.subTest(command=command):
@@ -295,6 +295,9 @@ class InfrastructureAndProvidersTest(PolicyGuardCase):
             "aws configure list",
             "aws ec2 terminate-instances --instance-ids i-1",
             "psql -h db.example.com -U app",
+            "terraform plan",
+            "terraform init",
+            "aws sts get-caller-identity",
             "pg_dump postgres://app@prod.abc.eu-central-1.rds.amazonaws.com/moin",
             "PGHOST=10.0.0.5 psql",
         ]:
@@ -306,8 +309,6 @@ class InfrastructureAndProvidersTest(PolicyGuardCase):
             "terraform fmt -recursive",
             "terraform validate",
             "terraform init -backend=false",
-            "terraform plan",
-            "aws sts get-caller-identity",
             "psql -h localhost -U moin",
             "psql -h postgres -U moin",
         ]:
