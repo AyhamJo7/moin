@@ -11,7 +11,7 @@ import subprocess
 import unittest
 from pathlib import Path
 
-from helpers import BIN, CLAUDE_DIR, REPO_ROOT, base_env, git, run, temp_dir, write
+from helpers import BIN, CLAUDE_DIR, REPO_ROOT, base_env, git, make_repo, run, temp_dir, write
 
 CHECK = BIN / "control_plane_check.py"
 PLAN_TOOL = BIN / "plan_section.py"
@@ -138,11 +138,15 @@ class ReferenceDriftTest(unittest.TestCase):
 
 
 class HookWiringTest(unittest.TestCase):
-    """Run every settings.json handler the way Claude Code does (exec form, placeholders substituted)."""
+    """Run every settings.json handler the way Claude Code does (exec form, placeholders
+    substituted). Events point at a throwaway repository, so hooks that write state (the
+    StopFailure checkpoint, session context) never touch this repository's .git."""
 
     def setUp(self) -> None:
         self._tmp = temp_dir()
-        self.state = Path(self._tmp.name)
+        self.state = Path(self._tmp.name) / "state"
+        self.state.mkdir()
+        self.repo = make_repo(Path(self._tmp.name))
         self.settings = json.loads((CLAUDE_DIR / "settings.json").read_text(encoding="utf-8"))
 
     def tearDown(self) -> None:
@@ -157,7 +161,7 @@ class HookWiringTest(unittest.TestCase):
 
         args = hook.get("args")
         argv = [sub(hook["command"]), *[sub(a) for a in (args if isinstance(args, list) else [])]]
-        env = base_env(CLAUDE_PROJECT_DIR=str(REPO_ROOT))
+        env = base_env(CLAUDE_PROJECT_DIR=str(self.repo))
         return subprocess.run(
             argv,
             input=json.dumps(payload),
@@ -170,26 +174,26 @@ class HookWiringTest(unittest.TestCase):
 
     def test_every_handler_starts_and_accepts_a_harmless_event(self) -> None:
         events: dict[str, dict[str, object]] = {
-            "SessionStart": {"cwd": str(REPO_ROOT), "source": "startup", "session_id": "wiring"},
+            "SessionStart": {"cwd": str(self.repo), "source": "startup", "session_id": "wiring"},
             "PreToolUse": {
                 "tool_name": "Bash",
                 "tool_input": {"command": "git status"},
-                "cwd": str(REPO_ROOT),
+                "cwd": str(self.repo),
             },
             "PostToolUse": {
                 "tool_name": "Edit",
-                "tool_input": {"file_path": str(REPO_ROOT / "CLAUDE.md")},
-                "cwd": str(REPO_ROOT),
+                "tool_input": {"file_path": str(self.repo / "README.md")},
+                "cwd": str(self.repo),
             },
             "Stop": {
-                "cwd": str(REPO_ROOT),
+                "cwd": str(self.repo),
                 "session_id": "wiring",
                 "stop_hook_active": False,
                 "last_assistant_message": "Read the ledger.",
                 "session_crons": [],
                 "background_tasks": [],
             },
-            "StopFailure": {"cwd": str(REPO_ROOT), "session_id": "wiring", "error": "server_error"},
+            "StopFailure": {"cwd": str(self.repo), "session_id": "wiring", "error": "server_error"},
         }
         count = 0
         for event, groups in self.settings["hooks"].items():
@@ -200,6 +204,14 @@ class HookWiringTest(unittest.TestCase):
                         res = self.invoke(hook, events[event])
                         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertEqual(count, 12)
+        self.assertTrue((self.repo / ".git" / "claude-evidence" / "latest-checkpoint.md").is_file())
+
+    def test_wiring_run_leaves_this_repository_untouched(self) -> None:
+        checkpoint = REPO_ROOT / ".git" / "claude-evidence" / "latest-checkpoint.md"
+        before = checkpoint.stat().st_mtime_ns if checkpoint.exists() else None
+        self.test_every_handler_starts_and_accepts_a_harmless_event()
+        after = checkpoint.stat().st_mtime_ns if checkpoint.exists() else None
+        self.assertEqual(before, after)
 
     def test_policy_guard_blocks_through_the_real_wiring(self) -> None:
         hook = next(
@@ -214,7 +226,7 @@ class HookWiringTest(unittest.TestCase):
             {
                 "tool_name": "Bash",
                 "tool_input": {"command": "git -C . push"},
-                "cwd": str(REPO_ROOT),
+                "cwd": str(self.repo),
             },
         )
         self.assertEqual(res.returncode, 2)
