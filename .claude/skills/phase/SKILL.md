@@ -3,15 +3,21 @@ name: phase
 description: "Scope this session to one PLAN.md phase and tier: check tier-scoped dependencies against the Status Ledger, then write the phase plan (item → EV ID → verification) and stop for founder approval. Use when the founder types /phase Pxx [TIER]."
 argument-hint: "Pxx [PILOT|MTLIVE|LAUNCH|SELL|TEN]"
 disable-model-invocation: true
+allowed-tools:
+  - "Bash(python3 .claude/bin/plan_section.py *)"
+  - "Bash(git status *)"
+  - "Bash(git log *)"
+  - "Bash(git branch *)"
 ---
 
 # /phase: plan one phase, then stop
 
 Target: `$ARGUMENTS` (phase `$0`, tier `$1`, default: the earliest tier with open items).
 
-## Current state (resolved when this skill loaded)
+## Step 0: orient
 
-!`python3 "${CLAUDE_PROJECT_DIR}/.claude/bin/plan_section.py" --id "$0" 2>&1 | head -3; git -C "${CLAUDE_PROJECT_DIR}" status --short --branch | head -5; test -f "${CLAUDE_PROJECT_DIR}/PROGRESS.md" && sed -n '1,8p' "${CLAUDE_PROJECT_DIR}/PROGRESS.md" || echo "PROGRESS.md: not created yet (P02.01.04)"`
+Run `python3 .claude/bin/plan_section.py --id $0` (the phase's Status Ledger row), `git status --short --branch`,
+and read the front matter of `PROGRESS.md` if it exists (created by P02.01.04).
 
 ## Rules
 

@@ -3,15 +3,24 @@ name: gate-ready
 description: "Prepare a phase tier for founder review: gates full, stress where relevant, security-reviewer and architecture-reviewer (QG-09), invariant-reviewer on control paths, documentation (QG-10), tier completeness; writes a gate-review evidence record and proposes READY_FOR_REVIEW. Use when the founder types /gate-ready Pxx TIER."
 argument-hint: "Pxx [PILOT|MTLIVE|LAUNCH|SELL|TEN]"
 disable-model-invocation: true
+allowed-tools:
+  - "Bash(python3 .claude/bin/gates.py *)"
+  - "Bash(python3 .claude/bin/evidence.py *)"
+  - "Bash(python3 .claude/bin/plan_section.py *)"
+  - "Bash(python3 .claude/bin/mutation_check.py *)"
+  - "Bash(git status *)"
+  - "Bash(git log *)"
+  - "Bash(git diff *)"
+  - "Bash(git rev-parse *)"
 ---
 
 # /gate-ready: assemble the gate evidence for one phase tier
 
 Phase `$0`, tier `$1`.
 
-## State (resolved when this skill loaded)
+## Step 0: state
 
-!`cd "${CLAUDE_PROJECT_DIR}" && python3 .claude/bin/gates.py status 2>&1 | head -12; python3 .claude/bin/evidence.py check --phase "$0" 2>&1 | tail -3`
+Run `python3 .claude/bin/gates.py status` and `python3 .claude/bin/evidence.py check --phase $0`.
 
 ## Rules
 

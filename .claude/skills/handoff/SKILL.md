@@ -3,15 +3,22 @@ name: handoff
 description: "End a working session cleanly: ledger entry, gate status, commit and push of the branch, and a one-paragraph resume prompt for the next local or cloud session. Use when the founder types /handoff."
 argument-hint: "[note]"
 disable-model-invocation: true
+allowed-tools:
+  - "Bash(git status *)"
+  - "Bash(git log *)"
+  - "Bash(git add *)"
+  - "Bash(git commit *)"
+  - "Bash(python3 .claude/bin/gates.py status)"
+  - "Bash(python3 .claude/bin/plan_section.py *)"
 ---
 
 # /handoff: leave the work resumable
 
 Note from the founder: `$ARGUMENTS`
 
-## State (resolved when this skill loaded)
+## Step 0: state
 
-!`cd "${CLAUDE_PROJECT_DIR}" && git status --short --branch | head -15; git log --oneline -5; python3 .claude/bin/gates.py status 2>&1 | head -6`
+Run `git status --short --branch`, `git log --oneline -5` and `python3 .claude/bin/gates.py status`.
 
 ## Procedure
 

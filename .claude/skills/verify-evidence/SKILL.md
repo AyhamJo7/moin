@@ -3,15 +3,23 @@ name: verify-evidence
 description: "Audit a phase's evidence against PLAN.md's evidence rules: every ticked item has an EV ID, every EV ID has a complete record whose commit exists, and the recorded verification still reproduces. Never marks anything VERIFIED in the Status Ledger. Use when the founder types /verify-evidence Pxx."
 argument-hint: "Pxx"
 disable-model-invocation: true
+allowed-tools:
+  - "Bash(python3 .claude/bin/evidence.py *)"
+  - "Bash(python3 .claude/bin/plan_section.py *)"
+  - "Bash(python3 .claude/bin/gates.py *)"
+  - "Bash(git status *)"
+  - "Bash(git log *)"
+  - "Bash(git rev-parse *)"
+  - "Bash(git cat-file *)"
 ---
 
 # /verify-evidence: audit one phase's evidence
 
 Phase: `$0`.
 
-## Registry check (resolved when this skill loaded)
+## Step 0: registry check
 
-!`cd "${CLAUDE_PROJECT_DIR}" && python3 .claude/bin/evidence.py check --phase "$0" 2>&1 | tail -40`
+Run `python3 .claude/bin/evidence.py check --phase $0` and keep its table.
 
 ## Procedure
 

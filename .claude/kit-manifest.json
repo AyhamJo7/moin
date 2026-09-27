@@ -1,6 +1,6 @@
 {
   "_doc": "Files copied from the personal verification kit (~/.claude/kit, bin/ and hooks/) and from the user-level agents/skills (~/.claude/agents, ~/.claude/skills). control_plane_check.py verifies every sha256; a local edit is drift. base_sha256 is the source file at copy time; patched files say what changed. To update: copy the new source, re-apply the patch, refresh both hashes, bump kit_commit, and say why in the PR.",
-  "kit_commit": "88fb3e404860722ce48415470ee45a6ee833fab6",
+  "kit_commit": "6033c7b0651c1fd229f23b0befc4ddb8d28f387a",
   "files": {
     ".claude/bin/gates.py": {
       "source": "bin/gates.py",
@@ -39,7 +39,7 @@
     },
     ".claude/hooks/session_context.py": {
       "source": "hooks/session_context.py",
-      "sha256": "3eaceb78de7938d278c07d2ea0b2de1bb46864b7dec8cb329256b2be928ee3ae",
+      "sha256": "dcd1468c01ddd1f04c5d5bb6c68dca4303f3eac329710204b84f59d1bb834980",
       "patched": false
     },
     ".claude/hooks/stop_guard.py": {
@@ -81,9 +81,9 @@
     ".claude/skills/closure/SKILL.md": {
       "source": "~/.claude/skills/closure/SKILL.md",
       "base_sha256": "0e9a96bff6ac33aa3df7e5f001a25663355a647f97bb6af9faec2e33efe49d30",
-      "sha256": "69b41d9875c274622179c03d55756da77079054752459b0585300cd0b9107b76",
+      "sha256": "e606118c99d39fbbf48b27bc223ec51a7a4dbf06ddf090feff030b90654e4e0a",
       "patched": true,
-      "patch": "disable-model-invocation: true; tools resolved from .claude/bin only; appends to an existing PROGRESS.md; report under docs/phases/; registers an EV record when the registry exists"
+      "patch": "disable-model-invocation: true; tools resolved from .claude/bin only; appends to an existing PROGRESS.md; report under docs/phases/; registers an EV record when the registry exists; `!` preprocessing replaced by a Tools section + allowed-tools (the preprocessing failed the permission check in headless runs and aborted the skill)"
     },
     ".claude/skills/closure/templates/CLOSURE_REPORT.md": {
       "source": "~/.claude/skills/closure/templates/CLOSURE_REPORT.md",

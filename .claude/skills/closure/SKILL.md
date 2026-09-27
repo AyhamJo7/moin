@@ -3,6 +3,14 @@ name: closure
 description: "Close a batch of review findings (Codex reconfirmation, /launch-check blockers, audit results) with mutation-verified regression tests, ordered gates, a 20x stress run, a red-team invariant review and an evidence-backed closure report. Use when the user pastes findings to fix or types /closure."
 argument-hint: "[findings file path | pasted findings]"
 disable-model-invocation: true
+allowed-tools:
+  - "Bash(python3 .claude/bin/gates.py *)"
+  - "Bash(python3 .claude/bin/mutation_check.py *)"
+  - "Bash(python3 .claude/bin/evidence.py *)"
+  - "Bash(python3 .claude/bin/plan_section.py *)"
+  - "Bash(git status *)"
+  - "Bash(git log *)"
+  - "Bash(git diff *)"
 ---
 
 # /closure: close findings with evidence
@@ -10,12 +18,13 @@ disable-model-invocation: true
 The findings to close are in `$ARGUMENTS` or in the user's message. Treat each finding as a hypothesis to
 reproduce, not as a known truth.
 
-## Tools (resolved when this skill loaded)
+## Tools
 
-!`for t in gates mutation_check; do f=""; for c in "${CLAUDE_PROJECT_DIR}/.claude/bin/$t.py"; do if [ -f "$c" ]; then f="$c"; break; fi; done; if [ -n "$f" ]; then echo "- $t: python3 $f"; else echo "- $t: MISSING"; fi; done; if [ -f "${CLAUDE_PROJECT_DIR}/.claude/gates.json" ]; then echo "- gates config (session root): present"; else echo "- gates config (session root): not found (check the target repo in step 0)"; fi`
+In this repository: `python3 .claude/bin/gates.py` and `python3 .claude/bin/mutation_check.py` (repo copies,
+hashes pinned in `.claude/kit-manifest.json`). If either file or `.claude/gates.json` is missing, stop: BLOCKED.
 
-In the steps below, **GATES** means `<gates command above> --repo REPO` and **MUTATION** means
-`<mutation_check command above> --repo REPO`, where REPO is the target repository resolved in step 0. If a tool
+In the steps below, **GATES** means `python3 .claude/bin/gates.py --repo REPO` and **MUTATION** means
+`python3 .claude/bin/mutation_check.py --repo REPO`, where REPO is the target repository resolved in step 0. If a tool
 is MISSING, or REPO has no `.claude/gates.json`, stop and report BLOCKED with what is missing. Never
 substitute ad-hoc commands and call the result verified.
 Templates: `${CLAUDE_SKILL_DIR}/templates/PROGRESS.md` and `${CLAUDE_SKILL_DIR}/templates/CLOSURE_REPORT.md`.

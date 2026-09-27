@@ -145,8 +145,14 @@ def is_orphan(entry: Path, ppid: int, current_claude: str) -> bool:
     if parent_comm == "claude" and str(ppid) != current_claude:
         comm = (entry / "comm").read_text().strip()
         cmdline = (entry / "cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace")
-        return comm not in SHELLS and "mcp" not in cmdline.lower()
+        return comm not in SHELLS and not is_mcp_server(cmdline)
     return False
+
+
+def is_mcp_server(cmdline: str) -> bool:
+    """A live session's MCP server (e.g. `npm exec @modelcontextprotocol/...`), not a leftover."""
+    lowered = cmdline.lower()
+    return "mcp" in lowered or "modelcontextprotocol" in lowered
 
 
 def orphan_lines(root: Path) -> list[str]:
