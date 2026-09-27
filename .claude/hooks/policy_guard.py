@@ -46,6 +46,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from git_guard import (  # kit tokenizer, pinned by kit-manifest.json
+    ASSIGNMENT_RE,
     REDIRECT_RE,
     SEPARATORS,
     GuardParseError,
@@ -161,6 +162,7 @@ class Context:
     heredocs: list[str]
     reasons: list[str] = field(default_factory=list)
     substs: list[str] = field(default_factory=list)
+    executed_heredocs: list[str] = field(default_factory=list)
 
     def block(self, reason: str) -> None:
         if reason not in self.reasons:
@@ -218,12 +220,27 @@ def secret_path(policy: Policy, path: Path) -> str | None:
 # --------------------------------------------------------------------------- parsing
 
 
-def heredoc_bodies(command: str) -> list[str]:
-    bodies: list[str] = []
+def heredoc_executed(line: str, start: int) -> bool:
+    """Whether the heredoc opened at `start` feeds an interpreter or shell (directly or via a
+    pipe). A heredoc written to a file (`cat > f <<EOF`) is content, not code."""
+    owner = re.split(r"&&|\|\||;|\$\(|\|", line[:start])[-1].split()
+    words = [w for w in owner if not ASSIGNMENT_RE.match(w)]
+    head = re.sub(r"[0-9.]+$", "", os.path.basename(words[0])) if words else ""
+    runs = head in INTERPRETERS or head in SHELLS or head in ("source", ".", "eval")
+    piped = re.search(
+        r"\|\s*(?:sudo\s+)?(?:ba|z|da|k)?sh\b|\|\s*(?:python3?|node|perl|ruby)\b", line[start:]
+    )
+    return runs or bool(piped)
+
+
+def heredoc_bodies(command: str) -> list[tuple[bool, str]]:
+    """(executed, body) for every heredoc in the command."""
+    bodies: list[tuple[bool, str]] = []
     lines = command.split("\n")
     i = 0
     while i < len(lines):
         m = HEREDOC_START_RE.search(lines[i])
+        executed = heredoc_executed(lines[i], m.start()) if m else False
         i += 1
         if not m:
             continue
@@ -231,7 +248,7 @@ def heredoc_bodies(command: str) -> list[str]:
         while i < len(lines) and lines[i].strip() != m.group(2):
             body.append(lines[i])
             i += 1
-        bodies.append("\n".join(body))
+        bodies.append((executed, "\n".join(body)))
         i += 1
     return bodies
 
@@ -852,7 +869,7 @@ def check_bash(ctx: Context) -> None:
         check_secret_tokens(ctx, cmd, cwd)
         check_inline_code(ctx, cmd)
         check_spec_files(ctx, cmd, cwd)
-    for body in ctx.heredocs:
+    for body in ctx.executed_heredocs:
         for m in INLINE_SECRET_RE.finditer(body):
             if secret_name(ctx.policy, os.path.basename(m.group(1))) and re.search(
                 r"\bopen\(|readFile|read_text|load_dotenv|dotenv|\bcat\b|source\s", body
@@ -937,7 +954,9 @@ def evaluate(payload: dict[str, Any], policy: Policy) -> list[str]:
         command = tool_input.get("command")
         if not isinstance(command, str):
             return ["hook input has no Bash command string; blocking to fail closed."]
-        ctx = Context(policy, cwd, command, heredoc_bodies(command))
+        docs = heredoc_bodies(command)
+        ctx = Context(policy, cwd, command, [body for _, body in docs])
+        ctx.executed_heredocs = [body for executed, body in docs if executed]
         check_bash(ctx)
         return ctx.reasons
     ctx = Context(policy, cwd, "", [])

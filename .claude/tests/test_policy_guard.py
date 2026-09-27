@@ -363,5 +363,21 @@ class FailClosedTest(PolicyGuardCase):
         self.assertEqual(self.tool("TaskStop", {"task_id": "x"}), (0, ""))
 
 
+class HeredocOwnerTest(PolicyGuardCase):
+    """A heredoc is inspected only when it is executed (fed to an interpreter or shell);
+    a heredoc written into a file never reads a secret into the session."""
+
+    def test_heredoc_written_to_a_file_may_mention_secrets(self) -> None:
+        self.assert_allowed("cat > notes.md <<'EOF'\nNever cat .env in a session.\nEOF")
+        self.assert_allowed(
+            "python3 - <<'EOF'\nfrom pathlib import Path\nPath('notes.md').write_text('ok')\nEOF"
+        )
+
+    def test_executed_heredoc_reading_a_secret_is_blocked(self) -> None:
+        self.assert_blocked("python3 - <<'EOF'\nprint(open('.env').read())\nEOF", "heredoc")
+        self.assert_blocked("bash <<'EOF'\ncat .env\nEOF", "INV-15")
+        self.assert_blocked("cat <<'EOF' | sh\nsource .env\nEOF", "heredoc")
+
+
 if __name__ == "__main__":
     unittest.main()
