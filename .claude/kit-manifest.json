@@ -1,0 +1,61 @@
+{
+  "_doc": "Files copied from the personal verification kit. control_plane_check.py verifies every hash; a local edit is drift. To update: copy the new kit version, refresh the hash, bump kit_commit, and say why in the PR. Patched files record what was changed.",
+  "kit_commit": "88fb3e404860722ce48415470ee45a6ee833fab6",
+  "files": {
+    ".claude/bin/gates.py": {
+      "source": "bin/gates.py",
+      "sha256": "f96f6c8b4696b22bffb80732a6c2145e3c2950ef7f0231a15a9dcee8d6c2db8b",
+      "patched": false
+    },
+    ".claude/bin/mutation_check.py": {
+      "source": "bin/mutation_check.py",
+      "sha256": "9c65b18c366cf937ca35797210c45886dcac148eb228f2927aec09ca4d0d2374",
+      "patched": false
+    },
+    ".claude/bin/progress_probe.py": {
+      "source": "bin/progress_probe.py",
+      "sha256": "95b39b0ba507c3663b73885906172167e0ed8799160125cb2abe3415db029e6e",
+      "patched": false
+    },
+    ".claude/hooks/_kit.py": {
+      "source": "hooks/_kit.py",
+      "sha256": "0aba032f82fff9c32b70e4da241a7cc6c67ed91960fa49ea068c78bcc5d07c0d",
+      "patched": false
+    },
+    ".claude/hooks/claim_check.py": {
+      "source": "hooks/claim_check.py",
+      "sha256": "fecda3590fee1ba03dcd477e0851d4452801e0d48dbc6cef61867d8a02ebed1c",
+      "patched": false
+    },
+    ".claude/hooks/commit_guard.py": {
+      "source": "hooks/commit_guard.py",
+      "sha256": "db00239d42d79b05d241d7974de46c5fedbc54f283bacfc4324f0ce0de2fda20",
+      "patched": false
+    },
+    ".claude/hooks/git_guard.py": {
+      "source": "hooks/git_guard.py",
+      "sha256": "ab60b6917050c12c0e16bf6d6b7c51f44a7f87eddadc3bfee5e740d6c07a7c86",
+      "patched": false
+    },
+    ".claude/hooks/session_context.py": {
+      "source": "hooks/session_context.py",
+      "sha256": "3eaceb78de7938d278c07d2ea0b2de1bb46864b7dec8cb329256b2be928ee3ae",
+      "patched": false
+    },
+    ".claude/hooks/stop_guard.py": {
+      "source": "hooks/stop_guard.py",
+      "sha256": "ec091f2b4bbc939347513d27bf25b3cf81143b4ae5f61f0bd752cbae4759ca10",
+      "patched": false
+    },
+    ".claude/hooks/stopfailure_checkpoint.py": {
+      "source": "hooks/stopfailure_checkpoint.py",
+      "sha256": "c89531989399d9994194b1ace1195ec7f60d6a11509c748fb3699b09f87a80a0",
+      "patched": false
+    },
+    ".claude/hooks/ts_edit_check.py": {
+      "source": "hooks/ts_edit_check.py",
+      "sha256": "120aca3b470358799ce9b519b07f6306481850c75f636dbd8c67074b26e22742",
+      "patched": false
+    }
+  }
+}

@@ -1,0 +1,15 @@
+# Lint/format config for the control-plane Python under .claude/ (stdlib-only, no runtime deps).
+# Mirrors the verification kit's settings so ported files stay byte-identical after formatting.
+target-version = "py312"
+line-length = 100
+
+[lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "SIM", "RUF"]
+ignore = [
+    "S603", # subprocess without shell=True is the intended pattern here
+    "S607", # tools (git, terraform, pnpm) are resolved from PATH by design
+    "E501", # line length is enforced by `ruff format`; only unsplittable strings remain
+]
+
+[lint.per-file-ignores]
+"tests/**" = ["S101", "S108"]
