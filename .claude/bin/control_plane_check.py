@@ -48,7 +48,7 @@ REQUIRED_DENY = (
 WRITE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n", re.DOTALL)
 IMPORT_RE = re.compile(r"(?<![`\w])@(?:\./)?(PLAN|BLUEPRINT)\.md\b")
-INV_RE = re.compile(r"\bINV-(\d{2})\b")
+INV_INDEX_RE = re.compile(r"^- INV-(\d{2}) ", re.MULTILINE)
 INV_ROW_RE = re.compile(r"^\|\s*INV-(\d{2})\s*\|")
 PIN_RE = re.compile(r"^readonly (NODE_VERSION|PNPM_VERSION|TERRAFORM_VERSION)=(\S+)", re.MULTILINE)
 PATH_PLACEHOLDER = "${CLAUDE_PROJECT_DIR}"
@@ -131,7 +131,7 @@ def check_settings(c: Check) -> None:
         if "--skip-headless" in parts or "--defer-to-repo" in parts:
             problems.append("repo hooks must not use --skip-headless/--defer-to-repo")
         for part in parts:
-            if part.startswith(PATH_PLACEHOLDER):
+            if part.startswith(PATH_PLACEHOLDER) and part.endswith((".py", ".sh")):
                 path = c.root / part[len(PATH_PLACEHOLDER) :].lstrip("/")
                 if not path.is_file() or not os.access(path, os.X_OK):
                     problems.append(f"{part} is not an executable file")
@@ -164,7 +164,7 @@ def check_claude_md(c: Check) -> None:
     except OSError:
         problems.append("PLAN.md unreadable (it must be committed; see the plan-baseline PR)")
         in_plan = set()
-    in_md = set(INV_RE.findall(text))
+    in_md = set(INV_INDEX_RE.findall(text))
     if in_plan and in_md != in_plan:
         missing = sorted(in_plan - in_md)
         extra = sorted(in_md - in_plan)
