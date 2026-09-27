@@ -932,11 +932,22 @@ def protected_diff(ctx: Context, cwd: Path, *revs: str) -> list[str]:
     return git_out(cwd, "diff", "--name-only", *revs, "--", *protected_specs(ctx))
 
 
+def resolve_target(cwd: Path, target: str) -> str | None:
+    """The commit-ish git will use for `target`, including git's DWIM: `git switch main` with no
+    local `main` creates it from the single remote-tracking `*/main`."""
+    if ref_exists(cwd, target):
+        return target
+    remote = git_out(cwd, "for-each-ref", "--format=%(refname:short)", f"refs/remotes/*/{target}")
+    return remote[0].strip() if len(remote) == 1 else None
+
+
 def guard_target(
     ctx: Context, cwd: Path, what: str, target: str, *, three_dot: bool = False
 ) -> None:
-    if not ref_exists(cwd, target):
+    resolved = resolve_target(cwd, target)
+    if resolved is None:
         return  # git will fail on an unknown ref
+    target = resolved
     changed = protected_diff(
         ctx,
         cwd,
@@ -1073,7 +1084,7 @@ def check_git_switch(ctx: Context, sub: str, args: list[str], cwd: Path) -> None
         pos = positionals(args, GIT_VALUE_FLAGS | {"-b", "-B", "-c", "-C", "--orphan"})
         if not pos:
             return
-        if ref_exists(cwd, pos[0]):
+        if resolve_target(cwd, pos[0]) is not None:
             if len(pos) > 1:
                 if pathspec_hits(ctx, cwd, pos[1:]) and protected_diff(ctx, cwd, "HEAD", pos[0]):
                     protect_block(

@@ -161,6 +161,13 @@ class SelfProtectionBashTest(GuardCase):
             with self.subTest(command=command):
                 self.assert_blocked(command)
 
+    def test_switch_to_remote_only_branch_is_checked_like_a_local_one(self) -> None:
+        """git DWIM: `git switch old` with only `origin/old` creates `old` from the remote
+        branch. A clone of one branch (cloud sessions) has no local main."""
+        git(self.repo, "update-ref", "refs/remotes/origin/old", self.initial)
+        self.assert_blocked("git switch old", "founder-only")
+        self.assert_blocked("git checkout old", "founder-only")
+
     def test_stash_carrying_protected_changes_is_blocked(self) -> None:
         write(self.repo, ".claude/gates.json", '{"gates": ["weakened"]}\n')
         git(self.repo, "stash", "push", "-q", "-m", "founder draft")
