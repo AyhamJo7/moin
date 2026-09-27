@@ -284,7 +284,7 @@ def cmd_check(opts: argparse.Namespace) -> int:
     for f in findings:
         print(f"| {f.status} | {f.ident} | {f.detail} |")
     ok = [
-        i for i in sorted(set(registered) & set(records)) if not any(f.ident == i for f in findings)
+        i for i in sorted(set(registered) & set(records)) if not any(f.ident == i for f in problems)
     ]
     for ident in ok:
         print(f"| OK | {ident} | record + index + commit present |")

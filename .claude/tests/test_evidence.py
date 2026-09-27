@@ -192,3 +192,29 @@ class CheckTest(EvidenceCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PendingOptionalFieldsTest(EvidenceCase):
+    def test_pending_ci_link_or_reviewer_still_counts_as_ok(self) -> None:
+        self.init_registry()
+        code, out, _ = self.ev(
+            "new",
+            "--phase",
+            "P02",
+            "--item",
+            "P02.05.06",
+            "--slug",
+            "harness",
+            "--summary",
+            "Harness passes",
+            "--command",
+            "`pnpm test`",
+            "--result",
+            "PASS",
+        )
+        self.assertEqual(code, 0, out)
+        code, out, _ = self.ev("check", "--phase", "P02")
+        self.assertEqual(code, 0, out)
+        self.assertIn("| OK | EV-P02-001 |", out)
+        self.assertIn("1 OK, 0 problem(s)", out)
+        self.assertIn("still pending", out)
