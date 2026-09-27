@@ -2,7 +2,7 @@
 mission: Build and prove the moin development control plane (CONTROL_PLANE_PLAN.md, approved 2026-09-27)
 status: ready_for_review
 mode: interactive
-updated: 2026-09-27T23:40Z
+updated: 2026-09-27T23:55Z
 next: founder runs the empty-HOME command (CONTROL_PLANE_REPORT.md §5) and the founder actions; then merge PR #1, then PR #2
 ---
 
@@ -31,5 +31,5 @@ Evidence = command + exit code + commit SHA, or a file under `evidence/`. This i
 | 13 | mutation_check live | done | `1540a7c`, `ca27f57` | two fixes, both KILLED (evidence `.git/claude-evidence/mutation/`) | — |
 | 14 | Rules probe; cloud pins | done | (this commit) | db.md auto-loaded (headless, model-reported) and evidence.md auto-loaded in the live session (observed); pins + checksums resolve; container run BLOCKED (Docker socket missing) | Docker / cloud run |
 | 15 | Empty-HOME headless run | BLOCKED (founder) | — | D-13: founder runs `run.sh empty-home` | founder |
-| 16 | CONTROL_PLANE_REPORT.md | in progress | — | — | — |
+| 16 | CONTROL_PLANE_REPORT.md + P02 kickoff prompt | done | (this commit) | report §2 evidence per component, §4 UNVERIFIED/BLOCKED, §5 founder actions, §6 kickoff | founder review |
 
