@@ -1,0 +1,36 @@
+{
+  "_doc": "A-22 / P02.01.03: commit messages, tag messages and PR/issue text never mention AI coding tools or carry tool attribution. This file is the single source for policy_guard.py (agent commands, GitHub MCP tools) and for P02.01.03's CI check. Scope is tools and attribution, NOT the product domain: 'feat(ai): ...', 'AI disclosure (INV-03)' and the provider name 'OpenAI' are allowed. Patterns are Python `re` syntax, matched with re.search. The examples are executable: tests assert every block example is blocked and every allow example passes.",
+  "patterns": [
+    {"id": "tool-claude", "regex": "(?i)(?<![A-Za-z0-9])claude(?![A-Za-z0-9])", "why": "names the tool; also covers Claude-Session trailers, claude.ai links, Claude Code"},
+    {"id": "vendor-anthropic", "regex": "(?i)(?<![A-Za-z0-9])anthropic(?![A-Za-z0-9])", "why": "names the vendor"},
+    {"id": "session-trailer", "regex": "(?im)^[ \\t]*claude-session[ \\t]*:", "why": "cloud-session commit trailer"},
+    {"id": "session-link", "regex": "(?i)claude\\.ai/(?:code|chat|share|artifact)", "why": "cloud-session link in PR text"},
+    {"id": "co-authored-by", "regex": "(?im)^[ \\t]*co-authored-by[ \\t]*:", "why": "attribution trailer (any co-author line; solo repo)"},
+    {"id": "robot-emoji", "regex": "\\U0001F916", "why": "the 'Generated with' footer emoji"},
+    {"id": "generated-with", "regex": "(?i)\\b(?:generated|written|created|authored|drafted|produced|assisted)\\s+(?:with|by|using|via)\\s+(?:an?\\s+)?(?:ai|llm|gpt|chatgpt|copilot|codex|cursor|gemini|agent|assistant|bot)\\b", "why": "tool attribution phrasing"},
+    {"id": "ai-authored", "regex": "(?i)\\b(?:ai|llm)[- ](?:generated|assisted|written|authored|powered commit)\\b", "why": "tool attribution phrasing"},
+    {"id": "other-tools", "regex": "(?i)\\b(?:chatgpt|github copilot|copilot|openai codex|codex cli|codex|cursor ai|cursor ide|gemini cli|gemini code assist|devin|windsurf|aider)\\b", "why": "names another coding tool"}
+  ],
+  "block_examples": [
+    "fix: tweak retry loop, generated with Claude",
+    "chore: tidy\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+    "feat(api): add health route\n\nClaude-Session: https://claude.ai/code/session_01ABC",
+    "See https://claude.ai/code/session_01ABC for the run",
+    "docs: update readme\n\n🤖 Generated with Claude Code",
+    "refactor: AI-generated cleanup of the kernel package",
+    "chore: changes suggested by Copilot",
+    "chore: reviewed by codex",
+    "Anthropic model routing notes",
+    "co-authored-by: someone <a@example.com>",
+    "feat: written by an AI assistant"
+  ],
+  "allow_examples": [
+    "feat(ai): add model gateway with EU routing",
+    "fix(voice): play the full AI disclosure before the session starts (INV-03)",
+    "feat(ai): add OpenAI EU-residency adapter",
+    "test(api): cover cursor pagination edge cases",
+    "chore(tooling): port repository guard hooks",
+    "docs(plan): add master execution plan baseline",
+    "feat(telephony): negotiate the opus audio codec at 48 kHz"
+  ]
+}
