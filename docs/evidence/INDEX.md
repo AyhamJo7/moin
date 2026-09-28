@@ -82,3 +82,5 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P02-038 | P02.08.03 | 2026-09-28 | `4e723368a815` | pnpm onlyBuiltDependencies allowlist; no unreviewed install scripts | [EV-P02-038-install-script-allowlist.md](P02/EV-P02-038-install-script-allowlist.md) |
 | EV-P02-039 | P02.06.06 | 2026-09-28 | `4e723368a815` | Every action and container image pinned by SHA; minimal permissions; concurrency; caching | [EV-P02-039-ci-hardening.md](P02/EV-P02-039-ci-hardening.md) |
 | EV-P02-040 | P02.06.05 | 2026-09-28 | `4e723368a815` | Reserved CI jobs for the RLS catalog check and OpenAPI drift | [EV-P02-040-reserved-ci-slots.md](P02/EV-P02-040-reserved-ci-slots.md) |
+| EV-P02-043 | P02.06.01 | 2026-09-28 | `1867d75a2e18` | The verify workflow is green: eight jobs including integration tests on real PostgreSQL | [EV-P02-043-verify-workflow-green.md](P02/EV-P02-043-verify-workflow-green.md) |
+| EV-P02-044 | P02.06.02 | 2026-09-28 | `1867d75a2e18` | The security-scan workflow is green: audit, licences, secrets, static analysis, Trivy, SBOM | [EV-P02-044-security-scan-green.md](P02/EV-P02-044-security-scan-green.md) |

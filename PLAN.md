@@ -2118,8 +2118,8 @@ Monorepo skeleton · CI v1 · local stack · test harnesses · governance files 
   - [x] P02.05.05 Fault-injection helpers and controllable clock — EV-P02-031
   - [x] P02.05.06 Verify: example test of every type passes in-suite **and** standalone — EV-P02-033
 - [ ] **P02.06 CI pipeline v1** `[G:PILOT]`
-  - [ ] P02.06.01 `verify`: frozen install, format, lint, typecheck, unit, integration (Postgres 17 + pgvector service), build
-  - [ ] P02.06.02 `security-scan`: `pnpm audit`/OSV (fail on high/critical with fix), gitleaks full history, Semgrep, actionlint, shellcheck, Trivy filesystem, CycloneDX SBOM artifact
+  - [x] P02.06.01 `verify`: frozen install, format, lint, typecheck, unit, integration (Postgres 17 + pgvector service), build — EV-P02-043
+  - [x] P02.06.02 `security-scan`: `pnpm audit`/OSV (fail on high/critical with fix), gitleaks full history, Semgrep, actionlint, shellcheck, Trivy filesystem, CycloneDX SBOM artifact — EV-P02-044
   - [ ] P02.06.03 `container-scan`: hadolint, image build, Trivy image scan (fail on high/critical with fix)
   - [x] P02.06.04 `scripts/check-migrations.ts` (ordering, destructive/lock heuristics, adapted from exitos) wired to CI — EV-P02-034
   - [x] P02.06.05 Job slots for RLS catalog check (P06.02) and OpenAPI drift (P06/P07) — EV-P02-040
