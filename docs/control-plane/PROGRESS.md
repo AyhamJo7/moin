@@ -2,8 +2,8 @@
 mission: Build and prove the moin development control plane (CONTROL_PLANE_PLAN.md, approved 2026-09-27)
 status: ready_for_review
 mode: interactive
-updated: 2026-09-27T23:55Z
-next: founder runs the empty-HOME command (CONTROL_PLANE_REPORT.md §5) and the founder actions; then merge PR #1, then PR #2
+updated: 2026-09-28T00:20Z
+next: founder applies guard patches 0001+0002 (report §0.6), runs empty-home-bypass, then merge PR #1, then PR #2
 ---
 
 # Control plane: progress ledger
@@ -33,3 +33,9 @@ Evidence = command + exit code + commit SHA, or a file under `evidence/`. This i
 | 15 | Empty-HOME headless run | BLOCKED (founder) | — | D-13: founder runs `run.sh empty-home` | founder |
 | 16 | CONTROL_PLANE_REPORT.md + P02 kickoff prompt | done | (this commit) | report §2 evidence per component, §4 UNVERIFIED/BLOCKED, §5 founder actions, §6 kickoff | founder review |
 
+| 17 | Unattended redesign (D-05 reversed): self-protection, permission table (0 ask), network allowlist | done | `95ac786` | built in a scratch clone, installed in one command; 73 tests; self-check exit 0 | — |
+| 18 | Live self-protection triggers, interactive bypass session | done | (this commit) | 4 file-tool writes denied, 12 Bash forms + script evasion + `git am` of a guard patch blocked, integrity check clean (report §0.2) | — |
+| 19 | Headless bypass harness (fresh clone per phase, AWS files → /dev/null) | done | (this commit) | pre-fix run exposed F-A (DWIM switch) → hooks failed open (F-B) → real AWS/ssh reachable (F-C, redacted); with patches: 17/17 + 10/10 blocked, table as designed | re-run without patches after the founder applies them |
+| 20 | Unattended safety in bypass: stall, claim, checkpoint | done | (this commit) | stall-detect → BLOCKER written, `status: blocked`; forced claim → Stop hook → UNVERIFIED; real rate_limit checkpoint by the repo copy (21:40) | — |
+| 21 | Guard patches 0001 (F-A) + 0002 (F-G, gate runner blocked) | BLOCKED (founder) | patches in `docs/control-plane/patches/` | both mutation KILLED in worktrees; 76 tests with both | founder applies (§0.6) |
+| 22 | `unattended-launch.sh` | done | (this commit) | shellcheck clean; credential cut-off UNVERIFIED (never launched) | founder check |

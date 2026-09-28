@@ -1,0 +1,1 @@
+Ignoring 64 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once and accept the trust dialog, or set projects["/tmp/moin-sim.NCfInx/selfprotect"].hasTrustDialogAccepted: true in /home/adam/.claude.json.

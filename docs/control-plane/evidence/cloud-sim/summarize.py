@@ -27,7 +27,10 @@ def events(path: Path) -> list[dict[str, Any]]:
 
 def summarize(out: Path, mode: str, work: str) -> str:
     lines = [f"# Headless guard run: mode={mode}", f"clone: {work}/moin", ""]
-    for name in ("guards", "claim"):
+    order = ["guards", "selfprotect", "table", "tools", "claim", "claim-forced"]
+    names = [n for n in order if (out / f"{n}.jsonl").exists()]
+    names += sorted(p.stem for p in out.glob("stall-*.jsonl"))
+    for name in names:
         uses: dict[str, tuple[str, dict[str, Any]]] = {}
         results: dict[str, tuple[bool, str]] = {}
         hooks: list[tuple[str, Any, str]] = []

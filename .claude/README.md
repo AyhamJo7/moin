@@ -8,9 +8,9 @@ Background, decisions and live evidence: `docs/control-plane/`.
 
 | Path | What | Source |
 |---|---|---|
-| `settings.json` | permissions (allow / ask / deny), attribution off, bypass mode disabled, hook wiring | moin |
+| `settings.json` | permissions (allow / deny only; no `ask`, so bypass-mode sessions behave the same), attribution off, hook wiring | moin |
 | `hooks/git_guard.py` | blocks git that discards uncommitted work; force-push/delete of `main` | kit (verbatim) |
-| `hooks/policy_guard.py` | secrets (INV-15), prod data (INV-16), founder-only infra (QG-05), push forms, hook bypass, AI-tool mentions (A-22), BLUEPRINT read-only, no whole-file PLAN reads | moin |
+| `hooks/policy_guard.py` | guardrail self-protection; secrets (INV-15); prod data (INV-16); founder-only infra (QG-05); push rules (no main/force/delete); draft-only PRs; network allowlist; no nested sessions; hook bypass; AI-tool mentions (A-22); BLUEPRINT read-only; no whole-file PLAN reads | moin |
 | `hooks/commit_guard.py` · `ts_edit_check.py` | typecheck of committed / edited TS and Python files (switch on with `tsconfig.json`) | kit (verbatim) |
 | `hooks/claim_check.py` | Stop: "done/green/fixed" claims need passing `gates full` evidence for the current tree | kit (verbatim) |
 | `hooks/stop_guard.py` · `stopfailure_checkpoint.py` · `session_context.py` · `_kit.py` | loop stall detection, usage-limit checkpoint, session re-orientation | kit (verbatim) |
@@ -23,6 +23,8 @@ Background, decisions and live evidence: `docs/control-plane/`.
 | `gates.json` | gate list; **stub until P02.02.02** (see below) | moin |
 | `policy/no-ai-mentions.json` | A-22 patterns + executable examples; shared with P02.01.03's CI check | moin |
 | `policy/secret-paths.json` | secret-bearing file names and credential directories | moin |
+| `policy/protected-paths.json` | the founder-only guardrail files, trunk refs, evasion markers | moin |
+| `policy/network.json` | curl/wget host allowlist and blocked network clients | moin |
 | `skills/phase`, `verify-evidence`, `gate-ready`, `handoff` | founder-invoked workflow skills | moin |
 | `skills/closure` | finding-closure ritual | user skill, patched |
 | `agents/security-reviewer`, `architecture-reviewer`, `invariant-reviewer` | read-only reviewers (QG-09, INV bypass hunting) | user agents + moin appendix |
@@ -53,6 +55,31 @@ their state in `.claude/state/` (gitignored) via `CLAUDE_KIT_STATE`.
 runs `pnpm turbo run lint typecheck test build`, which fails until P02 creates the monorepo. So
 `gates full` fails and the Stop hook blocks any "green/done" claim until real gates exist. P02.02.02
 splits `workspace` into the QG-01 gates. Never delete or weaken a gate to make `full` pass.
+
+## Protected files (founder-only)
+
+`policy/protected-paths.json` lists them: `settings.json`, `settings.local.json`, `hooks/**`, `agents/**`,
+`policy/**`, `gates.json`, `bin/**`, `kit-manifest.json`, plus the user-level `~/.claude/settings*.json`,
+`~/.claude/kit` and shell rc files. Sessions may read them. Every modification is blocked:
+- Edit/Write deny rules;
+- policy_guard for Bash writers: redirects, `sed`/`perl -i`, `tee`, `cp`/`mv`/`install`/`ln`/`rsync`,
+  `rm`/`rmdir`/`unlink`, `chmod`/`chown`, `truncate`, `dd`, `find -delete/-exec`;
+- policy_guard for git: checkout/restore/rm/mv of those paths; switches, resets, merges, rebases, pulls
+  and cherry-picks that would change them; `stash pop`; `apply`/`am`; plumbing;
+- inline or scripted code that writes them, docker mounts, and nested `claude` sessions.
+
+The only way in is the founder-merged trunk: a switch, pull, merge or rebase from `origin/main` that
+already contains the control plane.
+
+To change them, use one of:
+- edit them outside the session;
+- apply a prepared patch yourself (`! git am docs/control-plane/patches/<file>.patch`);
+- start a maintenance session with `claude --setting-sources user`. It loads no project settings, so it
+  runs without these guards.
+
+Known limits (in-band protection can't be absolute): a script that is generated and executed in more than
+one step, or code that builds the path at runtime, can evade the text scan. OS-level protection (files
+owned by another user, or the bubblewrap sandbox) needs sudo and is the founder's option.
 
 ## Maintaining the copied files
 

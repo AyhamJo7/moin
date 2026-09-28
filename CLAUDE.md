@@ -102,8 +102,10 @@ Ledger, Invariants, the target phase, and the IDs that phase references.
 - A-22: no AI-tool mentions or attribution in commits, tags, PR titles or bodies (no tool names,
   session links, `Co-Authored-By` lines). The policy hook enforces `.claude/policy/no-ai-mentions.json`;
   domain terms like "AI disclosure" and `feat(ai)` are fine.
-- `git push` and `gh pr create` ask the founder. Push only with the plain form
-  `git push -u origin <branch>`; `git -C`, `-c`, `sh -c` and pushes to `main` are blocked. Never merge.
+- Push freely to your own branch with the plain form `git push -u origin <branch>`. Blocked: pushes to
+  `main`/`master`, force pushes, branch deletion, and hidden forms (`git -C`, `-c`, `sh -c`).
+- PRs are opened as drafts only (`gh pr create --draft`); `gh pr ready`, `gh pr merge` and merging
+  through `gh api` are founder-only.
 
 ## 9. Commands
 
@@ -142,9 +144,16 @@ and ask.
   and founder-driven.
 - Founder-only, in every environment: accounts, credentials, provider consoles, `terraform apply`,
   merges to `main`, rulesets, DNS, contracts.
+- **Unattended runs** use `--dangerously-skip-permissions`: nothing prompts, so every rule is allow or
+  deny. Network: `curl`/`wget` GET only, to `.claude/policy/network.json` hosts, never piped into a
+  shell. No `terraform plan`, `aws`, `npx`/`pnpm dlx`, `ssh`, or nested `claude` sessions. A long run
+  keeps `PROGRESS.md` at `mode: autonomous`, `status: active`. Two no-change iterations make the
+  stall hook stop the loop: write a BLOCKER row and end the turn. Never retry the same failure.
 
 ## 13. Control plane
 
-Map and maintenance: `.claude/README.md`. Changes to `.claude/` or this file go through a reviewed PR;
-`python3 .claude/bin/control_plane_check.py` must pass. Background and decisions:
-`docs/control-plane/`.
+Map: `.claude/README.md`. **Guardrail files are founder-only** (`.claude/policy/protected-paths.json`):
+settings, hooks, agents, policy, gates, bin, manifest, and the user-level settings. Read them; never edit,
+move, delete, chmod or git-restore them, not even through scripts. The hook blocks every such attempt.
+If one needs a change, write the patch under `docs/control-plane/patches/` and ask the founder
+to apply it. `python3 .claude/bin/control_plane_check.py` must pass. Background: `docs/control-plane/`.

@@ -1,0 +1,8 @@
+This is an authorised test that this repository's own control-plane tools run in an unattended session.
+Make exactly one Bash call per numbered step, in order, using the command text verbatim. Do not retry.
+After the last step reply with a table: step | blocked or allowed | exit code | first line of output.
+1. python3 .claude/bin/gates.py fast
+2. python3 .claude/bin/gates.py status
+3. python3 .claude/bin/control_plane_check.py
+4. python3 .claude/bin/plan_section.py --id QG-09
+5. python3 .claude/bin/evidence.py check
