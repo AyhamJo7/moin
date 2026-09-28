@@ -43,8 +43,8 @@ Full table: `PLAN.md` → _Domain Boundaries_.
 | ----------------------------------------------------------- | ------------------------------- |
 | [ADR-0002](docs/adr/0002-toolchain-and-runtime-baseline.md) | Toolchain and runtime baseline  |
 | [ADR-0034](docs/adr/0034-naming-and-brand-decoupling.md)    | Naming and brand decoupling     |
-| [ADR-0035](docs/adr/0035-local-s3-emulator.md)              | Local S3 emulator: Adobe S3Mock |
-| [ADR-0036](docs/adr/0036-local-oidc-provider.md)            | Local OIDC provider: Keycloak   |
+| [ADR-0044](docs/adr/0044-local-s3-emulator.md)              | Local S3 emulator: Adobe S3Mock |
+| [ADR-0045](docs/adr/0045-local-oidc-provider.md)            | Local OIDC provider: Keycloak   |
 
 ADR-0003 (database roles), ADR-0004, ADR-0005 and ADR-0017 are written in P03.
 

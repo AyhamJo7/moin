@@ -84,3 +84,5 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P02-040 | P02.06.05 | 2026-09-28 | `4e723368a815` | Reserved CI jobs for the RLS catalog check and OpenAPI drift | [EV-P02-040-reserved-ci-slots.md](P02/EV-P02-040-reserved-ci-slots.md) |
 | EV-P02-041 | P02.07.01 | 2026-09-28 | `1867d75a2e18` | local-setup, testing and conventions guides | [EV-P02-041-developer-docs.md](P02/EV-P02-041-developer-docs.md) |
 | EV-P02-042 | P02.07.02 | 2026-09-28 | `1867d75a2e18` | ARCHITECTURE.md linking the ADRs, and SECURITY.md | [EV-P02-042-architecture-and-security-skeletons.md](P02/EV-P02-042-architecture-and-security-skeletons.md) |
+| EV-P02-043 | P02.06.01 | 2026-09-28 | `1867d75a2e18` | The verify workflow is green: eight jobs including integration tests on real PostgreSQL | [EV-P02-043-verify-workflow-green.md](P02/EV-P02-043-verify-workflow-green.md) |
+| EV-P02-044 | P02.06.02 | 2026-09-28 | `1867d75a2e18` | The security-scan workflow is green: audit, licences, secrets, static analysis, Trivy, SBOM | [EV-P02-044-security-scan-green.md](P02/EV-P02-044-security-scan-green.md) |

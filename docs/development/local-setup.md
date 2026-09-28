@@ -40,9 +40,9 @@ Run it whenever something behaves oddly — it is faster than reading a stack tr
 | postgres | 5432        | PostgreSQL 17 + pgvector                             |
 | valkey   | 6379        | Cache and rate-limit state                           |
 | sqs      | 9324 / 9325 | ElasticMQ, speaking the SQS API                      |
-| s3       | 9090        | Adobe S3Mock (ADR-0035)                              |
+| s3       | 9090        | Adobe S3Mock (ADR-0044)                              |
 | mail     | 1025 / 8025 | Mailpit — SMTP in, web UI at <http://127.0.0.1:8025> |
-| oidc     | 8080        | Keycloak (ADR-0036), realm `moin-local`              |
+| oidc     | 8080        | Keycloak (ADR-0045), realm `moin-local`              |
 
 Every port binds `127.0.0.1` explicitly. Plain `5432:5432` binds `0.0.0.0` and publishes a
 development database to whatever network the laptop is on.
