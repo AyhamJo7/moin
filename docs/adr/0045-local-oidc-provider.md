@@ -1,4 +1,4 @@
-# ADR-0036 — Local OIDC provider: Keycloak
+# ADR-0045 — Local OIDC provider: Keycloak
 
 - **Status:** Accepted (P02.04.01, 2026-09-28) · **Deciders:** founder
 - **Scope:** local development and automated tests only
