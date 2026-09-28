@@ -137,7 +137,7 @@ Single source of status. Tier columns show the status of that phase's items for 
 |---|---|---|---|---|---|---|---|---|
 | P00 | Planning baseline | READY_FOR_REVIEW | — | — | — | — | Founder review | Founder reads and adopts plan (P00.05) |
 | P01 | Discovery & Gurlitt observation | NOT_STARTED | NOT_STARTED | — | — | — | EXT-16 Gurlitt | Meet Gurlitt owner 2026-09-28 09:00 |
-| P02 | Engineering foundation | IN_PROGRESS | — | — | — | — | EXT-24 GitHub plan | P02.05 test infrastructure |
+| P02 | Engineering foundation | IN_PROGRESS | — | — | — | — | EXT-24 GitHub plan | P02.06 CI pipeline |
 | P03 | Architecture decisions & threat model | NOT_STARTED | — | — | — | — | — | Write core ADRs |
 | P04 | Feasibility proof & long-lead track | NOT_STARTED | — | — | NOT_STARTED | — | EXT-01/07/10/11/12 | Open Twilio/OpenAI/AWS requests day 1 |
 | P05 | Cloud foundation & walking skeleton | NOT_STARTED | — | — | — | — | EXT-09 AWS | Terraform bootstrap |
@@ -2110,13 +2110,13 @@ Monorepo skeleton · CI v1 · local stack · test harnesses · governance files 
   - [x] P02.04.04 Document the Twilio development path: developer-only tunnel to local voice service for sandbox numbers; never used for staging or production — EV-P02-027
   - [x] P02.04.05 `pnpm doctor`: checks Node, pnpm, Docker, free ports, env completeness (pattern from exitos `doctor.ts`) — EV-P02-023
   - [x] P02.04.06 Verify: fresh clone → running stack with seed data in ≤ 15 minutes (timed log) — EV-P02-022
-- [ ] **P02.05 Test infrastructure** `[G:PILOT]`
-  - [ ] P02.05.01 Vitest projects: `unit`, `integration`
-  - [ ] P02.05.02 Real-Postgres harness: template database cloning per test file, roles and migrations applied, runnable standalone
-  - [ ] P02.05.03 `packages/testing` factories with German-realistic synthetic data (names, E.164 numbers in reserved/test ranges, PLZ)
-  - [ ] P02.05.04 Playwright projects (Chromium, Firefox, WebKit, mobile viewport) + axe integration
-  - [ ] P02.05.05 Fault-injection helpers and controllable clock
-  - [ ] P02.05.06 Verify: example test of every type passes in-suite **and** standalone
+- [x] **P02.05 Test infrastructure** `[G:PILOT]` — EV-P02-033
+  - [x] P02.05.01 Vitest projects: `unit`, `integration` — EV-P02-028
+  - [x] P02.05.02 Real-Postgres harness: template database cloning per test file, roles and migrations applied, runnable standalone — EV-P02-029
+  - [x] P02.05.03 `packages/testing` factories with German-realistic synthetic data (names, E.164 numbers in reserved/test ranges, PLZ) — EV-P02-030
+  - [x] P02.05.04 Playwright projects (Chromium, Firefox, WebKit, mobile viewport) + axe integration — EV-P02-032
+  - [x] P02.05.05 Fault-injection helpers and controllable clock — EV-P02-031
+  - [x] P02.05.06 Verify: example test of every type passes in-suite **and** standalone — EV-P02-033
 - [ ] **P02.06 CI pipeline v1** `[G:PILOT]`
   - [ ] P02.06.01 `verify`: frozen install, format, lint, typecheck, unit, integration (Postgres 17 + pgvector service), build
   - [ ] P02.06.02 `security-scan`: `pnpm audit`/OSV (fail on high/critical with fix), gitleaks full history, Semgrep, actionlint, shellcheck, Trivy filesystem, CycloneDX SBOM artifact

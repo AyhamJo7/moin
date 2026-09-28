@@ -69,3 +69,9 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P02-025 | P02.04.02 | 2026-09-28 | `adbe336fea37` | dev:up, dev:down, dev:reset, db:migrate and db:seed work end to end | [EV-P02-025-dev-commands.md](P02/EV-P02-025-dev-commands.md) |
 | EV-P02-026 | P02.04.03 | 2026-09-28 | `adbe336fea37` | Example environment file with fake values only; every .env ignored | [EV-P02-026-env-example.md](P02/EV-P02-026-env-example.md) |
 | EV-P02-027 | P02.04.04 | 2026-09-28 | `adbe336fea37` | Twilio development path documented as developer-only | [EV-P02-027-twilio-local-path.md](P02/EV-P02-027-twilio-local-path.md) |
+| EV-P02-028 | P02.05.01 | 2026-09-28 | `6f79b0ec3c23` | Vitest unit and integration projects | [EV-P02-028-vitest-projects.md](P02/EV-P02-028-vitest-projects.md) |
+| EV-P02-029 | P02.05.02 | 2026-09-28 | `6f79b0ec3c23` | Real-Postgres harness: a database cloned from a migrated template per test file | [EV-P02-029-postgres-template-harness.md](P02/EV-P02-029-postgres-template-harness.md) |
+| EV-P02-030 | P02.05.03 | 2026-09-28 | `6f79b0ec3c23` | German-realistic synthetic factories, seeded and reserved-range only (INV-16) | [EV-P02-030-german-factories.md](P02/EV-P02-030-german-factories.md) |
+| EV-P02-031 | P02.05.05 | 2026-09-28 | `6f79b0ec3c23` | Fault-injection helpers and a controllable clock | [EV-P02-031-fault-injection-and-clock.md](P02/EV-P02-031-fault-injection-and-clock.md) |
+| EV-P02-032 | P02.05.04 | 2026-09-28 | `6f79b0ec3c23` | Playwright projects for Chromium, Firefox, WebKit and phone viewports, with axe | [EV-P02-032-playwright-and-axe.md](P02/EV-P02-032-playwright-and-axe.md) |
+| EV-P02-033 | P02.05.06 | 2026-09-28 | `6f79b0ec3c23` | One example of every test type passes in-suite and standalone on a freshly seeded database | [EV-P02-033-standalone-and-in-suite.md](P02/EV-P02-033-standalone-and-in-suite.md) |

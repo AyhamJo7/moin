@@ -5,7 +5,7 @@ mode: interactive
 phase: P02
 tier: PILOT
 plan: docs/phases/P02-plan.md
-next: P02.05 test infrastructure — PR test/p02-05-harness
+next: P02.06 CI pipeline v1 — PR chore/p02-06-ci
 updated: 2026-09-28
 ---
 
@@ -61,6 +61,13 @@ Rules
 | P02.04.05 | READY_FOR_REVIEW     | PR #6  | EV-P02-023             | `pnpm doctor`                                                                           |
 | P02.04.06 | READY_FOR_REVIEW     | PR #6  | EV-P02-022             | 29 s warm; cold download volume recorded; one founder-only step                         |
 
+| P02.05.01 | READY_FOR_REVIEW | PR #7 | EV-P02-028 | Vitest unit + integration projects |
+| P02.05.02 | READY_FOR_REVIEW | PR #7 | EV-P02-029 | Template-database clone per file; found two real defects |
+| P02.05.03 | READY_FOR_REVIEW | PR #7 | EV-P02-030 | German factories; folding bug on Turkish dotless i found and fixed |
+| P02.05.04 | READY_FOR_REVIEW | PR #7 | EV-P02-032 | Playwright + axe; only Chromium installed locally, rest on CI |
+| P02.05.05 | READY_FOR_REVIEW | PR #7 | EV-P02-031 | Fault injection + controllable clock |
+| P02.05.06 | READY_FOR_REVIEW | PR #7 | EV-P02-033 | Every type passes in-suite and standalone on a fresh database |
+
 ## External waits
 
 | ID     | Counterparty | Requested  | Expected | Fallback                                                                                  | Blocks               |
@@ -88,6 +95,7 @@ Rules
 
 ## Log
 
+- 2026-09-28 — P02.05 complete. 108 unit tests, 5 integration tests against real PostgreSQL, 4 end-to-end tests with an axe scan; every type verified both in-suite and standalone against a database destroyed and rebuilt first. The harness found three real defects the moment it was pointed at itself: the test template was created bare and had no pgvector; migration 0001 described a SELECT grant in a comment and never issued it (fixed as 0002, because the checksum rule correctly forbids editing an applied migration); and the German character folding dropped Turkish dotless i entirely, turning "Yılmaz" into "ylmaz" — plausible-looking and matching nothing. Only Chromium is installed locally, because `playwright install --with-deps` needs sudo; Firefox and WebKit are left to CI and are not claimed as passing.
 - 2026-09-28 — CORRECTION (process): several earlier ledger rows were never actually written. Prettier reformats this file's tables into aligned pipes, and later Python `str.replace()` calls used the unaligned source text, so they matched nothing and failed silently. The Items table has been rebuilt from the evidence registry, which is the authoritative record. Lesson applied: every scripted edit to a tracked file now asserts its match count, as the PLAN.md edits already did.
 - 2026-09-28 — P02.04 complete. Six-service stack, all digest-pinned, healthy in 26 s from empty volumes; fresh clone to a running stack with migrations in 29 s warm (cold adds ~1.73 GiB of image downloads, measured rather than estimated away). Two honest gaps: the local environment file must be created by the founder because the control plane blocks it, and the demo-tenant rows wait for P06's schema rather than creating a tenant table here without FORCE RLS. The health checks initially reported three working services as unhealthy — the probes used a bash builtin none of those images ship.
 - 2026-09-28 — P02.03 QG-09 review and remediation. The security and architecture reviewers returned BLOCK MERGE with 1 Critical and 11 High between them. Every one was reproduced before being fixed. Three findings were defects in work this session had already recorded as passing, and two evidence records (EV-P02-015, EV-P02-017) carried claims that were simply false — both now carry a correction section rather than being quietly rewritten. The most useful lesson: `redaction.test.ts` passed while three separate paths carried personal data to stdout, because it tested the redactor instead of the serialised line. Where the two reviewers disagreed on a fix, the measurement decided it. Tests 65 → 90.
