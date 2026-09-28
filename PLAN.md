@@ -826,6 +826,8 @@ ADRs live in `docs/adr/NNNN-title.md` (MADR format: context, decision, alternati
 | ADR-0041 | Generic outbound webhook | Tenant-configured, HMAC-signed, retried, SSRF-safe deliveries with logs and replay | P29 |
 | ADR-0042 | Document pipeline | Deferred; KoSIT validator + deterministic XML; malware scanning; original preserved | P34 |
 | ADR-0043 | Voice cost path | Deferred; Media Streams → dedicated STT → LLM → TTS behind the same voice port | P43 |
+| ADR-0044 | Local S3 emulator | Adobe S3Mock (Apache-2.0), local and test only, pinned by digest; production is real AWS S3 | P02 |
+| ADR-0045 | Local OIDC provider | Keycloak, local and test only, pinned by digest, realm committed as data; production identity is Cognito | P02 |
 
 ---
 

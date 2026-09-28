@@ -76,7 +76,7 @@ services:
       retries: 20
 
   s3:
-    # Adobe S3Mock (ADR-0035): Apache-2.0, S3-focused, no commercial-use licensing question.
+    # Adobe S3Mock (ADR-0044): Apache-2.0, S3-focused, no commercial-use licensing question.
     image: adobe/s3mock@sha256:c1beb36492706566afdea274fa19a15fe6ca519aa4d82889b13a127237b6d301
     environment:
       initialBuckets: 'moin-local-uploads,moin-local-recordings,moin-local-exports'
@@ -111,7 +111,7 @@ services:
       retries: 20
 
   oidc:
-    # Keycloak as a local OIDC provider (ADR-0036). Production identity is Amazon Cognito; this
+    # Keycloak as a local OIDC provider (ADR-0045). Production identity is Amazon Cognito; this
     # exists so the auth boundary can be exercised against real issuer, audience, JWKS-rotation
     # and token-expiry behaviour instead of a stub that always says yes.
     image: quay.io/keycloak/keycloak@sha256:82a77884f3af238beab1e7afd63b5f530e1b5c0590bd7aa60b40a40463e29b2c
