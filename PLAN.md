@@ -2122,7 +2122,7 @@ Monorepo skeleton · CI v1 · local stack · test harnesses · governance files 
 - [ ] **P02.06 CI pipeline v1** `[G:PILOT]`
   - [x] P02.06.01 `verify`: frozen install, format, lint, typecheck, unit, integration (Postgres 17 + pgvector service), build — EV-P02-043
   - [x] P02.06.02 `security-scan`: `pnpm audit`/OSV (fail on high/critical with fix), gitleaks full history, Semgrep, actionlint, shellcheck, Trivy filesystem, CycloneDX SBOM artifact — EV-P02-044
-  - [ ] P02.06.03 `container-scan`: hadolint, image build, Trivy image scan (fail on high/critical with fix)
+  - [x] P02.06.03 `container-scan`: hadolint, image build, Trivy image scan (fail on high/critical with fix) — EV-P02-045
   - [x] P02.06.04 `scripts/check-migrations.ts` (ordering, destructive/lock heuristics, adapted from exitos) wired to CI — EV-P02-034
   - [x] P02.06.05 Job slots for RLS catalog check (P06.02) and OpenAPI drift (P06/P07) — EV-P02-040
   - [x] P02.06.06 Actions pinned by SHA; `permissions: contents: read` by default; concurrency groups; caching — EV-P02-039
