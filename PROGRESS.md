@@ -5,7 +5,7 @@ mode: interactive
 phase: P03
 tier: PILOT
 plan: docs/phases/P03-plan.md
-next: P03.02 domain model and glossary — PR docs/p03-02-domain-model
+next: P03.06 personal-data inventory — PR docs/p03-06-data-inventory
 updated: 2026-09-28
 ---
 
@@ -92,6 +92,17 @@ Rules
 | P03.01.04 | READY_FOR_REVIEW | PR #10 | EV-P03-004 | Every ADR names its enforcement; the check found 4 gaps |
 | P03.01.05 | READY_FOR_REVIEW | PR #10 | EV-P03-005 | Every INV covered, or accounted for in the register |
 
+| P03.02.01 | READY_FOR_REVIEW | PR #11 | EV-P03-006 | Glossary; Vorgang flagged as at risk, decided by P01 |
+| P03.02.02 | READY_FOR_REVIEW | PR #11 | EV-P03-007 | Entity model per module |
+| P03.02.03 | READY_FOR_REVIEW | PR #11 | EV-P03-008 | Eleven aggregates with the rule each holds |
+| P03.02.04 | READY_FOR_REVIEW | PR #11 | EV-P03-009 | 16 intents, 11 outcomes, 10 task types, all closed |
+| P03.02.05 | READY_FOR_REVIEW | PR #11 | EV-P03-010 | ~40 events, id-only payloads |
+| P03.02.06 | READY_FOR_REVIEW | PR #11 | EV-P03-011 | 26 blueprint entities, 0 unmapped |
+| P03.03.01 | READY_FOR_REVIEW | PR #11 | EV-P03-012 | Call session, with deadlines as numbers |
+| P03.03.02 | READY_FOR_REVIEW | PR #11 | EV-P03-012 | Interaction finalisation + reconciler contract |
+| P03.03.03 | READY_FOR_REVIEW | PR #11 | EV-P03-012 | Eight further machines |
+| P03.03.04 | READY_FOR_REVIEW | PR #11 | EV-P03-012 | Six property tests generated from the tables |
+
 ## External waits
 
 | ID     | Counterparty | Requested  | Expected | Fallback                                                                                  | Blocks               |
@@ -119,6 +130,7 @@ Rules
 
 ## Log
 
+- 2026-09-29 — P03.02 and P03.03 complete. Glossary, entity model, aggregate boundaries, the three closed vocabularies and ten state machines as transition tables. Coverage against the blueprint is mechanical (26 entities, 0 unmapped, 5 explicitly deferred), and the check found a false positive in itself before it found anything else — naive pluralisation flagged `retention_policy` when the table is `retention_policies`. A false positive in a coverage check is worse than none, so it was fixed rather than allowlisted.
 - 2026-09-29 — P03.01 complete: ADR process, ten core ADRs accepted, three drafted and left PROPOSED, plus the invariant enforcement register. The coverage check is mechanical and found two things reading would not have: four P02 ADRs with no Verification section at all, and three invariants with no ADR. Those three are accounted for explicitly rather than excused — INV-14 has none by design, because no linter can tell whether a feature is an excluded sensitive use. Open question recorded rather than resolved: PLAN L2180 lists ADR-0036 for P03 while the register assigns it to P07.
 - 2026-09-29 — P02.07 complete, and the walkthrough was worth more than the documents it checked. A fresh session with no context found nine real defects, the worst two being that the environment checker silently did nothing (its name was shadowed by a pnpm built-in) and that nothing in the repository loaded the local environment file at all — so the first setup step was inert and the checker reported green on a configuration that could not run. Also fixed: `pnpm dev` did not exist, the integration harness silently fell back to an admin connection and failed with what looked like an RLS security defect, and two checkouts silently shared one database, which destroyed this machine's dev volume during the run. P02 PILOT is complete except EXT-24 and the founder items.
 - 2026-09-29 — All three CI workflows green. P02 is now complete except for the items that need the founder or a third party: the ruleset (EXT-24) and, behind it, the four negative-control PRs. Follow-up recorded rather than left to be rediscovered: the arm64 container build runs under emulation on an x86 runner at ~4.5 minutes per run, which will not stay tolerable as the image grows — a native arm64 runner is the remedy.
