@@ -9,7 +9,7 @@ import unittest
 from collections.abc import Mapping
 from pathlib import Path
 
-from helpers import HOOKS, base_env, git, make_repo, run_hook, temp_dir, write
+from helpers import BIN, HOOKS, base_env, git, make_repo, run_hook, temp_dir, write
 
 GUARD = HOOKS / "policy_guard.py"
 PROTECTED_FILES = {
@@ -204,6 +204,40 @@ class SelfProtectionBashTest(GuardCase):
         ]:
             with self.subTest(command=command):
                 self.assert_allowed(command)
+
+
+class RealControlPlaneToolsTest(GuardCase):
+    """Regression: the executed-script scan blocked the real gates.py (its docstring mentions
+    `<repo>/.claude/gates.json`). The fixture now carries the REAL bin/ and hooks/ scripts."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        for sub in ("bin", "hooks"):
+            for src in sorted((BIN.parent / sub).glob("*.py")):
+                (self.repo / ".claude" / sub / src.name).write_bytes(src.read_bytes())
+        write(self.repo, "tools/gates-copy.py", (BIN / "gates.py").read_text(encoding="utf-8"))
+
+    def test_the_control_plane_tools_run_unhindered(self) -> None:
+        for command in [
+            "python3 .claude/bin/gates.py status",
+            "python3 .claude/bin/gates.py full",
+            ".claude/bin/gates.py fast",
+            "python3 .claude/bin/control_plane_check.py",
+            "python3 .claude/bin/plan_section.py P02",
+            "python3 .claude/bin/evidence.py check",
+            "python3 .claude/bin/mutation_check.py --test 'python3 -m unittest'",
+            "python3 .claude/bin/progress_probe.py build --repo .",
+            "python3 .claude/hooks/session_bootstrap.py < /dev/null",
+            "python3 tools/gates-copy.py status",
+        ]:
+            with self.subTest(command=command):
+                self.assert_allowed(command)
+
+    def test_untrusted_scripts_that_write_guard_files_are_still_blocked(self) -> None:
+        write(self.repo, "tools/evil.py", "import os\nos.system('echo {} > .claude/gates.json')\n")
+        write(self.repo, "tools/evil.sh", "cat x >> .claude/settings.json\n")
+        self.assert_blocked("python3 tools/evil.py", "founder-only")
+        self.assert_blocked("bash tools/evil.sh", "founder-only")
 
 
 class SelfProtectionToolsTest(GuardCase):

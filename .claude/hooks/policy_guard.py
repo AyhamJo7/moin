@@ -184,7 +184,7 @@ WRITE_CODE_RE = re.compile(
     r"open\([^)]*['\"][wax]b?\+?['\"]|write_text|write_bytes|writeFile|appendFile|\.unlink\(|rmtree"
     r"|os\.remove|os\.rename|os\.replace|shutil\.(?:copy|move)|\bchmod\b|\bsed\s+(?:-[a-zA-Z]*i|--in-place)"
     r"|\btee\b|\brm\s|\bmv\s|\bcp\s|\bln\s|fs\.(?:rm|unlink|rename|copyFile|chmod|write)"
-    r"|>>?\s*['\"]?[^\s'\"]*\.claude"
+    r"|(?:^|[\s;|&(])>>?\s*['\"]?[^\s'\"]*\.claude"
 )
 PIPE_TO_SHELL_RE = re.compile(
     r"\b(?:curl|wget)\b[^|;&\n]*\|\s*(?:sudo\s+)?(?:(?:ba|z|da|k)?sh|python3?|node|perl|ruby|bun|deno)\b"
@@ -846,6 +846,12 @@ def check_executed_code(ctx: Context, what: str, text: str) -> None:
             return
 
 
+def trusted_script(ctx: Context, path: Path) -> bool:
+    """The control plane's own tools (.claude/bin, .claude/hooks) are founder-only files, so
+    running them is not a write risk; scanning their source only produces false positives."""
+    return protected_reason(ctx, path) is not None
+
+
 def script_texts(ctx: Context, cmd: SimpleCommand, cwd: Path) -> list[tuple[str, str]]:
     """(label, text) of code this command executes: inline code, script files, npm scripts."""
     head = os.path.basename(cmd.words[0])
@@ -859,12 +865,14 @@ def script_texts(ctx: Context, cmd: SimpleCommand, cwd: Path) -> list[tuple[str,
             for arg in args:
                 if arg.startswith("-"):
                     continue
-                text = read_text_file(resolve(cwd, arg))
+                path = resolve(cwd, arg)
+                text = None if trusted_script(ctx, path) else read_text_file(path)
                 if text is not None:
                     found.append((f"script `{arg}`", text))
                 break
     elif "/" in cmd.words[0]:
-        text = read_text_file(resolve(cwd, cmd.words[0]))
+        path = resolve(cwd, cmd.words[0])
+        text = None if trusted_script(ctx, path) else read_text_file(path)
         if text is not None:
             found.append((f"script `{cmd.words[0]}`", text))
     elif head in ("pnpm", "npm", "yarn") and len(args) >= 1:
