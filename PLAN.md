@@ -2127,10 +2127,10 @@ Monorepo skeleton · CI v1 · local stack · test harnesses · governance files 
   - [x] P02.06.05 Job slots for RLS catalog check (P06.02) and OpenAPI drift (P06/P07) — EV-P02-040
   - [x] P02.06.06 Actions pinned by SHA; `permissions: contents: read` by default; concurrency groups; caching — EV-P02-039
   - [ ] P02.06.07 Verify with four negative-control PRs: lint error, failing test, fake secret, vulnerable dependency, each fails the right job
-- [ ] **P02.07 Developer documentation** `[G:PILOT]`
+- [x] **P02.07 Developer documentation** `[G:PILOT]` — EV-P02-046
   - [x] P02.07.01 `docs/development/local-setup.md`, `testing.md`, `conventions.md` — EV-P02-041
   - [x] P02.07.02 `ARCHITECTURE.md` skeleton linking ADRs; `SECURITY.md` skeleton — EV-P02-042
-  - [ ] P02.07.03 Verify: a fresh agent session follows the docs from a clean clone without help
+  - [x] P02.07.03 Verify: a fresh agent session follows the docs from a clean clone without help — EV-P02-046
 - [x] **P02.08 Dependency and supply-chain policy** `[G:PILOT]` — EV-P02-036
   - [x] P02.08.01 Renovate: weekly grouped updates, immediate security updates, lockfile maintenance — EV-P02-037
   - [x] P02.08.02 Licence allowlist check (fail on AGPL/SSPL/unknown in production dependencies) — EV-P02-035

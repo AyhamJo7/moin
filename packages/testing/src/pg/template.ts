@@ -25,8 +25,9 @@ function adminUrl(): string {
   const url = process.env['TEST_DATABASE_ADMIN_URL'];
   if (url === undefined || url.length === 0) {
     throw new Error(
-      'TEST_DATABASE_ADMIN_URL is not set. Integration tests need the local stack: run ' +
-        '`pnpm dev:up`, then `pnpm test:integration`.',
+      'TEST_DATABASE_ADMIN_URL is not set. It is in the example environment file, which ' +
+        '`pnpm test:integration` reads — so this usually means that file has not been copied ' +
+        'yet. The local stack must also be running (`pnpm dev:up`).',
     );
   }
   return url;
@@ -72,7 +73,19 @@ export async function createTestDatabase(label = 'test'): Promise<TestDatabase> 
   }
 
   let appPool: Pool | undefined;
-  const appUrl = urlForDatabase(process.env['TEST_DATABASE_APP_URL'] ?? admin, name);
+  const appBase = process.env['TEST_DATABASE_APP_URL'];
+  if (appBase === undefined || appBase.length === 0) {
+    // Falling back to the admin connection used to be the default here, and it made the suite
+    // fail with "a superuser silently bypasses RLS" — an assertion that reads like a genuine
+    // security defect rather than a missing variable. Name the variable instead.
+    throw new Error(
+      'TEST_DATABASE_APP_URL is not set. Integration tests connect as the application role, not ' +
+        'as the admin role, because an admin connection bypasses row-level security and would ' +
+        'make every isolation test meaningless. Both connection strings are in the example ' +
+        'environment file.',
+    );
+  }
+  const appUrl = urlForDatabase(appBase, name);
 
   return {
     name,

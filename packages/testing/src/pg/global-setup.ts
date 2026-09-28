@@ -14,8 +14,9 @@ function adminUrl(): string {
   const url = process.env['TEST_DATABASE_ADMIN_URL'];
   if (url === undefined || url.length === 0) {
     throw new Error(
-      'TEST_DATABASE_ADMIN_URL is not set. Integration tests need the local stack: run ' +
-        '`pnpm dev:up` first.',
+      'TEST_DATABASE_ADMIN_URL is not set. It is in the example environment file, which ' +
+        '`pnpm test:integration` reads — so this usually means that file has not been copied ' +
+        'yet. The local stack must also be running (`pnpm dev:up`).',
     );
   }
   return url;

@@ -1,0 +1,15 @@
+# EV-P02-046: A fresh session followed the docs from a clean clone; it found nine real defects, all fixed
+
+| Field | Value |
+|---|---|
+| Evidence ID | EV-P02-046 |
+| Item | P02.07.03 |
+| Date (UTC) | 2026-09-28 17:17 UTC |
+| Commit | `c8564915fc12fa4af0f5f22f8ee2c5d1f6e6a150` (working tree had uncommitted changes) |
+| Environment | local; a clean clone at a separate path, with the local stack stopped first |
+| Command / procedure | A session with no prior context was given only a clean clone and told to reach a running stack using the documentation alone, starting from README.md, and to report every point where it had to guess. It reached a running stack, all suites passing — but not by following the documentation literally. |
+| Result | PASS as a verification, FAIL as a first result. The walkthrough found nine defects, every one confirmed independently before being fixed: (1) `pnpm doctor` is a pnpm BUILT-IN that shadowed the script, so the command both documents told people to run exited 0 having checked nothing — renamed to `pnpm preflight`; (2) `pnpm dev`, the last line of the README quickstart, did not exist — added, with a `dev` script for the server that had none; (3) `pnpm turbo run lint typecheck test build` in the README failed instantly because `test` had been moved off turbo — replaced with `pnpm verify`, which worked and was undocumented; (4) NOTHING loaded the environment file, so `cp .env.example .env` accomplished nothing and the doctor reported green on a setup that could not run — the scripts now use `node --env-file-if-exists`, verified both with the file present and absent; (5) TEST_DATABASE_ADMIN_URL and TEST_DATABASE_APP_URL existed only in the CI workflow — added to the example and both guides; (6) with only the admin URL set, the harness silently fell back to the ADMIN connection and the suite failed with "a superuser silently bypasses RLS", which reads like a genuine security defect on a clean clone — it now refuses and names the variable; (7) the README promised seeded demo tenants that do not exist yet; (8) templates/, evals/ and infrastructure/ were listed in the layout but git does not track empty directories, so a fresh clone lacked them — placeholders added; (9) docker-compose hard-coded its project name, so two checkouts silently shared one database, a fresh clone reported "migrations already applied", and a reset in one destroyed the other (which is exactly what happened to this machine during the walkthrough) — the name is now overridable. Also: the walkthrough put a realistic cold first-run at 45-90 minutes rather than 15, which is recorded rather than argued with. Re-verified after the fixes: pnpm preflight runs and reports the one real gap; pnpm verify green (16/16 typecheck, 123 tests, 12/12 build); integration 5/5; the missing-variable path now fails with a clear message instead of an RLS assertion. |
+| CI run / artifact | pending |
+| Reviewer | fresh session with no prior context |
+
+Sensitive material is stored by reference only (PLAN.md evidence rules).

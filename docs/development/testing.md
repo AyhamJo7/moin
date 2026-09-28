@@ -10,9 +10,15 @@
 
 ```bash
 pnpm test                # unit
-pnpm test:integration    # needs `pnpm dev:up`
-pnpm test:e2e            # needs `pnpm --filter @moin/web build`
+pnpm test:integration    # needs `pnpm dev:up` and the environment file copied
+pnpm test:e2e            # needs `pnpm --filter @moin/web build`, and once:
+                         #   pnpm exec playwright install chromium
 ```
+
+`pnpm test:integration` reads the environment file for `TEST_DATABASE_ADMIN_URL` and
+`TEST_DATABASE_APP_URL`; both are in the example. The app connection must be the **application**
+role — an admin connection bypasses row-level security, so a suite run against one would pass while
+proving nothing. The harness refuses to fall back to it rather than doing so silently.
 
 ## Two rules that are not negotiable
 

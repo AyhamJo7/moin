@@ -23,15 +23,19 @@ corepack enable               # pnpm 10.34.5 from packageManager
 pnpm install --frozen-lockfile
 
 cp .env.example .env          # every value in it is a development-only fake
-pnpm doctor                   # checks Node, pnpm, Docker, dependencies, env, ports
+pnpm preflight                # checks Node, pnpm, Docker, dependencies, env, ports
 
 pnpm dev:up                   # six services, waits until each is healthy
 pnpm db:migrate
 pnpm db:seed
 ```
 
-`pnpm doctor` reports **every** problem it finds, not just the first, and names the fix for each.
-Run it whenever something behaves oddly — it is faster than reading a stack trace.
+The command is `pnpm preflight`, **not** `pnpm doctor`: `doctor` is a pnpm built-in, and it shadows
+a script of that name, so `pnpm doctor` exits 0 having checked nothing. That is exactly why this
+script is not called `doctor`.
+
+It reports **every** problem it finds, not just the first, and names the fix for each. Run it
+whenever something behaves oddly — it is faster than reading a stack trace.
 
 ## What is running
 
@@ -59,10 +63,13 @@ one mattered would be in staging with real data.
 ## Running things
 
 ```bash
-pnpm dev                 # everything in watch mode
+pnpm dev                 # web and api in watch mode
 pnpm --filter @moin/web dev
-pnpm --filter @moin/server build && node apps/server/dist/main-api.js
+pnpm --filter @moin/server dev
 ```
+
+The API serves `/healthz` (liveness — deliberately checks nothing external) and `/readyz`
+(readiness — checks its dependencies). Those two paths are the only ones that exist today.
 
 The server needs `SERVER_ROLE` set to one of `api`, `voice`, `worker`, `migrate`, matching the
 entrypoint. Starting the wrong pair exits 1 with a message naming both — one image is built per
@@ -72,9 +79,15 @@ release and the role is chosen by the start command (INV-17).
 
 ```bash
 pnpm test                # unit — no Docker needed
-pnpm test:integration    # needs the stack up
-pnpm test:e2e            # needs a built web app
+pnpm test:integration    # needs the stack up and the environment file copied
+pnpm test:e2e            # needs a built web app, and a browser installed once:
+                         #   pnpm exec playwright install chromium
 ```
+
+`pnpm test:integration` reads the environment file for `TEST_DATABASE_ADMIN_URL` and
+`TEST_DATABASE_APP_URL`; both are in the example. The app connection must be the **application**
+role, not the admin role — an admin connection bypasses row-level security, which would make every
+isolation test meaningless, so the harness refuses to fall back to it.
 
 See [`testing.md`](testing.md).
 
@@ -88,16 +101,23 @@ pnpm dev:reset           # destroy volumes and start clean
 `dev:reset` is the right response to "the database is in a strange state". It is fast, and
 re-running the init scripts is exactly what proves a fresh clone works.
 
+**If you have two checkouts** — a worktree, or a clone for reviewing a branch — set
+`COMPOSE_PROJECT_NAME` in each. The project name determines the Docker volume, so two checkouts on
+the default silently share one database: a genuinely fresh clone reports "migrations already
+applied", and `dev:reset` in one destroys the other's data.
+
 ## When it does not work
 
-| Symptom                               | Cause                                           | Fix                                                                                             |
-| ------------------------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `docker: daemon unreachable`          | Docker Desktop off, or WSL integration disabled | Start it; enable integration for this distro                                                    |
-| `port 5432 already in use`            | A system PostgreSQL                             | Stop it. It will otherwise accept connections with the wrong schema rather than failing clearly |
-| `DATABASE_URL is missing`             | No `.env`                                       | `cp .env.example .env`                                                                          |
-| `permission denied for schema public` | Running as `moin_app`, which cannot run DDL     | Correct — use `pnpm db:migrate`, which uses the migrator role                                   |
-| Keycloak unhealthy for ~20 s          | Realm import on first boot                      | Expected; `dev:up` waits for it                                                                 |
-| `ERR_PNPM_OUTDATED_LOCKFILE`          | `package.json` changed without the lockfile     | `pnpm install`, and commit the lockfile                                                         |
+| Symptom                                  | Cause                                                          | Fix                                                                                                               |
+| ---------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `docker: daemon unreachable`             | Docker Desktop off, or WSL integration disabled                | Start it; enable integration for this distro                                                                      |
+| `port 5432 already in use`               | A system PostgreSQL                                            | Stop it. It will otherwise accept connections with the wrong schema rather than failing clearly                   |
+| `DATABASE_URL is missing`                | The environment file has not been copied                       | `cp` the example to it — the scripts read it with `--env-file-if-exists`, so copying genuinely does fix this      |
+| `TEST_DATABASE_APP_URL is not set`       | Same                                                           | Same. The harness refuses to fall back to the admin connection, because that silently bypasses row-level security |
+| `pnpm doctor` prints nothing and exits 0 | `doctor` is a pnpm built-in that shadows a script of that name | Use `pnpm preflight`                                                                                              |
+| `permission denied for schema public`    | Running as `moin_app`, which cannot run DDL                    | Correct — use `pnpm db:migrate`, which uses the migrator role                                                     |
+| Keycloak unhealthy for ~20 s             | Realm import on first boot                                     | Expected; `dev:up` waits for it                                                                                   |
+| `ERR_PNPM_OUTDATED_LOCKFILE`             | `package.json` changed without the lockfile                    | `pnpm install`, and commit the lockfile                                                                           |
 
 ## What never happens locally
 
