@@ -1,0 +1,50 @@
+# Secret scanning configuration (P02.06.02, used locally and in CI).
+#
+# The default ruleset is extended, never replaced: `useDefault = true` keeps every upstream rule,
+# so this file can only narrow *where* we look, never which secrets count.
+
+title = "moin secret scanning"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Generated build output and development-only fixtures"
+
+paths = [
+  # Next.js writes per-build preview and encryption keys into .next. They are ephemeral, they are
+  # gitignored, and they are regenerated on every build — flagging them trains people to ignore
+  # the scanner, which is how a real finding eventually gets waved through.
+  '''(^|/)\.next/''',
+  '''(^|/)(dist|build|coverage|\.turbo)/''',
+  '''(^|/)pnpm-lock\.yaml$''',
+
+  # Evidence records quote commands and their output verbatim; that is their purpose.
+  '''^docs/evidence/''',
+]
+
+regexes = [
+  # Every credential in the committed development stack is this exact literal, and it is the only
+  # password permitted to appear anywhere in the repository. Anything else that looks like a
+  # secret is a finding, including in docker-compose.yml and the example environment file.
+  '''local-development-only''',
+]
+
+[[rules]]
+id = "moin-env-example-must-stay-fake"
+description = "A real-looking credential assigned in the example environment file"
+# The realistic way a secret reaches this repository is someone pasting a working key into the
+# example file while debugging, then committing it. Go's regexp engine (RE2) has no negative
+# lookahead, so the permitted placeholders are a rule-scoped allowlist rather than inline.
+regex = '''(?i)^[ \t]*(TWILIO_AUTH_TOKEN|OPENAI_API_KEY|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|AWS_SECRET_ACCESS_KEY|GOOGLE_OAUTH_CLIENT_SECRET|MICROSOFT_GRAPH_CLIENT_SECRET)[ \t]*=[ \t]*\S{12,}'''
+path = '''\.env\.example$'''
+
+  [rules.allowlist]
+  description = "Placeholders that are allowed to appear in the example file"
+  regexTarget = "line"
+  regexes = [
+    '''local-development-only''',
+    '''\$\{''',
+    '''_SECRET_ARN''',
+    '''^[ \t]*#''',
+  ]

@@ -1,0 +1,112 @@
+{
+  "realm": "moin-local",
+  "enabled": true,
+  "displayName": "moin (local development)",
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "refreshTokenMaxReuse": 0,
+  "revokeRefreshToken": true,
+  "roles": {
+    "realm": [
+      {
+        "name": "owner",
+        "description": "Betriebsinhaber: full access to their own organisation"
+      },
+      {
+        "name": "staff",
+        "description": "Mitarbeiter: day-to-day tasks and conversations"
+      },
+      {
+        "name": "operator",
+        "description": "iQuantum operator: support access, never tenant data by default"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "moin-web",
+      "name": "moin owner app (local)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "local-development-only",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:3000/*",
+        "http://127.0.0.1:3000/*"
+      ],
+      "webOrigins": [
+        "http://localhost:3000"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:3000/*"
+      },
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "email",
+        "roles"
+      ]
+    },
+    {
+      "clientId": "moin-tests",
+      "name": "integration tests (local)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "local-development-only",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      }
+    }
+  ],
+  "users": [
+    {
+      "username": "inhaber@musterrestaurant.example",
+      "email": "inhaber@musterrestaurant.example",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Maria",
+      "lastName": "Mustermann",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "local-development-only",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "owner"
+      ]
+    },
+    {
+      "username": "mitarbeiter@musterbetrieb-shk.example",
+      "email": "mitarbeiter@musterbetrieb-shk.example",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Jonas",
+      "lastName": "Beispiel",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "local-development-only",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "staff"
+      ]
+    }
+  ]
+}
