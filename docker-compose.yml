@@ -127,7 +127,11 @@ services:
     healthcheck:
       # Keycloak's own readiness endpoint on the management port, which reports ready only once
       # the realm import has finished.
-      test: ['CMD-SHELL', "exec 3<>/dev/tcp/127.0.0.1/9000; echo -e 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&3; grep -q UP <&3"]
+      test:
+        [
+          'CMD-SHELL',
+          "exec 3<>/dev/tcp/127.0.0.1/9000; echo -e 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&3; grep -q UP <&3",
+        ]
       interval: 5s
       timeout: 5s
       retries: 40

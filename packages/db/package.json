@@ -6,7 +6,9 @@
   "description": "Reviewed SQL migrations, Drizzle table definitions, roles and RLS SQL, the tenant wrapper and seeds",
   "exports": {
     ".": "./src/index.ts",
-    "./pool": "./src/pool.ts"
+    "./pool": "./src/pool.ts",
+    "./migrate": "./src/migrate.ts",
+    "./seed": "./src/seed.ts"
   },
   "scripts": {
     "lint": "eslint .",
