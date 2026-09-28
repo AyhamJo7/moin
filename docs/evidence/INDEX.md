@@ -107,3 +107,5 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P03-017 | P03.04.01 | 2026-09-28 | `b9f29969dc70` | C4 context and container diagrams | [EV-P03-017-c4-diagrams.md](P03/EV-P03-017-c4-diagrams.md) |
 | EV-P03-018 | P03.04.02 | 2026-09-28 | `b9f29969dc70` | Data-flow diagram with five trust boundaries and twelve classified flows | [EV-P03-018-data-flow-diagram.md](P03/EV-P03-018-data-flow-diagram.md) |
 | EV-P03-019 | P03.04.03 | 2026-09-28 | `b9f29969dc70` | Every personal-data flow maps to an inventory category and a subprocessor entry | [EV-P03-019-dfd-coverage-verified.md](P03/EV-P03-019-dfd-coverage-verified.md) |
+| EV-P03-020 | P03.07.01 | 2026-09-28 | `07ab552346a0` | Lawyer briefing pack: product description, data flows, questions and draft caller wording | [EV-P03-020-lawyer-briefing-pack.md](P03/EV-P03-020-lawyer-briefing-pack.md) |
+| EV-P03-021 | P03.07.02 | 2026-09-28 | `07ab552346a0` | Question list with required decisions and deadlines, staged A and B | [EV-P03-021-legal-question-list.md](P03/EV-P03-021-legal-question-list.md) |

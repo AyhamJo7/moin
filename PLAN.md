@@ -138,7 +138,7 @@ Single source of status. Tier columns show the status of that phase's items for 
 | P00 | Planning baseline | READY_FOR_REVIEW | — | — | — | — | Founder review | Founder reads and adopts plan (P00.05) |
 | P01 | Discovery & Gurlitt observation | NOT_STARTED | NOT_STARTED | — | — | — | EXT-16 Gurlitt | Meet Gurlitt owner 2026-09-28 09:00 |
 | P02 | Engineering foundation | IN_PROGRESS | — | — | — | — | EXT-24 GitHub plan | P02.06 CI pipeline |
-| P03 | Architecture decisions & threat model | IN_PROGRESS | — | — | — | — | — | P03.04 diagrams, then P03.05 threat model |
+| P03 | Architecture decisions & threat model | IN_PROGRESS | — | — | — | — | EXT-02 counsel not engaged | P03.05 review findings; founder sends the legal pack |
 | P04 | Feasibility proof & long-lead track | NOT_STARTED | — | — | NOT_STARTED | — | EXT-01/07/10/11/12 | Open Twilio/OpenAI/AWS requests day 1 |
 | P05 | Cloud foundation & walking skeleton | NOT_STARTED | — | — | — | — | EXT-09 AWS | Terraform bootstrap |
 | P06 | Tenancy, identity, authorization, audit | NOT_STARTED | — | NOT_STARTED | — | — | — | after P02/P03 |
@@ -2228,7 +2228,7 @@ Accepted ADRs · glossary · entity/aggregate model · state-machine specificati
   - [x] P03.06.03 Data-dictionary generator plan (generated from schema comments in P06/P07) — EV-P03-015
   - [x] P03.06.04 Verify: a generated schema diff shows no unclassified column in MVP tables — EV-P03-016
 - [ ] **P03.07 Lawyer briefing pack** `[G:PILOT]` `[EXT]`
-  - [ ] P03.07.01 Contents:
+  - [x] P03.07.01 Contents: — EV-P03-020
     - Product description and data flows.
     - Controller/processor analysis.
     - Audio policy.
@@ -2242,7 +2242,7 @@ Accepted ADRs · glossary · entity/aggregate model · state-machine specificati
     - Telecom questions (EXT-03).
     - AI Act role questions (EXT-04).
     - Draft emergency and allergen scripts (EXT-05).
-  - [ ] P03.07.02 Question list with required decisions and deadlines (stage A before pilot; stage B before LAUNCH)
+  - [x] P03.07.02 Question list with required decisions and deadlines (stage A before pilot; stage B before LAUNCH) — EV-P03-021
   - [ ] P03.07.03 Engage counsel; send the pack; record counterparty, request date, expected date and fallback in the Status Ledger
   - [ ] P03.07.04 Verify: counsel acknowledged receipt; request date, expected date and fallback recorded in the Status Ledger
 - [ ] **P03.08 Invariant enforcement register** `[G:PILOT]`

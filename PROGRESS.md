@@ -110,9 +110,10 @@ Rules
 
 ## External waits
 
-| ID     | Counterparty | Requested  | Expected | Fallback                                                                                  | Blocks               |
-| ------ | ------------ | ---------- | -------- | ----------------------------------------------------------------------------------------- | -------------------- |
-| EXT-24 | GitHub       | 2026-09-28 | —        | Pre-push hook + CI status discipline as an accepted risk; must be resolved before MT-LIVE | P02.01.01, P02.01.07 |
+| ID     | Counterparty                   | Requested                         | Expected | Fallback                                                                                                                                                          | Blocks                                           |
+| ------ | ------------------------------ | --------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| EXT-24 | GitHub                         | 2026-09-28                        | —        | Pre-push hook + CI status discipline as an accepted risk; must be resolved before MT-LIVE                                                                         | P02.01.01, P02.01.07, P02.06.07                  |
+| EXT-02 | German data-protection counsel | **not yet sent — founder action** | —        | Every question in `docs/legal-briefs/02-questions.md` carries a conservative fallback, except A6 (telecom law), which has none: without it the pilot does not run | P03.07.03, P03.07.04, ADR-0019, the pilot (PG-3) |
 
 ## Founder actions waiting
 
