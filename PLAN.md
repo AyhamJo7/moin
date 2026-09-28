@@ -2218,10 +2218,10 @@ Accepted ADRs · glossary · entity/aggregate model · state-machine specificati
   - [x] P03.04.01 C4 context + container diagrams in `docs/architecture/` — EV-P03-017
   - [x] P03.04.02 Data-flow diagram with trust boundaries and personal-data flows (input to TOMs, DPIA support, subprocessor register) — EV-P03-018
   - [x] P03.04.03 Verify: every personal-data flow in the DFD maps to a subprocessor-register entry and an inventory category — EV-P03-019
-- [ ] **P03.05 Threat model v1 (STRIDE)** `[G:PILOT]`
-  - [ ] P03.05.01 Per component and flow, threats and mitigations mapped to checklist IDs; residual risks listed
-  - [ ] P03.05.02 Abuse cases: toll-fraud-like traffic, bot calls, social engineering ("Ich bin der Inhaber"), competitor scraping of knowledge via calls, notification spam
-  - [ ] P03.05.03 Independent review (security-reviewer agent + founder) with tracked findings
+- [x] **P03.05 Threat model v1 (STRIDE)** `[G:PILOT]` — EV-P03-024
+  - [x] P03.05.01 Per component and flow, threats and mitigations mapped to checklist IDs; residual risks listed — EV-P03-025
+  - [x] P03.05.02 Abuse cases: toll-fraud-like traffic, bot calls, social engineering ("Ich bin der Inhaber"), competitor scraping of knowledge via calls, notification spam — EV-P03-026
+  - [x] P03.05.03 Independent review (security-reviewer agent + founder) with tracked findings — EV-P03-024
 - [x] **P03.06 Personal-data inventory and retention matrix** `[G:PILOT]` — EV-P03-016
   - [x] P03.06.01 Field-level inventory: category, purpose, controller/processor role, retention, deletion method, subprocessor exposure — EV-P03-013
   - [x] P03.06.02 Retention matrix aligned with blueprint L1276–1290 and [Privacy / Compliance Engineering](#privacy--compliance-engineering) — EV-P03-014

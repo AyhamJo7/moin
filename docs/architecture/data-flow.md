@@ -24,20 +24,27 @@ graph TB
         alb["Load balancer"]
     end
 
-    subgraph tb4["④ Application — authenticated, tenant-scoped"]
-        voice["voice"]
+    subgraph tb4a["④a Internet-facing, provider-authenticated"]
+        voice["voice<br/><i>HMAC over a shared secret,<br/>untrusted caller input</i>"]
+    end
+
+    subgraph tb4b["④b Session-authenticated, tenant-scoped"]
+        web["web"]
         api["api"]
         worker["worker"]
     end
 
-    subgraph tb5["⑤ Data — FORCE RLS, NOBYPASSRLS role"]
-        pg[("PostgreSQL")]
-        s3[("S3")]
+    subgraph tb5["⑤ Data"]
+        pg[("PostgreSQL<br/><i>FORCE RLS, NOBYPASSRLS role</i>")]
+        valkey[("Valkey<br/><i>no RLS — tenant scope is a key convention</i>")]
+        sqs["SQS<br/><i>no RLS — the envelope is a hint, not an authorisation</i>"]
+        s3[("S3<br/><i>tenant prefixes</i>")]
         sm["Secrets Manager"]
     end
 
     caller -->|"F1 speech"| twilio
-    twilio -->|"F2 audio + caller number"| voice
+    twilio -->|"F2 audio + caller number"| alb
+    alb --> voice
     voice -->|"F3 utterance text"| openai
     openai -->|"F4 intent + slots"| voice
     voice -->|"F5 structured facts"| pg
@@ -51,6 +58,11 @@ graph TB
     worker -->|"F10 notifications"| tb2
     worker -->|"F11 availability, booking"| gcal
     api -->|"F12 credential by ARN"| sm
+    voice --> sm
+    worker --> sm
+    api --> valkey
+    api --> sqs
+    browser --> web
 
     classDef untrusted fill:#ffebee,stroke:#c62828
     classDef provider fill:#fff3e0,stroke:#ef6c00
@@ -60,26 +72,26 @@ graph TB
     class caller,browser untrusted
     class twilio,openai,cognito,gcal provider
     class alb perimeter
-    class voice,api,worker app
-    class pg,s3,sm data
+    class voice,web,api,worker app
+    class pg,valkey,sqs,s3,sm data
 ```
 
 ## Flows
 
-| #       | Flow                        | Personal data                              | Inventory category                                 | Guard at the boundary                                                                              |
-| ------- | --------------------------- | ------------------------------------------ | -------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| **F1**  | Caller speaks               | Voice, anything they say                   | Call audio                                         | AI disclosure before the session (INV-03); the caller may hang up                                  |
-| **F2**  | Twilio → `voice`            | Caller number, audio stream                | Call metadata                                      | `X-Twilio-Signature` validated on every webhook; TLS; **audio is never written to disk** (INV-07)  |
-| **F3**  | `voice` → OpenAI            | Utterance text, transiently                | Transient STT                                      | EU project; no-training headers; no identifiers sent with it; not persisted by us                  |
-| **F4**  | OpenAI → `voice`            | Intent and slots                           | Structured fact                                    | Schema-validated; a parse failure re-asks rather than guessing                                     |
-| **F5**  | `voice` → PostgreSQL        | Name, callback number, request ≤ 200 chars | Structured fact                                    | `withTenant`; FORCE RLS; the request field is capped so it cannot become a transcript              |
-| **F6**  | Browser → Cognito           | Credentials, MFA                           | Account                                            | Never touches our servers — that is the point of using an identity provider                        |
-| **F7**  | Browser → ALB → `api`       | Session, request bodies                    | Account, Contact, Task                             | TLS; server-side session lookup, revocable; tenant derived server-side (INV-02)                    |
-| **F8**  | `api` ↔ PostgreSQL          | Everything tenant-scoped                   | Contact, Task, Lead, Appointment, Knowledge, Audit | `withTenant` only; FORCE RLS; `NOBYPASSRLS` role owning no tables                                  |
-| **F9**  | `api` → S3                  | Export contents                            | Contact, Task                                      | Per-tenant prefix; presigned, short-lived URLs; cross-tenant prefix test                           |
-| **F10** | `worker` → SES/SMS/push     | Owner contact, task titles                 | Account, Task                                      | Notification payloads carry **identifiers and a template id**, never conversation content (INV-12) |
-| **F11** | `worker` ↔ Google/Microsoft | Availability, appointment details          | Appointment                                        | Tenant-granted OAuth; credential resolved from Secrets Manager by ARN at use                       |
-| **F12** | `api` → Secrets Manager     | — (it _is_ the credential)                 | Credential — not personal data                     | Resolved at use, cached in memory with a TTL, **never written to disk or a log** (INV-15)          |
+| #       | Flow                        | Personal data                              | Inventory category                                 | Guard at the boundary                                                                                                                                                                                                          |
+| ------- | --------------------------- | ------------------------------------------ | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **F1**  | Caller speaks               | Voice, anything they say                   | Call audio                                         | AI disclosure before the session (INV-03); the caller may hang up                                                                                                                                                              |
+| **F2**  | Twilio → `voice`            | Caller number, audio stream                | Call metadata                                      | `X-Twilio-Signature` validated on every webhook; TLS; **audio is never written to disk** (INV-07)                                                                                                                              |
+| **F3**  | `voice` → OpenAI            | Utterance text, transiently                | Transient STT                                      | EU project; no-training headers; no identifiers sent with it; not persisted by us                                                                                                                                              |
+| **F4**  | OpenAI → `voice`            | Intent and slots                           | Structured fact                                    | Schema-validated; a parse failure re-asks rather than guessing                                                                                                                                                                 |
+| **F5**  | `voice` → PostgreSQL        | Name, callback number, request ≤ 200 chars | Structured fact                                    | `withTenant`; FORCE RLS; the request field is capped so it cannot become a transcript                                                                                                                                          |
+| **F6**  | Browser → Cognito           | Credentials, MFA                           | Account                                            | **The credential** never touches our servers. The authorization code, `state`, nonce and token validation do, in `api` — an earlier draft said "never touches our servers", which removed the callback from the model entirely |
+| **F7**  | Browser → ALB → `api`       | Session, request bodies                    | Account, Contact, Task                             | TLS; server-side session lookup, revocable; tenant derived server-side (INV-02)                                                                                                                                                |
+| **F8**  | `api` ↔ PostgreSQL          | Everything tenant-scoped                   | Contact, Task, Lead, Appointment, Knowledge, Audit | `withTenant` only; FORCE RLS; `NOBYPASSRLS` role owning no tables                                                                                                                                                              |
+| **F9**  | `api` → S3                  | Export contents                            | Contact, Task                                      | Per-tenant prefix; presigned, short-lived URLs; cross-tenant prefix test                                                                                                                                                       |
+| **F10** | `worker` → SES/SMS/push     | Owner contact, task titles                 | Account, Task                                      | Notification payloads carry **identifiers and a template id**, never conversation content (INV-12)                                                                                                                             |
+| **F11** | `worker` ↔ Google/Microsoft | Availability, appointment details          | Appointment                                        | Tenant-granted OAuth; credential resolved from Secrets Manager by ARN at use                                                                                                                                                   |
+| **F12** | `api` → Secrets Manager     | — (it _is_ the credential)                 | Credential — not personal data                     | Resolved at use, cached in memory with a TTL, **never written to disk or a log** (INV-15)                                                                                                                                      |
 
 ## The crossings worth arguing about
 

@@ -111,3 +111,6 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P03-021 | P03.07.02 | 2026-09-28 | `07ab552346a0` | Question list with required decisions and deadlines, staged A and B | [EV-P03-021-legal-question-list.md](P03/EV-P03-021-legal-question-list.md) |
 | EV-P03-022 | P03.08.01 | 2026-09-28 | `2f6106c4727c` | Every invariant mapped to its enforcement, phase and owner | [EV-P03-022-invariant-enforcement-register.md](P03/EV-P03-022-invariant-enforcement-register.md) |
 | EV-P03-023 | P03.08.02 | 2026-09-28 | `2f6106c4727c` | Every invariant has an automated enforcement, or a documented manual control | [EV-P03-023-invariant-enforcement-verified.md](P03/EV-P03-023-invariant-enforcement-verified.md) |
+| EV-P03-024 | P03.05.03 | 2026-09-28 | `be50961f50af` | Independent security review of the threat model: 2 Critical, 7 High, all resolved | [EV-P03-024-threat-model-independent-review.md](P03/EV-P03-024-threat-model-independent-review.md) |
+| EV-P03-025 | P03.05.01 | 2026-09-28 | `be50961f50af` | STRIDE per component and flow, with every mitigation bound to a checklist item | [EV-P03-025-stride-threat-model.md](P03/EV-P03-025-stride-threat-model.md) |
+| EV-P03-026 | P03.05.02 | 2026-09-28 | `be50961f50af` | Abuse cases: what will actually be tried, including the tenant as attacker | [EV-P03-026-abuse-cases.md](P03/EV-P03-026-abuse-cases.md) |
