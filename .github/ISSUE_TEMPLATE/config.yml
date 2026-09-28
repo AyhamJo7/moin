@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/AyhamJo7/moin/security/advisories/new
+    about: Report privately through a security advisory. Never open a public issue for a vulnerability — see SECURITY.md.
+  - name: Execution plan
+    url: https://github.com/AyhamJo7/moin/blob/main/PLAN.md
+    about: Phases, checklists, gates and invariants. Scope work against a checklist item, not an ad-hoc idea.

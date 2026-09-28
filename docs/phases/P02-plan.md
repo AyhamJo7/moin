@@ -1,0 +1,256 @@
+# P02 — Engineering Foundation · session plan
+
+**Phase:** P02 · **Tier:** PILOT (the only tier; all eight sections carry `[G:PILOT]`)
+**Target window:** 2026-09-28 → 2026-10-02 · **Indicative effort:** 3 engineering-days
+**Status Ledger row today:** `P02 | Engineering foundation | NOT_STARTED | … | EXT-24 GitHub plan | Bootstrap monorepo`
+**Plan source:** PLAN.md L2058–L2172 · **HEAD at planning time:** `e6b72eb`
+
+> This file is a proposal. Nothing is implemented, no item is ticked, the Status Ledger is untouched.
+
+---
+
+## 1. Dependency check
+
+| Check | Result |
+|---|---|
+| Hard dependencies (PLAN L1749–L1788, row `P02`) | **none** — `P02 \| — \| P01, P03, P04 \| 09-28 → 10-02` |
+| Parallel phases | P01 (founder discovery, never executed by a session), P03, P04 |
+| Blocker in the Ledger | `EXT-24 GitHub plan` — scoped to P02.01.01/.07 only, does not block the other seven sections |
+
+**Verdict: P02 may start.** EXT-24 gates branch protection, not the phase.
+
+### Environment prerequisites that are *not* PLAN dependencies but do block work
+
+| # | Finding (verified this session) | Blocks | Who resolves |
+|---|---|---|---|
+| E1 | **Docker daemon unreachable.** `docker info` → `dial unix /var/run/docker.sock: no such file or directory`; contexts are `default` (socket) and `desktop-linux` (npipe). Docker Desktop is off or its WSL integration is disabled. | P02.03.07, all of P02.04, P02.05.02, P02.06.03 local verification | **Founder** — start Docker Desktop, enable WSL integration for this distro. Per workspace rule, a session never sudo-fixes this and never silently skips a Docker gate. |
+| E2 | **Node is v22.20.0**, ADR-0002 requires Node 24 LTS. | P02.02.01 onward | Session, via `nvm install 24` (nodejs.org is on the network allowlist). Confirm nvm is the intended installer (`.nvmrc` + `nvm use` is the documented workspace path). |
+| E3 | **`.claude/gates.json` is a founder-only guardrail** (`.claude/policy/protected-paths.json` → `.claude/gates.json`). P02.02.02 requires replacing its stub `workspace` gate with the QG-01 set and adding a `stress` section. | Any "green"/"done" claim for P02 — `full` fails by design until this lands | Session writes `docs/control-plane/patches/0003-p02-gates.patch`; **founder applies it**. See §8 Q3. |
+
+---
+
+## 2. Scope — sections in tier PILOT
+
+All eight sections are in scope. No section is deferred to a later tier.
+
+| Section | Title | Items | Gate tag |
+|---|---|---|---|
+| P02.01 | Repository governance | 7 | `[G:PILOT]` (.01/.07 carry EXT-24) |
+| P02.02 | Toolchain baseline | 10 | `[G:PILOT]` |
+| P02.03 | Monorepo skeleton | 7 | `[G:PILOT]` |
+| P02.04 | Local development environment | 6 | `[G:PILOT]` |
+| P02.05 | Test infrastructure | 6 | `[G:PILOT]` |
+| P02.06 | CI pipeline v1 | 7 | `[G:PILOT]` |
+| P02.07 | Developer documentation | 3 | `[G:PILOT]` |
+| P02.08 | Dependency and supply-chain policy | 4 | `[G:PILOT]` |
+
+**Acceptance criteria (PLAN):** clean clone → running stack ≤ 15 min · CI green on `main` · all four negative controls fail as designed · branch protection active **or** the accepted risk recorded.
+**Exit gate:** QG-01 operational for every subsequent PR.
+
+---
+
+## 3. Item → kind → evidence → verification command
+
+Evidence numbering: PLAN's *Required evidence* block pre-assigns **EV-P02-001…004**; those four keep their PLAN meaning. New records continue at **005**. The registry (`docs/evidence/INDEX.md`) is empty — it is itself created by P02.01.04, so it must land before any record is written.
+
+### P02.01 Repository governance
+
+| Item | Kind | EV | Verification command / procedure | Files touched |
+|---|---|---|---|---|
+| P02.01.01 Ruleset on `main` (PR required; required checks `verify`, `security-scan`, `container-scan`; linear history; no force-push/deletion) | impl **[EXT]** | — | Founder applies in GitHub UI/API. **Cannot run in-session** (EXT-24, founder-only per CLAUDE.md §12). | GitHub settings; exported to `docs/evidence/P02/` |
+| P02.01.02 CODEOWNERS, PR template (what/why, risk, tests, evidence IDs, docs, migration/rollback, privacy impact), issue templates | impl | — | `gh pr create --draft` renders the template (founder-run) | `.github/CODEOWNERS`, `.github/pull_request_template.md`, `.github/ISSUE_TEMPLATE/*.yml` |
+| P02.01.03 Conventional-Commit PR-title check + AI-mention rejection in titles and bodies | impl | — | covered by the P02.06.07 negative controls | `.github/workflows/pr-title.yml`, `scripts/check-no-ai-mentions.ts` |
+| P02.01.04 `PROGRESS.md` ledger, `docs/evidence/INDEX.md`, evidence record template | impl | — | `python3 .claude/bin/evidence.py check` → exit 0 | `PROGRESS.md`, `docs/evidence/INDEX.md`, `docs/evidence/TEMPLATE.md` |
+| P02.01.05 `README.md` + `CONTRIBUTING.md` | impl | — | link check; reviewed in P02.07.03 | `README.md`, `CONTRIBUTING.md` |
+| P02.01.06 Annotated/signed release-tag policy documented | impl | — | doc review | `docs/development/release-tags.md` (linked from CONTRIBUTING) |
+| **P02.01.07 Verify: direct push to `main` rejected; PR with failing required checks cannot merge** | **verify [EXT]** | **EV-P02-004** | Founder: `git push origin main` → expect rejection; open a PR with a deliberately red `verify`, confirm merge is blocked; export the ruleset JSON | evidence record only |
+
+> Sequencing trap: P02.01.01 names required checks `verify` / `security-scan` / `container-scan` that do not exist until P02.06. **The ruleset is applied after the P02.06 workflows are on `main`**, otherwise every PR blocks on a check that never reports. Reflected in §7.
+
+### P02.02 Toolchain baseline
+
+| Item | Kind | EV | Verification command / procedure | Files touched |
+|---|---|---|---|---|
+| P02.02.01 Node 24 LTS pinned (`.nvmrc`, `engines`), `packageManager: pnpm@10.x`, no sudo | impl | — | `nvm use && node -v` → v24.x; `pnpm -v` → 10.x | `.nvmrc`, `package.json` |
+| P02.02.02 Turborepo tasks `lint` `typecheck` `test` `test:integration` `build`, caching + `dependsOn` | impl | — | `pnpm turbo run lint typecheck test build` | `turbo.json`, `pnpm-workspace.yaml`, `package.json`; **+ patch for `.claude/gates.json`** |
+| P02.02.03 TS `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noImplicitOverride`, ESM | impl | — | `pnpm turbo run typecheck` | `packages/config/tsconfig/*.json`, root `tsconfig.json` |
+| P02.02.04 ESLint flat config (typescript-eslint strict-type-checked; bans: `any`, default exports except Next.js route files, `dangerouslySetInnerHTML`, string-built SQL, session-level `SET`, `console.*` in prod code) | impl | — | `pnpm turbo run lint` | `packages/config/eslint/*.js`, `eslint.config.ts` |
+| P02.02.05 Custom lint rule stubs: no tenant-specific conditionals (**INV-18**), DB access only via tenant wrapper (activated P06.03) | impl | — | rule unit tests (rules stay inactive repo-wide until P06.03) | `packages/config/eslint/rules/*.ts` + `*.test.ts` |
+| P02.02.06 Prettier, `.editorconfig` | impl | — | `pnpm format:check` | `.prettierrc`, `.editorconfig` |
+| P02.02.07 `dependency-cruiser` module-boundary rules (Domain Boundaries, PLAN L713–L742) | impl | — | `pnpm depcruise` | `.dependency-cruiser.cjs` |
+| P02.02.08 Terraform toolchain pinned, `tflint`, Trivy | impl | — | `terraform version` (v1.16.4 present — pin it explicitly), `tflint --version`, `trivy --version` | `.terraform-version`, `.tflint.hcl`, `scripts/` |
+| P02.02.09 Accept ADR-0002 (toolchain) and ADR-0034 (codename/brand decoupling) | impl | **EV-P02-010** | ADR files exist with `Status: Accepted`, linked from `ARCHITECTURE.md` | `docs/adr/0002-toolchain-and-runtime-baseline.md`, `docs/adr/0034-naming-and-brand-decoupling.md` |
+| **P02.02.10 Verify: fixtures violating each lint/boundary rule fail** | **verify** | **EV-P02-005** | `pnpm test --filter @moin/config` — one failing fixture per rule (any, default export, `dangerouslySetInnerHTML`, string SQL, session `SET`, `console.*`, tenant conditional, non-wrapper DB access, cross-module import) | `packages/config/**/__fixtures__/*` |
+
+### P02.03 Monorepo skeleton
+
+| Item | Kind | EV | Verification command / procedure | Files touched |
+|---|---|---|---|---|
+| P02.03.01 Structure from *Repository Structure* (PLAN L746–L776) | impl | — | `pnpm -r list` resolves every workspace; depcruise clean | `apps/{web,server}`, `packages/{contracts,db,kernel,ai,telephony,integrations,observability,ui,testing,config}`, `templates/`, `evals/`, `infrastructure/terraform/`, `docs/`, `scripts/` |
+| P02.03.02 Role entrypoints `main-api` `main-voice` `main-worker` `main-migrate` + role root modules | impl | — | each boots and exits cleanly with a no-op module graph | `apps/server/src/main-*.ts`, `apps/server/src/roots/*RootModule.ts` |
+| P02.03.03 Zod-validated config loader — fail fast, secrets never logged (**INV-15**) | impl | — | unit test: missing var → non-zero exit + message naming the var, never its value | `packages/config/src/env.ts` or `apps/server/src/config/` |
+| P02.03.04 Pino logger, redaction allowlist, request/correlation IDs (**INV-12**) | impl | — | unit test: PII keys redacted; allowlist is opt-in, not opt-out | `packages/observability/src/logger.ts` |
+| P02.03.05 `/healthz` (liveness) and `/readyz` (DB + dependency readiness) per role | impl | — | see .07 | `apps/server/src/health/*` |
+| P02.03.06 Multi-stage Dockerfiles (ARM64, non-root, read-only-FS compatible, no package manager in the runtime layer) — **INV-17: one image, role by command** | impl | — | `hadolint`; `docker image inspect` → `User` non-root | `apps/server/Dockerfile`, `apps/web/Dockerfile`, `.dockerignore` |
+| **P02.03.07 Verify: images build, containers start, health endpoints 200, image size recorded** | **verify** | **EV-P02-006** | `docker buildx build --platform linux/arm64 …` then per role `curl -fsS localhost:PORT/healthz` and `/readyz` → 200; record `docker image ls --format '{{.Size}}'` | evidence record · **blocked by E1** |
+
+### P02.04 Local development environment
+
+| Item | Kind | EV | Verification command / procedure | Files touched |
+|---|---|---|---|---|
+| P02.04.01 Compose: Postgres 17 + pgvector (pinned digest), Valkey, ElasticMQ, S3-compatible emulator (**licence-checked — not named by PLAN, see Q5**), Mailpit, local OIDC provider (**not named, see Q6**) | impl | — | `docker compose config` then `pnpm dev:up` → all healthy | `docker-compose.yml`, `docker/**` |
+| P02.04.02 `pnpm dev:up` `dev:down` `dev:reset` `db:migrate` `db:seed` (synthetic tenants "Musterrestaurant", "Musterbetrieb SHK") | impl | — | `pnpm dev:reset && pnpm db:migrate && pnpm db:seed` | `package.json` scripts, `packages/db/seeds/*` |
+| P02.04.03 `.env.example` with fake values; `.env*` gitignored except the example | impl | — | `git check-ignore .env` → ignored; gitleaks clean | `.env.example`, `.gitignore` |
+| P02.04.04 Document the Twilio development path (developer-only tunnel → local voice service, sandbox numbers only; **never** staging or production) | impl | — | doc review (no Twilio account needed — documentation only) | `docs/development/twilio-local.md` |
+| P02.04.05 `pnpm doctor`: Node, pnpm, Docker, free ports, env completeness | impl | **EV-P02-011** | `pnpm doctor` → exit 0 with a per-check report; must **fail** informatively when Docker is down (i.e. reproduce E1 as a clean diagnostic) | `scripts/doctor.ts` |
+| **P02.04.06 Verify: fresh clone → running stack with seed data ≤ 15 min (timed log)** | **verify** | **EV-P02-003** | clone to a scratch dir, `time` the documented sequence end to end, capture the transcript | evidence record · **blocked by E1** |
+
+### P02.05 Test infrastructure
+
+| Item | Kind | EV | Verification command / procedure | Files touched |
+|---|---|---|---|---|
+| P02.05.01 Vitest projects `unit`, `integration` | impl | — | `pnpm test` / `pnpm test:integration` | `vitest.workspace.ts`, `vitest.config.ts` |
+| P02.05.02 Real-Postgres harness: template-database cloning per test file, roles + migrations applied, runnable standalone | impl | — | see .06 | `packages/testing/src/pg/*` |
+| P02.05.03 `packages/testing` factories, German-realistic synthetic data (names, E.164 in reserved/test ranges, PLZ) — **INV-16** | impl | — | factory unit tests; no production data path exists | `packages/testing/src/factories/*` |
+| P02.05.04 Playwright projects (Chromium, Firefox, WebKit, mobile viewport) + axe | impl | — | `pnpm exec playwright test --list` shows 4 projects | `playwright.config.ts`, `apps/web/e2e/*` |
+| P02.05.05 Fault-injection helpers + controllable clock | impl | — | unit tests for the clock and one injected fault | `packages/testing/src/fault/*`, `packages/kernel/src/clock.ts` |
+| **P02.05.06 Verify: one example test of every type passes in-suite AND standalone** | **verify** | **EV-P02-007** | in-suite `pnpm turbo run test test:integration`; then **standalone against a freshly-seeded DB**: `pnpm dev:reset && pnpm db:migrate && pnpm vitest run <single file>` for each of unit / integration / e2e | evidence record · **blocked by E1** |
+
+### P02.06 CI pipeline v1
+
+| Item | Kind | EV | Verification command / procedure | Files touched |
+|---|---|---|---|---|
+| P02.06.01 `verify`: frozen install, format, lint, typecheck, unit, integration (PG17+pgvector service), build | impl | EV-P02-001 | green run on the PR | `.github/workflows/verify.yml` |
+| P02.06.02 `security-scan`: `pnpm audit`/OSV (fail high/critical **with fix**), gitleaks full history, Semgrep, actionlint, shellcheck, Trivy fs, CycloneDX SBOM artifact | impl | EV-P02-001 | green run + SBOM artifact attached | `.github/workflows/security-scan.yml` |
+| P02.06.03 `container-scan`: hadolint, image build, Trivy image (fail high/critical with fix) | impl | EV-P02-001 | green run | `.github/workflows/container-scan.yml` |
+| P02.06.04 `scripts/check-migrations.ts` (ordering, destructive/lock heuristics) wired to CI | impl | **EV-P02-012** | `pnpm exec tsx scripts/check-migrations.ts` on a deliberately destructive fixture → non-zero | `scripts/check-migrations.ts`, `scripts/__fixtures__/migrations/*` |
+| P02.06.05 Job slots for RLS catalog check (P06.02) and OpenAPI drift (P06/P07) | impl | — | jobs present, skipped with an explicit `if:` and a TODO naming the activating phase — **not** silently passing | `.github/workflows/verify.yml` |
+| P02.06.06 Actions pinned by SHA; `permissions: contents: read` default; concurrency groups; caching | impl | — | `actionlint`; grep every `uses:` for a 40-hex SHA | all workflows |
+| **P02.06.07 Verify with four negative-control PRs** (lint error · failing test · fake secret · vulnerable dependency) — each fails the *right* job | **verify** | **EV-P02-002** | four draft PRs from throwaway branches; record the failing job + run URL for each; **close all four unmerged** | evidence record |
+
+> The PLAN sentence reads "four negative-control PRs: lint error, failing test, fake secret, vulnerable dependency" — four causes, four PRs. No ambiguity.
+
+### P02.07 Developer documentation
+
+| Item | Kind | EV | Verification command / procedure | Files touched |
+|---|---|---|---|---|
+| P02.07.01 `docs/development/local-setup.md`, `testing.md`, `conventions.md` | impl | — | reviewed in .03 | those three files |
+| P02.07.02 `ARCHITECTURE.md` skeleton linking ADRs; `SECURITY.md` skeleton | impl | — | every ADR link resolves | `ARCHITECTURE.md`, `SECURITY.md` |
+| **P02.07.03 Verify: a fresh agent session follows the docs from a clean clone without help** | **verify** | **EV-P02-008** | fresh session (no prior context), clean clone, docs only, no questions asked; record the transcript and every point where it had to guess | evidence record |
+
+### P02.08 Dependency and supply-chain policy
+
+| Item | Kind | EV | Verification command / procedure | Files touched |
+|---|---|---|---|---|
+| P02.08.01 Renovate: weekly grouped updates, immediate security updates, lockfile maintenance | impl | — | `renovate-config-validator` | `renovate.json` |
+| P02.08.02 Licence allowlist check (fail on AGPL/SSPL/unknown in **production** dependencies) | impl | — | see .04 | `scripts/check-licences.ts`, `docs/development/licence-policy.md` |
+| P02.08.03 pnpm `onlyBuiltDependencies` allowlist; no unreviewed install scripts | impl | — | `pnpm install --frozen-lockfile` runs no unapproved script | `pnpm-workspace.yaml` / `.npmrc` |
+| **P02.08.04 Verify: licence check fails on a copyleft fixture** | **verify** | **EV-P02-009** | `pnpm exec tsx scripts/check-licences.ts --fixture agpl` → non-zero naming the package and its licence | `scripts/__fixtures__/licences/*` |
+
+### Evidence register for this phase
+
+| EV | Item | Content |
+|---|---|---|
+| EV-P02-001 | P02.06.01–.03 | CI run URLs for `verify`, `security-scan`, `container-scan` (PLAN-assigned) |
+| EV-P02-002 | P02.06.07 | Four negative-control PR links + failing job each (PLAN-assigned) |
+| EV-P02-003 | P02.04.06 | Timed clean-clone → running-stack log, ≤ 15 min (PLAN-assigned) |
+| EV-P02-004 | P02.01.01/.07 | Ruleset export + rejected-push and blocked-merge transcripts (PLAN-assigned) |
+| EV-P02-005 | P02.02.10 | Lint/boundary negative fixtures, one per rule |
+| EV-P02-006 | P02.03.07 | Image build, container start, `/healthz` + `/readyz` 200, image sizes |
+| EV-P02-007 | P02.05.06 | Every test type in-suite **and** standalone on a fresh DB |
+| EV-P02-008 | P02.07.03 | Fresh-session clean-clone doc walkthrough |
+| EV-P02-009 | P02.08.04 | Licence check failing on the copyleft fixture |
+| EV-P02-010 | P02.02.09 | ADR-0002 + ADR-0034 accepted |
+| EV-P02-011 | P02.04.05 | `pnpm doctor` report |
+| EV-P02-012 | P02.06.04 | `check-migrations.ts` rejecting a destructive fixture |
+
+Created with `python3 .claude/bin/evidence.py new --phase P02 --item <item> --slug <slug> --summary <…> --from-gates full`.
+
+---
+
+## 4. External gates and founder-only actions
+
+| ID / item | Counterparty | What the founder must do | Fallback | Ledger entry |
+|---|---|---|---|---|
+| **EXT-24** (PLAN L5684) — GitHub plan features: private-repo rulesets; optional code scanning | GitHub | Confirm the plan on `AyhamJo7/moin` (private) supports rulesets; if not, upgrade. Then apply the P02.01.01 ruleset **after** the P02.06 workflows are on `main`, and export it. | Pre-push hook + CI status discipline, recorded as an **accepted risk**, must be resolved before MT-LIVE (PLAN *Failure modes*) | `WAITING_FOR_EXTERNAL` · counterparty GitHub · requested \<date\> · expected \<date\> · fallback as stated |
+| P02.01.01 / P02.01.07 | — | Same as EXT-24; rulesets and merges are founder-only in every environment (CLAUDE.md §12) | — | rides on EXT-24 |
+| P02.01.02 issue/PR templates rendering, P02.06.07 PR creation | — | PRs are opened as drafts; `gh pr ready` / `gh pr merge` are founder-only (CLAUDE.md §8) | — | — |
+| E1 Docker Desktop | — | Start Docker Desktop, enable WSL integration | none — Docker gates are never skipped | `BLOCKED` on P02.03.07/P02.04/P02.05.02 if unresolved |
+| E3 `.claude/gates.json` | — | Apply `docs/control-plane/patches/0003-p02-gates.patch` | none — `full` stays failing, so P02 cannot reach READY_FOR_REVIEW | `BLOCKED` |
+
+No `DG-nn` founder decision gate is referenced by P02. Q5 and Q6 in §8 are decisions that will *become* ADRs, not registered DGs.
+
+---
+
+## 5. Invariants at risk, and the test that proves each
+
+| INV | Where it bites in P02 | Proving test |
+|---|---|---|
+| **INV-12** no personal data in logs, metrics, traces, analytics, push | P02.03.04 Pino redaction allowlist | Unit test logging an object with `phone`, `email`, `name`, `address`, `authorization`, and a nested body — asserts each is redacted and that the allowlist is **opt-in** (an unknown key is redacted, not passed through) |
+| **INV-15** secrets only in AWS Secrets Manager by ARN | P02.03.03 config loader; P02.04.03 `.env` handling; P02.06.02 gitleaks | (a) loader unit test: an invalid secret-shaped var fails fast and the error names the variable, never its value; (b) `git check-ignore .env`; (c) the fake-secret negative-control PR (P02.06.07) must fail `security-scan` |
+| **INV-16** production data never leaves production | P02.04.02 seeds, P02.05.03 factories | Factory tests assert German-realistic **synthetic** output; E.164 numbers fall in reserved/test ranges; no fixture path reads outside the repo |
+| **INV-17** one image digest per release; expand/contract migrations | P02.03.06 single image + role-by-command; P02.06.04 migration checker | (a) build produces one server image, four roles differ only by command; (b) `check-migrations.ts` rejects a destructive/locking fixture (EV-P02-012) |
+| **INV-18** no tenant-specific code paths | P02.02.05 lint rule stub | Rule unit test: a fixture containing `if (organisationId === 'gurlitt')` (and a tenant-name conditional) is reported by the rule. The rule is authored and tested in P02, activated repo-wide in P06.03 — the stub is not a stand-in for enforcement and P02.02.05 is not ticked on the basis that a file exists |
+
+INV-01/02 (RLS, server-side tenant context) are not yet exercised — no tenant tables exist before P06. P02 only ensures the lint rules that will guard them are written and tested.
+
+---
+
+## 6. Quality gates
+
+| Gate | Applies? | When it runs |
+|---|---|---|
+| **QG-01** PR verify | Yes — P02 *builds* it | Partially available from the P02.06 PR onward; fully from the ruleset. PRs 1–5 merge without required checks (the workflows do not exist yet) — that is stated in each PR body, not hidden |
+| **QG-10** Documentation | Yes | P02.07 PR; ADRs in P02.02.09 |
+| **QG-11** Dependency & licence | Yes | P02.08 PR, and any PR adding a dependency |
+| **QG-02** PR UI | No | `apps/web` has no routes yet |
+| **QG-08** Schema change | No | no migrations in P02 (only the checker and its fixtures) |
+| **QG-09** Sensitive-area review | **Not triggered** — P02 touches no production auth, session, RLS, `SECURITY DEFINER`, tool-guard, webhook, integration, billing or privacy handler. The P02.04.01 OIDC provider is a local-only dev container. | Even so I propose running `/gate-ready` on the **P02.03** PR: the config loader and logger are the seams that will later carry secrets and PII, and catching an INV-12/INV-15 design flaw there is far cheaper than in P06. Founder's call — say no and I skip it |
+| QG-03…07, QG-12 | No | nightly/release/AI/privacy-flow gates; nothing to run in P02 |
+
+---
+
+## 7. PR sequence
+
+Trunk-based, one checklist section or smaller per branch, Conventional Commit titles, **squash-merged by the founder**, drafts only (`gh pr create --draft`). A-22 applies: no AI-tool mentions anywhere in branches, commits, titles or bodies.
+
+| # | Branch | Section | Commit title | Note |
+|---|---|---|---|---|
+| 1 | `chore/p02-01-governance` | P02.01.02–.06 | `chore(governance): add contribution, evidence and progress scaffolding` | First, so `PROGRESS.md` and the evidence registry exist before any other work is recorded. Excludes the ruleset itself |
+| 2 | `chore/p02-02-toolchain` | P02.02 | `chore(toolchain): pin node 24, pnpm 10, turborepo and the lint baseline` | Includes `docs/control-plane/patches/0003-p02-gates.patch` for E3 |
+| 3 | `feat/p02-03-skeleton` | P02.03 | `feat(server): add monorepo skeleton, role entrypoints, config and logging` | Proposed `/gate-ready` point |
+| 4 | `chore/p02-04-local-stack` | P02.04 | `chore(dev): add the local compose stack, seeds and doctor` | Needs E1 |
+| 5 | `test/p02-05-harness` | P02.05 | `test(harness): add vitest projects, real-postgres harness and factories` | Needs E1 |
+| 6 | `chore/p02-06-ci` | P02.06.01–.06 | `chore(ci): add verify, security-scan and container-scan workflows` | `chore` not `ci` as the branch/commit type, to stay inside the type set the P02.01.03 title check will enforce |
+| 7 | `chore/p02-08-supply-chain` | P02.08 | `chore(deps): add renovate, licence allowlist and install-script policy` | — |
+| 8 | `docs/p02-07-developer-docs` | P02.07 | `docs(development): add local setup, testing and conventions guides` | Last, so it documents what actually exists |
+| — | *(founder)* | P02.01.01 | — | Apply + export the ruleset once PR 6 is on `main` |
+| 9 | 4× throwaway branches | P02.06.07 | `test(ci): negative control — <cause>` | Opened after the ruleset; **closed unmerged**; EV-P02-002 |
+
+Ledger discipline: this session edits only the `P02` Status Ledger row; `PROGRESS.md` and `docs/evidence/INDEX.md` are append-only. A session raises P02 to at most `READY_FOR_REVIEW` — `VERIFIED`/`COMPLETE` are the founder's.
+
+---
+
+## 8. Open questions — PLAN is ambiguous or the environment decides
+
+**Q1 (blocking, E1).** Docker Desktop / WSL integration is off. Confirm you will enable it. Without it P02.03.07, P02.04 entirely, P02.05.02 and P02.06.03 cannot be verified, and the workspace rule forbids skipping a Docker gate.
+
+**Q2 (E2).** Node 24 via `nvm install 24`, matching `.nvmrc` + `nvm use`? Or fnm/corepack, which P02.02.01 also names?
+
+**Q3 (blocking, E3).** `.claude/gates.json` is founder-only, but P02.02.02 requires swapping its stub `workspace` gate for the QG-01 set plus a `stress` section. I will write `docs/control-plane/patches/0003-p02-gates.patch`; confirm you will apply it. Until then `full` fails by design and no P02 item may be claimed green.
+
+**Q4 (EXT-24).** Does the current GitHub plan on the private `AyhamJo7/moin` support rulesets? If not: upgrade, or record the pre-push-hook fallback as an accepted risk (due before MT-LIVE)? I cannot check — `gh` is auth-dependent and founder-run.
+
+**Q5.** P02.04.01 requires an "S3-compatible emulator (licence-checked)" and the *Architecture decisions* note says MinIO's OSS distribution is archived, so an alternative is "selected and pinned" — but PLAN never names it. Candidates: LocalStack (S3 scope), Garage, SeaweedFS, Adobe s3mock. **Which?** This is a licence-policy decision that interacts with P02.08.02, so I will not pick it silently; it deserves an ADR.
+
+**Q6.** P02.04.01 requires a "local OIDC provider for auth flows" and does not name one either, while P06 targets Cognito. Keycloak, Dex, or `node-oidc-provider`? Whichever we choose must behave closely enough to Cognito that P06 does not have to re-do the work.
+
+**Q7.** *Repository Structure* says "NestJS/Fastify modular monolith", *Domain Boundaries* says "NestJS modules", and *Testing Strategy* says "Vitest + Fastify inject". I read that as **NestJS with the Fastify adapter** and will proceed on that assumption unless you say otherwise — flagging it because ADR-0002 does not pin the HTTP framework and P02.03.02 hard-codes the choice into the role root modules.
+
+**Q8.** P02.06.07's fourth negative control needs a genuinely vulnerable dependency on a branch of a private repo. Confirm that is acceptable, and note that all four control PRs stay unmerged and get closed.
+
+---
+
+## 9. What this session did *not* do
+
+No file other than this plan was created or edited. No checklist item was ticked. The Status Ledger, the phase header and `PROGRESS.md` are untouched. Nothing was committed or pushed.
