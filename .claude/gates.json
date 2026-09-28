@@ -1,0 +1,24 @@
+{
+  "_doc": "Verification gates (run with python3 .claude/bin/gates.py fast|full; evidence in .git/claude-evidence/; the Stop hook checks completion claims against `full`). STUB until P02.02.02: the 'workspace' gate fails until the Turborepo tasks exist, so `full` cannot pass and no session can claim green before P02 lands. P02.02.02 replaces 'workspace' with the QG-01 set (format, lint, typecheck, unit, integration on real PG17+pgvector, build, gitleaks) and adds a `stress` section. Keep 'control-plane' first. Never delete or weaken a gate to make `full` pass (loosening needs founder approval).",
+  "needs": [],
+  "gates": [
+    {
+      "name": "control-plane",
+      "run": "python3 .claude/bin/control_plane_check.py && python3 -m unittest discover -s .claude/tests -t .claude/tests",
+      "timeout": 600
+    },
+    {
+      "name": "control-plane-lint",
+      "run": "uvx ruff@0.15.12 format --check --config .claude/ruff.toml .claude && uvx ruff@0.15.12 check --config .claude/ruff.toml .claude && uvx --from mypy==2.3.1 mypy --config-file .claude/mypy.ini",
+      "requires": ["uvx"],
+      "timeout": 600
+    },
+    {
+      "name": "workspace",
+      "run": "pnpm turbo run lint typecheck test build",
+      "requires": ["pnpm"],
+      "timeout": 1800
+    }
+  ],
+  "fast": ["control-plane"]
+}

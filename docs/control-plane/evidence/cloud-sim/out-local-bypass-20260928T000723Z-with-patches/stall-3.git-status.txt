@@ -1,0 +1,4 @@
+ M PROGRESS.md
+?? .env
+?? PLAN.md
+?? dummy.pem

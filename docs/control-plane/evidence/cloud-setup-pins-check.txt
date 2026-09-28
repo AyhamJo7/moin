@@ -1,0 +1,7 @@
+# Cloud setup pins check (2026-09-27T23:13:14Z, local, no root)
+node-v24.21.0-linux-x64.tar.xz: OK (sha256 vs nodejs.org SHASUMS256.txt)
+terraform_1.16.4_linux_amd64.zip: OK (sha256 vs releases.hashicorp.com SHA256SUMS)
+proxy.golang.org gitleaks v8.30.1: resolves (tag hash 8d1f98c7967eb1e79cb44ac6241a124e145d2165)
+registry.npmjs.org pnpm 10.34.5: resolves
+bash -n and shellcheck: clean
+Full run in ubuntu:24.04 container: BLOCKED (Docker socket missing: /var/run/docker.sock)

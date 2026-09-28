@@ -1,0 +1,113 @@
+From ebce9c70f4511641e17ba5f03484fbf7c8d2ec26 Mon Sep 17 00:00:00 2001
+From: AyhamJo7 <mhd.ayham.joumran@studium.uni-hamburg.de>
+Date: Mon, 28 Sep 2026 02:06:41 +0200
+Subject: [PATCH] fix(tooling): let sessions run the control plane's own tools
+
+The executed-script scan read a gates.py docstring as a redirect onto a guard file and
+blocked the gate runner, so no session could record gate evidence; founder-only tools are
+trusted, and only a real redirect operator counts as a write.
+---
+ .claude/hooks/policy_guard.py    | 14 ++++++++++---
+ .claude/tests/test_unattended.py | 36 +++++++++++++++++++++++++++++++-
+ 2 files changed, 46 insertions(+), 4 deletions(-)
+
+diff --git a/.claude/hooks/policy_guard.py b/.claude/hooks/policy_guard.py
+index 4c59791..8f359b5 100755
+--- a/.claude/hooks/policy_guard.py
++++ b/.claude/hooks/policy_guard.py
+@@ -184,7 +184,7 @@ WRITE_CODE_RE = re.compile(
+     r"open\([^)]*['\"][wax]b?\+?['\"]|write_text|write_bytes|writeFile|appendFile|\.unlink\(|rmtree"
+     r"|os\.remove|os\.rename|os\.replace|shutil\.(?:copy|move)|\bchmod\b|\bsed\s+(?:-[a-zA-Z]*i|--in-place)"
+     r"|\btee\b|\brm\s|\bmv\s|\bcp\s|\bln\s|fs\.(?:rm|unlink|rename|copyFile|chmod|write)"
+-    r"|>>?\s*['\"]?[^\s'\"]*\.claude"
++    r"|(?:^|[\s;|&(])>>?\s*['\"]?[^\s'\"]*\.claude"
+ )
+ PIPE_TO_SHELL_RE = re.compile(
+     r"\b(?:curl|wget)\b[^|;&\n]*\|\s*(?:sudo\s+)?(?:(?:ba|z|da|k)?sh|python3?|node|perl|ruby|bun|deno)\b"
+@@ -846,6 +846,12 @@ def check_executed_code(ctx: Context, what: str, text: str) -> None:
+             return
+ 
+ 
++def trusted_script(ctx: Context, path: Path) -> bool:
++    """The control plane's own tools (.claude/bin, .claude/hooks) are founder-only files, so
++    running them is not a write risk; scanning their source only produces false positives."""
++    return protected_reason(ctx, path) is not None
++
++
+ def script_texts(ctx: Context, cmd: SimpleCommand, cwd: Path) -> list[tuple[str, str]]:
+     """(label, text) of code this command executes: inline code, script files, npm scripts."""
+     head = os.path.basename(cmd.words[0])
+@@ -859,12 +865,14 @@ def script_texts(ctx: Context, cmd: SimpleCommand, cwd: Path) -> list[tuple[str,
+             for arg in args:
+                 if arg.startswith("-"):
+                     continue
+-                text = read_text_file(resolve(cwd, arg))
++                path = resolve(cwd, arg)
++                text = None if trusted_script(ctx, path) else read_text_file(path)
+                 if text is not None:
+                     found.append((f"script `{arg}`", text))
+                 break
+     elif "/" in cmd.words[0]:
+-        text = read_text_file(resolve(cwd, cmd.words[0]))
++        path = resolve(cwd, cmd.words[0])
++        text = None if trusted_script(ctx, path) else read_text_file(path)
+         if text is not None:
+             found.append((f"script `{cmd.words[0]}`", text))
+     elif head in ("pnpm", "npm", "yarn") and len(args) >= 1:
+diff --git a/.claude/tests/test_unattended.py b/.claude/tests/test_unattended.py
+index 70cc807..11c0582 100644
+--- a/.claude/tests/test_unattended.py
++++ b/.claude/tests/test_unattended.py
+@@ -9,7 +9,7 @@ import unittest
+ from collections.abc import Mapping
+ from pathlib import Path
+ 
+-from helpers import HOOKS, base_env, git, make_repo, run_hook, temp_dir, write
++from helpers import BIN, HOOKS, base_env, git, make_repo, run_hook, temp_dir, write
+ 
+ GUARD = HOOKS / "policy_guard.py"
+ PROTECTED_FILES = {
+@@ -206,6 +206,40 @@ class SelfProtectionBashTest(GuardCase):
+                 self.assert_allowed(command)
+ 
+ 
++class RealControlPlaneToolsTest(GuardCase):
++    """Regression: the executed-script scan blocked the real gates.py (its docstring mentions
++    `<repo>/.claude/gates.json`). The fixture now carries the REAL bin/ and hooks/ scripts."""
++
++    def setUp(self) -> None:
++        super().setUp()
++        for sub in ("bin", "hooks"):
++            for src in sorted((BIN.parent / sub).glob("*.py")):
++                (self.repo / ".claude" / sub / src.name).write_bytes(src.read_bytes())
++        write(self.repo, "tools/gates-copy.py", (BIN / "gates.py").read_text(encoding="utf-8"))
++
++    def test_the_control_plane_tools_run_unhindered(self) -> None:
++        for command in [
++            "python3 .claude/bin/gates.py status",
++            "python3 .claude/bin/gates.py full",
++            ".claude/bin/gates.py fast",
++            "python3 .claude/bin/control_plane_check.py",
++            "python3 .claude/bin/plan_section.py P02",
++            "python3 .claude/bin/evidence.py check",
++            "python3 .claude/bin/mutation_check.py --test 'python3 -m unittest'",
++            "python3 .claude/bin/progress_probe.py build --repo .",
++            "python3 .claude/hooks/session_bootstrap.py < /dev/null",
++            "python3 tools/gates-copy.py status",
++        ]:
++            with self.subTest(command=command):
++                self.assert_allowed(command)
++
++    def test_untrusted_scripts_that_write_guard_files_are_still_blocked(self) -> None:
++        write(self.repo, "tools/evil.py", "import os\nos.system('echo {} > .claude/gates.json')\n")
++        write(self.repo, "tools/evil.sh", "cat x >> .claude/settings.json\n")
++        self.assert_blocked("python3 tools/evil.py", "founder-only")
++        self.assert_blocked("bash tools/evil.sh", "founder-only")
++
++
+ class SelfProtectionToolsTest(GuardCase):
+     def test_write_tools_on_protected_paths_are_blocked(self) -> None:
+         cases: list[tuple[str, Mapping[str, object]]] = [
+-- 
+2.43.0
+

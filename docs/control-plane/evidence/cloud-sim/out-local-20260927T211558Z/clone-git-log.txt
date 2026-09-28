@@ -1,0 +1,3 @@
+3d03852 feat(ai): add model gateway with EU routing
+c49980b feat(tooling): register guard hooks, reviewers, workflow skills and project instructions
+551f0a0 feat(tooling): add toolchain pin warnings and per-edit formatting hooks

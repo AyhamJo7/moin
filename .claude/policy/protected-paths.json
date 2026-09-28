@@ -1,0 +1,27 @@
+{
+  "_doc": "Guardrail self-protection. Sessions (including bypass-mode sessions) may read these paths but never modify, move, delete, chmod or git-restore them; policy_guard.py blocks it through Edit/Write/MultiEdit/NotebookEdit and Bash, and settings.json denies the Edit/Write forms. Only the founder changes them: with an editor outside the session, or in a maintenance session started with `claude --setting-sources user` (loads no project settings, so it runs without these guards). repo_globs are relative to the project root (** = any depth); home_paths are relative to $HOME. trunk_refs: a checkout, pull, merge or rebase may change protected files only when the target is one of these refs AND it already contains .claude/settings.json (founder-merged control plane).",
+  "repo_globs": [
+    ".claude/settings.json",
+    ".claude/settings.local.json",
+    ".claude/hooks/**",
+    ".claude/agents/**",
+    ".claude/policy/**",
+    ".claude/gates.json",
+    ".claude/bin/**",
+    ".claude/kit-manifest.json"
+  ],
+  "home_paths": [
+    ".claude/settings.json",
+    ".claude/settings.local.json",
+    ".claude/kit",
+    ".bashrc",
+    ".bash_profile",
+    ".bash_login",
+    ".profile",
+    ".bash_aliases",
+    ".zshrc",
+    ".zprofile"
+  ],
+  "trunk_refs": ["origin/main", "main"],
+  "evasion_markers": ["disableAllHooks", "--setting-sources", "allowManagedHooksOnly", "hasTrustDialogAccepted"]
+}

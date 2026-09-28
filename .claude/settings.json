@@ -1,0 +1,354 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "attribution": {
+    "commit": "",
+    "pr": "",
+    "sessionUrl": false
+  },
+  "permissions": {
+    "defaultMode": "default",
+    "allow": [
+      "Bash(python3 .claude/bin/plan_section.py *)",
+      "Bash(python3 .claude/bin/gates.py *)",
+      "Bash(python3 .claude/bin/mutation_check.py *)",
+      "Bash(python3 .claude/bin/progress_probe.py *)",
+      "Bash(python3 .claude/bin/evidence.py *)",
+      "Bash(python3 .claude/bin/control_plane_check.py)",
+      "Bash(python3 -m unittest *)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git switch *)",
+      "Bash(git checkout -b *)",
+      "Bash(git branch *)",
+      "Bash(git stash push *)",
+      "Bash(git fetch *)",
+      "Bash(git rev-parse *)",
+      "Bash(gh pr view *)",
+      "Bash(gh pr diff *)",
+      "Bash(gh pr checks *)",
+      "Bash(gh run list *)",
+      "Bash(gh run view *)",
+      "Bash(gh run watch *)",
+      "Bash(pnpm install --frozen-lockfile)",
+      "Bash(pnpm turbo *)",
+      "Bash(pnpm run *)",
+      "Bash(pnpm exec vitest *)",
+      "Bash(pnpm exec playwright test *)",
+      "Bash(pnpm dev:*)",
+      "Bash(pnpm db:*)",
+      "Bash(pnpm doctor)",
+      "Bash(docker compose *)",
+      "Bash(terraform fmt *)",
+      "Bash(terraform validate *)",
+      "Bash(terraform init -backend=false *)",
+      "Bash(tflint *)",
+      "Bash(gitleaks *)",
+      "Bash(jq *)",
+      "Bash(git push *)",
+      "Bash(git config *)",
+      "Bash(git rebase *)",
+      "Bash(git merge *)",
+      "Bash(git tag *)",
+      "Bash(gh pr create --draft *)",
+      "Bash(gh pr edit *)",
+      "Bash(gh pr comment *)",
+      "Bash(gh pr review *)",
+      "Bash(gh issue *)",
+      "Bash(gh api *)",
+      "Bash(gh run rerun *)",
+      "Bash(pnpm add *)",
+      "Bash(pnpm remove *)",
+      "Bash(pnpm update *)",
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "Bash(docker run *)",
+      "Bash(docker exec *)",
+      "Bash(rm -rf *)",
+      "Edit(/PLAN.md)",
+      "Write(/PLAN.md)",
+      "Edit(/.github/**)",
+      "Write(/.github/**)"
+    ],
+    "ask": [],
+    "deny": [
+      "Read(.env)",
+      "Read(.env.*)",
+      "Read(!.env.example)",
+      "Edit(.env)",
+      "Edit(.env.*)",
+      "Edit(!.env.example)",
+      "Write(.env)",
+      "Write(.env.*)",
+      "Write(!.env.example)",
+      "Read(**/*.tfvars)",
+      "Read(**/*.tfvars.json)",
+      "Read(**/*.tfstate)",
+      "Read(**/*.tfstate.*)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Read(**/*.p12)",
+      "Read(**/*.pfx)",
+      "Read(**/id_rsa*)",
+      "Read(**/id_ed25519*)",
+      "Read(**/id_ecdsa*)",
+      "Read(~/.aws/**)",
+      "Read(~/.azure/**)",
+      "Read(//mnt/c/Users/*/.aws/**)",
+      "Read(//mnt/c/Users/*/.azure/**)",
+      "Read(~/.ssh/**)",
+      "Read(~/.config/gh/**)",
+      "Read(~/.config/gcloud/**)",
+      "Read(~/.docker/config.json)",
+      "Read(~/.claude/.credentials.json)",
+      "Read(~/.npmrc)",
+      "Read(~/.netrc)",
+      "Read(~/.git-credentials)",
+      "Edit(/BLUEPRINT.md)",
+      "Write(/BLUEPRINT.md)",
+      "Bash(terraform apply *)",
+      "Bash(terraform destroy *)",
+      "Bash(terraform import *)",
+      "Bash(terraform state *)",
+      "Bash(terraform force-unlock *)",
+      "Bash(terraform taint *)",
+      "Bash(terraform untaint *)",
+      "Bash(terraform workspace delete *)",
+      "Bash(terraform login *)",
+      "Bash(aws configure *)",
+      "Bash(aws sso *)",
+      "Bash(aws secretsmanager get-secret-value *)",
+      "Bash(aws iam create-access-key *)",
+      "Bash(aws * delete-*)",
+      "Bash(aws * terminate-*)",
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Bash(git commit --no-verify *)",
+      "Bash(git commit -n *)",
+      "Bash(gh pr merge *)",
+      "Bash(gh secret *)",
+      "Bash(gh repo delete *)",
+      "Bash(gh repo edit *)",
+      "Bash(gh ruleset *)",
+      "Bash(gh auth *)",
+      "Bash(stripe *)",
+      "Bash(twilio *)",
+      "Bash(sudo *)",
+      "Edit(/.claude/settings.json)",
+      "Edit(/.claude/settings.local.json)",
+      "Edit(/.claude/hooks/**)",
+      "Edit(/.claude/agents/**)",
+      "Edit(/.claude/policy/**)",
+      "Edit(/.claude/gates.json)",
+      "Edit(/.claude/bin/**)",
+      "Edit(/.claude/kit-manifest.json)",
+      "Edit(~/.claude/settings.json)",
+      "Edit(~/.claude/settings.local.json)",
+      "Edit(~/.claude/kit/**)",
+      "Edit(~/.bashrc)",
+      "Edit(~/.profile)",
+      "Edit(~/.bash_profile)",
+      "Edit(~/.zshrc)",
+      "Write(/.claude/settings.json)",
+      "Write(/.claude/settings.local.json)",
+      "Write(/.claude/hooks/**)",
+      "Write(/.claude/agents/**)",
+      "Write(/.claude/policy/**)",
+      "Write(/.claude/gates.json)",
+      "Write(/.claude/bin/**)",
+      "Write(/.claude/kit-manifest.json)",
+      "Write(~/.claude/settings.json)",
+      "Write(~/.claude/settings.local.json)",
+      "Write(~/.claude/kit/**)",
+      "Write(~/.bashrc)",
+      "Write(~/.profile)",
+      "Write(~/.bash_profile)",
+      "Write(~/.zshrc)",
+      "Bash(terraform plan *)",
+      "Bash(terraform plan)",
+      "Bash(aws *)",
+      "Bash(npx *)",
+      "Bash(pnpm dlx *)",
+      "Bash(bunx *)",
+      "Bash(npm install *)",
+      "Bash(npm i *)",
+      "Bash(npm ci *)",
+      "Bash(npm exec *)",
+      "Bash(gh pr ready *)",
+      "Bash(gh release *)",
+      "Bash(gh workflow run *)",
+      "Bash(gh variable *)",
+      "Bash(ssh *)",
+      "Bash(scp *)",
+      "Bash(sftp *)",
+      "Bash(nc *)",
+      "Bash(ncat *)",
+      "Bash(socat *)",
+      "Bash(telnet *)",
+      "Bash(claude *)",
+      "Bash(git push origin main *)",
+      "Bash(git push origin master *)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "env",
+            "args": [
+              "CLAUDE_KIT_STATE=${CLAUDE_PROJECT_DIR}/.claude/state",
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/session_context.py",
+              "--log",
+              "${CLAUDE_PROJECT_DIR}/.claude/state/hooks.log"
+            ],
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/session_bootstrap.py",
+            "args": [],
+            "timeout": 300
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/git_guard.py",
+            "args": [
+              "--log",
+              "${CLAUDE_PROJECT_DIR}/.claude/state/hooks.log"
+            ],
+            "timeout": 20,
+            "if": "Bash(git *)"
+          },
+          {
+            "type": "command",
+            "command": "env",
+            "args": [
+              "CLAUDE_KIT_STATE=${CLAUDE_PROJECT_DIR}/.claude/state",
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/commit_guard.py",
+              "--log",
+              "${CLAUDE_PROJECT_DIR}/.claude/state/hooks.log"
+            ],
+            "timeout": 60,
+            "if": "Bash(git *)"
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/policy_guard.py",
+            "args": [
+              "--log",
+              "${CLAUDE_PROJECT_DIR}/.claude/state/hooks.log"
+            ],
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "Read|Edit|Write|MultiEdit|NotebookEdit|Grep",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/policy_guard.py",
+            "args": [
+              "--log",
+              "${CLAUDE_PROJECT_DIR}/.claude/state/hooks.log"
+            ],
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/policy_guard.py",
+            "args": [
+              "--log",
+              "${CLAUDE_PROJECT_DIR}/.claude/state/hooks.log"
+            ],
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "env",
+            "args": [
+              "CLAUDE_KIT_STATE=${CLAUDE_PROJECT_DIR}/.claude/state",
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/ts_edit_check.py",
+              "--log",
+              "${CLAUDE_PROJECT_DIR}/.claude/state/hooks.log"
+            ],
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/format_on_edit.py",
+            "args": [],
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/claim_check.py",
+            "args": [
+              "--log",
+              "${CLAUDE_PROJECT_DIR}/.claude/state/hooks.log"
+            ],
+            "timeout": 60
+          },
+          {
+            "type": "command",
+            "command": "env",
+            "args": [
+              "CLAUDE_KIT_STATE=${CLAUDE_PROJECT_DIR}/.claude/state",
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/stop_guard.py",
+              "--log",
+              "${CLAUDE_PROJECT_DIR}/.claude/state/hooks.log"
+            ],
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "env",
+            "args": [
+              "CLAUDE_KIT_STATE=${CLAUDE_PROJECT_DIR}/.claude/state",
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/stopfailure_checkpoint.py",
+              "--log",
+              "${CLAUDE_PROJECT_DIR}/.claude/state/hooks.log"
+            ],
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,101 @@
+{
+  "_doc": "Files copied from the personal verification kit (~/.claude/kit, bin/ and hooks/) and from the user-level agents/skills (~/.claude/agents, ~/.claude/skills). control_plane_check.py verifies every sha256; a local edit is drift. base_sha256 is the source file at copy time; patched files say what changed. To update: copy the new source, re-apply the patch, refresh both hashes, bump kit_commit, and say why in the PR.",
+  "kit_commit": "6033c7b0651c1fd229f23b0befc4ddb8d28f387a",
+  "files": {
+    ".claude/bin/gates.py": {
+      "source": "bin/gates.py",
+      "sha256": "f96f6c8b4696b22bffb80732a6c2145e3c2950ef7f0231a15a9dcee8d6c2db8b",
+      "patched": false
+    },
+    ".claude/bin/mutation_check.py": {
+      "source": "bin/mutation_check.py",
+      "sha256": "9c65b18c366cf937ca35797210c45886dcac148eb228f2927aec09ca4d0d2374",
+      "patched": false
+    },
+    ".claude/bin/progress_probe.py": {
+      "source": "bin/progress_probe.py",
+      "sha256": "95b39b0ba507c3663b73885906172167e0ed8799160125cb2abe3415db029e6e",
+      "patched": false
+    },
+    ".claude/hooks/_kit.py": {
+      "source": "hooks/_kit.py",
+      "sha256": "0aba032f82fff9c32b70e4da241a7cc6c67ed91960fa49ea068c78bcc5d07c0d",
+      "patched": false
+    },
+    ".claude/hooks/claim_check.py": {
+      "source": "hooks/claim_check.py",
+      "sha256": "fecda3590fee1ba03dcd477e0851d4452801e0d48dbc6cef61867d8a02ebed1c",
+      "patched": false
+    },
+    ".claude/hooks/commit_guard.py": {
+      "source": "hooks/commit_guard.py",
+      "sha256": "db00239d42d79b05d241d7974de46c5fedbc54f283bacfc4324f0ce0de2fda20",
+      "patched": false
+    },
+    ".claude/hooks/git_guard.py": {
+      "source": "hooks/git_guard.py",
+      "sha256": "ab60b6917050c12c0e16bf6d6b7c51f44a7f87eddadc3bfee5e740d6c07a7c86",
+      "patched": false
+    },
+    ".claude/hooks/session_context.py": {
+      "source": "hooks/session_context.py",
+      "sha256": "dcd1468c01ddd1f04c5d5bb6c68dca4303f3eac329710204b84f59d1bb834980",
+      "patched": false
+    },
+    ".claude/hooks/stop_guard.py": {
+      "source": "hooks/stop_guard.py",
+      "sha256": "ec091f2b4bbc939347513d27bf25b3cf81143b4ae5f61f0bd752cbae4759ca10",
+      "patched": false
+    },
+    ".claude/hooks/stopfailure_checkpoint.py": {
+      "source": "hooks/stopfailure_checkpoint.py",
+      "sha256": "c89531989399d9994194b1ace1195ec7f60d6a11509c748fb3699b09f87a80a0",
+      "patched": false
+    },
+    ".claude/hooks/ts_edit_check.py": {
+      "source": "hooks/ts_edit_check.py",
+      "sha256": "120aca3b470358799ce9b519b07f6306481850c75f636dbd8c67074b26e22742",
+      "patched": false
+    },
+    ".claude/agents/architecture-reviewer.md": {
+      "source": "~/.claude/agents/architecture-reviewer.md",
+      "base_sha256": "9d5e26c6ad9a154567fbed7a4f79aed798bf1d8cb4fae0839a45acbf74693405",
+      "sha256": "0fda72c5bf778bfab41e3cbacd0d3cd8cdad3495ca0b5b7deb8f527d251d3748",
+      "patched": true,
+      "patch": "moin appendix appended (second QG-09 reviewer, layering, INV-17/18, ADRs)"
+    },
+    ".claude/agents/invariant-reviewer.md": {
+      "source": "~/.claude/agents/invariant-reviewer.md",
+      "base_sha256": "9d4fe67a087e8d6b850ece03b96f8567b1549acdba7f965b8965297ac2cdbece",
+      "sha256": "97c1142b4ffe1c2cf270b9a034f9e15d6de5c49a94a1006b4c7c1dbdc5d33896",
+      "patched": true,
+      "patch": "moin appendix appended (INV-01..20 source, choke points, real-PG test sketches)"
+    },
+    ".claude/agents/security-reviewer.md": {
+      "source": "~/.claude/agents/security-reviewer.md",
+      "base_sha256": "8230dddd43b62081d7ac9518ed1481c7eaf021d294724b29b460c69819ddeb11",
+      "sha256": "7f0b85149462df143840b4011953ad905a3cc31e26de2c0a53bb980444677668",
+      "patched": true,
+      "patch": "moin appendix appended (first QG-09 reviewer, INV list, plan_section usage)"
+    },
+    ".claude/skills/closure/SKILL.md": {
+      "source": "~/.claude/skills/closure/SKILL.md",
+      "base_sha256": "0e9a96bff6ac33aa3df7e5f001a25663355a647f97bb6af9faec2e33efe49d30",
+      "sha256": "e606118c99d39fbbf48b27bc223ec51a7a4dbf06ddf090feff030b90654e4e0a",
+      "patched": true,
+      "patch": "disable-model-invocation: true; tools resolved from .claude/bin only; appends to an existing PROGRESS.md; report under docs/phases/; registers an EV record when the registry exists; `!` preprocessing replaced by a Tools section + allowed-tools (the preprocessing failed the permission check in headless runs and aborted the skill)"
+    },
+    ".claude/skills/closure/templates/CLOSURE_REPORT.md": {
+      "source": "~/.claude/skills/closure/templates/CLOSURE_REPORT.md",
+      "base_sha256": "c2592b2a9f19204eaf49338fc739da353366bd583d7b107c36a434c430311c45",
+      "sha256": "c2592b2a9f19204eaf49338fc739da353366bd583d7b107c36a434c430311c45",
+      "patched": false
+    },
+    ".claude/skills/closure/templates/PROGRESS.md": {
+      "source": "~/.claude/skills/closure/templates/PROGRESS.md",
+      "base_sha256": "1d26829050d22adc519a3de30e87ef18c3d4e2fe464aeef2df011d3083f4efbf",
+      "sha256": "1d26829050d22adc519a3de30e87ef18c3d4e2fe464aeef2df011d3083f4efbf",
+      "patched": false
+    }
+  }
+}
