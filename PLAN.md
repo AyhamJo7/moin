@@ -137,7 +137,7 @@ Single source of status. Tier columns show the status of that phase's items for 
 |---|---|---|---|---|---|---|---|---|
 | P00 | Planning baseline | READY_FOR_REVIEW | — | — | — | — | Founder review | Founder reads and adopts plan (P00.05) |
 | P01 | Discovery & Gurlitt observation | NOT_STARTED | NOT_STARTED | — | — | — | EXT-16 Gurlitt | Meet Gurlitt owner 2026-09-28 09:00 |
-| P02 | Engineering foundation | IN_PROGRESS | — | — | — | — | EXT-24 GitHub plan | P02.01 governance scaffolding |
+| P02 | Engineering foundation | IN_PROGRESS | — | — | — | — | EXT-24 GitHub plan | P02.04 local development environment |
 | P03 | Architecture decisions & threat model | NOT_STARTED | — | — | — | — | — | Write core ADRs |
 | P04 | Feasibility proof & long-lead track | NOT_STARTED | — | — | NOT_STARTED | — | EXT-01/07/10/11/12 | Open Twilio/OpenAI/AWS requests day 1 |
 | P05 | Cloud foundation & walking skeleton | NOT_STARTED | — | — | — | — | EXT-09 AWS | Terraform bootstrap |
@@ -2087,22 +2087,22 @@ Monorepo skeleton · CI v1 · local stack · test harnesses · governance files 
 - [x] **P02.02 Toolchain baseline** `[G:PILOT]` — EV-P02-001
   - [x] P02.02.01 Pin Node 24 LTS (`.nvmrc`, `engines`), `packageManager: pnpm@10.x`; install via fnm/corepack without sudo — EV-P02-002
   - [x] P02.02.02 Turborepo tasks: `lint`, `typecheck`, `test`, `test:integration`, `build` with caching and correct `dependsOn` — EV-P02-008
-  - [x] P02.02.03 TypeScript `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noImplicitOverride`, ESM — EV-P02-009
+  - [x] P02.02.03 TypeScript `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noImplicitOverride`, ESM — EV-P02-009, EV-P02-019
   - [x] P02.02.04 ESLint flat config: `typescript-eslint` strict-type-checked, `no-explicit-any`, named exports only (Next.js route files excepted), ban `dangerouslySetInnerHTML`, ban string-built SQL, ban session-level `SET`, ban `console.*` in production code — EV-P02-001
   - [x] P02.02.05 Custom lint rule stubs: no tenant-specific conditionals (INV-18), DB access only via tenant wrapper (activated in P06.03) — EV-P02-001
   - [x] P02.02.06 Prettier, `.editorconfig` — EV-P02-010
-  - [x] P02.02.07 `dependency-cruiser` rules for module boundaries (see [Domain Boundaries](#domain-boundaries)) — EV-P02-011
+  - [x] P02.02.07 `dependency-cruiser` rules for module boundaries (see [Domain Boundaries](#domain-boundaries)) — EV-P02-011, EV-P02-020
   - [x] P02.02.08 Terraform toolchain pinned (`tfenv` or pinned binary in `~/.local/bin`), `tflint`, Trivy — EV-P02-002
   - [x] P02.02.09 Accept ADR-0002 and ADR-0034 — EV-P02-002
   - [x] P02.02.10 Verify: fixtures that violate each lint/boundary rule fail — EV-P02-001
-- [ ] **P02.03 Monorepo skeleton** `[G:PILOT]`
-  - [ ] P02.03.01 Create the structure from [Repository Structure](#repository-structure)
-  - [ ] P02.03.02 Server role entrypoints (`main-api`, `main-voice`, `main-worker`, `main-migrate`) with role root modules
-  - [ ] P02.03.03 Zod-validated configuration loader (fail fast on missing or invalid env; secrets never logged)
-  - [ ] P02.03.04 Pino logger with redaction allowlist and request/correlation IDs (full telemetry in P15.01)
-  - [ ] P02.03.05 `/healthz` (liveness) and `/readyz` (DB and dependency readiness) per role
-  - [ ] P02.03.06 Multi-stage Dockerfiles (ARM64, non-root, read-only FS compatible, no package manager in runtime layer)
-  - [ ] P02.03.07 Verify: images build; containers start; health endpoints return 200; image size recorded
+- [x] **P02.03 Monorepo skeleton** `[G:PILOT]` — EV-P02-018
+  - [x] P02.03.01 Create the structure from [Repository Structure](#repository-structure) — EV-P02-012
+  - [x] P02.03.02 Server role entrypoints (`main-api`, `main-voice`, `main-worker`, `main-migrate`) with role root modules — EV-P02-013
+  - [x] P02.03.03 Zod-validated configuration loader (fail fast on missing or invalid env; secrets never logged) — EV-P02-014
+  - [x] P02.03.04 Pino logger with redaction allowlist and request/correlation IDs (full telemetry in P15.01) — EV-P02-015
+  - [x] P02.03.05 `/healthz` (liveness) and `/readyz` (DB and dependency readiness) per role — EV-P02-016
+  - [x] P02.03.06 Multi-stage Dockerfiles (ARM64, non-root, read-only FS compatible, no package manager in runtime layer) — EV-P02-017
+  - [x] P02.03.07 Verify: images build; containers start; health endpoints return 200; image size recorded — EV-P02-018
 - [ ] **P02.04 Local development environment** `[G:PILOT]`
   - [ ] P02.04.01 Docker Compose: Postgres 17 + pgvector (pinned digest), Valkey, SQS emulator (ElasticMQ), S3-compatible emulator (licence-checked), Mailpit, local OIDC provider for auth flows
   - [ ] P02.04.02 `pnpm dev:up`, `dev:down`, `dev:reset`, `db:migrate`, `db:seed` (synthetic demo tenants "Musterrestaurant" and "Musterbetrieb SHK")

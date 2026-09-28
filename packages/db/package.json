@@ -1,0 +1,25 @@
+{
+  "name": "@moin/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Reviewed SQL migrations, Drizzle table definitions, roles and RLS SQL, the tenant wrapper and seeds",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --passWithNoTests",
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.0",
+    "@types/pg": "8.23.1",
+    "typescript": "6.0.3",
+    "vitest": "5.0.2"
+  },
+  "dependencies": {
+    "pg": "8.23.0"
+  }
+}

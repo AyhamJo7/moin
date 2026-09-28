@@ -50,9 +50,22 @@ giving up every type-aware lint rule — the rules that do the most work in this
 TypeScript 6.0.3 is the last release inside that range and is the intended bridge to 7. Revisit
 when typescript-eslint supports 7; that revisit is a follow-up ADR, not a silent bump.
 
-**VALIDATION REQUIRED:** TypeScript 6 has not yet been exercised against Next.js 15 or NestJS,
-which arrive in P02.03. If either proves incompatible, the fallback is TypeScript 5.9.3 (also
-inside the peer range) and this ADR is amended with the evidence.
+~~**VALIDATION REQUIRED:** TypeScript 6 has not yet been exercised against Next.js 15 or NestJS,
+which arrive in P02.03.~~
+
+**Validated in P02.03 (2026-09-28); both frameworks work and the fallback is not taken**
+— EV-P02-019:
+
+- **NestJS 12.1.1** — `tsc --noEmit` over the server exits 0 across four role entrypoints,
+  decorated controllers and modules and symbol-token dependency injection; the compiled output
+  runs, and all four roles boot in a container and serve their endpoints.
+- **Next.js 16.3.6** — `next build` succeeds, including its own TypeScript pass, and prerenders
+  the app-router routes.
+
+NestJS needs three overrides of the shared base, and they stop at `apps/server/tsconfig.json`:
+`erasableSyntaxOnly: false`, `experimentalDecorators: true`, `emitDecoratorMetadata: true`. Nest
+resolves providers from decorator metadata that only the TypeScript emitter produces, so the
+server is compiled rather than type-stripped. Every strictness option is still inherited.
 
 ### Lint bans
 

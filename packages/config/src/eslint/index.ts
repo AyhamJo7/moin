@@ -150,6 +150,16 @@ export const baseConfig = defineConfig(
     },
   },
 
+  // A NestJS module, and a Nest root module in particular, is an empty class whose entire
+  // content is its decorator — that is the framework's declaration syntax, not a class someone
+  // forgot to finish. The rule stays on everywhere else, because elsewhere it is usually right.
+  {
+    files: ['**/*.module.ts', '**/roots/*.ts'],
+    rules: {
+      '@typescript-eslint/no-extraneous-class': 'off',
+    },
+  },
+
   // Repository scripts and config files are CLIs: their output IS the interface, and they run
   // outside the service, where the Pino logger and its redaction allowlist do not exist.
   {

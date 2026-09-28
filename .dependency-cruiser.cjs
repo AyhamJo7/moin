@@ -39,6 +39,13 @@ module.exports = {
           '(^|/)(babel|webpack|vitest|playwright|next|eslint|turbo)\\.[^/]+\\.(js|cjs|mjs|ts)$',
           '^(apps/server/src/main-|scripts/|evals/)',
           '/__fixtures__/',
+          // A package's public entry point has no in-repo importer until a consumer exists, which
+          // in a monorepo built phase by phase is the normal state, not a defect. Dead-code
+          // detection still applies to every other file inside the package.
+          '^packages/[^/]+/src/index\\.ts$',
+          // Next.js app-router files are invoked by the framework by convention, never imported.
+          '^apps/web/(app|pages)/',
+          '^apps/web/(next\\.config|middleware|instrumentation)\\.',
         ],
       },
       to: {},
@@ -128,6 +135,8 @@ module.exports = {
 
   options: {
     doNotFollow: { path: 'node_modules' },
+    // Build output is generated, so an "orphan" there means nothing and drowns the real findings.
+    exclude: { path: '(^|/)(dist|build|\\.next|\\.turbo|coverage)/' },
     moduleSystems: ['es6', 'cjs'],
     tsPreCompilationDeps: true,
     tsConfig: { fileName: 'tsconfig.json' },
