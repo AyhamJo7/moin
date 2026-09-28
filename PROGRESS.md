@@ -1,11 +1,11 @@
 ---
-mission: P02 — Engineering Foundation (tier PILOT)
+mission: P02 complete bar external gates; P03 in progress (tier PILOT)
 status: active
 mode: interactive
-phase: P02
+phase: P03
 tier: PILOT
-plan: docs/phases/P02-plan.md
-next: P02.06.07 negative controls, then gate-ready — blocked on EXT-24
+plan: docs/phases/P03-plan.md
+next: P03.02 domain model and glossary — PR docs/p03-02-domain-model
 updated: 2026-09-28
 ---
 
@@ -83,6 +83,15 @@ Rules
 | P02.06.07 | BLOCKED | — | — | Four negative-control PRs; needs the workflows on `main` and the ruleset (EXT-24) |
 | P02.07.03 | BLOCKED | — | — | Fresh-session doc walkthrough; needs a session with no prior context |
 
+| P02.07.01 | READY_FOR_REVIEW | PR #9 | EV-P02-041 | local-setup, testing, conventions |
+| P02.07.02 | READY_FOR_REVIEW | PR #9 | EV-P02-042 | ARCHITECTURE.md, SECURITY.md |
+| P02.07.03 | READY_FOR_REVIEW | PR #9 | EV-P02-046 | Fresh-session walkthrough; 9 real defects found and fixed |
+| P03.01.01 | READY_FOR_REVIEW | PR #10 | EV-P03-001 | ADR process, template, index |
+| P03.01.02 | READY_FOR_REVIEW | PR #10 | EV-P03-002 | Ten core ADRs accepted |
+| P03.01.03 | READY_FOR_REVIEW | PR #10 | EV-P03-003 | ADR-0011/0018/0019 drafted, all PROPOSED |
+| P03.01.04 | READY_FOR_REVIEW | PR #10 | EV-P03-004 | Every ADR names its enforcement; the check found 4 gaps |
+| P03.01.05 | READY_FOR_REVIEW | PR #10 | EV-P03-005 | Every INV covered, or accounted for in the register |
+
 ## External waits
 
 | ID     | Counterparty | Requested  | Expected | Fallback                                                                                  | Blocks               |
@@ -91,14 +100,14 @@ Rules
 
 ## Founder actions waiting
 
-| #   | Action                                                                                                                                        | Blocks                                                 | How to confirm it worked                                                                   |
-| --- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
-| F1  | Apply `docs/control-plane/patches/0003-p02-gates.patch` to the founder-only gate configuration                                                | Every `gates.py full` claim for P02                    | `control_plane_check.py` passes and `gates.py status` no longer shows the `workspace` stub |
-| F2  | EXT-24: confirm the GitHub plan supports private-repo rulesets, then apply the P02.01.01 ruleset **after** the P02.06 workflows are on `main` | P02.01.01, P02.01.07                                   | A direct push to `main` is rejected; a PR with a red required check cannot merge           |
-| F3  | Register `EV-P00-001` for the already-ticked P00.02.04, or untick it                                                                          | Repository-wide `evidence.py check` exits 1            | `evidence.py check` exits 0                                                                |
-| F4  | Review and squash-merge the P02 PRs in order: #3 → #4 → #5 → #6                                                                               | Later branches, and `main` reflecting P02              | `git log --oneline main` shows them linearly                                               |
-| F5  | Create the local environment file once from the committed example (the control plane blocks any session command touching it, INV-15)          | `pnpm doctor` reporting six of six ok                  | `node scripts/doctor.ts` exits 0                                                           |
-| F6  | Optional: confirm setup time on a machine with no Docker image cache (1.73 GiB to pull)                                                       | The 15-minute criterion measured cold rather than warm | The timed log                                                                              |
+| #   | Action                                                                                                                                        | Blocks                                                                                        | How to confirm it worked                                                                   |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| F1  | Apply `docs/control-plane/patches/0003-p02-gates.patch` to the founder-only gate configuration                                                | Every `gates.py full` claim for P02                                                           | `control_plane_check.py` passes and `gates.py status` no longer shows the `workspace` stub |
+| F2  | EXT-24: confirm the GitHub plan supports private-repo rulesets, then apply the P02.01.01 ruleset **after** the P02.06 workflows are on `main` | P02.01.01, P02.01.07                                                                          | A direct push to `main` is rejected; a PR with a red required check cannot merge           |
+| F3  | Register `EV-P00-001` for the already-ticked P00.02.04, or untick it                                                                          | Repository-wide `evidence.py check` exits 1                                                   | `evidence.py check` exits 0                                                                |
+| F4  | Review and squash-merge the P02 PRs in order: #3 → #4 → #5 → #6                                                                               | Later branches, and `main` reflecting P02                                                     | `git log --oneline main` shows them linearly                                               |
+| F5  | Create the local environment file from the committed example (the control plane blocks any session command touching it, INV-15)               | `pnpm preflight` reporting six of six, and `pnpm test:integration` without exported variables | `pnpm preflight` exits 0                                                                   |
+| F6  | Optional: confirm setup time on a machine with no Docker image cache (1.73 GiB to pull)                                                       | The 15-minute criterion measured cold rather than warm                                        | The timed log                                                                              |
 
 ## Deferred with a trigger (from the P02.03 QG-09 review)
 
@@ -110,6 +119,8 @@ Rules
 
 ## Log
 
+- 2026-09-29 — P03.01 complete: ADR process, ten core ADRs accepted, three drafted and left PROPOSED, plus the invariant enforcement register. The coverage check is mechanical and found two things reading would not have: four P02 ADRs with no Verification section at all, and three invariants with no ADR. Those three are accounted for explicitly rather than excused — INV-14 has none by design, because no linter can tell whether a feature is an excluded sensitive use. Open question recorded rather than resolved: PLAN L2180 lists ADR-0036 for P03 while the register assigns it to P07.
+- 2026-09-29 — P02.07 complete, and the walkthrough was worth more than the documents it checked. A fresh session with no context found nine real defects, the worst two being that the environment checker silently did nothing (its name was shadowed by a pnpm built-in) and that nothing in the repository loaded the local environment file at all — so the first setup step was inert and the checker reported green on a configuration that could not run. Also fixed: `pnpm dev` did not exist, the integration harness silently fell back to an admin connection and failed with what looked like an RLS security defect, and two checkouts silently shared one database, which destroyed this machine's dev volume during the run. P02 PILOT is complete except EXT-24 and the founder items.
 - 2026-09-29 — All three CI workflows green. P02 is now complete except for the items that need the founder or a third party: the ruleset (EXT-24) and, behind it, the four negative-control PRs. Follow-up recorded rather than left to be rediscovered: the arm64 container build runs under emulation on an x86 runner at ~4.5 minutes per run, which will not stay tolerable as the image grows — a native arm64 runner is the remedy.
 - 2026-09-29 — CORRECTION: P02 wrote its two local-emulator decisions as ADR-0035 and ADR-0036, which PLAN's register reserves for Search (P09) and time/locale (P07). Renumbered to ADR-0044 and ADR-0045 and added to the register, with every reference updated. Found while reading the register at the start of P03 — which is the argument for reading the register before writing an ADR, not after.
 - 2026-09-29 — P03 started. Its only dependency, P02.03, is complete. Plan at docs/phases/P03-plan.md; ADR index, template and the first eight core ADRs written on docs/p03-01-adrs.
