@@ -1,0 +1,131 @@
+P02.02.02 — replace the stub `workspace` gate with the QG-01 gate set and add `stress`.
+
+This file is founder-only (.claude/policy/protected-paths.json), so this session
+wrote the change as a patch instead of editing it. Apply it yourself:
+
+    git apply docs/control-plane/patches/0003-p02-gates.patch
+    python3 .claude/bin/control_plane_check.py
+    python3 .claude/bin/gates.py full
+
+What changes
+------------
+Removed: the `workspace` stub (`pnpm turbo run lint typecheck test build`), which
+existed only so that `full` could not pass before P02 landed.
+
+Added, in QG-01's order (PLAN.md, Cross-Phase Quality Gates):
+
+  conventions   Conventional Commit + no-attribution self-tests (P02.01.03)
+  format        prettier --check
+  lint          turbo run lint (includes the two repository rules)
+  boundaries    dependency-cruiser (P02.02.07)
+  typecheck     turbo run typecheck
+  unit          turbo run test
+  integration   turbo run test:integration   [requires docker]
+  build         turbo run build
+  secret-scan   gitleaks over history
+
+`fast` becomes control-plane, conventions, format, lint, typecheck, unit — the
+loop that needs no Docker.
+
+`stress` is added (20 iterations of `pnpm exec vitest run {targets}`), which
+`gates.py stress --targets` needs and which the stub had no section for.
+
+Not yet included, with the phase that adds them
+-----------------------------------------------
+  RLS catalog check + cross-tenant suite   P06.02, P06.03
+  OpenAPI + client drift                   P06, P07
+  migration safety check                   P02.06.04 wires it into CI; it is
+                                           added here once packages/db exists
+  dependency audit + licence check         P02.08
+
+Each is a tightening, which needs no approval; they land with the phase that
+makes them real rather than as a gate that passes because it checks nothing.
+
+Note
+----
+`integration` requires Docker. On a machine without a reachable daemon that gate
+is reported SKIPPED-UNVERIFIED rather than passing, so a skip can never be read
+as a pass.
+
+diff --git a/.claude/gates.json b/.claude/gates.json
+index 3bca18d..61d86f6 100644
+--- a/.claude/gates.json
++++ b/.claude/gates.json
+@@ -1,6 +1,7 @@
+ {
+-  "_doc": "Verification gates (run with python3 .claude/bin/gates.py fast|full; evidence in .git/claude-evidence/; the Stop hook checks completion claims against `full`). STUB until P02.02.02: the 'workspace' gate fails until the Turborepo tasks exist, so `full` cannot pass and no session can claim green before P02 lands. P02.02.02 replaces 'workspace' with the QG-01 set (format, lint, typecheck, unit, integration on real PG17+pgvector, build, gitleaks) and adds a `stress` section. Keep 'control-plane' first. Never delete or weaken a gate to make `full` pass (loosening needs founder approval).",
++  "_doc": "Verification gates (run with python3 .claude/bin/gates.py fast|full; evidence in .git/claude-evidence/; the Stop hook checks completion claims against `full`). P02.02.02 replaced the 'workspace' stub with the QG-01 set and added a `stress` section. Keep 'control-plane' first. Never delete or weaken a gate to make `full` pass (loosening needs founder approval). Integration gates need the local stack: `pnpm dev:up` (Docker).",
+   "needs": [],
++  "restore_generated": [],
+   "gates": [
+     {
+       "name": "control-plane",
+@@ -14,11 +15,65 @@
+       "timeout": 600
+     },
+     {
+-      "name": "workspace",
+-      "run": "pnpm turbo run lint typecheck test build",
++      "name": "conventions",
++      "run": "node scripts/check-conventional-commit.ts --self-test && node scripts/check-no-ai-mentions.ts --self-test",
++      "requires": ["node"],
++      "timeout": 120
++    },
++    {
++      "name": "format",
++      "run": "pnpm exec prettier --check .",
++      "requires": ["pnpm"],
++      "timeout": 300
++    },
++    {
++      "name": "lint",
++      "run": "pnpm turbo run lint",
++      "requires": ["pnpm"],
++      "timeout": 900
++    },
++    {
++      "name": "boundaries",
++      "run": "pnpm exec depcruise apps packages scripts --config .dependency-cruiser.cjs",
++      "requires": ["pnpm"],
++      "timeout": 600
++    },
++    {
++      "name": "typecheck",
++      "run": "pnpm turbo run typecheck",
++      "requires": ["pnpm"],
++      "timeout": 900
++    },
++    {
++      "name": "unit",
++      "run": "pnpm turbo run test",
+       "requires": ["pnpm"],
+       "timeout": 1800
++    },
++    {
++      "name": "integration",
++      "run": "pnpm turbo run test:integration",
++      "requires": ["pnpm", "docker"],
++      "timeout": 2400
++    },
++    {
++      "name": "build",
++      "run": "pnpm turbo run build",
++      "requires": ["pnpm"],
++      "timeout": 1800
++    },
++    {
++      "name": "secret-scan",
++      "run": "gitleaks git --redact --no-banner .",
++      "requires": ["gitleaks"],
++      "timeout": 900
+     }
+   ],
+-  "fast": ["control-plane"]
++  "fast": ["control-plane", "conventions", "format", "lint", "typecheck", "unit"],
++  "stress": {
++    "run": "pnpm exec vitest run {targets}",
++    "iterations": 20,
++    "default_targets": "packages/config/src",
++    "timeout": 2400
++  }
+ }

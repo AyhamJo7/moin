@@ -17,7 +17,13 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { compile, violations, type CompiledPattern, type Policy } from './policy-regex.ts';
+import {
+  compile,
+  parsePolicy,
+  violations,
+  type CompiledPattern,
+  type Policy,
+} from './policy-regex.ts';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const POLICY_PATH = resolve(REPO_ROOT, '.claude/policy/no-ai-mentions.json');
@@ -28,7 +34,7 @@ interface Source {
 }
 
 function loadPolicy(): Policy {
-  return JSON.parse(readFileSync(POLICY_PATH, 'utf8')) as Policy;
+  return parsePolicy(JSON.parse(readFileSync(POLICY_PATH, 'utf8')) as unknown);
 }
 
 function commitMessages(range: string): Source[] {
@@ -41,15 +47,17 @@ function commitMessages(range: string): Source[] {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
   } catch {
-    throw new Error(`cannot read commits for range ${JSON.stringify(range)}: no such revision range`);
+    throw new Error(
+      `cannot read commits for range ${JSON.stringify(range)}: no such revision range`,
+    );
   }
   return out
     .split('\x1e')
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0)
     .map((entry) => {
-      const [sha = '', body = ''] = entry.split('\x00');
-      return { label: `commit ${sha.slice(0, 12)}`, text: body };
+      const [sha, body] = entry.split('\x00');
+      return { label: `commit ${(sha ?? '').slice(0, 12)}`, text: body ?? '' };
     });
 }
 
@@ -57,7 +65,7 @@ function parseArgs(argv: readonly string[]): { sources: Source[]; selfTest: bool
   const sources: Source[] = [];
   let selfTest = false;
   for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
+    const arg = argv[i] ?? '';
     const value = argv[i + 1];
     switch (arg) {
       case '--self-test':
@@ -121,8 +129,9 @@ function main(): number {
       return 1;
     }
     console.log(
-      `no-ai-mentions self-test passed: ${patterns.length} patterns, ` +
-        `${policy.block_examples.length} blocked and ${policy.allow_examples.length} allowed examples`,
+      `no-ai-mentions self-test passed: ${String(patterns.length)} patterns, ` +
+        `${String(policy.block_examples.length)} blocked and ` +
+        `${String(policy.allow_examples.length)} allowed examples`,
     );
   }
 
@@ -147,7 +156,7 @@ function main(): number {
     );
     return 1;
   }
-  console.log(`no-ai-mentions: ${sources.length} source(s) clean`);
+  console.log(`no-ai-mentions: ${String(sources.length)} source(s) clean`);
   return 0;
 }
 

@@ -8,7 +8,7 @@
 
 <!-- What changed, and the reason it needed to change. The diff shows what; this says why. -->
 
-**Phase / checklist items:**  <!-- e.g. P02.03.03, P02.03.04 -->
+**Phase / checklist items:** <!-- e.g. P02.03.03, P02.03.04 -->
 
 ## Risk
 

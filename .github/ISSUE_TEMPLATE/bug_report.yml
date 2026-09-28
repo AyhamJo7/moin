@@ -1,6 +1,6 @@
 name: Bug report
 description: Something behaves differently from what the plan or the code says it should
-labels: ["bug"]
+labels: ['bug']
 body:
   - type: markdown
     attributes:
@@ -51,8 +51,8 @@ body:
       label: Does this touch an invariant?
       description: Tenant isolation, audit, idempotency, secrets, personal data in logs, life-safety routing.
       options:
-        - "No"
-        - "Yes — name it in the description"
+        - 'No'
+        - 'Yes — name it in the description'
     validations:
       required: true
   - type: checkboxes

@@ -1,0 +1,24 @@
+pnpm-lock.yaml
+dist/
+build/
+.next/
+coverage/
+.turbo/
+*.tsbuildinfo
+
+# The control plane is founder-owned (.claude/policy/protected-paths.json). Formatting it would
+# rewrite guardrail files this session may not change, and `prettier --write .` did exactly that
+# once before this entry existed.
+.claude/
+
+# PLAN.md is read by line-anchored tooling (plan_section.py, the BR-nnn line citations), so
+# reflowing it would move every anchor. BLUEPRINT.md is read-only by policy.
+PLAN.md
+BLUEPRINT.md
+
+# Evidence records are transcripts: their exact bytes are the point.
+docs/evidence/
+docs/control-plane/
+
+# Managed by turbo; it rewrites the block itself.
+AGENTS.md

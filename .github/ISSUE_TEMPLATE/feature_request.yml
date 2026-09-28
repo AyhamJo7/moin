@@ -1,6 +1,6 @@
 name: Change request
 description: Propose work that is not already a PLAN.md checklist item
-labels: ["needs-triage"]
+labels: ['needs-triage']
 body:
   - type: markdown
     attributes:
@@ -26,7 +26,7 @@ body:
     id: tier
     attributes:
       label: Earliest gate tier that needs it
-      options: ["G:PILOT", "G:MTLIVE", "G:LAUNCH", "G:SELL", "G:TEN", "unsure"]
+      options: ['G:PILOT', 'G:MTLIVE', 'G:LAUNCH', 'G:SELL', 'G:TEN', 'unsure']
     validations:
       required: true
   - type: textarea
