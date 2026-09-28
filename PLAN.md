@@ -138,7 +138,7 @@ Single source of status. Tier columns show the status of that phase's items for 
 | P00 | Planning baseline | READY_FOR_REVIEW | — | — | — | — | Founder review | Founder reads and adopts plan (P00.05) |
 | P01 | Discovery & Gurlitt observation | NOT_STARTED | NOT_STARTED | — | — | — | EXT-16 Gurlitt | Meet Gurlitt owner 2026-09-28 09:00 |
 | P02 | Engineering foundation | IN_PROGRESS | — | — | — | — | EXT-24 GitHub plan | P02.06 CI pipeline |
-| P03 | Architecture decisions & threat model | IN_PROGRESS | — | — | — | — | — | P03.02 domain model and glossary |
+| P03 | Architecture decisions & threat model | IN_PROGRESS | — | — | — | — | — | P03.06 data inventory, then diagrams |
 | P04 | Feasibility proof & long-lead track | NOT_STARTED | — | — | NOT_STARTED | — | EXT-01/07/10/11/12 | Open Twilio/OpenAI/AWS requests day 1 |
 | P05 | Cloud foundation & walking skeleton | NOT_STARTED | — | — | — | — | EXT-09 AWS | Terraform bootstrap |
 | P06 | Tenancy, identity, authorization, audit | NOT_STARTED | — | NOT_STARTED | — | — | — | after P02/P03 |
@@ -2202,18 +2202,18 @@ Accepted ADRs · glossary · entity/aggregate model · state-machine specificati
   - [x] P03.01.03 Draft ADR-0011 (dialogue manager), 0018 (retention/deletion), 0019 (turn logs, pending EXT-02) — EV-P03-003
   - [x] P03.01.04 Every ADR names the automated check or test that enforces it — EV-P03-004
   - [x] P03.01.05 Verify: each ADR reviewed against the INV table; no invariant lacks an ADR — EV-P03-005
-- [ ] **P03.02 Domain model and glossary** `[G:PILOT]`
-  - [ ] P03.02.01 German/English glossary (Anruf, Rückruf, Anfrage, Aufgabe, Vorgang, Kontakt, Wissenseintrag, Freigabe …), mapping UI terms to code terms
-  - [ ] P03.02.02 Entity and relationship model per module (extends blueprint L1028–1087)
-  - [ ] P03.02.03 Aggregate boundaries and invariants (task states, lead transitions, appointment-request states, knowledge approvals)
-  - [ ] P03.02.04 Canonical intents, outcome codes and task types (T-01)
-  - [ ] P03.02.05 Domain event catalogue v1 (names, ID-only payloads, producers, consumers)
-  - [ ] P03.02.06 Verify: glossary and model reviewed against blueprint L1028–1087 and UI copy; no unmapped entity
-- [ ] **P03.03 State machines** `[G:PILOT]`
-  - [ ] P03.03.01 Call session: `received → routed → greeting → dialogue → wrapping_up → ended | failed | degraded`, with timeouts and failure transitions
-  - [ ] P03.03.02 Interaction finalisation (INV-06) and the reconciler contract
-  - [ ] P03.03.03 Task, lead, appointment request, knowledge item, integration, tenant lifecycle, DSAR request, support grant
-  - [ ] P03.03.04 Each machine is specified as a transition table with a property-test plan (illegal transitions rejected)
+- [x] **P03.02 Domain model and glossary** `[G:PILOT]` — EV-P03-011
+  - [x] P03.02.01 German/English glossary (Anruf, Rückruf, Anfrage, Aufgabe, Vorgang, Kontakt, Wissenseintrag, Freigabe …), mapping UI terms to code terms — EV-P03-006
+  - [x] P03.02.02 Entity and relationship model per module (extends blueprint L1028–1087) — EV-P03-007
+  - [x] P03.02.03 Aggregate boundaries and invariants (task states, lead transitions, appointment-request states, knowledge approvals) — EV-P03-008
+  - [x] P03.02.04 Canonical intents, outcome codes and task types (T-01) — EV-P03-009
+  - [x] P03.02.05 Domain event catalogue v1 (names, ID-only payloads, producers, consumers) — EV-P03-010
+  - [x] P03.02.06 Verify: glossary and model reviewed against blueprint L1028–1087 and UI copy; no unmapped entity — EV-P03-011
+- [x] **P03.03 State machines** `[G:PILOT]` — EV-P03-012
+  - [x] P03.03.01 Call session: `received → routed → greeting → dialogue → wrapping_up → ended | failed | degraded`, with timeouts and failure transitions — EV-P03-012
+  - [x] P03.03.02 Interaction finalisation (INV-06) and the reconciler contract — EV-P03-012
+  - [x] P03.03.03 Task, lead, appointment request, knowledge item, integration, tenant lifecycle, DSAR request, support grant — EV-P03-012
+  - [x] P03.03.04 Each machine is specified as a transition table with a property-test plan (illegal transitions rejected) — EV-P03-012
 - [ ] **P03.04 C4 and data-flow diagrams** `[G:PILOT]`
   - [ ] P03.04.01 C4 context + container diagrams in `docs/architecture/`
   - [ ] P03.04.02 Data-flow diagram with trust boundaries and personal-data flows (input to TOMs, DPIA support, subprocessor register)
