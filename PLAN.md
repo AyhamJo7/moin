@@ -2121,19 +2121,19 @@ Monorepo skeleton · CI v1 · local stack · test harnesses · governance files 
   - [ ] P02.06.01 `verify`: frozen install, format, lint, typecheck, unit, integration (Postgres 17 + pgvector service), build
   - [ ] P02.06.02 `security-scan`: `pnpm audit`/OSV (fail on high/critical with fix), gitleaks full history, Semgrep, actionlint, shellcheck, Trivy filesystem, CycloneDX SBOM artifact
   - [ ] P02.06.03 `container-scan`: hadolint, image build, Trivy image scan (fail on high/critical with fix)
-  - [ ] P02.06.04 `scripts/check-migrations.ts` (ordering, destructive/lock heuristics, adapted from exitos) wired to CI
-  - [ ] P02.06.05 Job slots for RLS catalog check (P06.02) and OpenAPI drift (P06/P07)
-  - [ ] P02.06.06 Actions pinned by SHA; `permissions: contents: read` by default; concurrency groups; caching
+  - [x] P02.06.04 `scripts/check-migrations.ts` (ordering, destructive/lock heuristics, adapted from exitos) wired to CI — EV-P02-034
+  - [x] P02.06.05 Job slots for RLS catalog check (P06.02) and OpenAPI drift (P06/P07) — EV-P02-040
+  - [x] P02.06.06 Actions pinned by SHA; `permissions: contents: read` by default; concurrency groups; caching — EV-P02-039
   - [ ] P02.06.07 Verify with four negative-control PRs: lint error, failing test, fake secret, vulnerable dependency, each fails the right job
 - [ ] **P02.07 Developer documentation** `[G:PILOT]`
   - [ ] P02.07.01 `docs/development/local-setup.md`, `testing.md`, `conventions.md`
   - [ ] P02.07.02 `ARCHITECTURE.md` skeleton linking ADRs; `SECURITY.md` skeleton
   - [ ] P02.07.03 Verify: a fresh agent session follows the docs from a clean clone without help
-- [ ] **P02.08 Dependency and supply-chain policy** `[G:PILOT]`
-  - [ ] P02.08.01 Renovate: weekly grouped updates, immediate security updates, lockfile maintenance
-  - [ ] P02.08.02 Licence allowlist check (fail on AGPL/SSPL/unknown in production dependencies)
-  - [ ] P02.08.03 pnpm `onlyBuiltDependencies` allowlist; no unreviewed install scripts
-  - [ ] P02.08.04 Verify: licence check fails on a copyleft fixture
+- [x] **P02.08 Dependency and supply-chain policy** `[G:PILOT]` — EV-P02-036
+  - [x] P02.08.01 Renovate: weekly grouped updates, immediate security updates, lockfile maintenance — EV-P02-037
+  - [x] P02.08.02 Licence allowlist check (fail on AGPL/SSPL/unknown in production dependencies) — EV-P02-035
+  - [x] P02.08.03 pnpm `onlyBuiltDependencies` allowlist; no unreviewed install scripts — EV-P02-038
+  - [x] P02.08.04 Verify: licence check fails on a copyleft fixture — EV-P02-036
 
 ### Security
 Supply chain (pinned actions, frozen lockfile, SBOM), secret scanning from the first commit, branch protection, minimal CI permissions.
