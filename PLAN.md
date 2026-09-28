@@ -138,7 +138,7 @@ Single source of status. Tier columns show the status of that phase's items for 
 | P00 | Planning baseline | READY_FOR_REVIEW | — | — | — | — | Founder review | Founder reads and adopts plan (P00.05) |
 | P01 | Discovery & Gurlitt observation | NOT_STARTED | NOT_STARTED | — | — | — | EXT-16 Gurlitt | Meet Gurlitt owner 2026-09-28 09:00 |
 | P02 | Engineering foundation | IN_PROGRESS | — | — | — | — | EXT-24 GitHub plan | P02.06 CI pipeline |
-| P03 | Architecture decisions & threat model | IN_PROGRESS | — | — | — | — | — | P03.06 data inventory, then diagrams |
+| P03 | Architecture decisions & threat model | IN_PROGRESS | — | — | — | — | — | P03.04 diagrams, then P03.05 threat model |
 | P04 | Feasibility proof & long-lead track | NOT_STARTED | — | — | NOT_STARTED | — | EXT-01/07/10/11/12 | Open Twilio/OpenAI/AWS requests day 1 |
 | P05 | Cloud foundation & walking skeleton | NOT_STARTED | — | — | — | — | EXT-09 AWS | Terraform bootstrap |
 | P06 | Tenancy, identity, authorization, audit | NOT_STARTED | — | NOT_STARTED | — | — | — | after P02/P03 |
@@ -2222,11 +2222,11 @@ Accepted ADRs · glossary · entity/aggregate model · state-machine specificati
   - [ ] P03.05.01 Per component and flow, threats and mitigations mapped to checklist IDs; residual risks listed
   - [ ] P03.05.02 Abuse cases: toll-fraud-like traffic, bot calls, social engineering ("Ich bin der Inhaber"), competitor scraping of knowledge via calls, notification spam
   - [ ] P03.05.03 Independent review (security-reviewer agent + founder) with tracked findings
-- [ ] **P03.06 Personal-data inventory and retention matrix** `[G:PILOT]`
-  - [ ] P03.06.01 Field-level inventory: category, purpose, controller/processor role, retention, deletion method, subprocessor exposure
-  - [ ] P03.06.02 Retention matrix aligned with blueprint L1276–1290 and [Privacy / Compliance Engineering](#privacy--compliance-engineering)
-  - [ ] P03.06.03 Data-dictionary generator plan (generated from schema comments in P06/P07)
-  - [ ] P03.06.04 Verify: a generated schema diff shows no unclassified column in MVP tables
+- [x] **P03.06 Personal-data inventory and retention matrix** `[G:PILOT]` — EV-P03-016
+  - [x] P03.06.01 Field-level inventory: category, purpose, controller/processor role, retention, deletion method, subprocessor exposure — EV-P03-013
+  - [x] P03.06.02 Retention matrix aligned with blueprint L1276–1290 and [Privacy / Compliance Engineering](#privacy--compliance-engineering) — EV-P03-014
+  - [x] P03.06.03 Data-dictionary generator plan (generated from schema comments in P06/P07) — EV-P03-015
+  - [x] P03.06.04 Verify: a generated schema diff shows no unclassified column in MVP tables — EV-P03-016
 - [ ] **P03.07 Lawyer briefing pack** `[G:PILOT]` `[EXT]`
   - [ ] P03.07.01 Contents:
     - Product description and data flows.
