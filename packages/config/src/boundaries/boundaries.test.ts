@@ -12,7 +12,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, copyFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, copyFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -40,6 +40,29 @@ function cruise(files: Record<string, string>): string[] {
     const target = join(root, relative);
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, contents, 'utf8');
+  }
+
+  // Workspace packages are resolved through node_modules in the real repository (pnpm symlinks
+  // them there), so the fixture tree mirrors that. Resolving `@moin/db/pool` the same way real
+  // code does is the whole point of these two cases.
+  for (const name of ['db', 'contracts', 'kernel', 'observability']) {
+    if (!Object.keys(files).some((file) => file.startsWith(`packages/${name}/`))) continue;
+    const linked = join(root, 'node_modules', '@moin', name);
+    mkdirSync(dirname(linked), { recursive: true });
+    symlinkSync(join(root, 'packages', name), linked, 'dir');
+    writeFileSync(
+      join(root, 'packages', name, 'package.json'),
+      JSON.stringify({
+        name: `@moin/${name}`,
+        version: '0.0.0',
+        type: 'module',
+        exports:
+          name === 'db'
+            ? { '.': './src/index.ts', './pool': './src/pool.ts' }
+            : { '.': './src/index.ts' },
+      }),
+      'utf8',
+    );
   }
   copyFileSync(
     resolve(REPO_ROOT, '.dependency-cruiser.cjs'),
@@ -115,24 +138,74 @@ describe('module boundary rules', () => {
     ).not.toContain('no-cross-module-internals');
   });
 
-  it('rejects a module opening its own database transaction instead of using the wrapper', () => {
+  // These two use the package specifier a developer would actually type. The previous version
+  // used a six-level relative path into packages/db, which no reviewer would accept and no
+  // developer would write — so it "proved" a rule that could never fire on real code.
+  it('rejects a module taking a raw database handle instead of using the wrapper', () => {
     expect(
       cruise({
         'apps/server/src/modules/work/application/list-tasks.ts':
-          "import { pool } from '../../../../../../packages/db/src/client.ts';\nexport const use = pool;\n",
-        'packages/db/src/client.ts': 'export const pool = 1;\n',
+          "import { createPool } from '@moin/db/pool';\nexport const use = createPool;\n",
+        'packages/db/src/pool.ts': 'export const createPool = () => 1;\n',
+        'packages/db/src/index.ts': "export const PACKAGE_NAME = '@moin/db';\n",
       }),
     ).toContain('only-platform-opens-transactions');
   });
 
-  it('allows the platform module to hold the transaction primitives it owns', () => {
+  it('allows the platform module to hold the raw handles it owns', () => {
     expect(
       cruise({
         'apps/server/src/modules/platform/infrastructure/tenant-transaction.ts':
-          "import { pool } from '../../../../../../packages/db/src/client.ts';\nexport const use = pool;\n",
-        'packages/db/src/client.ts': 'export const pool = 1;\n',
+          "import { createPool } from '@moin/db/pool';\nexport const use = createPool;\n",
+        'packages/db/src/pool.ts': 'export const createPool = () => 1;\n',
+        'packages/db/src/index.ts': "export const PACKAGE_NAME = '@moin/db';\n",
       }),
     ).not.toContain('only-platform-opens-transactions');
+  });
+
+  it('does not let the package barrel launder a raw handle past the rule', () => {
+    // If @moin/db ever re-exported the pool, every module could take a raw handle through the
+    // barrel and the rule would see only `module -> index.ts`. This is the regression test for
+    // that: importing the barrel must not reach pool.ts.
+    const violations = cruise({
+      'apps/server/src/modules/work/application/list-tasks.ts':
+        "import { PACKAGE_NAME } from '@moin/db';\nexport const use = PACKAGE_NAME;\n",
+      'packages/db/src/index.ts': "export const PACKAGE_NAME = '@moin/db';\n",
+      'packages/db/src/pool.ts': 'export const createPool = () => 1;\n',
+    });
+    expect(violations).not.toContain('only-platform-opens-transactions');
+  });
+
+  it('rejects a module domain layer reaching into its own infrastructure', () => {
+    expect(
+      cruise({
+        'apps/server/src/modules/work/domain/task.ts':
+          "import { repo } from '../infrastructure/task-repository.ts';\nexport const use = repo;\n",
+        'apps/server/src/modules/work/infrastructure/task-repository.ts':
+          'export const repo = 1;\n',
+      }),
+    ).toContain('no-domain-imports-outward');
+  });
+
+  it('rejects an http controller reaching into infrastructure instead of an application service', () => {
+    expect(
+      cruise({
+        'apps/server/src/modules/work/http/task.controller.ts':
+          "import { repo } from '../infrastructure/task-repository.ts';\nexport const use = repo;\n",
+        'apps/server/src/modules/work/infrastructure/task-repository.ts':
+          'export const repo = 1;\n',
+      }),
+    ).toContain('no-http-imports-repositories');
+  });
+
+  it('rejects a module reaching into another module\u2019s http layer', () => {
+    expect(
+      cruise({
+        'apps/server/src/modules/work/application/list-tasks.ts':
+          "import { c } from '../../contacts/http/contact.controller.ts';\nexport const use = c;\n",
+        'apps/server/src/modules/contacts/http/contact.controller.ts': 'export const c = 1;\n',
+      }),
+    ).toContain('no-cross-module-internals');
   });
 
   it('rejects a shared package importing an application', () => {

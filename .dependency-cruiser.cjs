@@ -57,7 +57,7 @@ module.exports = {
         'Modules talk through exported application services and domain events. Reaching into another module’s domain or infrastructure layer removes the boundary that makes it a bounded context (PLAN.md, Domain Boundaries).',
       from: { path: '^apps/server/src/modules/([^/]+)/' },
       to: {
-        path: '^apps/server/src/modules/([^/]+)/(domain|infrastructure)/',
+        path: '^apps/server/src/modules/([^/]+)/(domain|infrastructure|http)/',
         pathNot: '^apps/server/src/modules/$1/',
       },
     },
@@ -65,12 +65,43 @@ module.exports = {
       name: 'only-platform-opens-transactions',
       severity: 'error',
       comment:
-        'Only the platform module owns transactions and the tenant wrapper. Everything else goes through withTenant / withSystemWork (INV-01, INV-02).',
+        'Only the platform module owns transactions and raw database handles. Everything else goes through withTenant / withSystemWork (INV-01, INV-02). Raw handles live behind the @moin/db/pool specifier precisely so this rule has an edge it can see: the earlier version targeted a file reachable only through the package barrel, so it could not fire for any import a developer would actually write.',
       from: {
-        path: '^apps/server/src/modules/',
-        pathNot: '^apps/server/src/modules/platform/',
+        // Deliberately all of apps/server, not just modules/: code outside modules/ (health,
+        // bootstrap) was ungoverned, and that is exactly where the first raw pool appeared.
+        path: '^apps/server/src/',
+        pathNot: '^apps/server/src/(modules/platform|health)/',
       },
-      to: { path: '^packages/db/src/(client|pool|transaction)' },
+      to: { path: '^packages/db/src/pool\\.ts$' },
+    },
+    {
+      name: 'no-domain-imports-outward',
+      severity: 'error',
+      comment:
+        'A module\u2019s domain layer holds business rules and must not reach outward into its own infrastructure or http layer, nor depend on a framework. Otherwise the rules can only be tested by standing up Nest, Fastify and a database, and the layering exists for nothing.',
+      from: { path: '^apps/server/src/modules/[^/]+/domain/' },
+      to: {
+        path: '^apps/server/src/modules/[^/]+/(infrastructure|http)/',
+      },
+    },
+    {
+      name: 'no-domain-imports-frameworks',
+      severity: 'error',
+      comment:
+        'Domain code stays framework-free: no NestJS, Fastify, pg or ORM imports. Provider and transport concerns belong in infrastructure and http.',
+      from: { path: '^apps/server/src/modules/[^/]+/domain/' },
+      to: {
+        dependencyTypes: ['npm'],
+        path: '^(@nestjs/|fastify|pg$|pg-|drizzle-orm|@aws-sdk/)',
+      },
+    },
+    {
+      name: 'no-http-imports-repositories',
+      severity: 'error',
+      comment:
+        'HTTP controllers call application services, never repositories directly. A controller that reaches into infrastructure puts business rules in the transport layer, where no other caller can reuse them.',
+      from: { path: '^apps/server/src/modules/[^/]+/http/' },
+      to: { path: '^apps/server/src/modules/[^/]+/infrastructure/' },
     },
     {
       name: 'provider-sdks-stay-in-adapters',
@@ -99,7 +130,7 @@ module.exports = {
       comment:
         'The web app talks to the server over its HTTP contract, typed by packages/contracts. Importing server internals would ship server code, and possibly secrets, into the browser bundle.',
       from: { path: '^apps/web/' },
-      to: { path: '^apps/server/(?!.*contracts)' },
+      to: { path: '^apps/server/' },
     },
     {
       name: 'not-to-dev-dep',

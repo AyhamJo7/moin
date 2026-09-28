@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ConfigurationError, describeConfig, loadConfig } from './env.ts';
+import { ConfigurationError, configKeys, describeConfig, loadConfig, secretKeys } from './env.ts';
 
 const VALID = {
   SERVER_ROLE: 'api',
@@ -62,5 +62,37 @@ describe('configuration loader (P02.03.03)', () => {
     expect(described['DATABASE_URL']).toBe('[redacted]');
     expect(described['SERVER_ROLE']).toBe('api');
     expect(JSON.stringify(described)).not.toContain('s3cr3t-p4ssw0rd');
+  });
+
+  it('rejects pretty logging outside development, where its transport is not installed', () => {
+    expect(() => loadConfig({ ...VALID, LOG_PRETTY: 'true', NODE_ENV: 'production' })).toThrow(
+      ConfigurationError,
+    );
+    expect(() => loadConfig({ ...VALID, LOG_PRETTY: 'true', NODE_ENV: 'staging' })).toThrow(
+      ConfigurationError,
+    );
+    expect(loadConfig({ ...VALID, LOG_PRETTY: 'true', NODE_ENV: 'development' }).LOG_PRETTY).toBe(
+      true,
+    );
+  });
+
+  // A hand-maintained list of secret-bearing keys beside the schema drifts the first time someone
+  // adds a key and forgets the other file — and that first miss leaks a credential into the boot
+  // log. This asserts the classification is complete rather than remembered.
+  it('classifies every configuration key as secret-bearing or not', () => {
+    const secrets = secretKeys();
+    const unclassified = configKeys().filter(
+      (key) => !secrets.has(key) && /(_URL|SECRET|TOKEN|PASSWORD|KEY|ARN)$/i.test(key),
+    );
+    expect(unclassified, `these keys look secret-bearing but are not marked`).toStrictEqual([]);
+  });
+
+  it('every key marked secret is redacted by describeConfig', () => {
+    const described = describeConfig(loadConfig(VALID));
+    for (const key of secretKeys()) {
+      if (key in described) {
+        expect(described[key], `${key} must be redacted`).toBe('[redacted]');
+      }
+    }
   });
 });

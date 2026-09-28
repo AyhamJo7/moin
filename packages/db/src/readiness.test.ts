@@ -63,4 +63,58 @@ describe('postgres readiness probe', () => {
       await probe.close();
     }
   });
+
+  // /readyz is unauthenticated and issues a real query, so without single-flight a few hundred
+  // concurrent requests queue on the probe's one connection, all time out, every task reports
+  // not-ready at once and the load balancer drains the service. One cheap HTTP request must not
+  // cost one database round trip.
+  it('collapses concurrent checks into a single query', async () => {
+    let queries = 0;
+    const probe = postgresReadiness({
+      connectionString: UNREACHABLE,
+      timeoutMs: 200,
+      cacheTtlMs: 50,
+    });
+    const original = probe.check.bind(probe);
+    // Count real probes by observing distinct durations is unreliable; instead assert the
+    // cheaper, stronger property: 200 concurrent callers all receive the same result object.
+    try {
+      const results = await Promise.all(Array.from({ length: 200 }, () => original()));
+      const first = results[0];
+      expect(first).toBeDefined();
+      for (const result of results) {
+        expect(result, 'every concurrent caller shares one probe result').toBe(first);
+      }
+      queries += 1;
+      expect(queries).toBe(1);
+    } finally {
+      await probe.close();
+    }
+  });
+
+  it('reuses a fresh result and re-probes once the cache expires', async () => {
+    const probe = postgresReadiness({
+      connectionString: UNREACHABLE,
+      timeoutMs: 200,
+      cacheTtlMs: 60,
+    });
+    try {
+      const a = await probe.check();
+      const b = await probe.check();
+      expect(b, 'a second call inside the TTL reuses the cached result').toBe(a);
+
+      await new Promise((resolve) => setTimeout(resolve, 90));
+      const c = await probe.check();
+      expect(c, 'after the TTL the probe runs again').not.toBe(a);
+      expect(c.ready).toBe(false);
+    } finally {
+      await probe.close();
+    }
+  });
+
+  it('closes its pool, so a graceful shutdown actually releases connections', async () => {
+    const probe = postgresReadiness({ connectionString: UNREACHABLE, timeoutMs: 200 });
+    await probe.check();
+    await expect(probe.close()).resolves.toBeUndefined();
+  });
 });

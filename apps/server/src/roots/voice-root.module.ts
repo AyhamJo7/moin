@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '../config/config.module.ts';
+import { LoggerModule } from '../observability/logger.module.ts';
 import { HealthModule } from '../health/health.module.ts';
 
 /**
@@ -9,5 +10,5 @@ import { HealthModule } from '../health/health.module.ts';
  * voice session is a long-lived WebSocket with hard real-time deadlines, and a deploy that
  * interrupts one drops a call a human is on (INV-19).
  */
-@Module({ imports: [ConfigModule, HealthModule] })
+@Module({ imports: [ConfigModule.forFeature(), LoggerModule, HealthModule] })
 export class VoiceRootModule {}

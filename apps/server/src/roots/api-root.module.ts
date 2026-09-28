@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '../config/config.module.ts';
+import { LoggerModule } from '../observability/logger.module.ts';
 import { HealthModule } from '../health/health.module.ts';
 
 /**
@@ -12,5 +13,5 @@ import { HealthModule } from '../health/health.module.ts';
  * The business modules (identity-access, tenancy, audit, contacts, conversations, work, …) are
  * added by the phases that build them, P06 onward.
  */
-@Module({ imports: [ConfigModule, HealthModule] })
+@Module({ imports: [ConfigModule.forFeature(), LoggerModule, HealthModule] })
 export class ApiRootModule {}

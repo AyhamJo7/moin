@@ -24,19 +24,21 @@ const LOG_LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'] as const
 export type ServerRole = (typeof ROLES)[number];
 
 /**
- * Variables holding, or capable of holding, a credential. Their values are never echoed — not in
- * an error, not in a debug dump, not in a startup banner.
+ * Marks a variable as holding, or capable of holding, a credential. Its value is never echoed —
+ * not in an error, not in a debug dump, not in a startup banner.
+ *
+ * Secrecy is declared on the schema rather than in a parallel list. A hand-maintained set beside
+ * the schema drifts the first time someone adds a key and forgets the other file, and that first
+ * miss leaks a credential into the boot log (INV-15). Here, forgetting means the key is simply
+ * not marked, which `env.test.ts` fails on.
  */
-const SECRET_BEARING = new Set([
-  'DATABASE_URL',
-  'REDIS_URL',
-  'AWS_SECRETS_MANAGER_ARN',
-  'OIDC_CLIENT_SECRET',
-  'S3_SECRET_ACCESS_KEY',
-  'S3_ACCESS_KEY_ID',
-]);
+const SECRET_KEYS = new Set<string>();
+function secret<T extends z.ZodType>(name: string, schema_: T): T {
+  SECRET_KEYS.add(name);
+  return schema_;
+}
 
-const schema = z.object({
+const baseSchema = z.object({
   NODE_ENV: z.enum(NODE_ENVS).default('development'),
   SERVICE_NAME: z.string().min(1).default('moin'),
   SERVER_ROLE: z.enum(ROLES),
@@ -52,10 +54,32 @@ const schema = z.object({
     .regex(/^sha256:[0-9a-f]{64}$/, 'must be a sha256 image digest')
     .optional(),
 
-  DATABASE_URL: z.url({ protocol: /^postgres(ql)?$/ }),
-  REDIS_URL: z.url({ protocol: /^rediss?$/ }).optional(),
+  DATABASE_URL: secret('DATABASE_URL', z.url({ protocol: /^postgres(ql)?$/ })),
+  REDIS_URL: secret('REDIS_URL', z.url({ protocol: /^rediss?$/ }).optional()),
 
   SHUTDOWN_GRACE_MS: z.coerce.number().int().min(0).max(120_000).default(15_000),
+
+  /**
+   * How long to keep serving after SIGTERM before closing the listener. Must be at least the
+   * target group's deregistration delay, or the load balancer is still routing to a closed
+   * listener (INV-19).
+   */
+  DRAIN_MS: z.coerce.number().int().min(0).max(120_000).default(5_000),
+});
+
+const schema = baseSchema.superRefine((value, ctx) => {
+  // `pino-pretty` is a devDependency and is absent from the runtime image, so LOG_PRETTY=true
+  // on a deployed task would throw inside pino during boot and produce a crash loop. The
+  // comment in the logger said "never enabled outside local development"; nothing enforced it.
+  if (value.LOG_PRETTY && (value.NODE_ENV === 'staging' || value.NODE_ENV === 'production')) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['LOG_PRETTY'],
+      message:
+        'pretty logging is development-only: the transport it needs is not installed in the ' +
+        'runtime image, and human-formatted logs are not machine-parseable in production',
+    });
+  }
 });
 
 export type Config = Readonly<z.infer<typeof schema>>;
@@ -88,7 +112,7 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): Config {
 
   const problems = result.error.issues.map((issue) => {
     const name = issue.path.map(String).join('.') || '(root)';
-    const detail = SECRET_BEARING.has(name) ? describeWithoutValue(issue.code) : issue.message;
+    const detail = SECRET_KEYS.has(name) ? describeWithoutValue(issue.code) : issue.message;
     return `${name}: ${detail}`;
   });
   throw new ConfigurationError(problems);
@@ -110,11 +134,21 @@ function describeWithoutValue(code: string): string {
   }
 }
 
+/** Every key the schema knows about, so a test can assert each one is classified. */
+export function configKeys(): readonly string[] {
+  return Object.keys(baseSchema.shape);
+}
+
+/** Keys marked as secret-bearing. */
+export function secretKeys(): ReadonlySet<string> {
+  return SECRET_KEYS;
+}
+
 /** The resolved configuration with every secret-bearing value replaced, safe to log or print. */
 export function describeConfig(config: Config): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(config)) {
-    out[key] = SECRET_BEARING.has(key) ? '[redacted]' : value;
+    out[key] = SECRET_KEYS.has(key) ? '[redacted]' : value;
   }
   return out;
 }

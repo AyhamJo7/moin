@@ -35,7 +35,6 @@ export const ALLOWED_FIELDS: ReadonlySet<string> = new Set([
   'time',
   'msg',
   'pid',
-  'hostname',
 
   // Which deployment produced the line.
   'service',
@@ -78,8 +77,9 @@ export const ALLOWED_FIELDS: ReadonlySet<string> = new Set([
   'provider',
   'queue',
   'event',
-  'from',
-  'to',
+  'channel',
+  'direction',
+  'queueName',
 ]);
 
 /** Error shape that is safe to log: the type and where it happened, never the message. */
@@ -97,9 +97,15 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 /**
  * Replace every value whose key is not allowlisted with `[redacted]`, recursively.
  *
- * `from` and `to` are allowlisted as routing labels (a queue name, a channel), never as phone
- * numbers or email addresses — the E.164 and email value objects in `@moin/kernel` are not
- * loggable, and passing one here yields `[redacted]` because it is not a string.
+ * `from` and `to` were allowlisted here as routing labels and have been removed: in a telephony
+ * product they are the literal Twilio webhook parameter names for the caller's and the callee's
+ * E.164 numbers, so `logger.info({ from: call.from, to: call.to })` would have passed lint, passed
+ * every test, and shipped two phone numbers to the log aggregator. Routing labels now use names
+ * that cannot be mistaken for a person: `channel`, `direction`, `queueName`.
+ *
+ * Note that a class instance is not rejected by being "not a plain object": `isPlainObject` is
+ * true for any non-array object, so a value object is recursed into like any other. What protects
+ * it is that its inner field names are not allowlisted.
  */
 export function redactToAllowlist(input: unknown, depth = 0): unknown {
   if (depth > MAX_DEPTH) return REDACTED;

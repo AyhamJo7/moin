@@ -98,3 +98,16 @@ they guard exists: `moin/no-tenant-conditional` (INV-18) and `moin/no-direct-db-
 - **Biome instead of ESLint + Prettier** — faster, but has no type-aware rules and no plugin API
   for the two repository-specific rules above, which are the ones tied to invariants.
 - **TypeScript 7 now** — see above.
+
+## Runtime constraint: workspace sources must resolve outside `node_modules`
+
+The server is compiled, but the workspace packages it imports (`@moin/kernel`, `@moin/db`,
+`@moin/observability`, `@moin/contracts`) ship as TypeScript and are type-stripped by Node at
+runtime. That works only because pnpm's symlinked workspace layout resolves them to a realpath
+_outside_ `node_modules`: Node refuses to strip types for files underneath it
+(`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`).
+
+So `node-linker=hoisted`, vendoring one of these packages, or publishing any of them to a registry
+would break the runtime image at its first import — with a clean local test suite, because tests
+resolve the same sources through the workspace. If any of those becomes desirable, these packages
+must be compiled and their `exports` pointed at `dist` first.
