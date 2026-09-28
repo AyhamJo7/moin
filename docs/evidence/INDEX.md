@@ -62,3 +62,4 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P02-018 | P02.03.07 | 2026-09-28 | `f3065928572a` | Images build, containers start, health endpoints return 200, image size recorded | [EV-P02-018-images-build-and-serve.md](P02/EV-P02-018-images-build-and-serve.md) |
 | EV-P02-019 | P02.02.03 | 2026-09-28 | `f3065928572a` | TypeScript 6.0.3 validated against NestJS 12 and Next.js 16; ADR-0002 fallback not taken | [EV-P02-019-typescript-6-framework-validation.md](P02/EV-P02-019-typescript-6-framework-validation.md) |
 | EV-P02-020 | P02.02.07 | 2026-09-28 | `f3065928572a` | Module-boundary rules proven by trees that violate them | [EV-P02-020-boundary-rule-fixtures.md](P02/EV-P02-020-boundary-rule-fixtures.md) |
+| EV-P02-021 | P02.03 | 2026-09-28 | `2808106e7157` | QG-09 review of P02.03: 1 Critical, 11 High, 18 Medium/Low findings; all Critical and High fixed | [EV-P02-021-qg09-review-remediation.md](P02/EV-P02-021-qg09-review-remediation.md) |
