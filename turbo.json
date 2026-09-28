@@ -25,17 +25,6 @@
       "dependsOn": ["^build"],
       "outputs": []
     },
-    "test": {
-      "dependsOn": ["^build"],
-      "outputs": ["coverage/**"]
-    },
-    "test:integration": {
-      "dependsOn": ["^build"],
-      "cache": false,
-      "persistent": false,
-      "env": ["DATABASE_URL", "REDIS_URL", "S3_ENDPOINT", "SQS_ENDPOINT", "OIDC_ISSUER_URL"],
-      "outputs": []
-    },
     "dev": {
       "cache": false,
       "persistent": true

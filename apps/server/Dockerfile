@@ -7,13 +7,14 @@
 # The base is pinned by digest, not by tag: `node:24.21.0-bookworm-slim` is mutable and a
 # rebuild months later would silently produce a different image for the same source commit.
 
-# Not an ARG: a build argument can be overridden on the command line, which would defeat the
-# pin it exists to enforce. The release-validation script asserts the built manifest's
-# architecture, because a digest alone does not guarantee the platform that was built.
+# The target architecture is selected by `docker buildx build --platform linux/arm64`, not here:
+# `FROM --platform=$TARGETPLATFORM` is what buildx already does, so stating it is redundant
+# (hadolint DL3065). The container-scan job asserts the built image really is arm64, because a
+# digest alone does not guarantee the platform that was built.
 ARG NODE_IMAGE=node@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6
 
 # ---------------------------------------------------------------- dependencies
-FROM --platform=$TARGETPLATFORM ${NODE_IMAGE} AS deps
+FROM ${NODE_IMAGE} AS deps
 WORKDIR /app
 ENV CI=true PNPM_HOME=/pnpm PATH=/pnpm:$PATH
 RUN corepack enable
@@ -55,7 +56,7 @@ RUN pnpm --filter @moin/server... build
 # are already unpacked in the store and stay on disk. The first version of this file did exactly
 # that and shipped turbo, typescript, eslint, prettier and vitest into the runtime image — 589 MB,
 # most of it a build toolchain that an attacker in the container would have been delighted to find.
-FROM --platform=$TARGETPLATFORM ${NODE_IMAGE} AS prod-deps
+FROM ${NODE_IMAGE} AS prod-deps
 WORKDIR /app
 ENV CI=true PNPM_HOME=/pnpm PATH=/pnpm:$PATH
 RUN corepack enable
@@ -74,7 +75,7 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile --prod --ignore-scripts --filter @moin/server...
 
 # ---------------------------------------------------------------- runtime
-FROM --platform=$TARGETPLATFORM ${NODE_IMAGE} AS runtime
+FROM ${NODE_IMAGE} AS runtime
 WORKDIR /app
 
 ENV NODE_ENV=production \

@@ -70,7 +70,7 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm turbo run test
+      - run: pnpm test
 
   integration:
     name: integration tests (real postgres)
@@ -120,7 +120,7 @@ jobs:
           GRANT CONNECT ON DATABASE moin TO moin_app, moin_migrator, moin_readonly;
           SQL
 
-      - run: pnpm turbo run test:integration
+      - run: pnpm test:integration
 
       - name: Migration safety check
         run: node scripts/check-migrations.ts

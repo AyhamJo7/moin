@@ -13,7 +13,6 @@
   "scripts": {
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run --passWithNoTests",
     "build": "tsc -p tsconfig.build.json"
   },
   "devDependencies": {
