@@ -72,3 +72,13 @@ evidence.
   check and `pnpm doctor` account for.
 - Every credential in the committed realm is a development-only literal. Production secrets live in
   AWS Secrets Manager and are referenced by ARN (INV-15).
+
+## Verification
+
+| Enforcement                                                 | Where                                                                                                               |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| The provider is pinned by digest and its realm is committed | `docker-compose.yml` + `docker/keycloak/realm-moin-local.json`, imported on boot                                    |
+| PKCE is required, matching production                       | Realm attribute `pkce.code.challenge.method: S256`; a code without a verifier is rejected                           |
+| The negative cases are exercised                            | P06 auth suite: invalid issuer, invalid audience, expired token, unknown signing key, malformed token               |
+| No Keycloak-specific concept reaches production code        | The auth boundary depends on standard OIDC only; no admin-API call and no Keycloak claim outside the local fixtures |
+| Cognito-specific behaviour is verified against Cognito      | P06 records each such item as a staging verification; a local pass is a precondition, not evidence                  |

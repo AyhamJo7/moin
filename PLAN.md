@@ -138,7 +138,7 @@ Single source of status. Tier columns show the status of that phase's items for 
 | P00 | Planning baseline | READY_FOR_REVIEW | — | — | — | — | Founder review | Founder reads and adopts plan (P00.05) |
 | P01 | Discovery & Gurlitt observation | NOT_STARTED | NOT_STARTED | — | — | — | EXT-16 Gurlitt | Meet Gurlitt owner 2026-09-28 09:00 |
 | P02 | Engineering foundation | IN_PROGRESS | — | — | — | — | EXT-24 GitHub plan | P02.06 CI pipeline |
-| P03 | Architecture decisions & threat model | NOT_STARTED | — | — | — | — | — | Write core ADRs |
+| P03 | Architecture decisions & threat model | IN_PROGRESS | — | — | — | — | — | P03.02 domain model and glossary |
 | P04 | Feasibility proof & long-lead track | NOT_STARTED | — | — | NOT_STARTED | — | EXT-01/07/10/11/12 | Open Twilio/OpenAI/AWS requests day 1 |
 | P05 | Cloud foundation & walking skeleton | NOT_STARTED | — | — | — | — | EXT-09 AWS | Terraform bootstrap |
 | P06 | Tenancy, identity, authorization, audit | NOT_STARTED | — | NOT_STARTED | — | — | — | after P02/P03 |
@@ -2178,7 +2178,7 @@ CI run URLs (EV-P02-001), negative-control PR links (EV-P02-002), timed setup lo
 <a id="p03--architecture-decisions-domain-design-threat-model-and-data-inventory"></a>
 ## P03 — Architecture Decisions, Domain Design, Threat Model and Data Inventory
 
-**Status:** PILOT NOT_STARTED · **Target:** 2026-09-29 → 2026-10-06 · **Effort:** 4 engineering-days
+**Status:** PILOT IN_PROGRESS · **Target:** 2026-09-29 → 2026-10-06 · **Effort:** 4 engineering-days
 
 ### Objective
 Make the expensive-to-change decisions explicitly and early: tenancy, identity, data model, event model, dialogue design, retention, credentials. Produce the threat model and personal-data inventory the lawyer and later phases depend on.
@@ -2196,12 +2196,12 @@ Accept ADR-0001, 0003, 0004, 0005, 0006, 0007, 0008, 0009, 0015, 0020 and 0036. 
 Accepted ADRs · glossary · entity/aggregate model · state-machine specifications · event catalogue v1 · C4 + DFD · STRIDE threat model v1 · personal-data inventory + retention matrix · lawyer briefing pack · invariant enforcement register.
 
 ### Checklist
-- [ ] **P03.01 ADR process and core ADRs** `[G:PILOT]`
-  - [ ] P03.01.01 MADR template + `docs/adr/README.md` index
-  - [ ] P03.01.02 Write and accept ADR-0001, 0003, 0004, 0005, 0006, 0007, 0008, 0009, 0015, 0020, 0036
-  - [ ] P03.01.03 Draft ADR-0011 (dialogue manager), 0018 (retention/deletion), 0019 (turn logs, pending EXT-02)
-  - [ ] P03.01.04 Every ADR names the automated check or test that enforces it
-  - [ ] P03.01.05 Verify: each ADR reviewed against the INV table; no invariant lacks an ADR
+- [x] **P03.01 ADR process and core ADRs** `[G:PILOT]` — EV-P03-005
+  - [x] P03.01.01 MADR template + `docs/adr/README.md` index — EV-P03-001
+  - [x] P03.01.02 Write and accept ADR-0001, 0003, 0004, 0005, 0006, 0007, 0008, 0009, 0015, 0020, 0036 — EV-P03-002
+  - [x] P03.01.03 Draft ADR-0011 (dialogue manager), 0018 (retention/deletion), 0019 (turn logs, pending EXT-02) — EV-P03-003
+  - [x] P03.01.04 Every ADR names the automated check or test that enforces it — EV-P03-004
+  - [x] P03.01.05 Verify: each ADR reviewed against the INV table; no invariant lacks an ADR — EV-P03-005
 - [ ] **P03.02 Domain model and glossary** `[G:PILOT]`
   - [ ] P03.02.01 German/English glossary (Anruf, Rückruf, Anfrage, Aufgabe, Vorgang, Kontakt, Wissenseintrag, Freigabe …), mapping UI terms to code terms
   - [ ] P03.02.02 Entity and relationship model per module (extends blueprint L1028–1087)

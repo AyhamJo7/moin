@@ -111,3 +111,14 @@ So `node-linker=hoisted`, vendoring one of these packages, or publishing any of 
 would break the runtime image at its first import — with a clean local test suite, because tests
 resolve the same sources through the workspace. If any of those becomes desirable, these packages
 must be compiled and their `exports` pointed at `dist` first.
+
+## Verification
+
+| Enforcement                                 | Where                                                                                                                      |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Node and pnpm are the pinned versions       | `.nvmrc` + `engines`; `packageManager` resolved by corepack; `pnpm run preflight` checks the running machine               |
+| TypeScript strictness is not weakened       | `packages/config/tsconfig/base.json`; `pnpm turbo run typecheck` in CI                                                     |
+| Every lint ban still fires                  | One violating fixture per ban in `packages/config/src/eslint/__fixtures__`, asserted by `bans.test.ts` and mutation-proven |
+| Module boundaries hold                      | `.dependency-cruiser.cjs` with violating fixtures in `boundaries.test.ts`                                                  |
+| Type stripping stays viable                 | `erasableSyntaxOnly` in the shared base; the server overrides it and is compiled instead                                   |
+| The pinned toolchain is not bumped silently | Renovate requires dashboard approval for node, pnpm, typescript, typescript-eslint and eslint                              |

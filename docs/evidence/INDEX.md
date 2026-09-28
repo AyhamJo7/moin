@@ -88,3 +88,8 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P02-044 | P02.06.02 | 2026-09-28 | `1867d75a2e18` | The security-scan workflow is green: audit, licences, secrets, static analysis, Trivy, SBOM | [EV-P02-044-security-scan-green.md](P02/EV-P02-044-security-scan-green.md) |
 | EV-P02-045 | P02.06.03 | 2026-09-28 | `aa643ef093e3` | The container-scan workflow is green: hadolint, arm64 build, image assertions, Trivy | [EV-P02-045-container-scan-green.md](P02/EV-P02-045-container-scan-green.md) |
 | EV-P02-046 | P02.07.03 | 2026-09-28 | `c8564915fc12` | A fresh session followed the docs from a clean clone; it found nine real defects, all fixed | [EV-P02-046-fresh-session-doc-walkthrough.md](P02/EV-P02-046-fresh-session-doc-walkthrough.md) |
+| EV-P03-001 | P03.01.01 | 2026-09-28 | `90b3b4158bd1` | ADR template and index, with the enforcement requirement built in | [EV-P03-001-adr-process.md](P03/EV-P03-001-adr-process.md) |
+| EV-P03-002 | P03.01.02 | 2026-09-28 | `90b3b4158bd1` | Ten core ADRs accepted | [EV-P03-002-core-adrs-accepted.md](P03/EV-P03-002-core-adrs-accepted.md) |
+| EV-P03-003 | P03.01.03 | 2026-09-28 | `90b3b4158bd1` | Three ADRs drafted and left PROPOSED | [EV-P03-003-adrs-drafted.md](P03/EV-P03-003-adrs-drafted.md) |
+| EV-P03-004 | P03.01.04 | 2026-09-28 | `90b3b4158bd1` | Every ADR names the automated check that enforces it | [EV-P03-004-adr-enforcement-named.md](P03/EV-P03-004-adr-enforcement-named.md) |
+| EV-P03-005 | P03.01.05 | 2026-09-28 | `90b3b4158bd1` | Every invariant is covered by an ADR, or the register says which phase writes one | [EV-P03-005-invariant-adr-coverage.md](P03/EV-P03-005-invariant-adr-coverage.md) |
