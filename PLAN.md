@@ -2214,10 +2214,10 @@ Accepted ADRs · glossary · entity/aggregate model · state-machine specificati
   - [x] P03.03.02 Interaction finalisation (INV-06) and the reconciler contract — EV-P03-012
   - [x] P03.03.03 Task, lead, appointment request, knowledge item, integration, tenant lifecycle, DSAR request, support grant — EV-P03-012
   - [x] P03.03.04 Each machine is specified as a transition table with a property-test plan (illegal transitions rejected) — EV-P03-012
-- [ ] **P03.04 C4 and data-flow diagrams** `[G:PILOT]`
-  - [ ] P03.04.01 C4 context + container diagrams in `docs/architecture/`
-  - [ ] P03.04.02 Data-flow diagram with trust boundaries and personal-data flows (input to TOMs, DPIA support, subprocessor register)
-  - [ ] P03.04.03 Verify: every personal-data flow in the DFD maps to a subprocessor-register entry and an inventory category
+- [x] **P03.04 C4 and data-flow diagrams** `[G:PILOT]` — EV-P03-019
+  - [x] P03.04.01 C4 context + container diagrams in `docs/architecture/` — EV-P03-017
+  - [x] P03.04.02 Data-flow diagram with trust boundaries and personal-data flows (input to TOMs, DPIA support, subprocessor register) — EV-P03-018
+  - [x] P03.04.03 Verify: every personal-data flow in the DFD maps to a subprocessor-register entry and an inventory category — EV-P03-019
 - [ ] **P03.05 Threat model v1 (STRIDE)** `[G:PILOT]`
   - [ ] P03.05.01 Per component and flow, threats and mitigations mapped to checklist IDs; residual risks listed
   - [ ] P03.05.02 Abuse cases: toll-fraud-like traffic, bot calls, social engineering ("Ich bin der Inhaber"), competitor scraping of knowledge via calls, notification spam

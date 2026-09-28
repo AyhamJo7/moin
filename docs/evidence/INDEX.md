@@ -104,3 +104,6 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P03-014 | P03.06.02 | 2026-09-28 | `66270cbaae43` | Retention matrix aligned with the blueprint and PLAN privacy engineering | [EV-P03-014-retention-matrix.md](P03/EV-P03-014-retention-matrix.md) |
 | EV-P03-015 | P03.06.03 | 2026-09-28 | `66270cbaae43` | Data-dictionary check: no column holding personal data is unclassified | [EV-P03-015-data-dictionary-generator.md](P03/EV-P03-015-data-dictionary-generator.md) |
 | EV-P03-016 | P03.06.04 | 2026-09-28 | `66270cbaae43` | No unclassified column in the MVP tables | [EV-P03-016-classification-verified.md](P03/EV-P03-016-classification-verified.md) |
+| EV-P03-017 | P03.04.01 | 2026-09-28 | `b9f29969dc70` | C4 context and container diagrams | [EV-P03-017-c4-diagrams.md](P03/EV-P03-017-c4-diagrams.md) |
+| EV-P03-018 | P03.04.02 | 2026-09-28 | `b9f29969dc70` | Data-flow diagram with five trust boundaries and twelve classified flows | [EV-P03-018-data-flow-diagram.md](P03/EV-P03-018-data-flow-diagram.md) |
+| EV-P03-019 | P03.04.03 | 2026-09-28 | `b9f29969dc70` | Every personal-data flow maps to an inventory category and a subprocessor entry | [EV-P03-019-dfd-coverage-verified.md](P03/EV-P03-019-dfd-coverage-verified.md) |
