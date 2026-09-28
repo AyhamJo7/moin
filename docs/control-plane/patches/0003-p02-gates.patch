@@ -1,66 +1,77 @@
 P02.02.02 — replace the stub `workspace` gate with the QG-01 gate set and add `stress`.
 
-This file is founder-only (.claude/policy/protected-paths.json), so this session
-wrote the change as a patch instead of editing it. Apply it yourself:
+This file is founder-only (protected-paths policy), so this session wrote the
+change as a patch instead of editing it. Apply it yourself:
 
     git apply docs/control-plane/patches/0003-p02-gates.patch
     python3 .claude/bin/control_plane_check.py
     python3 .claude/bin/gates.py full
 
+REVISED 2026-09-29. The first version of this patch was written before P02.07
+moved the test runner: it used `pnpm turbo run test`, and turbo no longer owns a
+`test` task, so applying it would have produced a config whose `unit` gate could
+not run. Every command in this revision was executed individually against the
+current tree before the patch was regenerated.
+
 What changes
 ------------
 Removed: the `workspace` stub (`pnpm turbo run lint typecheck test build`), which
-existed only so that `full` could not pass before P02 landed.
+existed only so `full` could not pass before P02 landed. It now fails for a
+second reason too — turbo has no `test` task since P02.07.
 
 Added, in QG-01's order (PLAN.md, Cross-Phase Quality Gates):
 
-  conventions   Conventional Commit + no-attribution self-tests (P02.01.03)
-  format        prettier --check
-  lint          turbo run lint (includes the two repository rules)
-  boundaries    dependency-cruiser (P02.02.07)
-  typecheck     turbo run typecheck
-  unit          turbo run test
-  integration   turbo run test:integration   [requires docker]
-  build         turbo run build
-  secret-scan   gitleaks over history
+  conventions       Conventional Commit + no-attribution self-tests
+  docs-consistency  ADR coverage, domain coverage, DFD coverage, threat-model
+                    references, data classification
+  format            prettier --check
+  lint              turbo run lint
+  boundaries        dependency-cruiser
+  typecheck         turbo run typecheck
+  unit              pnpm test  (vitest, unit project)
+  integration       pnpm test:integration          [requires docker]
+  migrations        expand/contract and lock safety
+  build             turbo run build
+  licences          production-dependency licence allowlist
+  secret-scan       gitleaks over history, with the repository config
 
-`fast` becomes control-plane, conventions, format, lint, typecheck, unit — the
-loop that needs no Docker.
+`fast` becomes control-plane, conventions, docs-consistency, format, lint,
+typecheck, unit — the loop that needs no Docker.
 
-`stress` is added (20 iterations of `pnpm exec vitest run {targets}`), which
-`gates.py stress --targets` needs and which the stub had no section for.
+`stress` is added (20 iterations of the unit project), which `gates.py stress`
+needs and which the stub had no section for.
 
 Not yet included, with the phase that adds them
 -----------------------------------------------
   RLS catalog check + cross-tenant suite   P06.02, P06.03
   OpenAPI + client drift                   P06, P07
-  migration safety check                   P02.06.04 wires it into CI; it is
-                                           added here once packages/db exists
-  dependency audit + licence check         P02.08
 
 Each is a tightening, which needs no approval; they land with the phase that
 makes them real rather than as a gate that passes because it checks nothing.
 
-Note
-----
-`integration` requires Docker. On a machine without a reachable daemon that gate
-is reported SKIPPED-UNVERIFIED rather than passing, so a skip can never be read
-as a pass.
+Notes
+-----
+`integration` requires Docker and the local environment file. Without them the
+gate is reported SKIPPED-UNVERIFIED rather than passing, so a skip can never be
+read as a pass.
+
+The gate runner inherits whatever Node is on PATH. Run it under `nvm use` (Node
+24.21.0); under Node 22 pnpm emits an unsupported-engine warning.
 
 diff --git a/.claude/gates.json b/.claude/gates.json
-index 3bca18d..61d86f6 100644
+index 3bca18d..8fc9279 100644
 --- a/.claude/gates.json
 +++ b/.claude/gates.json
 @@ -1,6 +1,7 @@
  {
 -  "_doc": "Verification gates (run with python3 .claude/bin/gates.py fast|full; evidence in .git/claude-evidence/; the Stop hook checks completion claims against `full`). STUB until P02.02.02: the 'workspace' gate fails until the Turborepo tasks exist, so `full` cannot pass and no session can claim green before P02 lands. P02.02.02 replaces 'workspace' with the QG-01 set (format, lint, typecheck, unit, integration on real PG17+pgvector, build, gitleaks) and adds a `stress` section. Keep 'control-plane' first. Never delete or weaken a gate to make `full` pass (loosening needs founder approval).",
-+  "_doc": "Verification gates (run with python3 .claude/bin/gates.py fast|full; evidence in .git/claude-evidence/; the Stop hook checks completion claims against `full`). P02.02.02 replaced the 'workspace' stub with the QG-01 set and added a `stress` section. Keep 'control-plane' first. Never delete or weaken a gate to make `full` pass (loosening needs founder approval). Integration gates need the local stack: `pnpm dev:up` (Docker).",
++  "_doc": "Verification gates (run with python3 .claude/bin/gates.py fast|full; evidence in .git/claude-evidence/; the Stop hook checks completion claims against `full`). P02.02.02 replaced the 'workspace' stub with the QG-01 set and added a `stress` section. Keep 'control-plane' first. Never delete or weaken a gate to make `full` pass (loosening needs founder approval). The integration gate needs the local stack (`pnpm dev:up`) and the environment file. Every command below was run individually before this file was written.",
    "needs": [],
 +  "restore_generated": [],
    "gates": [
      {
        "name": "control-plane",
-@@ -14,11 +15,65 @@
+@@ -14,11 +15,91 @@
        "timeout": 600
      },
      {
@@ -70,6 +81,12 @@ index 3bca18d..61d86f6 100644
 +      "run": "node scripts/check-conventional-commit.ts --self-test && node scripts/check-no-ai-mentions.ts --self-test",
 +      "requires": ["node"],
 +      "timeout": 120
++    },
++    {
++      "name": "docs-consistency",
++      "run": "node scripts/check-adr-coverage.ts && node scripts/check-domain-coverage.ts && node scripts/check-dfd-coverage.ts && node scripts/check-threat-model-refs.ts && node scripts/check-data-classification.ts",
++      "requires": ["node"],
++      "timeout": 300
 +    },
 +    {
 +      "name": "format",
@@ -97,15 +114,21 @@ index 3bca18d..61d86f6 100644
 +    },
 +    {
 +      "name": "unit",
-+      "run": "pnpm turbo run test",
++      "run": "pnpm test",
        "requires": ["pnpm"],
        "timeout": 1800
 +    },
 +    {
 +      "name": "integration",
-+      "run": "pnpm turbo run test:integration",
++      "run": "pnpm test:integration",
 +      "requires": ["pnpm", "docker"],
 +      "timeout": 2400
++    },
++    {
++      "name": "migrations",
++      "run": "node scripts/check-migrations.ts",
++      "requires": ["node"],
++      "timeout": 300
 +    },
 +    {
 +      "name": "build",
@@ -114,18 +137,32 @@ index 3bca18d..61d86f6 100644
 +      "timeout": 1800
 +    },
 +    {
++      "name": "licences",
++      "run": "node scripts/check-licences.ts",
++      "requires": ["pnpm", "node"],
++      "timeout": 600
++    },
++    {
 +      "name": "secret-scan",
-+      "run": "gitleaks git --redact --no-banner .",
++      "run": "gitleaks git --redact --no-banner --config .gitleaks.toml .",
 +      "requires": ["gitleaks"],
 +      "timeout": 900
      }
    ],
 -  "fast": ["control-plane"]
-+  "fast": ["control-plane", "conventions", "format", "lint", "typecheck", "unit"],
++  "fast": [
++    "control-plane",
++    "conventions",
++    "docs-consistency",
++    "format",
++    "lint",
++    "typecheck",
++    "unit"
++  ],
 +  "stress": {
-+    "run": "pnpm exec vitest run {targets}",
++    "run": "pnpm exec vitest run --project unit {targets}",
 +    "iterations": 20,
-+    "default_targets": "packages/config/src",
++    "default_targets": "packages scripts apps",
 +    "timeout": 2400
 +  }
  }
