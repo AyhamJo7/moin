@@ -2245,9 +2245,9 @@ Accepted ADRs · glossary · entity/aggregate model · state-machine specificati
   - [x] P03.07.02 Question list with required decisions and deadlines (stage A before pilot; stage B before LAUNCH) — EV-P03-021
   - [ ] P03.07.03 Engage counsel; send the pack; record counterparty, request date, expected date and fallback in the Status Ledger
   - [ ] P03.07.04 Verify: counsel acknowledged receipt; request date, expected date and fallback recorded in the Status Ledger
-- [ ] **P03.08 Invariant enforcement register** `[G:PILOT]`
-  - [ ] P03.08.01 Map every INV to lint rules, CI checks, runtime assertions and alarms, each with an owner
-  - [ ] P03.08.02 Verify: every INV has ≥ 1 automated enforcement or an explicit documented manual control
+- [x] **P03.08 Invariant enforcement register** `[G:PILOT]` — EV-P03-023
+  - [x] P03.08.01 Map every INV to lint rules, CI checks, runtime assertions and alarms, each with an owner — EV-P03-022
+  - [x] P03.08.02 Verify: every INV has ≥ 1 automated enforcement or an explicit documented manual control — EV-P03-023
 
 ### Security
 The threat model drives controls in P05–P17. Social-engineering and toll-fraud abuse cases are explicitly modelled.
