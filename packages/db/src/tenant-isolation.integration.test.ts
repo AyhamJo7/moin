@@ -248,4 +248,20 @@ describe('the application role itself', () => {
       app.query('create table should_not_exist (id uuid primary key)'),
     ).rejects.toThrow();
   });
+
+  // The escape hatch that would make everything above irrelevant: becoming a role that can.
+  //
+  // The test is named "cannot become" rather than naming the statement it runs, because the lint
+  // rule banning session-level role and parameter changes matches string literals — and it
+  // matched the test's own title. Renaming the test is cheaper than loosening a rule that exists
+  // to stop a setting leaking onto the next checkout of a pooled connection.
+  it.each(['moin_owner', 'moin_migrator', 'moin_provisioner'])('cannot become %s', async (role) => {
+    const client = await app.connect();
+    try {
+      // eslint-disable-next-line no-restricted-syntax -- role identifier from a literal array in this file; a role name cannot be parameterised.
+      await expect(client.query(`set role ${role}`)).rejects.toThrow(/permission denied|must be/u);
+    } finally {
+      client.release();
+    }
+  });
 });

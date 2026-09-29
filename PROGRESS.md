@@ -1,11 +1,11 @@
 ---
-mission: P02 complete and verified end to end; P04 engineering done bar external; P06 next
+mission: P02 closed; P04 engineering done bar external; P06 tenancy spine in progress
 status: active
 mode: autonomous
 phase: P06
 tier: PILOT
 plan: docs/phases/P06-plan.md
-next: P06 — roles, FORCE RLS, tenant context, provisioning, RBAC, audit, cross-tenant suite
+next: P06.03 tenant context propagation, P06.14 withSystemWork, then P06.04 provisioning
 updated: 2026-09-29
 ---
 
@@ -134,6 +134,18 @@ Rules
 | P02.01.01 | READY_FOR_REVIEW | — | EV-P02-047 | EXT-24 ruleset active on `main`; export committed as an artefact |
 | P02.01.07 | READY_FOR_REVIEW | — | EV-P02-048 | Four red pull requests all BLOCKED; the no-push half is derived, see F14 |
 | P02.06.07 | READY_FOR_REVIEW | PR #20–#23 | EV-P02-049 | Four negative controls, each failing the job it was written for |
+| P06.01.01 | READY_FOR_REVIEW | PR #27 | EV-P06-001 | Seven roles; the migration asserts them because the migrator has no CREATEROLE |
+| P06.01.02 | READY_FOR_REVIEW | PR #27 | EV-P06-002 | PUBLIC revoked; default privileges are a safety net, explicit grants are the mechanism |
+| P06.01.03 | WAITING_FOR_EXTERNAL | — | — | Role credentials in Secrets Manager: needs P05 and EXT-09 |
+| P06.01.04 | WAITING_FOR_EXTERNAL | — | — | `pgaudit` is an RDS parameter group: needs P05 |
+| P06.01.05 | READY_FOR_REVIEW | PR #27 | EV-P06-003 | No DDL, no TRUNCATE, no policy changes, no role escalation, owns nothing |
+| P06.02.01 | READY_FOR_REVIEW | PR #27 | EV-P06-004 | NULL when unset, so a forgotten `withTenant` sees nothing rather than everything |
+| P06.02.02 | READY_FOR_REVIEW | PR #27 | EV-P06-005 | One function applies every policy, so no table has its own copy to diverge |
+| P06.02.03 | READY_FOR_REVIEW | PR #27 | EV-P06-006 | Composite keys checked against the live catalog rather than by review |
+| P06.02.04 | READY_FOR_REVIEW | PR #27 | EV-P06-007 | Seven rules over `pg_catalog`; wired into the `rls-catalog` CI job |
+| P06.02.05 | READY_FOR_REVIEW | PR #27 | EV-P06-008 | Global tables registered with a reason; a row without one does not count |
+| P06.02.06 | READY_FOR_REVIEW | PR #27 | EV-P06-009 | 20 isolation assertions, all as the application role against real policies |
+| P06.02.07 | READY_FOR_REVIEW | PR #27 | EV-P06-010 | Nine fixtures, including the enabled-but-not-forced case PLAN names |
 
 ## External waits
 
@@ -177,6 +189,10 @@ secret-rule fix (#25) merged, with its full-history scan green.
 ## Log
 
 - 2026-09-29 — #25 merged; the negative-control branches and the superseded fix branch are gone from the remote. `gates full` is **PASS 14/14** on this branch at `8a1478d169`, which is the first fully green full-gate run on a P02 branch. One thing worth recording about the local runs that preceded it: they kept failing `secret-scan` after the remote branches were deleted, because `gitleaks` scans **every ref** and the deleted branches still existed as _local_ branches in this clone. The repository was clean; the working copy was not. Deleting the local branches was the fix, and CI never saw the problem because it clones fresh.
+- 2026-09-29 — **P06.01 and P06.02: the security spine.** Tenant isolation is enforced by the database rather than by the application, because the application will be wrong occasionally and the property that matters is that being wrong is not _sufficient_ to leak. `app.current_org()` returns NULL when unset, so a policy comparing against it matches no rows and code that forgets `withTenant` sees an empty table rather than every tenant's — the obvious alternative, `current_setting` without `missing_ok`, _raises_, which sounds stricter and is worse, because an exception becomes a 500 while an empty result is a correct answer to a question asked without a tenant. One function applies every policy, so no table carries its own copy to diverge into `USING` without `WITH CHECK`. The catalog check reads `pg_catalog` rather than the migrations, because a later migration can undo an earlier one and `DISABLE ROW LEVEL SECURITY` is one line; it has seven rules and nine fixtures, including the enabled-but-not-forced case PLAN names.
+- 2026-09-29 — Deviation, flagged rather than done quietly: P06.01.01 asks for "a migration creating" the seven roles, and a migration cannot create a role, because `moin_migrator` has no `CREATEROLE` — which is the point of the split, since a role that can create roles can create a superuser. Roles are provisioned by whoever owns the cluster; the migration **asserts** them and fails with the name of any missing one, so the grants below it can never be silent no-ops.
+- 2026-09-29 — Three defects in P06, none found by reading. **Default privileges are recorded per grantor**: naming only the migrator left every table unreadable in the integration template, which builds its schema through the admin connection — eleven isolation tests failed with `permission denied`, far from the cause. Explicit grants per table are now the mechanism and the defaults are only a safety net. **The classification check had a phantom column named `REFERENCES`**, because its parser read the continuation line of a multi-line constraint as a column definition. And the first `locations` foreign key named `organisation_id` twice: harmless, reads as a typo, and the right answer is that a direct child of `organisations` needs only the tenant column because the parent _is_ the tenant — the catalog rule knows that now too.
+- 2026-09-29 — A lint rule fired on a test's own **title**: the ban on session-level `SET` matches string literals, and the test was called "cannot SET ROLE to %s". Renamed to "cannot become %s", which reads better anyway. Recorded because the tempting fix — loosening a rule that exists to stop a setting leaking onto the next checkout of a pooled connection — would have been much worse than renaming a test.
 - 2026-09-29 — The secret-rule fix had to be recreated on a clean branch (#24 closed, **#25** opened). Its first version wrote realistic-looking tokens into the self-test's examples and the stock `generic-api-key` rule flagged two of them — correctly. Writing a credential-shaped literal into the repository is exactly what the rule under test exists to prevent, so doing it inside that rule's own test was the wrong way round. The values are built from a low-entropy placeholder now; the rule checks the variable name and the length, not the entropy. The branch had to be recreated rather than fixed forward because **removing a literal in a later commit does not remove it from history, and history is what the secret scan reads** — the same lesson as the abandoned P04 branch earlier today, learned twice. Worth stating as a rule: a credential-shaped literal must never be committed at all, not even transiently, because a session cannot rewrite pushed history.
 - 2026-09-29 — **P02 is closed.** EXT-24 is satisfied: the `main-protection` ruleset is active with a pull request required, three required checks, linear history, force-push and deletion blocked, and **no bypass actors**. The export is committed as an artefact so a later export diffs against it. P02.01.01, P02.01.07 and P02.06.07 are the last three items and they are now ticked. One qualification, recorded rather than smoothed over: the half of P02.01.07 that says _a direct push to `main` is rejected_ is **derived from the ruleset, not tested**, because a session may not push to `main`. It is F14, one command.
 - 2026-09-29 — The four negative controls ran, and each failed the job it was written for: #20 lint → the static job; #21 a failing test → the unit job; #22 a vulnerable production dependency → the audit job; #23 a planted fake credential → the secret scan. **All four were reported BLOCKED by GitHub**, which is the empirical half of P02.01.07. Two results were better than predicted. #22 failed three jobs, not one: `pnpm audit`, Trivy against the lockfile and Trivy inside the built image caught it independently, in two different workflows — so a single misconfigured gate would not open the door. And `verify` passed on it, correctly: a vulnerable dependency is not a correctness failure, which is exactly the class of problem only a supply-chain check finds.
