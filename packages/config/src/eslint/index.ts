@@ -163,7 +163,7 @@ export const baseConfig = defineConfig(
   // Repository scripts and config files are CLIs: their output IS the interface, and they run
   // outside the service, where the Pino logger and its redaction allowlist do not exist.
   {
-    files: ['scripts/**/*.ts', '**/*.config.ts'],
+    files: ['scripts/**/*.ts', '**/*.config.ts', '**/src/cli.ts'],
     rules: {
       'no-console': 'off',
     },

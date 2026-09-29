@@ -11,15 +11,22 @@
     "pnpm": ">=10.34.5 <11"
   },
   "scripts": {
-    "lint": "turbo run lint",
-    "typecheck": "turbo run typecheck",
-    "test": "turbo run test",
-    "test:integration": "turbo run test:integration",
     "build": "turbo run build",
+    "check:conventions": "node scripts/check-conventional-commit.ts --self-test && node scripts/check-no-ai-mentions.ts --self-test",
+    "db:migrate": "node packages/db/src/cli.ts migrate",
+    "db:seed": "node packages/db/src/cli.ts seed",
+    "depcruise": "depcruise apps packages --config .dependency-cruiser.cjs",
+    "dev:down": "docker compose down",
+    "dev:logs": "docker compose logs -f",
+    "dev:reset": "docker compose down --volumes && docker compose up -d --wait",
+    "dev:up": "docker compose up -d --wait",
+    "doctor": "node scripts/doctor.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "depcruise": "depcruise apps packages --config .dependency-cruiser.cjs",
-    "check:conventions": "node scripts/check-conventional-commit.ts --self-test && node scripts/check-no-ai-mentions.ts --self-test",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "test:integration": "turbo run test:integration",
+    "typecheck": "turbo run typecheck",
     "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   },
   "devDependencies": {

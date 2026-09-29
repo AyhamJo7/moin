@@ -137,7 +137,7 @@ Single source of status. Tier columns show the status of that phase's items for 
 |---|---|---|---|---|---|---|---|---|
 | P00 | Planning baseline | READY_FOR_REVIEW | — | — | — | — | Founder review | Founder reads and adopts plan (P00.05) |
 | P01 | Discovery & Gurlitt observation | NOT_STARTED | NOT_STARTED | — | — | — | EXT-16 Gurlitt | Meet Gurlitt owner 2026-09-28 09:00 |
-| P02 | Engineering foundation | IN_PROGRESS | — | — | — | — | EXT-24 GitHub plan | P02.04 local development environment |
+| P02 | Engineering foundation | IN_PROGRESS | — | — | — | — | EXT-24 GitHub plan | P02.05 test infrastructure |
 | P03 | Architecture decisions & threat model | NOT_STARTED | — | — | — | — | — | Write core ADRs |
 | P04 | Feasibility proof & long-lead track | NOT_STARTED | — | — | NOT_STARTED | — | EXT-01/07/10/11/12 | Open Twilio/OpenAI/AWS requests day 1 |
 | P05 | Cloud foundation & walking skeleton | NOT_STARTED | — | — | — | — | EXT-09 AWS | Terraform bootstrap |
@@ -826,6 +826,8 @@ ADRs live in `docs/adr/NNNN-title.md` (MADR format: context, decision, alternati
 | ADR-0041 | Generic outbound webhook | Tenant-configured, HMAC-signed, retried, SSRF-safe deliveries with logs and replay | P29 |
 | ADR-0042 | Document pipeline | Deferred; KoSIT validator + deterministic XML; malware scanning; original preserved | P34 |
 | ADR-0043 | Voice cost path | Deferred; Media Streams → dedicated STT → LLM → TTS behind the same voice port | P43 |
+| ADR-0044 | Local S3 emulator | Adobe S3Mock (Apache-2.0), local and test only, pinned by digest; production is real AWS S3 | P02 |
+| ADR-0045 | Local OIDC provider | Keycloak, local and test only, pinned by digest, realm committed as data; production identity is Cognito | P02 |
 
 ---
 
@@ -2103,13 +2105,13 @@ Monorepo skeleton · CI v1 · local stack · test harnesses · governance files 
   - [x] P02.03.05 `/healthz` (liveness) and `/readyz` (DB and dependency readiness) per role — EV-P02-016
   - [x] P02.03.06 Multi-stage Dockerfiles (ARM64, non-root, read-only FS compatible, no package manager in runtime layer) — EV-P02-017
   - [x] P02.03.07 Verify: images build; containers start; health endpoints return 200; image size recorded — EV-P02-018
-- [ ] **P02.04 Local development environment** `[G:PILOT]`
-  - [ ] P02.04.01 Docker Compose: Postgres 17 + pgvector (pinned digest), Valkey, SQS emulator (ElasticMQ), S3-compatible emulator (licence-checked), Mailpit, local OIDC provider for auth flows
-  - [ ] P02.04.02 `pnpm dev:up`, `dev:down`, `dev:reset`, `db:migrate`, `db:seed` (synthetic demo tenants "Musterrestaurant" and "Musterbetrieb SHK")
-  - [ ] P02.04.03 `.env.example` with fake values; `.env*` gitignored except the example
-  - [ ] P02.04.04 Document the Twilio development path: developer-only tunnel to local voice service for sandbox numbers; never used for staging or production
-  - [ ] P02.04.05 `pnpm doctor`: checks Node, pnpm, Docker, free ports, env completeness (pattern from exitos `doctor.ts`)
-  - [ ] P02.04.06 Verify: fresh clone → running stack with seed data in ≤ 15 minutes (timed log)
+- [x] **P02.04 Local development environment** `[G:PILOT]` — EV-P02-022
+  - [x] P02.04.01 Docker Compose: Postgres 17 + pgvector (pinned digest), Valkey, SQS emulator (ElasticMQ), S3-compatible emulator (licence-checked), Mailpit, local OIDC provider for auth flows — EV-P02-024
+  - [x] P02.04.02 `pnpm dev:up`, `dev:down`, `dev:reset`, `db:migrate`, `db:seed` (synthetic demo tenants "Musterrestaurant" and "Musterbetrieb SHK") — EV-P02-025
+  - [x] P02.04.03 `.env.example` with fake values; `.env*` gitignored except the example — EV-P02-026
+  - [x] P02.04.04 Document the Twilio development path: developer-only tunnel to local voice service for sandbox numbers; never used for staging or production — EV-P02-027
+  - [x] P02.04.05 `pnpm doctor`: checks Node, pnpm, Docker, free ports, env completeness (pattern from exitos `doctor.ts`) — EV-P02-023
+  - [x] P02.04.06 Verify: fresh clone → running stack with seed data in ≤ 15 minutes (timed log) — EV-P02-022
 - [ ] **P02.05 Test infrastructure** `[G:PILOT]`
   - [ ] P02.05.01 Vitest projects: `unit`, `integration`
   - [ ] P02.05.02 Real-Postgres harness: template database cloning per test file, roles and migrations applied, runnable standalone

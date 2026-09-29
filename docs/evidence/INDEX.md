@@ -63,3 +63,9 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P02-019 | P02.02.03 | 2026-09-28 | `f3065928572a` | TypeScript 6.0.3 validated against NestJS 12 and Next.js 16; ADR-0002 fallback not taken | [EV-P02-019-typescript-6-framework-validation.md](P02/EV-P02-019-typescript-6-framework-validation.md) |
 | EV-P02-020 | P02.02.07 | 2026-09-28 | `f3065928572a` | Module-boundary rules proven by trees that violate them | [EV-P02-020-boundary-rule-fixtures.md](P02/EV-P02-020-boundary-rule-fixtures.md) |
 | EV-P02-021 | P02.03 | 2026-09-28 | `2808106e7157` | QG-09 review of P02.03: 1 Critical, 11 High, 18 Medium/Low findings; all Critical and High fixed | [EV-P02-021-qg09-review-remediation.md](P02/EV-P02-021-qg09-review-remediation.md) |
+| EV-P02-022 | P02.04.06 | 2026-09-28 | `adbe336fea37` | Fresh clone to a running stack with migrations applied, timed | [EV-P02-022-fresh-clone-timed.md](P02/EV-P02-022-fresh-clone-timed.md) |
+| EV-P02-023 | P02.04.05 | 2026-09-28 | `adbe336fea37` | pnpm doctor checks Node, pnpm, Docker, dependencies, env completeness and ports | [EV-P02-023-doctor.md](P02/EV-P02-023-doctor.md) |
+| EV-P02-024 | P02.04.01 | 2026-09-28 | `adbe336fea37` | Six-service local stack, every image pinned by digest, all healthy | [EV-P02-024-local-stack.md](P02/EV-P02-024-local-stack.md) |
+| EV-P02-025 | P02.04.02 | 2026-09-28 | `adbe336fea37` | dev:up, dev:down, dev:reset, db:migrate and db:seed work end to end | [EV-P02-025-dev-commands.md](P02/EV-P02-025-dev-commands.md) |
+| EV-P02-026 | P02.04.03 | 2026-09-28 | `adbe336fea37` | Example environment file with fake values only; every .env ignored | [EV-P02-026-env-example.md](P02/EV-P02-026-env-example.md) |
+| EV-P02-027 | P02.04.04 | 2026-09-28 | `adbe336fea37` | Twilio development path documented as developer-only | [EV-P02-027-twilio-local-path.md](P02/EV-P02-027-twilio-local-path.md) |
