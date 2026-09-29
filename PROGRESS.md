@@ -1,11 +1,11 @@
 ---
 mission: P02 closed; P04 engineering done bar external; P06 tenancy spine in progress
-status: active
+status: blocked
 mode: autonomous
 phase: P06
 tier: PILOT
 plan: docs/phases/P06-plan.md
-next: P06.04 provisioning (provision_tenant, Early Access cap), then P06.10 audit
+next: finish P06.04 — see the BLOCKER entry at the top of the Log for the exact order
 updated: 2026-09-29
 ---
 
@@ -197,6 +197,11 @@ secret-rule fix (#25) merged, with its full-history scan green.
 
 ## Log
 
+- 2026-09-29 — **BLOCKER: usage limit reached mid-P06.04.** Not a technical blocker and not an external wait — the session ran out of budget.
+  - **What was tried:** `packages/db/migrations/0006_provisioning.sql` was written and applied to the local development database (`pnpm db:migrate` → `applied 1: 0006_provisioning`). It adds `provisioning_limits`, `provisioning_requests` and `app.provision_tenant(...)`.
+  - **Why it is not progressing:** nothing after that ran. No tests, no `gates full`, no commit until this entry. **Nothing about P06.04 is verified**, and the migration has been applied to one developer database only.
+  - **What is needed next, in order:** (1) register `app.provision_tenant` in `docs/architecture/security-definer-allowlist.md` with its justification — **the catalog check fails until this exists**, by design; (2) add `provisioning_limits` and `provisioning_requests` to `docs/architecture/global-tables.md`; (3) classify the new columns in `docs/privacy/data-inventory.md`, or `check-data-classification` fails; (4) write the P06.04.05 tests — one consistent tenant, `moin_app` cannot call the function, the cap holds under concurrency, a failure leaves nothing, and a negative control proving `moin_provisioner` cannot INSERT directly; (5) `gates full` **at the final committed HEAD**, then the PR.
+  - **Design intent, so it is not re-derived:** the function does not bypass row-level security, it satisfies it — it sets the tenant context to the organisation it is about to create, and `organisations.organisation_id` is generated from `id`, so the ordinary policy passes by construction. FORCE RLS stays on and no role gains `BYPASSRLS`. `moin_provisioner` has `EXECUTE` and no DML on what the function writes, so the only way that role can create a tenant is the way that enforces the cap and the idempotency. The cap lives in a single-row table changed only by a reviewed migration, which is what makes an override signed and audited here. `pg_advisory_xact_lock` before the count is what makes it hold under concurrency rather than merely be checked.
 - 2026-09-29 — **P06.03 and P06.14: the tenant wrapper.** `withTenant` is the only place the tenant setting is written, and it writes it **transaction-locally**: a session-level `SET` would survive the transaction and ride the pooled connection into the next request — one caller's tenant applied to another caller's query, which is the single worst bug this codebase could have. `withSystemWork` is the other half: sweeps and reconcilers run across tenants by definition, and the tempting shortcut is a role that can see all of them at once. There is no such role — the claim returns identifiers only, and each is processed inside `withTenant` as the ordinary application role. A job envelope that names the wrong organisation therefore updates **zero rows**: an empty path rather than an error path, which is what makes a mismatch harmless rather than merely detected.
 - 2026-09-29 — Nesting a _different_ tenant now throws. Nesting the same one is ordinary — a service calls a service — but nesting a different one means code is about to act for organisation B inside a transaction opened for organisation A, and whichever the database ends up applying, something is wrong. Also: a malformed organisation id is rejected at the boundary rather than by the policy's cast, so the caller gets a clear failure instead of something that reads like a database fault, and the rejected value is never echoed into the error.
 - 2026-09-29 — Two lint findings worth recording rather than suppressing quietly. Thirteen `async` arrows in the new tests had no `await`; they were rewritten rather than suppressed. One suppression was kept, in `TenantClient.query<R>`: the rule is right that `R` appears only in the return type and is therefore an assertion rather than an inference — but the shape of a result set is decided by the database, and the alternatives are worse. The comment says so rather than naming the rule and moving on.
