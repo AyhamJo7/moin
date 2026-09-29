@@ -93,3 +93,10 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P03-003 | P03.01.03 | 2026-09-28 | `90b3b4158bd1` | Three ADRs drafted and left PROPOSED | [EV-P03-003-adrs-drafted.md](P03/EV-P03-003-adrs-drafted.md) |
 | EV-P03-004 | P03.01.04 | 2026-09-28 | `90b3b4158bd1` | Every ADR names the automated check that enforces it | [EV-P03-004-adr-enforcement-named.md](P03/EV-P03-004-adr-enforcement-named.md) |
 | EV-P03-005 | P03.01.05 | 2026-09-28 | `90b3b4158bd1` | Every invariant is covered by an ADR, or the register says which phase writes one | [EV-P03-005-invariant-adr-coverage.md](P03/EV-P03-005-invariant-adr-coverage.md) |
+| EV-P03-006 | P03.02.01 | 2026-09-28 | `906b56850bb3` | German/English glossary mapping UI terms to code terms | [EV-P03-006-glossary.md](P03/EV-P03-006-glossary.md) |
+| EV-P03-007 | P03.02.02 | 2026-09-28 | `906b56850bb3` | Entity and relationship model per module, extending the blueprint | [EV-P03-007-entity-model.md](P03/EV-P03-007-entity-model.md) |
+| EV-P03-008 | P03.02.03 | 2026-09-28 | `906b56850bb3` | Aggregate boundaries with the rule each holds at every commit | [EV-P03-008-aggregate-boundaries.md](P03/EV-P03-008-aggregate-boundaries.md) |
+| EV-P03-009 | P03.02.04 | 2026-09-28 | `906b56850bb3` | Canonical intents, outcome codes and task types as closed vocabularies (T-01) | [EV-P03-009-intents-outcomes-tasks.md](P03/EV-P03-009-intents-outcomes-tasks.md) |
+| EV-P03-010 | P03.02.05 | 2026-09-28 | `906b56850bb3` | Domain event catalogue v1: names, id-only payloads, producers and consumers | [EV-P03-010-event-catalogue.md](P03/EV-P03-010-event-catalogue.md) |
+| EV-P03-011 | P03.02.06 | 2026-09-28 | `906b56850bb3` | Every blueprint entity maps to the model; no unmapped entity | [EV-P03-011-domain-coverage-verified.md](P03/EV-P03-011-domain-coverage-verified.md) |
+| EV-P03-012 | P03.03.01 | 2026-09-28 | `906b56850bb3` | Ten state machines as transition tables with a property-test plan | [EV-P03-012-state-machines.md](P03/EV-P03-012-state-machines.md) |
