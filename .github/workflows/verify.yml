@@ -133,7 +133,13 @@ jobs:
           CREATE ROLE moin_app WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
           CREATE ROLE moin_migrator WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
           CREATE ROLE moin_readonly WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
-          GRANT CONNECT ON DATABASE moin TO moin_app, moin_migrator, moin_readonly;
+          CREATE ROLE moin_provisioner WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
+          CREATE ROLE moin_dispatcher WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
+          CREATE ROLE moin_support_ro WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
+          CREATE ROLE moin_reporting WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
+          GRANT CONNECT ON DATABASE moin TO moin_app, moin_migrator, moin_readonly,
+            moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting;
+          GRANT CREATE ON DATABASE moin TO moin_migrator;
           SQL
 
       - run: pnpm test:integration
@@ -189,20 +195,69 @@ jobs:
   # because it checks nothing is worse than no job: it reports green and means nothing.
   # ---------------------------------------------------------------------------------------
   rls-catalog:
-    name: RLS catalog check (activated in P06.02)
+    name: RLS catalog check
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
+    # Migrates a real database and then reads pg_catalog. The question this answers — is every
+    # tenant table actually forced and policed right now — cannot be answered from the migrations,
+    # because a later one can undo an earlier one and `DISABLE ROW LEVEL SECURITY` is one line.
+    services:
+      postgres:
+        image: pgvector/pgvector@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
+        env:
+          POSTGRES_USER: moin_owner
+          POSTGRES_PASSWORD: ci-only-not-a-secret
+          POSTGRES_DB: moin
+          POSTGRES_INITDB_ARGS: '--encoding=UTF8 --locale=C'
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U moin_owner -d moin"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      DATABASE_MIGRATION_URL: postgres://moin_owner:ci-only-not-a-secret@127.0.0.1:5432/moin
+      DATABASE_URL: postgres://moin_owner:ci-only-not-a-secret@127.0.0.1:5432/moin
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Not yet active
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Create database roles
+        env:
+          PGPASSWORD: ci-only-not-a-secret
         run: |
-          if [ -f scripts/check-rls-catalog.ts ]; then
-            echo "scripts/check-rls-catalog.ts exists — wire this job to run it (P06.02.04)." >&2
-            exit 1
-          fi
-          echo "Reserved slot: the RLS catalog check is created in P06.02.04. Nothing is checked yet."
+          psql -h 127.0.0.1 -U moin_owner -d moin -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE moin_app WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
+          CREATE ROLE moin_migrator WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
+          CREATE ROLE moin_readonly WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
+          CREATE ROLE moin_provisioner WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
+          CREATE ROLE moin_dispatcher WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
+          CREATE ROLE moin_support_ro WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
+          CREATE ROLE moin_reporting WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
+          GRANT CONNECT ON DATABASE moin TO moin_app, moin_migrator, moin_readonly,
+            moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting;
+          GRANT CREATE ON DATABASE moin TO moin_migrator;
+          SQL
+
+      - name: Extensions
+        env:
+          PGPASSWORD: ci-only-not-a-secret
+        run: |
+          psql -h 127.0.0.1 -U moin_owner -d moin -v ON_ERROR_STOP=1 \
+            -c 'CREATE EXTENSION IF NOT EXISTS vector' \
+            -c 'CREATE EXTENSION IF NOT EXISTS pgcrypto' \
+            -c 'CREATE EXTENSION IF NOT EXISTS citext' \
+            -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm'
+
+      - run: pnpm db:migrate
+      - run: node scripts/check-rls-catalog.ts
 
   openapi-drift:
     name: OpenAPI and client drift (activated in P06/P07)

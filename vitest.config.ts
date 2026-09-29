@@ -41,7 +41,7 @@ export default defineConfig({
         test: {
           name: 'integration',
           root: import.meta.dirname,
-          include: ['{apps,packages}/**/*.integration.test.ts'],
+          include: ['{apps,packages,scripts}/**/*.integration.test.ts'],
           exclude: ['**/node_modules/**', '**/dist/**'],
           environment: 'node',
           // Each file gets its own database cloned from the template, so files are independent

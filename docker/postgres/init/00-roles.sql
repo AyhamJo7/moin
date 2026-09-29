@@ -19,9 +19,31 @@ CREATE ROLE moin_migrator WITH LOGIN PASSWORD 'local-development-only' NOBYPASSR
 -- query cannot accidentally read across tenants.
 CREATE ROLE moin_readonly WITH LOGIN PASSWORD 'local-development-only' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
 
-GRANT CONNECT ON DATABASE moin TO moin_app, moin_migrator, moin_readonly;
+-- Provisioning role: may execute provision_tenant() and nothing else (P06.04). Separate from the
+-- application role because creating a tenant is the one operation that legitimately writes across
+-- the tenancy boundary, and it must not be reachable from a request handler.
+CREATE ROLE moin_provisioner WITH LOGIN PASSWORD 'local-development-only' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
+
+-- Bookkeeping pool for the worker: outbox, inbox, job history and timers. It touches no tenant
+-- table, so a dispatcher bug cannot reach tenant data; tenant effects run afterwards as moin_app
+-- inside withTenant.
+CREATE ROLE moin_dispatcher WITH LOGIN PASSWORD 'local-development-only' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
+
+-- Support diagnostics. Reads tenant data only through views gated by an active support access
+-- grant (P06.11), never directly.
+CREATE ROLE moin_support_ro WITH LOGIN PASSWORD 'local-development-only' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
+
+-- Founder KPI dashboards: aggregate, PII-free views only.
+CREATE ROLE moin_reporting WITH LOGIN PASSWORD 'local-development-only' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
+
+GRANT CONNECT ON DATABASE moin TO moin_app, moin_migrator, moin_readonly, moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting;
 
 -- The public schema is not writable by default; P06 creates the application schema and grants.
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
-GRANT USAGE ON SCHEMA public TO moin_app, moin_migrator, moin_readonly;
+GRANT USAGE ON SCHEMA public TO moin_app, moin_migrator, moin_readonly, moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting;
 GRANT CREATE ON SCHEMA public TO moin_migrator;
+
+-- The migrator is the DDL role, so it may also create schemas: P06 adds `app`, which holds the
+-- helpers row-level-security policies call. Creating it needs CREATE on the database, not on a
+-- schema, which is a distinction that costs an afternoon the first time it is met.
+GRANT CREATE ON DATABASE moin TO moin_migrator;

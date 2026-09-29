@@ -141,7 +141,7 @@ Single source of status. Tier columns show the status of that phase's items for 
 | P03 | Architecture decisions & threat model | IN_PROGRESS | — | — | — | — | EXT-02 counsel not engaged | P03.05 review findings; founder sends the legal pack |
 | P04 | Feasibility proof & long-lead track | IN_PROGRESS | — | — | NOT_STARTED | — | EXT-01/07/10/11/12 | Adapter, gateway port and measurement harness built; every measurement waits on EXT-10/11/12 |
 | P05 | Cloud foundation & walking skeleton | NOT_STARTED | — | — | — | — | EXT-09 AWS | Terraform bootstrap |
-| P06 | Tenancy, identity, authorization, audit | NOT_STARTED | — | NOT_STARTED | — | — | — | after P02/P03 |
+| P06 | Tenancy, identity, authorization, audit | IN_PROGRESS | — | NOT_STARTED | — | — | P05 for Cognito, Secrets Manager, pgaudit | Roles, FORCE RLS and the catalog check done |
 | P07 | Core business action model | NOT_STARTED | — | NOT_STARTED | NOT_STARTED | — | — | after P06.02 |
 | P08 | Async, events, scheduling, realtime | NOT_STARTED | — | — | — | — | — | after P06.03 |
 | P09 | Knowledge system | NOT_STARTED | — | NOT_STARTED | NOT_STARTED | — | — | after P07 |
@@ -2536,7 +2536,7 @@ Recreate-from-scratch log (EV-P05-001), rollback drill (EV-P05-002), SCP denial 
 <a id="p06--tenancy-identity-authorization-and-audit-foundation"></a>
 ## P06 — Tenancy, Identity, Authorization and Audit Foundation
 
-**Status:** PILOT NOT_STARTED · LAUNCH NOT_STARTED · **Target:** 2026-10-05 → 2026-10-14 · **Effort:** 6 engineering-days
+**Status:** PILOT IN_PROGRESS · LAUNCH NOT_STARTED · **Target:** 2026-10-05 → 2026-10-14 · **Effort:** 6 engineering-days
 
 ### Objective
 Build the security spine every feature depends on: DB roles, FORCE RLS, tenant-context propagation, provisioning, authentication with mandatory MFA, server-side sessions, RBAC, audit, operator identity, and the adversarial cross-tenant suite.
@@ -2555,22 +2555,22 @@ Roles and RLS framework · `withTenant` / `withSystemWork` · catalog check · o
 
 ### Checklist
 - [ ] **P06.01 Database roles and privileges** `[G:PILOT]`
-  - [ ] P06.01.01 Migration creating `moin_owner`, `moin_migrator`, `moin_app`, `moin_provisioner`, `moin_dispatcher`, `moin_support_ro`, `moin_reporting` per [Data Architecture](#data-architecture)
-  - [ ] P06.01.02 Revoke `PUBLIC` privileges on schemas and functions; default privileges per role
+  - [x] P06.01.01 Migration creating `moin_owner`, `moin_migrator`, `moin_app`, `moin_provisioner`, `moin_dispatcher`, `moin_support_ro`, `moin_reporting` per [Data Architecture](#data-architecture) — EV-P06-001
+  - [x] P06.01.02 Revoke `PUBLIC` privileges on schemas and functions; default privileges per role — EV-P06-002
   - [ ] P06.01.03 Credentials per role in Secrets Manager; rotation configured (P05.08)
   - [ ] P06.01.04 `pgaudit` configured for DDL, role changes and break-glass sessions
-  - [ ] P06.01.05 Tests: `moin_app` cannot run DDL, `TRUNCATE`, `SET ROLE` to owner/migrator, or disable RLS, and owns no tables
-- [ ] **P06.02 RLS framework and catalog check** `[G:PILOT]`
-  - [ ] P06.02.01 `app.current_org()` helper (NULL when unset or empty → fail closed)
-  - [ ] P06.02.02 Policy template (USING + WITH CHECK) applied with ENABLE + FORCE on every tenant table
-  - [ ] P06.02.03 Composite unique `(organisation_id, id)` and composite FK convention; migration lint rejects violations
-  - [ ] P06.02.04 `scripts/check-rls-catalog.ts`:
+  - [x] P06.01.05 Tests: `moin_app` cannot run DDL, `TRUNCATE`, `SET ROLE` to owner/migrator, or disable RLS, and owns no tables — EV-P06-003
+- [x] **P06.02 RLS framework and catalog check** `[G:PILOT]` — EV-P06-007
+  - [x] P06.02.01 `app.current_org()` helper (NULL when unset or empty → fail closed) — EV-P06-004
+  - [x] P06.02.02 Policy template (USING + WITH CHECK) applied with ENABLE + FORCE on every tenant table — EV-P06-005
+  - [x] P06.02.03 Composite unique `(organisation_id, id)` and composite FK convention; migration lint rejects violations — EV-P06-006
+  - [x] P06.02.04 `scripts/check-rls-catalog.ts` — EV-P06-007:
     - every `organisation_id` table has RLS enabled and forced, plus policies for all commands;
     - `moin_app` has no BYPASSRLS;
     - `SECURITY DEFINER` functions are on the allowlist with `search_path` pinned.
-  - [ ] P06.02.05 Global-table register with justification (see Data Architecture)
-  - [ ] P06.02.06 Tests per tenant table: cross-tenant SELECT/INSERT/UPDATE/DELETE blocked; no-GUC → zero rows; WITH CHECK rejects foreign `organisation_id` on insert/update
-  - [ ] P06.02.07 Verify: catalog check runs in CI and fails on a fixture table without FORCE RLS
+  - [x] P06.02.05 Global-table register with justification (see Data Architecture) — EV-P06-008
+  - [x] P06.02.06 Tests per tenant table: cross-tenant SELECT/INSERT/UPDATE/DELETE blocked; no-GUC → zero rows; WITH CHECK rejects foreign `organisation_id` on insert/update — EV-P06-009
+  - [x] P06.02.07 Verify: catalog check runs in CI and fails on a fixture table without FORCE RLS — EV-P06-010
 - [ ] **P06.03 Tenant context propagation and tenant-transaction wrapper** `[G:PILOT]`
   - [ ] P06.03.01 `withTenant(orgId, fn)`: transaction + `set_config('app.organisation_id', $1, true)` + AsyncLocalStorage context (org, actor, correlation IDs)
   - [ ] P06.03.02 API: organisation resolved from session → active membership; never from body, query or headers (INV-02)
