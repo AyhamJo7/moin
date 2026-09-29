@@ -55,6 +55,55 @@ const baseSchema = z.object({
     .optional(),
 
   DATABASE_URL: secret('DATABASE_URL', z.url({ protocol: /^postgres(ql)?$/ })),
+
+  /**
+   * Twilio account auth token, used to validate `X-Twilio-Signature` (P04.04.03). Optional in the
+   * schema and required for the voice role below: the API and worker roles must not carry it, so
+   * that a compromise of either cannot forge a call webhook (INV-04, INV-15).
+   *
+   * This variable holds the resolved value, not the ARN, and that is still INV-15: the ARN is what
+   * the task definition references, and the runtime injects the value into the environment of the
+   * one role that needs it. Nothing reads a secret from a file, a database row or a log line.
+   */
+  TWILIO_AUTH_TOKEN: secret('TWILIO_AUTH_TOKEN', z.string().min(1).optional()),
+
+  /**
+   * The origin Twilio was configured to call, e.g. `https://voice.example.de`. This is the value
+   * the signature was computed over, and it is configuration rather than a request header for the
+   * reason set out in `packages/telephony/src/signature/url.ts`: a host taken from a header is a
+   * host an attacker can choose.
+   */
+  VOICE_PUBLIC_ORIGIN: z.url({ protocol: /^https$/ }).optional(),
+
+  /** The media WebSocket origin, e.g. `wss://voice.example.de`. */
+  VOICE_WEBSOCKET_ORIGIN: z.url({ protocol: /^wss$/ }).optional(),
+
+  /**
+   * Speech configuration.
+   *
+   * These are variables rather than constants because P04.05.04 requires comparing two
+   * transcription providers and two German voices over the same fifty calls. A comparison that
+   * needs a code change and a deploy between arms is a comparison that will be run once, badly.
+   */
+  VOICE_LANGUAGE: z.string().min(2).default('de-DE'),
+  VOICE_TRANSCRIPTION_PROVIDER: z.string().min(1).default('Deepgram'),
+  VOICE_TRANSCRIPTION_MODEL: z.string().min(1).optional(),
+  VOICE_TTS_PROVIDER: z.string().min(1).default('Google'),
+  VOICE_TTS_VOICE: z.string().min(1).default('de-DE-Standard-A'),
+  VOICE_INTERRUPTIBLE: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value === 'true'),
+
+  /**
+   * Where per-turn measurements are written during the feasibility work (P04.05.03).
+   *
+   * The file holds what callers said, so it is personal data collected under volunteer consent
+   * (EXT-20) and it has no business existing anywhere near production. The refinement below
+   * refuses to start if it is set outside development, rather than trusting a deployment not to
+   * set it.
+   */
+  VOICE_MEASUREMENT_SINK: z.string().min(1).optional(),
   REDIS_URL: secret('REDIS_URL', z.url({ protocol: /^rediss?$/ }).optional()),
 
   SHUTDOWN_GRACE_MS: z.coerce.number().int().min(0).max(120_000).default(15_000),
@@ -68,6 +117,40 @@ const baseSchema = z.object({
 });
 
 const schema = baseSchema.superRefine((value, ctx) => {
+  // The voice role answers the telephone. Starting it without the three values that make signature
+  // validation possible would produce a service that either rejects every call or, worse, is
+  // written later to skip validation "because the token is not set in this environment".
+  if (
+    value.VOICE_MEASUREMENT_SINK !== undefined &&
+    value.NODE_ENV !== 'development' &&
+    value.NODE_ENV !== 'test'
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['VOICE_MEASUREMENT_SINK'],
+      message:
+        'writes caller utterances to a file and is development-only: it exists for the P04 ' +
+        'feasibility calls under volunteer consent, and must never be set where real callers reach',
+    });
+  }
+
+  if (value.SERVER_ROLE === 'voice') {
+    for (const key of [
+      'TWILIO_AUTH_TOKEN',
+      'VOICE_PUBLIC_ORIGIN',
+      'VOICE_WEBSOCKET_ORIGIN',
+    ] as const) {
+      if (value[key] === undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [key],
+          message:
+            'is required for the voice role, which cannot validate Twilio signatures without it',
+        });
+      }
+    }
+  }
+
   // `pino-pretty` is a devDependency and is absent from the runtime image, so LOG_PRETTY=true
   // on a deployed task would throw inside pino during boot and produce a crash loop. The
   // comment in the logger said "never enabled outside local development"; nothing enforced it.
