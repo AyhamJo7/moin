@@ -23,12 +23,12 @@
     "dev:up": "docker compose up -d --wait",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "lint": "turbo run lint",
+    "lint": "turbo run lint && eslint scripts eslint.config.ts vitest.config.ts playwright.config.ts",
     "preflight": "node --env-file-if-exists=.env scripts/doctor.ts",
     "test": "vitest run --project unit",
     "test:e2e": "playwright test",
     "test:integration": "node --env-file-if-exists=.env ./node_modules/vitest/vitest.mjs run --project integration",
-    "typecheck": "turbo run typecheck",
+    "typecheck": "turbo run typecheck && tsc --noEmit -p tsconfig.json",
     "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   },
   "devDependencies": {
