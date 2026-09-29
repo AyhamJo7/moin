@@ -22,7 +22,7 @@
     },
     {
       "name": "docs-consistency",
-      "run": "node scripts/check-adr-coverage.ts && node scripts/check-domain-coverage.ts && node scripts/check-dfd-coverage.ts && node scripts/check-threat-model-refs.ts && node scripts/check-data-classification.ts",
+      "run": "node scripts/check-adr-coverage.ts && node scripts/check-domain-coverage.ts && node scripts/check-dfd-coverage.ts && node scripts/check-threat-model-refs.ts && node scripts/check-data-classification.ts && node scripts/check-subprocessors.ts && node scripts/check-brand-strings.ts",
       "requires": ["node"],
       "timeout": 300
     },
@@ -34,7 +34,7 @@
     },
     {
       "name": "lint",
-      "run": "pnpm turbo run lint",
+      "run": "pnpm lint",
       "requires": ["pnpm"],
       "timeout": 900
     },
@@ -46,7 +46,7 @@
     },
     {
       "name": "typecheck",
-      "run": "pnpm turbo run typecheck",
+      "run": "pnpm typecheck",
       "requires": ["pnpm"],
       "timeout": 900
     },
