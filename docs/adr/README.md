@@ -43,7 +43,9 @@ names an enforcement.
 | [0007](0007-events-outbox-inbox-ordering.md)        | Events, outbox/inbox, ordering      | ACCEPTED                | P03       |
 | [0008](0008-jobs-queues-and-timers.md)              | Jobs, queues and timers             | ACCEPTED                | P03       |
 | [0009](0009-realtime.md)                            | Realtime                            | ACCEPTED                | P03       |
+| [0010](0010-telephony-architecture.md)              | Telephony architecture              | PROPOSED (needs DG-01)  | P04 → P11 |
 | [0011](0011-dialogue-manager-and-response-types.md) | Dialogue manager and response types | PROPOSED                | P03 → P12 |
+| [0012](0012-ai-gateway-and-provider-strategy.md)    | AI gateway and provider strategy    | PROPOSED (needs DG-01)  | P04 → P10 |
 | [0015](0015-business-action-model.md)               | Business action model               | ACCEPTED                | P03       |
 | [0018](0018-retention-and-deletion.md)              | Retention and deletion              | PROPOSED                | P03 → P16 |
 | [0019](0019-turn-logs-and-transcripts.md)           | Turn logs and transcripts           | PROPOSED (needs EXT-02) | P03 → P16 |
