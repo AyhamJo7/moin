@@ -24,13 +24,16 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "turbo run lint",
-    "test": "turbo run test",
-    "test:integration": "turbo run test:integration",
+    "test": "vitest run --project unit",
+    "test:e2e": "playwright test",
+    "test:integration": "vitest run --project integration",
     "typecheck": "turbo run typecheck",
     "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
     "@eslint/js": "10.0.1",
+    "@playwright/test": "1.63.0",
     "@types/node": "24.19.0",
     "dependency-cruiser": "18.4.0",
     "eslint": "10.11.0",
