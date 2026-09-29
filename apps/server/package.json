@@ -14,10 +14,12 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@fastify/websocket": "11.3.1",
     "@moin/contracts": "workspace:*",
     "@moin/db": "workspace:*",
     "@moin/kernel": "workspace:*",
     "@moin/observability": "workspace:*",
+    "@moin/telephony": "workspace:*",
     "@nestjs/common": "12.1.1",
     "@nestjs/core": "12.1.1",
     "@nestjs/platform-fastify": "12.1.1",
@@ -29,6 +31,7 @@
   "devDependencies": {
     "@nestjs/testing": "12.1.1",
     "@types/node": "24.19.0",
+    "@types/ws": "8.18.2",
     "typescript": "6.0.3",
     "vitest": "5.0.2"
   }

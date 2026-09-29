@@ -94,4 +94,9 @@ function main(): number {
   return 0;
 }
 
-process.exitCode = main();
+// Only when run directly. `check-subprocessors.ts` imports `flows()` from here, and a module that
+// runs its own check on import would print a second report and set the exit code of a different
+// script — which, if this check ever failed, the importing script would then silently overwrite.
+if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  process.exitCode = main();
+}

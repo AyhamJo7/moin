@@ -139,7 +139,7 @@ Single source of status. Tier columns show the status of that phase's items for 
 | P01 | Discovery & Gurlitt observation | NOT_STARTED | NOT_STARTED | — | — | — | EXT-16 Gurlitt | Meet Gurlitt owner 2026-09-28 09:00 |
 | P02 | Engineering foundation | IN_PROGRESS | — | — | — | — | EXT-24 GitHub plan | P02.06 CI pipeline |
 | P03 | Architecture decisions & threat model | IN_PROGRESS | — | — | — | — | EXT-02 counsel not engaged | P03.05 review findings; founder sends the legal pack |
-| P04 | Feasibility proof & long-lead track | NOT_STARTED | — | — | NOT_STARTED | — | EXT-01/07/10/11/12 | Open Twilio/OpenAI/AWS requests day 1 |
+| P04 | Feasibility proof & long-lead track | IN_PROGRESS | — | — | NOT_STARTED | — | EXT-01/07/10/11/12 | Adapter, gateway port and measurement harness built; every measurement waits on EXT-10/11/12 |
 | P05 | Cloud foundation & walking skeleton | NOT_STARTED | — | — | — | — | EXT-09 AWS | Terraform bootstrap |
 | P06 | Tenancy, identity, authorization, audit | NOT_STARTED | — | NOT_STARTED | — | — | — | after P02/P03 |
 | P07 | Core business action model | NOT_STARTED | — | NOT_STARTED | NOT_STARTED | — | — | after P06.02 |
@@ -2290,7 +2290,7 @@ ADR index (EV-P03-001), threat model review record (EV-P03-002), inventory (EV-P
 <a id="p04--voice-and-ai-feasibility-proof-and-long-lead-external-track"></a>
 ## P04 — Voice and AI Feasibility Proof and Long-Lead External Track
 
-**Status:** PILOT NOT_STARTED · SELL NOT_STARTED · **Target:** 2026-09-28 → 2026-10-09 · **Effort:** 4 engineering-days + founder admin
+**Status:** PILOT IN_PROGRESS · SELL NOT_STARTED · **Target:** 2026-09-28 → 2026-10-09 · **Effort:** 4 engineering-days + founder admin
 
 ### Objective
 Prove the riskiest technical assumption before building on it: German voice over ConversationRelay IE1 with acceptable latency and number capture. Start every external dependency with a long lead time on day 1.
@@ -2326,11 +2326,11 @@ Production-quality `packages/telephony` (TwiML builder, protocol codecs, signatu
   - [ ] P04.03.04 DG-14: evaluate one alternative EU-resident provider (structured outputs, latency, DPA, region) and select it
   - [ ] P04.03.05 Verify: a strict-schema call from eu-central-1 succeeds; the latency distribution (N ≥ 200) is recorded
 - [ ] **P04.04 ConversationRelay adapter (production quality)** `[G:PILOT]`
-  - [ ] P04.04.01 `packages/telephony` TwiML builder: `<Connect action>` + `<ConversationRelay>` with `welcomeGreeting`, `welcomeGreetingInterruptible="none"`, `language="de-DE"`, STT/TTS provider and voice, `interruptible`, `dtmfDetection`, `<Parameter>` session token
-  - [ ] P04.04.02 Zod codecs for inbound (`setup`, `prompt`, `interrupt`, `dtmf`, `error`) and outbound (`text`, `play`, `sendDigits`, `language`, `end`) messages; unknown message types logged and ignored
-  - [ ] P04.04.03 `X-Twilio-Signature` validation for HTTP and WebSocket upgrade (constant-time), URL reconstruction behind the ALB
-  - [ ] P04.04.04 Minimal voice role: inbound webhook → TwiML; WSS handler with scripted responses; connect-action handler logging `SessionStatus`/`HandoffData`
-  - [ ] P04.04.05 Tests: codec round-trips, signature fixtures (valid, tampered, wrong URL), TwiML snapshot asserting the disclosure attributes
+  - [x] P04.04.01 `packages/telephony` TwiML builder: `<Connect action>` + `<ConversationRelay>` with `welcomeGreeting`, `welcomeGreetingInterruptible="none"`, `language="de-DE"`, STT/TTS provider and voice, `interruptible`, `dtmfDetection`, `<Parameter>` session token — EV-P04-001
+  - [x] P04.04.02 Zod codecs for inbound (`setup`, `prompt`, `interrupt`, `dtmf`, `error`) and outbound (`text`, `play`, `sendDigits`, `language`, `end`) messages; unknown message types logged and ignored — EV-P04-002
+  - [x] P04.04.03 `X-Twilio-Signature` validation for HTTP and WebSocket upgrade (constant-time), URL reconstruction behind the ALB — EV-P04-003
+  - [x] P04.04.04 Minimal voice role: inbound webhook → TwiML; WSS handler with scripted responses; connect-action handler logging `SessionStatus`/`HandoffData` — EV-P04-004
+  - [x] P04.04.05 Tests: codec round-trips, signature fixtures (valid, tampered, wrong URL), TwiML snapshot asserting the disclosure attributes — EV-P04-005
   - [ ] P04.04.06 Verify on a real call: disclosure plays fully even when the caller talks over it; prompts arrive; replies are spoken; DTMF is received; `end` + handoff reaches the action URL
 - [ ] **P04.05 Latency and German speech measurement** `[G:PILOT]`
   - [ ] P04.05.01 Run the spike from eu-central-1 (P05 skeleton or minimal temporary task), never through a laptop tunnel, for latency figures
@@ -2339,7 +2339,7 @@ Production-quality `packages/telephony` (TwiML builder, protocol codecs, signatu
   - [ ] P04.05.04 Compare two STT providers/models and two German TTS voices; tune `speechTimeout` and `interruptSensitivity`
   - [ ] P04.05.05 Report p50/p95, N, per-slot accuracy, limitations and the chosen configuration (`docs/voice/feasibility-report.md`)
 - [ ] **P04.06 Voice go/no-go (DG-01)** `[G:PILOT]`
-  - [ ] P04.06.01 Criteria:
+  - [x] P04.06.01 Criteria (recorded in `docs/decisions/DG-01-voice-go-no-go.md` before any measurement existed) — EV-P04-006:
     - p95 ≤ 1.8 s achievable or a credible path to it;
     - critical-slot capture feasible with read-back and DTMF;
     - non-interruptible disclosure verified;
@@ -2350,7 +2350,7 @@ Production-quality `packages/telephony` (TwiML builder, protocol codecs, signatu
   - [ ] P04.07.01 Trademark search (DPMA, EUIPO, WIPO; classes 9, 35, 38, 42), confirmed by counsel (EXT-07)
   - [ ] P04.07.02 Decide the name; register domain(s); delegate DNS to Route 53
   - [ ] P04.07.03 Create role mailboxes: support@, security@, privacy@, billing@
-  - [ ] P04.07.04 If the name changes: configuration-only change (ADR-0034), verified by a grep for hard-coded brand strings
+  - [x] P04.07.04 If the name changes: configuration-only change (ADR-0034), verified by a grep for hard-coded brand strings — EV-P04-007
 - [ ] **P04.08 Entity, tax, banking and insurance** `[G:PILOT]` `[EXT]`
   - [ ] P04.08.01 DG-09: operating entity path (Gewerbeanmeldung now; UG in parallel until the HRB entry)
   - [ ] P04.08.02 Finanzamt registration, USt-IdNr., Kleinunternehmer decision with the tax advisor (EXT-08)
@@ -2366,7 +2366,7 @@ Production-quality `packages/telephony` (TwiML builder, protocol codecs, signatu
   - [ ] P04.10.01 Collect/sign DPAs: AWS, Twilio, OpenAI, alternative LLM provider, Stripe (for LAUNCH), PostHog (later)
   - [ ] P04.10.02 Ask Twilio in writing: STT/TTS vendors and processing regions for IE1 ConversationRelay; retention of transcripts, logs and metadata; deletion APIs
   - [ ] P04.10.03 Record results in the draft subprocessor register (P16.08) with regions and transfer mechanisms
-  - [ ] P04.10.04 Verify: every pilot data flow in the DFD (P03.04) has a subprocessor entry with region and DPA status
+  - [x] P04.10.04 Verify: every pilot data flow in the DFD (P03.04) has a subprocessor entry with region and DPA status — EV-P04-008
 
 ### Security
 Provider credentials created directly into Secrets Manager (P05.08) or a password manager until then. Geo permissions and usage triggers against toll fraud. Spike code meets production standards (tests, validation) and is kept.

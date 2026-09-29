@@ -26,6 +26,53 @@ describe('configuration loader (P02.03.03)', () => {
     }
   });
 
+  // P04.04.03. A voice process that starts without these cannot validate a Twilio signature, and
+  // the pressure at that point is always to skip validation rather than to fix the environment.
+  it('refuses to start the voice role without the values signature validation needs', () => {
+    try {
+      loadConfig({ ...VALID, SERVER_ROLE: 'voice' });
+      expect.unreachable('expected the voice role to require its telephony configuration');
+    } catch (error) {
+      const problems = (error as ConfigurationError).problems.join('\n');
+      expect(problems).toContain('TWILIO_AUTH_TOKEN');
+      expect(problems).toContain('VOICE_PUBLIC_ORIGIN');
+      expect(problems).toContain('VOICE_WEBSOCKET_ORIGIN');
+    }
+  });
+
+  it('starts the voice role when its telephony configuration is complete', () => {
+    const config = loadConfig({
+      ...VALID,
+      SERVER_ROLE: 'voice',
+      TWILIO_AUTH_TOKEN: 'a'.repeat(32),
+      VOICE_PUBLIC_ORIGIN: 'https://voice.example.de',
+      VOICE_WEBSOCKET_ORIGIN: 'wss://voice.example.de',
+    });
+    expect(config.SERVER_ROLE).toBe('voice');
+  });
+
+  it('does not require telephony configuration for the other roles', () => {
+    for (const role of ['api', 'worker', 'migrate'] as const) {
+      expect(loadConfig({ ...VALID, SERVER_ROLE: role }).SERVER_ROLE).toBe(role);
+    }
+  });
+
+  it.each([
+    ['a non-https public origin', { VOICE_PUBLIC_ORIGIN: 'http://voice.example.de' }],
+    ['a non-wss websocket origin', { VOICE_WEBSOCKET_ORIGIN: 'ws://voice.example.de' }],
+  ])('rejects %s', (_name, overrides) => {
+    expect(() =>
+      loadConfig({
+        ...VALID,
+        SERVER_ROLE: 'voice',
+        TWILIO_AUTH_TOKEN: 'a'.repeat(32),
+        VOICE_PUBLIC_ORIGIN: 'https://voice.example.de',
+        VOICE_WEBSOCKET_ORIGIN: 'wss://voice.example.de',
+        ...overrides,
+      }),
+    ).toThrow(ConfigurationError);
+  });
+
   it('rejects an unknown server role rather than starting the wrong module graph', () => {
     expect(() => loadConfig({ ...VALID, SERVER_ROLE: 'api-v2' })).toThrow(ConfigurationError);
   });

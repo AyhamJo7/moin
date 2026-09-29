@@ -59,9 +59,9 @@ Rules that follow from this:
 
 ## Verification
 
-| Enforcement                                   | Where                                                                                                                    |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| No customer-visible brand literal in code     | Review scope, plus the brand configuration being the only source read by the web app and the templates                   |
-| The codename never reaches a customer surface | Caller-facing wording comes from reviewed templates (ADR-0011), never from code; template review is where this is caught |
-| Brand configuration fails fast when missing   | Validated by the configuration loader at startup, so a missing brand string stops a deploy rather than reaching a caller |
-| One image serves every brand                  | INV-17: the image is brand-agnostic; a per-brand build would be a second digest                                          |
+| Enforcement                                   | Where                                                                                                                                                                                               |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No customer-visible brand literal in code     | `scripts/check-brand-strings.ts` rule A (P04.07.04). It reads the name from `NEXT_PUBLIC_BRAND_NAME`, so a rename renames what the check looks for                                                  |
+| The codename never reaches a customer surface | `scripts/check-brand-strings.ts` rule B: string literals in `apps/web/app/`, and the whole body of anything in `templates/`. Template review (ADR-0011) remains, but it is no longer the only thing |
+| Brand configuration fails fast when missing   | Validated by the configuration loader at startup, so a missing brand string stops a deploy rather than reaching a caller                                                                            |
+| One image serves every brand                  | INV-17: the image is brand-agnostic; a per-brand build would be a second digest                                                                                                                     |
