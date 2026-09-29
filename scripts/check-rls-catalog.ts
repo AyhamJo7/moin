@@ -77,8 +77,32 @@ interface ForeignKeyRow {
 
 interface FunctionRow {
   readonly function_name: string;
+  readonly identity_arguments: string;
+  readonly owner_name: string;
   readonly search_path: string | null;
+  readonly execute_grantees: string[];
 }
+
+/** Reviewed QG-09 contract. Documentation registration alone cannot change privileges. */
+const APPROVED_DEFINERS: Readonly<
+  Record<
+    string,
+    {
+      readonly arguments: string;
+      readonly owners: readonly string[];
+      readonly searchPath: string;
+      readonly executeGrantees: readonly string[];
+    }
+  >
+> = {
+  'app.provision_tenant': {
+    arguments: 'uuid, citext, text, text, text, text, text, boolean, text',
+    // The migrator owns the test function. Owner is also allowed for deployments using SET ROLE.
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: ['moin_provisioner'],
+  },
+};
 
 interface RoleRow {
   readonly rolname: string;
@@ -160,7 +184,12 @@ const FK_QUERY = `
 
 const FUNCTION_QUERY = `
   SELECT (n.nspname || '.' || p.proname)::text AS function_name,
-         (SELECT s FROM unnest(COALESCE(p.proconfig, '{}')) s WHERE s LIKE 'search_path=%') AS search_path
+         oidvectortypes(p.proargtypes)::text AS identity_arguments,
+         pg_get_userbyid(p.proowner)::text AS owner_name,
+         (SELECT s FROM unnest(COALESCE(p.proconfig, '{}')) s WHERE s LIKE 'search_path=%') AS search_path,
+         COALESCE((SELECT array_agg((CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee) END)::text ORDER BY a.grantee)
+           FROM aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a
+           WHERE a.privilege_type = 'EXECUTE' AND a.grantee <> p.proowner), ARRAY[]::text[]) AS execute_grantees
   FROM pg_proc p
   JOIN pg_namespace n ON n.oid = p.pronamespace
   WHERE p.prosecdef AND n.nspname IN ('public', 'app')
@@ -168,12 +197,15 @@ const FUNCTION_QUERY = `
 
 const ROLE_QUERY = `SELECT rolname::text, rolbypassrls, rolsuper FROM pg_roles WHERE rolname = ANY($1)`;
 
-export async function inspect(url: string): Promise<Finding[]> {
+export async function inspect(
+  url: string,
+  allowlistPath: string = DEFINER_ALLOWLIST,
+): Promise<Finding[]> {
   const pool = createPool({ connectionString: url, max: 1 });
   const findings: Finding[] = [];
   try {
     const globals = registeredGlobalTables();
-    const definers = allowlistedDefiners();
+    const definers = allowlistedDefiners(allowlistPath);
 
     const tables = (await pool.query<TableRow>(TABLE_QUERY)).rows;
     for (const table of tables) {
@@ -265,7 +297,8 @@ export async function inspect(url: string): Promise<Finding[]> {
     }
 
     for (const fn of (await pool.query<FunctionRow>(FUNCTION_QUERY)).rows) {
-      if (!definers.has(fn.function_name)) {
+      const approved = APPROVED_DEFINERS[fn.function_name];
+      if (!definers.has(fn.function_name) || fn.identity_arguments !== approved?.arguments) {
         findings.push({
           rule: 'security-definer-not-allowlisted',
           subject: fn.function_name,
@@ -282,6 +315,29 @@ export async function inspect(url: string): Promise<Finding[]> {
             'is SECURITY DEFINER with no pinned search_path, so its caller chooses which functions ' +
             'and tables it resolves to — a privilege-escalation primitive.',
         });
+      }
+      if (approved !== undefined) {
+        if (!approved.owners.includes(fn.owner_name)) {
+          findings.push({
+            rule: 'security-definer-unsafe-owner',
+            subject: fn.function_name,
+            detail: `owner ${fn.owner_name} is not one of the reviewed owners.`,
+          });
+        }
+        if (fn.search_path !== approved.searchPath) {
+          findings.push({
+            rule: 'security-definer-unsafe-search-path',
+            subject: fn.function_name,
+            detail: 'search_path differs from the reviewed fixed path.',
+          });
+        }
+        if (fn.execute_grantees.join(',') !== approved.executeGrantees.join(',')) {
+          findings.push({
+            rule: 'security-definer-unexpected-execute-grant',
+            subject: fn.function_name,
+            detail: 'explicit EXECUTE grants differ from the reviewed role set.',
+          });
+        }
       }
     }
 

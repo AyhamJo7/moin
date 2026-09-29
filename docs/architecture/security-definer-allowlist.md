@@ -24,9 +24,9 @@ prevent.
 
 ## Register
 
-| Function     | What it returns, and why it must be elevated    | Who may execute it |
-| ------------ | ----------------------------------------------- | ------------------ |
-| _(none yet)_ | The first is `provision_tenant(…)` in P06.04.02 | —                  |
+| Function               | What it returns, and why it must be elevated                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Who may execute it                                             |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------- |
+| `app.provision_tenant` | Returns the organisation UUID. Creates tenant state before an ordinary tenant session exists; transaction-local context still subjects every tenant row to FORCE RLS (P06.04.02, INV-01/02, QG-09). Exact signature: `(uuid, citext, text, text, text, text, text, boolean, text)`. Reviewed owners: `moin_migrator` in the test template and direct-migrator deployment, or `moin_owner` when a deployment uses `SET ROLE`. Fixed path: `pg_catalog, public, app, pg_temp` with caller-created temporary objects last. No dynamic SQL or caller-controlled identifiers. | `moin_provisioner` only; the owner retains implicit execution. |
 
 ## Functions PLAN expects here
 

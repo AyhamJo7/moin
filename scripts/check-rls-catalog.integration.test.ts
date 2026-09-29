@@ -10,7 +10,10 @@
 import { createTestDatabase, type TestDatabase } from '@moin/testing';
 import { createPool } from '@moin/db/pool';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { inspect, type Finding } from './check-rls-catalog.ts';
+import { inspect, allowlistedDefiners, type Finding } from './check-rls-catalog.ts';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 let database: TestDatabase;
 
@@ -46,6 +49,59 @@ afterAll(async () => {
 describe('the migrated schema', () => {
   it('has no findings', async () => {
     expect(await findings()).toStrictEqual([]);
+  });
+});
+
+describe('the QG-09 provisioning registration', () => {
+  it('rejects the same function without its documented registration', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'moin-definers-'));
+    try {
+      const path = join(directory, 'allowlist.md');
+      writeFileSync(path, '| Function | Why | Role |\n| --- | --- | --- |\n');
+      expect(allowlistedDefiners(path).has('app.provision_tenant')).toBe(false);
+      expect(
+        rulesFor(await inspect(database.migrationUrl, path), 'app.provision_tenant'),
+      ).toContain('security-definer-not-allowlisted');
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a mutable search path on the registered function', async () => {
+    // eslint-disable-next-line no-restricted-syntax -- DDL fixture deliberately mutates the function-level setting, not a pooled session.
+    await ddl(`ALTER FUNCTION app.provision_tenant(uuid, citext, text, text, text, text, text, boolean, text)
+      SET search_path = public, app, pg_catalog`);
+    expect(rulesFor(await findings(), 'app.provision_tenant')).toContain(
+      'security-definer-unsafe-search-path',
+    );
+    // eslint-disable-next-line no-restricted-syntax -- Restore the reviewed function-level setting for subsequent fixtures.
+    await ddl(`ALTER FUNCTION app.provision_tenant(uuid, citext, text, text, text, text, text, boolean, text)
+      SET search_path = pg_catalog, public, app, pg_temp`);
+  });
+
+  it('rejects an unexpected EXECUTE grant', async () => {
+    await ddl(
+      'GRANT EXECUTE ON FUNCTION app.provision_tenant(uuid, citext, text, text, text, text, text, boolean, text) TO moin_app',
+    );
+    expect(rulesFor(await findings(), 'app.provision_tenant')).toContain(
+      'security-definer-unexpected-execute-grant',
+    );
+    await ddl(
+      'REVOKE EXECUTE ON FUNCTION app.provision_tenant(uuid, citext, text, text, text, text, text, boolean, text) FROM moin_app',
+    );
+  });
+
+  it('rejects an unreviewed function owner', async () => {
+    await ddl(`ALTER FUNCTION app.provision_tenant(uuid, citext, text, text, text, text, text, boolean, text)
+      OWNER TO moin_app`);
+    try {
+      expect(rulesFor(await findings(), 'app.provision_tenant')).toContain(
+        'security-definer-unsafe-owner',
+      );
+    } finally {
+      await ddl(`ALTER FUNCTION app.provision_tenant(uuid, citext, text, text, text, text, text, boolean, text)
+        OWNER TO moin_migrator`);
+    }
   });
 });
 

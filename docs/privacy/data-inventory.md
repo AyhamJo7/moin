@@ -34,15 +34,26 @@ processor data about their callers. A business address is not personal data; a s
 business address is their home address, and the distinction is not one the schema can make. So it
 is treated as personal throughout, which costs nothing and avoids a judgement call per row.
 
-| Field                                     | Category | Personal?                                   | Retention                    | Method      | Subprocessor |
-| ----------------------------------------- | -------- | ------------------------------------------- | ---------------------------- | ----------- | ------------ |
-| `organisations.slug`                      | Account  | no (chosen identifier, may embed a surname) | life of the contract + 8 y\* | hard delete | —            |
-| `organisations.status`                    | Account  | no                                          | life of the contract + 8 y\* | hard delete | —            |
-| `organisations.time_zone`                 | Account  | no                                          | life of the contract         | hard delete | —            |
-| `organisations.early_access`              | Account  | no                                          | life of the contract         | hard delete | —            |
-| `locations.street`, `postal_code`, `city` | Account  | **yes for a sole trader** — see above       | life of the contract         | hard delete | —            |
-| `locations.country_code`                  | Account  | no                                          | life of the contract         | hard delete | —            |
-| `locations.time_zone`                     | Account  | no                                          | life of the contract         | hard delete | —            |
+| Field                                            | Category | Personal?                                                       | Retention                                       | Method      | Subprocessor               |
+| ------------------------------------------------ | -------- | --------------------------------------------------------------- | ----------------------------------------------- | ----------- | -------------------------- |
+| `organisations.slug`                             | Account  | no (chosen identifier, may embed a surname)                     | life of the contract + 8 y\*                    | hard delete | —                          |
+| `organisations.status`                           | Account  | no                                                              | life of the contract + 8 y\*                    | hard delete | —                          |
+| `organisations.time_zone`                        | Account  | no                                                              | life of the contract                            | hard delete | —                          |
+| `organisations.early_access`                     | Account  | no                                                              | life of the contract                            | hard delete | —                          |
+| `organisations.plan_code`                        | Account  | no                                                              | life of the contract + 8 y\*                    | hard delete | —                          |
+| `tenant_setup.template_ref`                      | Account  | no                                                              | life of the contract                            | hard delete | —                          |
+| `tenant_setup.retention_days`                    | Account  | no                                                              | life of the contract                            | hard delete | —                          |
+| `tenant_setup.settings`                          | Account  | no at provisioning (`{}`); future keys require reclassification | life of the contract                            | hard delete | —                          |
+| `owner_invitation_requests.email`                | Account  | yes                                                             | until invitation resolved or tenant termination | hard delete | mail provider after P06.08 |
+| `owner_invitation_requests.state`                | Account  | no                                                              | same                                            | hard delete | —                          |
+| `provisioning_limits.early_access_cap`           | Platform | no                                                              | permanent audit history                         | retain      | —                          |
+| `provisioning_limits.accepted_paid_early_access` | Platform | no                                                              | permanent audit history                         | retain      | —                          |
+| `provisioning_limits.reason`                     | Platform | no                                                              | permanent audit history                         | retain      | —                          |
+| `provisioning_requests.request_id`               | Account  | no (random request identifier)                                  | life of the contract                            | hard delete | —                          |
+| `provisioning_requests.tenant_id`                | Account  | no (business identifier)                                        | life of the contract                            | hard delete | —                          |
+| `locations.street`, `postal_code`, `city`        | Account  | **yes for a sole trader** — see above                           | life of the contract                            | hard delete | —                          |
+| `locations.country_code`                         | Account  | no                                                              | life of the contract                            | hard delete | —                          |
+| `locations.time_zone`                            | Account  | no                                                              | life of the contract                            | hard delete | —                          |
 
 \* Billing-relevant fields are retained for eight years under German tax law (GoBD/HGB, EXT-08),
 which overrides erasure for those records. The rest is deleted on tenant termination.
