@@ -1,0 +1,99 @@
+# QG-01 — the runtime image (P02.06.03).
+#
+# Separate from `security-scan` because it needs a built image, which is the slowest step here,
+# and because a base-image CVE is a different remediation from a dependency advisory: one is a
+# rebuild, the other is a version bump.
+name: container-scan
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Daily: the base image accumulates CVEs without the repository changing at all.
+    - cron: '43 4 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: container-scan-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    name: hadolint, build, trivy image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: hadolint
+        run: |
+          docker run --rm -i \
+            hadolint/hadolint@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d \
+            hadolint --failure-threshold warning - < apps/server/Dockerfile
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # linux/arm64 is the target (Graviton). Nothing else pins the architecture, so an image
+      # built on this x86 runner without it would be an amd64 image promoted under the
+      # one-digest-per-release claim (INV-17) and would fail to start in production.
+      - name: Build the server image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: apps/server/Dockerfile
+          platforms: linux/arm64
+          push: false
+          load: true
+          tags: moin-server:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Assert the image is what it claims to be
+        run: |
+          arch=$(docker image inspect moin-server:ci --format '{{.Architecture}}')
+          user=$(docker image inspect moin-server:ci --format '{{.Config.User}}')
+          [ "$arch" = "arm64" ] || { echo "expected arm64, got $arch" >&2; exit 1; }
+          [ "$user" = "node" ] || { echo "expected to run as node, got '$user'" >&2; exit 1; }
+
+          # The base image ships npm, npx, corepack and yarn. A package manager in a running
+          # container is an installer and a network fetcher for anyone who gets code execution.
+          for tool in npm npx corepack yarn pnpm; do
+            if docker run --rm --entrypoint sh moin-server:ci -c "command -v $tool" >/dev/null 2>&1; then
+              echo "a package manager survived into the runtime layer: $tool" >&2
+              exit 1
+            fi
+          done
+          echo "arm64, runs as node, no package manager in the runtime layer"
+
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: moin-server:ci
+          severity: HIGH,CRITICAL
+          # Only fixable findings block: an unfixable base-image CVE would otherwise block every
+          # pull request until upstream acts, which teaches people to bypass the gate.
+          ignore-unfixed: true
+          exit-code: '1'
+
+  container-scan:
+    name: container-scan
+    runs-on: ubuntu-24.04
+    needs: [image]
+    if: always()
+    steps:
+      - name: All checks passed
+        run: |
+          results='${{ join(needs.*.result, ' ') }}'
+          echo "job results: $results"
+          for result in $results; do
+            if [ "$result" != "success" ]; then
+              echo "a required job did not succeed: $result" >&2
+              exit 1
+            fi
+          done
