@@ -5,7 +5,7 @@ mode: autonomous
 phase: P06
 tier: PILOT
 plan: docs/phases/P06-plan.md
-next: P06.03 tenant context propagation, P06.14 withSystemWork, then P06.04 provisioning
+next: P06.04 provisioning (provision_tenant, Early Access cap), then P06.10 audit
 updated: 2026-09-29
 ---
 
@@ -146,6 +146,15 @@ Rules
 | P06.02.05 | READY_FOR_REVIEW | PR #27 | EV-P06-008 | Global tables registered with a reason; a row without one does not count |
 | P06.02.06 | READY_FOR_REVIEW | PR #27 | EV-P06-009 | 20 isolation assertions, all as the application role against real policies |
 | P06.02.07 | READY_FOR_REVIEW | PR #27 | EV-P06-010 | Nine fixtures, including the enabled-but-not-forced case PLAN names |
+| P06.03.01 | READY_FOR_REVIEW | PR #28 | EV-P06-011 | `withTenant`: transaction-local setting, ambient context, client released either way |
+| P06.03.02 | BLOCKED | — | — | Needs sessions and memberships (P06.06, P06.07) |
+| P06.03.03 | IN_PROGRESS | PR #28 | EV-P06-015 | The mechanism is proven; the job envelope itself arrives with the queue |
+| P06.03.04 | BLOCKED | — | — | Needs `number_routes` and `resolve_route` |
+| P06.03.05 | READY_FOR_REVIEW | PR #28 | EV-P06-012 | Rule already active from P02.02.07; `withTenant` is now the alternative it points to |
+| P06.03.06 | READY_FOR_REVIEW | PR #28 | EV-P06-013 | Every line inside a tenant transaction names its organisation, still redacted |
+| P06.03.07 | IN_PROGRESS | PR #28 | EV-P06-015 | The job half is done; the forged-header half needs the HTTP session layer |
+| P06.14.01 | READY_FOR_REVIEW | PR #28 | EV-P06-014 | Claims identifiers only; each item processed in its own tenant transaction |
+| P06.14.02 | READY_FOR_REVIEW | PR #28 | EV-P06-015 | A mismatched envelope updates zero rows rather than the wrong tenant's |
 
 ## External waits
 
@@ -188,6 +197,9 @@ secret-rule fix (#25) merged, with its full-history scan green.
 
 ## Log
 
+- 2026-09-29 — **P06.03 and P06.14: the tenant wrapper.** `withTenant` is the only place the tenant setting is written, and it writes it **transaction-locally**: a session-level `SET` would survive the transaction and ride the pooled connection into the next request — one caller's tenant applied to another caller's query, which is the single worst bug this codebase could have. `withSystemWork` is the other half: sweeps and reconcilers run across tenants by definition, and the tempting shortcut is a role that can see all of them at once. There is no such role — the claim returns identifiers only, and each is processed inside `withTenant` as the ordinary application role. A job envelope that names the wrong organisation therefore updates **zero rows**: an empty path rather than an error path, which is what makes a mismatch harmless rather than merely detected.
+- 2026-09-29 — Nesting a _different_ tenant now throws. Nesting the same one is ordinary — a service calls a service — but nesting a different one means code is about to act for organisation B inside a transaction opened for organisation A, and whichever the database ends up applying, something is wrong. Also: a malformed organisation id is rejected at the boundary rather than by the policy's cast, so the caller gets a clear failure instead of something that reads like a database fault, and the rejected value is never echoed into the error.
+- 2026-09-29 — Two lint findings worth recording rather than suppressing quietly. Thirteen `async` arrows in the new tests had no `await`; they were rewritten rather than suppressed. One suppression was kept, in `TenantClient.query<R>`: the rule is right that `R` appears only in the return type and is therefore an assertion rather than an inference — but the shape of a result set is decided by the database, and the alternatives are worse. The comment says so rather than naming the rule and moving on.
 - 2026-09-29 — #25 merged; the negative-control branches and the superseded fix branch are gone from the remote. `gates full` is **PASS 14/14** on this branch at `8a1478d169`, which is the first fully green full-gate run on a P02 branch. One thing worth recording about the local runs that preceded it: they kept failing `secret-scan` after the remote branches were deleted, because `gitleaks` scans **every ref** and the deleted branches still existed as _local_ branches in this clone. The repository was clean; the working copy was not. Deleting the local branches was the fix, and CI never saw the problem because it clones fresh.
 - 2026-09-29 — **P06.01 and P06.02: the security spine.** Tenant isolation is enforced by the database rather than by the application, because the application will be wrong occasionally and the property that matters is that being wrong is not _sufficient_ to leak. `app.current_org()` returns NULL when unset, so a policy comparing against it matches no rows and code that forgets `withTenant` sees an empty table rather than every tenant's — the obvious alternative, `current_setting` without `missing_ok`, _raises_, which sounds stricter and is worse, because an exception becomes a 500 while an empty result is a correct answer to a question asked without a tenant. One function applies every policy, so no table carries its own copy to diverge into `USING` without `WITH CHECK`. The catalog check reads `pg_catalog` rather than the migrations, because a later migration can undo an earlier one and `DISABLE ROW LEVEL SECURITY` is one line; it has seven rules and nine fixtures, including the enabled-but-not-forced case PLAN names.
 - 2026-09-29 — Deviation, flagged rather than done quietly: P06.01.01 asks for "a migration creating" the seven roles, and a migration cannot create a role, because `moin_migrator` has no `CREATEROLE` — which is the point of the split, since a role that can create roles can create a superuser. Roles are provisioned by whoever owns the cluster; the migration **asserts** them and fails with the name of any missing one, so the grants below it can never be silent no-ops.

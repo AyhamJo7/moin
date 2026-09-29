@@ -2572,12 +2572,12 @@ Roles and RLS framework · `withTenant` / `withSystemWork` · catalog check · o
   - [x] P06.02.06 Tests per tenant table: cross-tenant SELECT/INSERT/UPDATE/DELETE blocked; no-GUC → zero rows; WITH CHECK rejects foreign `organisation_id` on insert/update — EV-P06-009
   - [x] P06.02.07 Verify: catalog check runs in CI and fails on a fixture table without FORCE RLS — EV-P06-010
 - [ ] **P06.03 Tenant context propagation and tenant-transaction wrapper** `[G:PILOT]`
-  - [ ] P06.03.01 `withTenant(orgId, fn)`: transaction + `set_config('app.organisation_id', $1, true)` + AsyncLocalStorage context (org, actor, correlation IDs)
+  - [x] P06.03.01 `withTenant(orgId, fn)`: transaction + `set_config('app.organisation_id', $1, true)` + AsyncLocalStorage context (org, actor, correlation IDs) — EV-P06-011
   - [ ] P06.03.02 API: organisation resolved from session → active membership; never from body, query or headers (INV-02)
   - [ ] P06.03.03 Worker: job envelope carries `organisation_id`; the handler loads the target entity inside `withTenant`, so a mismatch yields not-found (no cross-tenant effect)
   - [ ] P06.03.04 Voice and webhooks: organisation from `resolve_route(e164)` or provider-identifier lookups (`SECURITY DEFINER`, minimal return)
-  - [ ] P06.03.05 Activate lint rule: DB client imports only in `platform`; direct pool usage banned
-  - [ ] P06.03.06 Logger and trace enrichment with a pseudonymous tenant ID
+  - [x] P06.03.05 Activate lint rule: DB client imports only in `platform`; direct pool usage banned — EV-P06-012
+  - [x] P06.03.06 Logger and trace enrichment with a pseudonymous tenant ID — EV-P06-013
   - [ ] P06.03.07 Tests: a request with a forged org header or body field cannot change the tenant; a job with a mismatched org has no effect
 - [ ] **P06.04 Organisation, location and provisioning path** `[G:PILOT]`
   - [ ] P06.04.01 `organisations` and `locations` tables and lifecycle states (trial, pilot, active, suspended, terminating, deleted)
@@ -2639,9 +2639,9 @@ Roles and RLS framework · `withTenant` / `withSystemWork` · catalog check · o
   - [ ] P06.13.03 DB-layer suite (P06.02.06) and job-layer suite (P06.03.07) wired together
   - [ ] P06.13.04 SSE, cache keys and S3 prefix checks (extended as those features land)
   - [ ] P06.13.05 Suite is release-blocking in CI (LG-P01); coverage report stored as evidence
-- [ ] **P06.14 System-work pattern** `[G:PILOT]`
-  - [ ] P06.14.01 `withSystemWork(claimFn)` + claim-function template (`SECURITY DEFINER`, pinned `search_path`, `FOR UPDATE SKIP LOCKED`, lease expiry) returning `(organisation_id, id)` only
-  - [ ] P06.14.02 Tests: claims are exclusive under concurrency; expired leases are reclaimable; processing runs under `withTenant`
+- [x] **P06.14 System-work pattern** `[G:PILOT]` — EV-P06-014
+  - [x] P06.14.01 `withSystemWork(claimFn)` + claim-function template (`SECURITY DEFINER`, pinned `search_path`, `FOR UPDATE SKIP LOCKED`, lease expiry) returning `(organisation_id, id)` only — EV-P06-014
+  - [x] P06.14.02 Tests: claims are exclusive under concurrency; expired leases are reclaimable; processing runs under `withTenant` — EV-P06-015
 
 ### Security
 This phase implements INV-01, INV-02, INV-10 and INV-15. OWASP ASVS V2/V3/V4 (authentication, session, access control). Operator access is separated from customer access. All functions with elevated rights are allowlisted and reviewed (QG-09).

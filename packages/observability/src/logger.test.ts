@@ -8,12 +8,20 @@
  */
 
 import { Writable } from 'node:stream';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { createLogger } from './logger.ts';
 import { REDACTED } from './redaction.ts';
 
 const PHONE = '+4915112345678';
 const DSN = 'postgres://moin_app:S3cr3tPw@db.internal:5432/moin';
+
+/**
+ * Per-line context for the next `captured(...)` call.
+ *
+ * A module-level variable rather than a parameter so that every existing call site keeps working
+ * unchanged, which keeps this addition from touching assertions it has nothing to do with.
+ */
+let contextForNextCapture: (() => Record<string, unknown>) | undefined;
 
 /** Capture what pino actually writes, by replacing stdout for the duration of `run`. */
 function captured(run: (log: ReturnType<typeof createLogger>) => void): Record<string, unknown>[] {
@@ -34,7 +42,15 @@ function captured(run: (log: ReturnType<typeof createLogger>) => void): Record<s
     writable: true,
   });
   try {
-    run(createLogger({ level: 'trace', service: 'moin', role: 'api', env: 'test' }));
+    run(
+      createLogger({
+        level: 'trace',
+        service: 'moin',
+        role: 'api',
+        env: 'test',
+        ...(contextForNextCapture === undefined ? {} : { context: contextForNextCapture }),
+      }),
+    );
   } finally {
     Object.defineProperty(process.stdout, 'write', {
       value: original,
@@ -127,5 +143,43 @@ describe('logger (INV-12, serialised output)', () => {
     });
     expect(line?.['requestId']).toBe('req_2');
     expect(line?.['contactEmail']).toBe(REDACTED);
+  });
+});
+
+describe('per-line context (P06.03.06)', () => {
+  afterEach(() => {
+    contextForNextCapture = undefined;
+  });
+
+  it('attaches the tenant of the current unit of work to every line', () => {
+    contextForNextCapture = () => ({ organisationId: '11111111-1111-4111-8111-111111111111' });
+    const lines = captured((log) => {
+      log.info('first');
+      log.warn('second');
+    });
+    expect(lines).toHaveLength(2);
+    for (const line of lines) {
+      expect(line['organisationId']).toBe('11111111-1111-4111-8111-111111111111');
+    }
+  });
+
+  it('adds nothing when there is no unit of work', () => {
+    contextForNextCapture = () => ({});
+    const [line] = captured((log) => {
+      log.info('outside');
+    });
+    expect(line?.['organisationId']).toBeUndefined();
+  });
+
+  // The convenience must not become a way round the allowlist: a caller that returns a phone
+  // number from its context function is still redacted (INV-12).
+  it('is redacted like anything else', () => {
+    contextForNextCapture = () => ({ callerNumber: PHONE, organisationId: 'org-1' });
+    const [line] = captured((log) => {
+      log.info('with context');
+    });
+    expect(JSON.stringify(line)).not.toContain(PHONE);
+    expect(line?.['callerNumber']).toBe('[redacted]');
+    expect(line?.['organisationId']).toBe('org-1');
   });
 });

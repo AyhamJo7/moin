@@ -42,6 +42,18 @@ export interface LoggerConfig {
   readonly version?: string;
   /** Pretty-print for a human terminal. Never enabled outside local development. */
   readonly pretty?: boolean;
+  /**
+   * Fields to attach to every line, evaluated per line (P06.03.06).
+   *
+   * This exists so the tenant of the current unit of work reaches the log without every call site
+   * passing it — a call site that has to remember is a call site that forgets, and the lines it
+   * forgets on are the ones an incident needs. It is a function rather than a value because the
+   * tenant changes per request while the logger does not.
+   *
+   * Whatever it returns still passes through the allowlist: this is a convenience, not a way
+   * around redaction (INV-12).
+   */
+  readonly context?: () => Record<string, unknown>;
 }
 
 export function createLogger(config: LoggerConfig): Logger {
@@ -55,6 +67,9 @@ export function createLogger(config: LoggerConfig): Logger {
   const options: LoggerOptions = {
     level: config.level,
     base,
+    // pino calls this per line and merges the result. Redaction still applies: `formatters.log`
+    // runs afterwards over the merged object.
+    ...(config.context === undefined ? {} : { mixin: config.context }),
     // ISO timestamps: correlating a call recording, a Twilio log and our own line by epoch
     // milliseconds during an incident is a needless tax.
     timestamp: pino.stdTimeFunctions.isoTime,
