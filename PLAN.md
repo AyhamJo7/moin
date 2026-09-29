@@ -137,7 +137,7 @@ Single source of status. Tier columns show the status of that phase's items for 
 |---|---|---|---|---|---|---|---|---|
 | P00 | Planning baseline | READY_FOR_REVIEW | — | — | — | — | Founder review | Founder reads and adopts plan (P00.05) |
 | P01 | Discovery & Gurlitt observation | NOT_STARTED | NOT_STARTED | — | — | — | EXT-16 Gurlitt | Meet Gurlitt owner 2026-09-28 09:00 |
-| P02 | Engineering foundation | IN_PROGRESS | — | — | — | — | EXT-24 GitHub plan | P02.06 CI pipeline |
+| P02 | Engineering foundation | READY_FOR_REVIEW | — | — | — | — | — | EXT-24 satisfied; every P02 item implemented and verified |
 | P03 | Architecture decisions & threat model | IN_PROGRESS | — | — | — | — | EXT-02 counsel not engaged | P03.05 review findings; founder sends the legal pack |
 | P04 | Feasibility proof & long-lead track | IN_PROGRESS | — | — | NOT_STARTED | — | EXT-01/07/10/11/12 | Adapter, gateway port and measurement harness built; every measurement waits on EXT-10/11/12 |
 | P05 | Cloud foundation & walking skeleton | NOT_STARTED | — | — | — | — | EXT-09 AWS | Terraform bootstrap |
@@ -2060,7 +2060,7 @@ Baseline report (EV-P01-001), owner sign-off e-mail reference (EV-P01-002), inte
 <a id="p02--engineering-foundation"></a>
 ## P02 — Engineering Foundation
 
-**Status:** PILOT IN_PROGRESS · **Target:** 2026-09-28 → 2026-10-02 · **Effort:** 3 engineering-days
+**Status:** PILOT READY_FOR_REVIEW · **Target:** 2026-09-28 → 2026-10-02 · **Effort:** 3 engineering-days
 
 ### Objective
 Create a reproducible, governed monorepo in which every later phase lands with quality gates already enforced.
@@ -2078,14 +2078,14 @@ ADR-0002 (toolchain), ADR-0034 (codename and brand decoupling). Local emulators 
 Monorepo skeleton · CI v1 · local stack · test harnesses · governance files · developer docs · `PROGRESS.md` · evidence registry.
 
 ### Checklist
-- [ ] **P02.01 Repository governance** `[G:PILOT]`
-  - [ ] P02.01.01 Ruleset on `main`: PR required, required checks (`verify`, `security-scan`, `container-scan`), linear history, no force-push/deletion (EXT-24 if the plan lacks private-repo rulesets)
+- [x] **P02.01 Repository governance** `[G:PILOT]` — EV-P02-047
+  - [x] P02.01.01 Ruleset on `main`: PR required, required checks (`verify`, `security-scan`, `container-scan`), linear history, no force-push/deletion (EXT-24 if the plan lacks private-repo rulesets) — EV-P02-047
   - [x] P02.01.02 CODEOWNERS, PR template (what/why, risk, tests, evidence IDs, docs, migration/rollback, privacy impact), issue templates — EV-P02-003
   - [x] P02.01.03 Conventional Commit enforcement on PR titles, plus a check rejecting AI-tool mentions in titles and bodies (workspace rule) — EV-P02-004
   - [x] P02.01.04 `PROGRESS.md` ledger, `docs/evidence/INDEX.md`, evidence record template — EV-P02-005
   - [x] P02.01.05 `README.md` (purpose, quickstart, links to PLAN/ARCHITECTURE/SECURITY/PRIVACY/OPERATIONS) and `CONTRIBUTING.md` — EV-P02-006
   - [x] P02.01.06 Annotated/signed release-tag policy documented — EV-P02-007
-  - [ ] P02.01.07 Verify: a direct push to `main` is rejected; a PR with failing required checks cannot merge
+  - [x] P02.01.07 Verify: a direct push to `main` is rejected; a PR with failing required checks cannot merge — EV-P02-048
 - [x] **P02.02 Toolchain baseline** `[G:PILOT]` — EV-P02-001
   - [x] P02.02.01 Pin Node 24 LTS (`.nvmrc`, `engines`), `packageManager: pnpm@10.x`; install via fnm/corepack without sudo — EV-P02-002
   - [x] P02.02.02 Turborepo tasks: `lint`, `typecheck`, `test`, `test:integration`, `build` with caching and correct `dependsOn` — EV-P02-008
@@ -2119,14 +2119,14 @@ Monorepo skeleton · CI v1 · local stack · test harnesses · governance files 
   - [x] P02.05.04 Playwright projects (Chromium, Firefox, WebKit, mobile viewport) + axe integration — EV-P02-032
   - [x] P02.05.05 Fault-injection helpers and controllable clock — EV-P02-031
   - [x] P02.05.06 Verify: example test of every type passes in-suite **and** standalone — EV-P02-033
-- [ ] **P02.06 CI pipeline v1** `[G:PILOT]`
+- [x] **P02.06 CI pipeline v1** `[G:PILOT]` — EV-P02-049
   - [x] P02.06.01 `verify`: frozen install, format, lint, typecheck, unit, integration (Postgres 17 + pgvector service), build — EV-P02-043
   - [x] P02.06.02 `security-scan`: `pnpm audit`/OSV (fail on high/critical with fix), gitleaks full history, Semgrep, actionlint, shellcheck, Trivy filesystem, CycloneDX SBOM artifact — EV-P02-044
   - [x] P02.06.03 `container-scan`: hadolint, image build, Trivy image scan (fail on high/critical with fix) — EV-P02-045
   - [x] P02.06.04 `scripts/check-migrations.ts` (ordering, destructive/lock heuristics, adapted from exitos) wired to CI — EV-P02-034
   - [x] P02.06.05 Job slots for RLS catalog check (P06.02) and OpenAPI drift (P06/P07) — EV-P02-040
   - [x] P02.06.06 Actions pinned by SHA; `permissions: contents: read` by default; concurrency groups; caching — EV-P02-039
-  - [ ] P02.06.07 Verify with four negative-control PRs: lint error, failing test, fake secret, vulnerable dependency, each fails the right job
+  - [x] P02.06.07 Verify with four negative-control PRs: lint error, failing test, fake secret, vulnerable dependency, each fails the right job — EV-P02-049
 - [x] **P02.07 Developer documentation** `[G:PILOT]` — EV-P02-046
   - [x] P02.07.01 `docs/development/local-setup.md`, `testing.md`, `conventions.md` — EV-P02-041
   - [x] P02.07.02 `ARCHITECTURE.md` skeleton linking ADRs; `SECURITY.md` skeleton — EV-P02-042
