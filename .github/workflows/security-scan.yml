@@ -56,6 +56,18 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # The repository's own rule is self-tested before the scan runs. It was added without the
+      # multiline flag and therefore never fired; the scan was green throughout. A custom rule
+      # that has never matched anything is worse than no custom rule, because it is counted on.
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Custom secret rules are self-testing
+        run: node scripts/check-gitleaks-rules.ts
+
       # The pinned image rather than the action: gitleaks-action now requires a GITHUB_TOKEN to
       # scan a pull request, and a workflow that checks out contributor code should not hold one.
       # This runs the same scanner, with the same configuration the local gate uses.
