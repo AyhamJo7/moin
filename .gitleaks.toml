@@ -36,7 +36,15 @@ description = "A real-looking credential assigned in the example environment fil
 # The realistic way a secret reaches this repository is someone pasting a working key into the
 # example file while debugging, then committing it. Go's regexp engine (RE2) has no negative
 # lookahead, so the permitted placeholders are a rule-scoped allowlist rather than inline.
-regex = '''(?i)^[ \t]*(TWILIO_AUTH_TOKEN|OPENAI_API_KEY|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|AWS_SECRET_ACCESS_KEY|GOOGLE_OAUTH_CLIENT_SECRET|MICROSOFT_GRAPH_CLIENT_SECRET)[ \t]*=[ \t]*\S{12,}'''
+#
+# `(?im)` — the `m` is load-bearing and this rule went in without it. gitleaks applies a rule's
+# regex to the whole file, not line by line, so a bare `^` anchors to the start of the *file*.
+# The rule therefore matched only a secret on line 1 and, in a file where these variables live
+# near the bottom, never fired at all. It was found by the P02.06.07 negative control, not by
+# reading: the gate was green and the rule looked correct.
+# `scripts/check-gitleaks-rules.ts` is what keeps it fired; it asserts a planted value is caught
+# on a line other than the first.
+regex = '''(?im)^[ \t]*(TWILIO_AUTH_TOKEN|OPENAI_API_KEY|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|AWS_SECRET_ACCESS_KEY|GOOGLE_OAUTH_CLIENT_SECRET|MICROSOFT_GRAPH_CLIENT_SECRET)[ \t]*=[ \t]*\S{12,}'''
 path = '''\.env\.example$'''
 
   [rules.allowlist]
