@@ -1,0 +1,38 @@
+name: Change request
+description: Propose work that is not already a PLAN.md checklist item
+labels: ["needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        PLAN.md is the authoritative execution plan. Work that already has a checklist item does not
+        need an issue — reference the item. Use this when something is genuinely missing from the
+        plan, so it can be added there rather than done off-plan.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: The concrete situation this leaves broken or unserved. Not the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: plan-gap
+    attributes:
+      label: Why the plan does not already cover it
+      description: The phases and items you checked, and what they leave out.
+    validations:
+      required: true
+  - type: dropdown
+    id: tier
+    attributes:
+      label: Earliest gate tier that needs it
+      options: ["G:PILOT", "G:MTLIVE", "G:LAUNCH", "G:SELL", "G:TEN", "unsure"]
+    validations:
+      required: true
+  - type: textarea
+    id: risk
+    attributes:
+      label: Invariants, gates or external parties involved
+      description: INV / QG / EXT / DG IDs, or "none known".
+    validations:
+      required: true

@@ -1,0 +1,53 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# Test and coverage output
+coverage/
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
+# Turborepo
+.turbo/
+
+# Environment — every .env is ignored except the committed example
+.env
+.env.*
+!.env.example
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform.lock.hcl.bak
+
+# Local tooling caches
+.mypy_cache/
+.ruff_cache/
+.eslintcache
+.vitest/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.shared.json
+
+# Local agent memory and scratch files (untracked by design)
+.claude/settings.local.json
+*.local.md
+scratch/

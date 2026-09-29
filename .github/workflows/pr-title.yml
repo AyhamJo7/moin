@@ -1,0 +1,60 @@
+# P02.01.03 — Conventional Commit titles and the A-22 no-AI-mention rule.
+#
+# Runs on `pull_request`, not `pull_request_target`: this workflow checks attacker-controllable
+# text, so it must never run with a writable token or repository secrets in scope.
+#
+# PR title and body reach the scripts through the environment, never through `${{ }}` inside a
+# `run:` block — an interpolated title containing a backtick or `$(...)` would otherwise execute
+# in the runner's shell.
+name: pr-title
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-title-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  conventions:
+    name: title, body and commit conventions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out the pull request head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Policy checks are self-testing
+        run: |
+          node scripts/check-conventional-commit.ts --self-test
+          node scripts/check-no-ai-mentions.ts --self-test
+
+      - name: Pull request title is a Conventional Commit
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: node scripts/check-conventional-commit.ts --title "$PR_TITLE"
+
+      - name: Pull request title and body carry no tool attribution
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          node scripts/check-no-ai-mentions.ts --text "$PR_TITLE" --text "$PR_BODY"
+
+      - name: Commit messages on this branch carry no tool attribution
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/check-no-ai-mentions.ts --commits "$BASE_SHA..$HEAD_SHA"

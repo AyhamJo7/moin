@@ -1,0 +1,64 @@
+name: Bug report
+description: Something behaves differently from what the plan or the code says it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Never put personal data, call audio, customer names or real phone numbers in an issue.
+        Use the demo tenants ("Musterrestaurant", "Musterbetrieb SHK") and reserved test numbers.
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: What should happen, and which checklist item, invariant or gate says so.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: What happens instead. Paste log lines with identifiers only, never payloads.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: The smallest sequence that reproduces it, starting from a clean clone.
+      placeholder: |
+        1. pnpm dev:reset && pnpm db:migrate && pnpm db:seed
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Commit
+      description: The SHA you observed this on.
+    validations:
+      required: true
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environment
+      options: [local, CI, staging, production]
+    validations:
+      required: true
+  - type: dropdown
+    id: invariant
+    attributes:
+      label: Does this touch an invariant?
+      description: Tenant isolation, audit, idempotency, secrets, personal data in logs, life-safety routing.
+      options:
+        - "No"
+        - "Yes — name it in the description"
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Confirm
+      options:
+        - label: This issue contains no personal data, secrets or production identifiers
+          required: true

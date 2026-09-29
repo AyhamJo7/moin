@@ -137,7 +137,7 @@ Single source of status. Tier columns show the status of that phase's items for 
 |---|---|---|---|---|---|---|---|---|
 | P00 | Planning baseline | READY_FOR_REVIEW | — | — | — | — | Founder review | Founder reads and adopts plan (P00.05) |
 | P01 | Discovery & Gurlitt observation | NOT_STARTED | NOT_STARTED | — | — | — | EXT-16 Gurlitt | Meet Gurlitt owner 2026-09-28 09:00 |
-| P02 | Engineering foundation | NOT_STARTED | — | — | — | — | EXT-24 GitHub plan | Bootstrap monorepo |
+| P02 | Engineering foundation | IN_PROGRESS | — | — | — | — | EXT-24 GitHub plan | P02.01 governance scaffolding |
 | P03 | Architecture decisions & threat model | NOT_STARTED | — | — | — | — | — | Write core ADRs |
 | P04 | Feasibility proof & long-lead track | NOT_STARTED | — | — | NOT_STARTED | — | EXT-01/07/10/11/12 | Open Twilio/OpenAI/AWS requests day 1 |
 | P05 | Cloud foundation & walking skeleton | NOT_STARTED | — | — | — | — | EXT-09 AWS | Terraform bootstrap |
@@ -2058,7 +2058,7 @@ Baseline report (EV-P01-001), owner sign-off e-mail reference (EV-P01-002), inte
 <a id="p02--engineering-foundation"></a>
 ## P02 — Engineering Foundation
 
-**Status:** PILOT NOT_STARTED · **Target:** 2026-09-28 → 2026-10-02 · **Effort:** 3 engineering-days
+**Status:** PILOT IN_PROGRESS · **Target:** 2026-09-28 → 2026-10-02 · **Effort:** 3 engineering-days
 
 ### Objective
 Create a reproducible, governed monorepo in which every later phase lands with quality gates already enforced.
@@ -2078,11 +2078,11 @@ Monorepo skeleton · CI v1 · local stack · test harnesses · governance files 
 ### Checklist
 - [ ] **P02.01 Repository governance** `[G:PILOT]`
   - [ ] P02.01.01 Ruleset on `main`: PR required, required checks (`verify`, `security-scan`, `container-scan`), linear history, no force-push/deletion (EXT-24 if the plan lacks private-repo rulesets)
-  - [ ] P02.01.02 CODEOWNERS, PR template (what/why, risk, tests, evidence IDs, docs, migration/rollback, privacy impact), issue templates
-  - [ ] P02.01.03 Conventional Commit enforcement on PR titles, plus a check rejecting AI-tool mentions in titles and bodies (workspace rule)
-  - [ ] P02.01.04 `PROGRESS.md` ledger, `docs/evidence/INDEX.md`, evidence record template
-  - [ ] P02.01.05 `README.md` (purpose, quickstart, links to PLAN/ARCHITECTURE/SECURITY/PRIVACY/OPERATIONS) and `CONTRIBUTING.md`
-  - [ ] P02.01.06 Annotated/signed release-tag policy documented
+  - [x] P02.01.02 CODEOWNERS, PR template (what/why, risk, tests, evidence IDs, docs, migration/rollback, privacy impact), issue templates
+  - [x] P02.01.03 Conventional Commit enforcement on PR titles, plus a check rejecting AI-tool mentions in titles and bodies (workspace rule)
+  - [x] P02.01.04 `PROGRESS.md` ledger, `docs/evidence/INDEX.md`, evidence record template
+  - [x] P02.01.05 `README.md` (purpose, quickstart, links to PLAN/ARCHITECTURE/SECURITY/PRIVACY/OPERATIONS) and `CONTRIBUTING.md`
+  - [x] P02.01.06 Annotated/signed release-tag policy documented
   - [ ] P02.01.07 Verify: a direct push to `main` is rejected; a PR with failing required checks cannot merge
 - [ ] **P02.02 Toolchain baseline** `[G:PILOT]`
   - [ ] P02.02.01 Pin Node 24 LTS (`.nvmrc`, `engines`), `packageManager: pnpm@10.x`; install via fnm/corepack without sudo

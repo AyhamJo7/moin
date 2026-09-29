@@ -1,0 +1,23 @@
+# Every change needs the founder's review until the team grows beyond one person.
+# GitHub matches the LAST matching pattern, so the catch-all comes first.
+
+*                               @AyhamJo7
+
+# Control plane, gates and policy — never changed as a side effect of feature work.
+/.claude/                       @AyhamJo7
+/.github/                       @AyhamJo7
+
+# The authoritative plan and the founder's product specification.
+/PLAN.md                        @AyhamJo7
+/BLUEPRINT.md                   @AyhamJo7
+/PROGRESS.md                    @AyhamJo7
+/docs/evidence/                 @AyhamJo7
+
+# Security-, privacy- and tenancy-critical surfaces (QG-09).
+/packages/db/                   @AyhamJo7
+/apps/server/src/modules/identity-access/  @AyhamJo7
+/apps/server/src/modules/tenancy/          @AyhamJo7
+/apps/server/src/modules/audit/            @AyhamJo7
+/apps/server/src/modules/privacy/          @AyhamJo7
+/apps/server/src/modules/billing/          @AyhamJo7
+/infrastructure/                @AyhamJo7
