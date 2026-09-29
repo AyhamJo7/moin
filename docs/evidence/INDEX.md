@@ -100,3 +100,7 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P03-010 | P03.02.05 | 2026-09-28 | `906b56850bb3` | Domain event catalogue v1: names, id-only payloads, producers and consumers | [EV-P03-010-event-catalogue.md](P03/EV-P03-010-event-catalogue.md) |
 | EV-P03-011 | P03.02.06 | 2026-09-28 | `906b56850bb3` | Every blueprint entity maps to the model; no unmapped entity | [EV-P03-011-domain-coverage-verified.md](P03/EV-P03-011-domain-coverage-verified.md) |
 | EV-P03-012 | P03.03.01 | 2026-09-28 | `906b56850bb3` | Ten state machines as transition tables with a property-test plan | [EV-P03-012-state-machines.md](P03/EV-P03-012-state-machines.md) |
+| EV-P03-013 | P03.06.01 | 2026-09-28 | `66270cbaae43` | Field-level personal-data inventory with roles, retention, method and subprocessor | [EV-P03-013-data-inventory.md](P03/EV-P03-013-data-inventory.md) |
+| EV-P03-014 | P03.06.02 | 2026-09-28 | `66270cbaae43` | Retention matrix aligned with the blueprint and PLAN privacy engineering | [EV-P03-014-retention-matrix.md](P03/EV-P03-014-retention-matrix.md) |
+| EV-P03-015 | P03.06.03 | 2026-09-28 | `66270cbaae43` | Data-dictionary check: no column holding personal data is unclassified | [EV-P03-015-data-dictionary-generator.md](P03/EV-P03-015-data-dictionary-generator.md) |
+| EV-P03-016 | P03.06.04 | 2026-09-28 | `66270cbaae43` | No unclassified column in the MVP tables | [EV-P03-016-classification-verified.md](P03/EV-P03-016-classification-verified.md) |

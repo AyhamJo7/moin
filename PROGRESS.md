@@ -5,7 +5,7 @@ mode: interactive
 phase: P03
 tier: PILOT
 plan: docs/phases/P03-plan.md
-next: P03.06 personal-data inventory — PR docs/p03-06-data-inventory
+next: P03.04 C4 and data-flow diagrams — PR docs/p03-04-diagrams
 updated: 2026-09-28
 ---
 
@@ -103,6 +103,11 @@ Rules
 | P03.03.03 | READY_FOR_REVIEW | PR #11 | EV-P03-012 | Eight further machines |
 | P03.03.04 | READY_FOR_REVIEW | PR #11 | EV-P03-012 | Six property tests generated from the tables |
 
+| P03.06.01 | READY_FOR_REVIEW | PR #12 | EV-P03-013 | Field-level inventory; request_text flagged as riskiest |
+| P03.06.02 | READY_FOR_REVIEW | PR #12 | EV-P03-014 | Retention matrix; 7 questions for EXT-02 |
+| P03.06.03 | READY_FOR_REVIEW | PR #12 | EV-P03-015 | Classification check, proven on a fixture |
+| P03.06.04 | READY_FOR_REVIEW | PR #12 | EV-P03-016 | 0 unclassified columns |
+
 ## External waits
 
 | ID     | Counterparty | Requested  | Expected | Fallback                                                                                  | Blocks               |
@@ -130,6 +135,7 @@ Rules
 
 ## Log
 
+- 2026-09-29 — P03.06 complete. Field-level rather than category-level, because category level is where erasure requests die: "conversation data" cannot be erased, but a named column can. Four things are stated rather than smoothed over: `conversations.request_text` is the riskiest field in the product and whether it is defensible at all is an open EXT-02 question; contacts are anonymised rather than deleted so tasks are not orphaned; knowledge is flagged as _possibly_ personal because an owner can write a staff member's mobile number into it; and German tax law overrides erasure for billing records for eight years. The classification check is proven on a fixture, which mattered — the real schema is five columns today, so a bare pass would have shown nothing.
 - 2026-09-29 — P03.02 and P03.03 complete. Glossary, entity model, aggregate boundaries, the three closed vocabularies and ten state machines as transition tables. Coverage against the blueprint is mechanical (26 entities, 0 unmapped, 5 explicitly deferred), and the check found a false positive in itself before it found anything else — naive pluralisation flagged `retention_policy` when the table is `retention_policies`. A false positive in a coverage check is worse than none, so it was fixed rather than allowlisted.
 - 2026-09-29 — P03.01 complete: ADR process, ten core ADRs accepted, three drafted and left PROPOSED, plus the invariant enforcement register. The coverage check is mechanical and found two things reading would not have: four P02 ADRs with no Verification section at all, and three invariants with no ADR. Those three are accounted for explicitly rather than excused — INV-14 has none by design, because no linter can tell whether a feature is an excluded sensitive use. Open question recorded rather than resolved: PLAN L2180 lists ADR-0036 for P03 while the register assigns it to P07.
 - 2026-09-29 — P02.07 complete, and the walkthrough was worth more than the documents it checked. A fresh session with no context found nine real defects, the worst two being that the environment checker silently did nothing (its name was shadowed by a pnpm built-in) and that nothing in the repository loaded the local environment file at all — so the first setup step was inert and the checker reported green on a configuration that could not run. Also fixed: `pnpm dev` did not exist, the integration harness silently fell back to an admin connection and failed with what looked like an RLS security defect, and two checkouts silently shared one database, which destroyed this machine's dev volume during the run. P02 PILOT is complete except EXT-24 and the founder items.
