@@ -2,9 +2,9 @@
 
 - **Enforced by:** `scripts/check-rls-catalog.ts` (P06.02.04) · **Invariants:** INV-01, INV-02 · **Review:** QG-09
 
-A `SECURITY DEFINER` function runs with its owner's privileges rather than its caller's. In this
-database that means it runs as a role that can see every tenant, which makes each one a deliberate
-hole in the isolation everything else is built on.
+A `SECURITY DEFINER` function runs with its owner's privileges rather than its caller's. This
+can grant a caller access to writes it cannot perform directly. The owner must still be
+`NOBYPASSRLS`; each definer is a reviewed privilege boundary, not an RLS bypass.
 
 There are legitimate reasons to need one — resolving a dialled number to a tenant cannot itself be
 tenant-scoped without circularity — so the answer is not "never". It is: each one is named here,
@@ -16,11 +16,10 @@ does not pin `search_path`. **A row with no reason does not count as registered.
 
 ## Why `search_path` is not optional
 
-An unpinned `search_path` on an elevated function lets its caller decide which `public.foo()` it
-resolves to. The caller creates a schema, puts a function called `foo` in it, puts that schema
-first on the search path, and the elevated function calls the attacker's code with the owner's
-privileges. It is the standard PostgreSQL privilege-escalation primitive, and it is one line to
-prevent.
+An unpinned `search_path` on an elevated function lets its caller influence resolution of
+unqualified names. The caller can also create temporary tables: unless `pg_temp` is explicitly
+placed last, PostgreSQL may resolve an unqualified table to the caller's temporary copy before
+the intended table. Every registered path is checked exactly against its reviewed value.
 
 ## Register
 

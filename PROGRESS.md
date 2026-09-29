@@ -1,11 +1,11 @@
 ---
 mission: P02 closed; P04 engineering done bar external; P06 tenancy spine in progress
-status: blocked
+status: active
 mode: autonomous
 phase: P06
 tier: PILOT
 plan: docs/phases/P06-plan.md
-next: finish P06.04 — see the BLOCKER entry at the top of the Log for the exact order
+next: submit P06.04 for QG-09 founder review; continue dependency-valid P06 work
 updated: 2026-09-29
 ---
 
@@ -155,6 +155,11 @@ Rules
 | P06.03.07 | IN_PROGRESS | PR #28 | EV-P06-015 | The job half is done; the forged-header half needs the HTTP session layer |
 | P06.14.01 | READY_FOR_REVIEW | PR #28 | EV-P06-014 | Claims identifiers only; each item processed in its own tenant transaction |
 | P06.14.02 | READY_FOR_REVIEW | PR #28 | EV-P06-015 | A mismatched envelope updates zero rows rather than the wrong tenant's |
+| P06.04.01 | READY_FOR_REVIEW | 127ba14 | EV-P06-016 | Organisation and location lifecycle tables; FORCE RLS retained |
+| P06.04.02 | READY_FOR_REVIEW | 127ba14 | EV-P06-017 | Privileged function creates setup and pending owner invitation; P06.08 issues and delivers token |
+| P06.04.03 | READY_FOR_REVIEW | 127ba14 | EV-P06-018 | Paid Early Access cap of five via one locked global counter; founder review pending |
+| P06.04.04 | READY_FOR_REVIEW | 127ba14 | EV-P06-019 | Retry and racing request IDs return one tenant |
+| P06.04.05 | READY_FOR_REVIEW | 127ba14 | EV-P06-020 | Real PostgreSQL attack suite, catalog defects and rollback tests |
 
 ## External waits
 
@@ -197,6 +202,7 @@ secret-rule fix (#25) merged, with its full-history scan green.
 
 ## Log
 
+- 2026-09-29 — **P06.04 resumed from the 290ce67 checkpoint.** The old BLOCKER below was session exhaustion, not a technical impediment. The first real PostgreSQL run with a non-bypass function owner exposed that a FORCE RLS role cannot count all organisations for the Early Access cap; three cap tests failed. The corrected function updates a single global counter under a row lock in the same transaction. A security review also found that an implicit `pg_temp` search path could let a caller shadow unqualified tables; the final function pins it last, with a malicious TEMP-table fixture. `moin_app` cannot change plan/status or insert an organisation, and the provisioner has no direct DML. `gates full` passed 14/14 at clean implementation HEAD `127ba14acb4e4b594a7a6db32180bf30d582c98d`; evidence and ledger changes still require their own final-HEAD run. QG-09 founder review, PR CI and invitation delivery in P06.08 remain pending.
 - 2026-09-29 — **BLOCKER: usage limit reached mid-P06.04.** Not a technical blocker and not an external wait — the session ran out of budget.
   - **What was tried:** `packages/db/migrations/0006_provisioning.sql` was written and applied to the local development database (`pnpm db:migrate` → `applied 1: 0006_provisioning`). It adds `provisioning_limits`, `provisioning_requests` and `app.provision_tenant(...)`.
   - **Why it is not progressing:** nothing after that ran. No tests, no `gates full`, no commit until this entry. **Nothing about P06.04 is verified**, and the migration has been applied to one developer database only.

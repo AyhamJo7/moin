@@ -140,3 +140,8 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P06-013 | P06.03.06 | 2026-09-29 | `c2c25800e9be` | Every log line inside a tenant transaction carries its organisation, and the allowlist still applies to it | [EV-P06-013-tenant-in-every-log-line.md](P06/EV-P06-013-tenant-in-every-log-line.md) |
 | EV-P06-014 | P06.14.01 | 2026-09-29 | `c2c25800e9be` | Cross-tenant work claims identifiers only, then processes each item in its own tenant transaction | [EV-P06-014-with-system-work.md](P06/EV-P06-014-with-system-work.md) |
 | EV-P06-015 | P06.14.02 | 2026-09-29 | `c2c25800e9be` | A job envelope naming the wrong organisation updates zero rows rather than the wrong tenant's row | [EV-P06-015-system-work-tenant-mismatch.md](P06/EV-P06-015-system-work-tenant-mismatch.md) |
+| EV-P06-016 | P06.04.01 | 2026-09-29 | `127ba14acb4e` | Organisation and location lifecycle tables under FORCE RLS | [EV-P06-016-tenant-tables.md](P06/EV-P06-016-tenant-tables.md) |
+| EV-P06-017 | P06.04.02 | 2026-09-29 | `127ba14acb4e` | Privileged tenant provisioning creates complete scoped setup | [EV-P06-017-provisioning-contract.md](P06/EV-P06-017-provisioning-contract.md) |
+| EV-P06-018 | P06.04.03 | 2026-09-29 | `127ba14acb4e` | Atomic five-customer paid Early Access cap | [EV-P06-018-early-access-cap.md](P06/EV-P06-018-early-access-cap.md) |
+| EV-P06-019 | P06.04.04 | 2026-09-29 | `127ba14acb4e` | Retry and concurrent request idempotency | [EV-P06-019-provisioning-idempotency.md](P06/EV-P06-019-provisioning-idempotency.md) |
+| EV-P06-020 | P06.04.05 | 2026-09-29 | `127ba14acb4e` | Real PostgreSQL privilege, rollback, isolation and catalog attacks | [EV-P06-020-provisioning-attacks.md](P06/EV-P06-020-provisioning-attacks.md) |
