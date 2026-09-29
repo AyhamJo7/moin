@@ -1,0 +1,3 @@
+# AI evaluation datasets, adversarial suites and runners. Populated in P10 and P12.
+# Git does not track empty directories, so this file keeps the shape
+# of the repository honest on a fresh clone.

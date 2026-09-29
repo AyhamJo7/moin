@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "_comment": "Fixtures deliberately violate the repository's lint rules. They get their own tsconfig so the typescript-eslint project service can type them for the type-aware rules, while the package's own `typecheck` task excludes them — they are inputs to a test, not source.",
+  "extends": "../../../tsconfig/base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "jsx": "react-jsx",
+    "types": ["node"],
+    "skipLibCheck": true
+  },
+  "include": ["./**/*.ts", "./**/*.tsx"]
+}

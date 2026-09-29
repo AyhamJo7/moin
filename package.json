@@ -1,0 +1,51 @@
+{
+  "name": "moin",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "KlarDesk \u2014 Digitales Front Office f\u00fcr kleine Betriebe",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@10.34.5",
+  "engines": {
+    "node": ">=24.21.0 <25",
+    "pnpm": ">=10.34.5 <11"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "check:conventions": "node scripts/check-conventional-commit.ts --self-test && node scripts/check-no-ai-mentions.ts --self-test",
+    "db:migrate": "node --env-file-if-exists=.env packages/db/src/cli.ts migrate",
+    "db:seed": "node --env-file-if-exists=.env packages/db/src/cli.ts seed",
+    "depcruise": "depcruise apps packages --config .dependency-cruiser.cjs",
+    "dev": "turbo run dev",
+    "dev:down": "docker compose down",
+    "dev:logs": "docker compose logs -f",
+    "dev:reset": "docker compose down --volumes && docker compose up -d --wait",
+    "dev:up": "docker compose up -d --wait",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "turbo run lint && eslint scripts eslint.config.ts vitest.config.ts playwright.config.ts",
+    "preflight": "node --env-file-if-exists=.env scripts/doctor.ts",
+    "test": "vitest run --project unit",
+    "test:e2e": "playwright test",
+    "test:integration": "node --env-file-if-exists=.env ./node_modules/vitest/vitest.mjs run --project integration",
+    "typecheck": "turbo run typecheck && tsc --noEmit -p tsconfig.json",
+    "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "@eslint/js": "10.0.1",
+    "@playwright/test": "1.63.0",
+    "@types/node": "24.19.0",
+    "dependency-cruiser": "18.4.0",
+    "eslint": "10.11.0",
+    "eslint-config-prettier": "10.1.8",
+    "globals": "17.12.0",
+    "jiti": "2.7.0",
+    "prettier": "3.9.9",
+    "turbo": "2.11.5",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.70.1",
+    "vite": "8.3.1",
+    "vitest": "5.0.2"
+  }
+}

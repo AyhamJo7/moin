@@ -1,0 +1,26 @@
+{
+  "name": "@moin/config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared tsconfig, ESLint and dependency-cruiser presets, and the repository's custom lint rules",
+  "exports": {
+    "./eslint": "./src/eslint/index.ts",
+    "./tsconfig/base": "./tsconfig/base.json",
+    "./tsconfig/node": "./tsconfig/node.json"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "echo \"@moin/config ships TypeScript sources; nothing to build\""
+  },
+  "devDependencies": {
+    "@types/estree": "1.0.9",
+    "@types/react": "19.3.0",
+    "@typescript-eslint/parser": "8.70.1",
+    "eslint": "10.11.0",
+    "globals": "17.12.0",
+    "typescript": "6.0.3",
+    "vitest": "5.0.2"
+  }
+}

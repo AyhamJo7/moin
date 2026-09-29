@@ -1,8 +1,8 @@
 # Contributing to moin
 
 `PLAN.md` is the authoritative execution plan. Work is scoped by a phase and a checklist section,
-never by "whatever seems useful". Read `PLAN.md`'s *Conventions*, the *Status Ledger*, the
-*Invariants* and the phase you are working on — never the whole file.
+never by "whatever seems useful". Read `PLAN.md`'s _Conventions_, the _Status Ledger_, the
+_Invariants_ and the phase you are working on — never the whole file.
 
 ```bash
 python3 .claude/bin/plan_section.py --ledger        # status of every phase
@@ -26,8 +26,8 @@ used as branch prefixes; use `chore` instead, so the set of branch prefixes stay
 
 ## Commits
 
-[Conventional Commits](https://www.conventionalcommits.org/). The subject says *what*, the body says
-*why* — the diff already shows what changed.
+[Conventional Commits](https://www.conventionalcommits.org/). The subject says _what_, the body says
+_why_ — the diff already shows what changed.
 
 ```text
 feat(voice): hold the call open while the tool result is pending
@@ -92,7 +92,7 @@ Implementation and verification are **separate items**. An item may not be ticke
 feature flag exists, because a UI element exists that was never exercised end to end, because a
 provider SDK is installed, because a test was skipped or quarantined, because documentation claims
 it works, or because a sandbox run stood in for a live one. The full list is `PLAN.md` →
-*Checklist rules — no fake completion*.
+_Checklist rules — no fake completion_.
 
 Sensitive evidence is never committed: the record holds the storage location, a SHA-256 hash, the
 date and the counterparty.

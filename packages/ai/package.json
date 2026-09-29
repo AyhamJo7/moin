@@ -1,0 +1,23 @@
+{
+  "name": "@moin/ai",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Model gateway, provider adapters, prompt and policy registry, structured-output validation, redaction and cost",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3",
+    "vitest": "5.0.2",
+    "@types/node": "24.19.0"
+  },
+  "dependencies": {
+    "zod": "4.6.5"
+  }
+}

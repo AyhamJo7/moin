@@ -1,0 +1,20 @@
+{
+  "name": "@moin/kernel",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Value objects, German normalisation, the opening-hours engine and the clock",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3",
+    "vitest": "5.0.2",
+    "@types/node": "24.19.0"
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":semanticCommits", ":dependencyDashboard"],
+
+  "_comment": "P02.08.01. Two speeds on purpose: a security fix should not wait for the weekly batch, and a routine bump should not interrupt a working day. Everything arrives as a pull request that runs the full gate set — Renovate never merges here, because merging to main is a founder action.",
+
+  "timezone": "Europe/Berlin",
+  "schedule": ["before 6am on monday"],
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 0,
+  "rebaseWhen": "conflicted",
+  "semanticCommitType": "chore",
+  "semanticCommitScope": "deps",
+  "labels": ["dependencies"],
+  "commitMessageLowerCase": "auto",
+
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on the first day of the month"]
+  },
+
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "labels": ["dependencies", "security"],
+    "schedule": ["at any time"],
+    "prPriority": 10
+  },
+
+  "osvVulnerabilityAlerts": true,
+
+  "packageRules": [
+    {
+      "description": "Routine updates arrive in batches, so review is one pass rather than twenty.",
+      "matchUpdateTypes": ["minor", "patch"],
+      "matchCurrentVersion": "!/^0/",
+      "groupName": "non-major dependencies"
+    },
+    {
+      "description": "A major bump is read on its own; that is where the breaking change is.",
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "The toolchain baseline is pinned by ADR-0002. A bump is an ADR amendment, not a routine update.",
+      "matchPackageNames": ["node", "pnpm", "typescript", "typescript-eslint", "eslint"],
+      "dependencyDashboardApproval": true,
+      "labels": ["dependencies", "adr-0002"]
+    },
+    {
+      "description": "Actions and container images are pinned by digest (P02.06.06); Renovate keeps the digest current and the comment honest.",
+      "matchManagers": ["github-actions", "dockerfile", "docker-compose"],
+      "pinDigests": true,
+      "groupName": "pinned digests"
+    },
+    {
+      "description": "A brand-new release has had no time to be found wrong. Three days is cheap insurance against a compromised or broken publish.",
+      "matchUpdateTypes": ["minor", "patch"],
+      "minimumReleaseAge": "3 days"
+    }
+  ],
+
+  "postUpdateOptions": ["pnpmDedupe"]
+}

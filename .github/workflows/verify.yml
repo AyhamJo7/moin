@@ -1,0 +1,241 @@
+# QG-01 — the check every pull request must pass (P02.06.01).
+#
+# Ordered cheapest-first, so a formatting mistake fails in seconds rather than after the
+# integration suite has spun up a database.
+#
+# `permissions: contents: read` is the workflow default and each job narrows from there. The
+# default GITHUB_TOKEN is write-capable unless told otherwise, and a workflow that checks out a
+# contributor's branch should never hold one.
+name: verify
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  # One run per ref. A push that supersedes another cancels it rather than queueing behind it.
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Turborepo telemetry off: CI should not phone home about a private repository.
+  TURBO_TELEMETRY_DISABLED: '1'
+  DO_NOT_TRACK: '1'
+
+jobs:
+  static:
+    name: format, lint, typecheck, boundaries, docs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      # --frozen-lockfile so CI can never silently resolve a dependency tree different from the
+      # one that was reviewed and scanned.
+      - run: pnpm install --frozen-lockfile
+
+      - name: Repository conventions
+        run: |
+          node scripts/check-conventional-commit.ts --self-test
+          node scripts/check-no-ai-mentions.ts --self-test
+
+      - run: pnpm exec prettier --check .
+      # `pnpm lint` and `pnpm typecheck`, not `turbo run`: turbo only runs the per-package tasks,
+      # which left scripts/ — the seven consistency checks and the doctor — unlinted and
+      # untypechecked. The root scripts run turbo and then cover the root files.
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm exec depcruise apps packages scripts --config .dependency-cruiser.cjs
+
+      # These ran only in the local gate, so a pull request could break the ADR index, the
+      # data-flow-to-subprocessor mapping or a threat-model reference and CI would stay green —
+      # on the checks that are meant to protect `main`.
+      - name: Documentation consistency
+        run: |
+          node scripts/check-adr-coverage.ts
+          node scripts/check-domain-coverage.ts
+          node scripts/check-dfd-coverage.ts
+          node scripts/check-threat-model-refs.ts
+          node scripts/check-data-classification.ts
+          node scripts/check-subprocessors.ts
+          node scripts/check-brand-strings.ts
+
+  unit:
+    name: unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+
+  integration:
+    name: integration tests (real postgres)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    services:
+      # Real PostgreSQL, matching the local stack. An embedded substitute runs as superuser and
+      # silently bypasses row-level security, so isolation tests against one would pass while
+      # proving nothing (INV-01).
+      postgres:
+        image: pgvector/pgvector@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
+        env:
+          POSTGRES_USER: moin_owner
+          POSTGRES_PASSWORD: ci-only-not-a-secret
+          POSTGRES_DB: moin
+          POSTGRES_INITDB_ARGS: '--encoding=UTF8 --locale=C'
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U moin_owner -d moin"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      TEST_DATABASE_ADMIN_URL: postgres://moin_owner:ci-only-not-a-secret@127.0.0.1:5432/postgres
+      TEST_DATABASE_APP_URL: postgres://moin_app:ci-only-not-a-secret@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # The service container runs no init scripts, so the roles the local stack creates are
+      # created here instead. The application role is NOBYPASSRLS exactly as in production.
+      - name: Create database roles
+        env:
+          PGPASSWORD: ci-only-not-a-secret
+        run: |
+          psql -h 127.0.0.1 -U moin_owner -d moin -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE moin_app WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
+          CREATE ROLE moin_migrator WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
+          CREATE ROLE moin_readonly WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
+          GRANT CONNECT ON DATABASE moin TO moin_app, moin_migrator, moin_readonly;
+          SQL
+
+      - run: pnpm test:integration
+
+      - name: Migration safety check
+        run: node scripts/check-migrations.ts
+
+  build:
+    name: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm turbo run build
+
+  e2e:
+    name: end-to-end (chromium) and accessibility
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Chromium only on a pull request (QG-02). Firefox, WebKit and the phone viewports run
+      # nightly under QG-03: three extra browser runs per push buys little and slows the loop.
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm --filter @moin/web build
+      - run: pnpm exec playwright test --project=chromium
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------------------
+  # Slots reserved by P02.06.05. Each fails loudly if its script exists but does not pass, and
+  # is skipped with a visible reason until the phase that creates it. A job that silently passes
+  # because it checks nothing is worse than no job: it reports green and means nothing.
+  # ---------------------------------------------------------------------------------------
+  rls-catalog:
+    name: RLS catalog check (activated in P06.02)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Not yet active
+        run: |
+          if [ -f scripts/check-rls-catalog.ts ]; then
+            echo "scripts/check-rls-catalog.ts exists — wire this job to run it (P06.02.04)." >&2
+            exit 1
+          fi
+          echo "Reserved slot: the RLS catalog check is created in P06.02.04. Nothing is checked yet."
+
+  openapi-drift:
+    name: OpenAPI and client drift (activated in P06/P07)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Not yet active
+        run: |
+          if [ -f scripts/check-openapi-drift.ts ]; then
+            echo "scripts/check-openapi-drift.ts exists — wire this job to run it." >&2
+            exit 1
+          fi
+          echo "Reserved slot: the OpenAPI drift check is created with the API surface in P06/P07."
+
+  verify:
+    name: verify
+    runs-on: ubuntu-24.04
+    needs: [static, unit, integration, build, e2e, rls-catalog, openapi-drift]
+    if: always()
+    steps:
+      # One required check to configure in the ruleset, and it cannot pass while any job failed,
+      # was cancelled or was skipped. `needs.*.result` rather than `success()` because a skipped
+      # required job would otherwise be read as success.
+      - name: All checks passed
+        run: |
+          results='${{ join(needs.*.result, ' ') }}'
+          echo "job results: $results"
+          for result in $results; do
+            if [ "$result" != "success" ]; then
+              echo "a required job did not succeed: $result" >&2
+              exit 1
+            fi
+          done

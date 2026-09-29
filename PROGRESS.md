@@ -1,12 +1,12 @@
 ---
-mission: P02 — Engineering Foundation (tier PILOT)
+mission: P02 and P03 internally complete; P04 in progress (tier PILOT)
 status: active
-mode: interactive
-phase: P02
+mode: autonomous
+phase: P04
 tier: PILOT
-plan: docs/phases/P02-plan.md
-next: P02.02 toolchain baseline — PR chore/p02-02-toolchain
-updated: 2026-09-28
+plan: docs/phases/P04-plan.md
+next: P04 is at its strongest truthful engineering state; everything left needs EXT-10/11/12 or a real call
+updated: 2026-09-29
 ---
 
 # PROGRESS — moin
@@ -15,9 +15,10 @@ Append-only execution ledger. One row per checklist item, carrying the commit th
 implemented it and the evidence record that verifies it. Status vocabulary is PLAN.md's
 (`NOT_STARTED`, `IN_PROGRESS`, `BLOCKED`, `WAITING_FOR_EXTERNAL`, `READY_FOR_REVIEW`,
 `VERIFIED`, `COMPLETE`, `DEFERRED`). The Status Ledger in PLAN.md is the source of truth for
-*phase* status; this file records *item* progress and the order it happened in.
+_phase_ status; this file records _item_ progress and the order it happened in.
 
 Rules
+
 - Append; never rewrite or delete a row. A correction is a new row that says what it corrects.
 - An item reaches `VERIFIED` only with an `EV-Pxx-nnn` evidence record, never on a claim.
 - Implementation and verification are separate rows, because they are separate checklist items.
@@ -26,24 +27,174 @@ Rules
 
 ## Items
 
-| Item | Status | Commit | Evidence | Note |
-|---|---|---|---|---|
-| P02.01.02 | READY_FOR_REVIEW | (this commit) | — | CODEOWNERS, PR template, two issue templates, issue config |
-| P02.01.03 | READY_FOR_REVIEW | (this commit) | — | `pr-title` workflow + `check-conventional-commit.ts` + `check-no-ai-mentions.ts`; both self-test against `.claude/policy/no-ai-mentions.json` |
-| P02.01.04 | READY_FOR_REVIEW | (this commit) | — | `PROGRESS.md`, `docs/evidence/INDEX.md`, `docs/evidence/TEMPLATE.md` |
-| P02.01.05 | READY_FOR_REVIEW | (this commit) | — | `README.md`, `CONTRIBUTING.md` |
-| P02.01.06 | READY_FOR_REVIEW | (this commit) | — | `docs/development/release-tags.md` |
-| P02.01.01 | WAITING_FOR_EXTERNAL | — | — | Ruleset on `main` — EXT-24; must be applied only after the P02.06 workflows are on `main` |
-| P02.01.07 | BLOCKED | — | — | Verification of the ruleset; blocked by P02.01.01 |
+| Item      | Status               | Commit | Evidence               | Note                                                                                    |
+| --------- | -------------------- | ------ | ---------------------- | --------------------------------------------------------------------------------------- |
+| P02.01.02 | READY_FOR_REVIEW     | PR #3  | EV-P02-003             | CODEOWNERS, PR template, two issue templates, issue config                              |
+| P02.01.03 | READY_FOR_REVIEW     | PR #3  | EV-P02-004             | `pr-title` workflow; both policy checks self-test against the founder-owned policy file |
+| P02.01.04 | READY_FOR_REVIEW     | PR #3  | EV-P02-005             | This ledger, the evidence registry and the record template                              |
+| P02.01.05 | READY_FOR_REVIEW     | PR #3  | EV-P02-006             | `README.md`, `CONTRIBUTING.md`                                                          |
+| P02.01.06 | READY_FOR_REVIEW     | PR #3  | EV-P02-007             | `docs/development/release-tags.md`                                                      |
+| P02.01.01 | WAITING_FOR_EXTERNAL | —      | —                      | Ruleset on `main` (EXT-24); apply only after the P02.06 workflows are on `main`         |
+| P02.01.07 | BLOCKED              | —      | —                      | Verification of the ruleset; blocked by P02.01.01                                       |
+| P02.02.01 | READY_FOR_REVIEW     | PR #4  | EV-P02-002             | Node 24.21.0 via nvm; pnpm 10.34.5 via corepack                                         |
+| P02.02.02 | READY_FOR_REVIEW     | PR #4  | EV-P02-008             | Turborepo tasks; the gate-config replacement is patch 0003, founder-applied             |
+| P02.02.03 | READY_FOR_REVIEW     | PR #4  | EV-P02-009, EV-P02-019 | TS 6.0.3 strict; validated against NestJS 12 and Next 16, fallback not taken            |
+| P02.02.04 | READY_FOR_REVIEW     | PR #4  | EV-P02-001             | ESLint flat config; every ban proven by a violating fixture                             |
+| P02.02.05 | READY_FOR_REVIEW     | PR #4  | EV-P02-001             | `moin/no-tenant-conditional` (INV-18), `moin/no-direct-db-access`; off until P06.03     |
+| P02.02.06 | READY_FOR_REVIEW     | PR #4  | EV-P02-010             | Prettier, `.editorconfig`                                                               |
+| P02.02.07 | READY_FOR_REVIEW     | PR #4  | EV-P02-011, EV-P02-020 | dependency-cruiser; boundary rules proven by violating trees                            |
+| P02.02.08 | READY_FOR_REVIEW     | PR #4  | EV-P02-002             | Terraform 1.16.4, tflint 0.64.0, Trivy 0.74.0                                           |
+| P02.02.09 | READY_FOR_REVIEW     | PR #4  | EV-P02-002             | ADR-0002, ADR-0034 accepted                                                             |
+| P02.02.10 | READY_FOR_REVIEW     | PR #4  | EV-P02-001             | Mutation-proven non-vacuous                                                             |
+| P02.03.01 | READY_FOR_REVIEW     | PR #5  | EV-P02-012             | Full tree; 12 workspaces; boundaries clean                                              |
+| P02.03.02 | READY_FOR_REVIEW     | PR #5  | EV-P02-013             | Four roles from one image; mismatch guard exits 1                                       |
+| P02.03.03 | READY_FOR_REVIEW     | PR #5  | EV-P02-014             | Zod loader; a rejected secret is never echoed (INV-15)                                  |
+| P02.03.04 | READY_FOR_REVIEW     | PR #5  | EV-P02-015             | Pino allowlist; three leaks found by review, all closed, mutation-proven                |
+| P02.03.05 | READY_FOR_REVIEW     | PR #5  | EV-P02-016             | `/healthz` 200, `/readyz` 503; single-flight; thin unauthenticated body                 |
+| P02.03.06 | READY_FOR_REVIEW     | PR #5  | EV-P02-017             | arm64, non-root, read-only FS, no package manager; 379 MiB                              |
+| P02.03.07 | READY_FOR_REVIEW     | PR #5  | EV-P02-018             | All four roles verified live in containers                                              |
+| P02.03    | READY_FOR_REVIEW     | PR #5  | EV-P02-021             | QG-09 review: 1 Critical + 11 High, all reproduced then fixed                           |
+| P02.04.01 | READY_FOR_REVIEW     | PR #6  | EV-P02-024             | Six services, digest-pinned, healthy in 26 s from empty volumes                         |
+| P02.04.02 | READY_FOR_REVIEW     | PR #6  | EV-P02-025             | dev/db commands; demo tenants defined, rows land in P06.04                              |
+| P02.04.03 | READY_FOR_REVIEW     | PR #6  | EV-P02-026             | Example environment file; gitleaks 0 findings                                           |
+| P02.04.04 | READY_FOR_REVIEW     | PR #6  | EV-P02-027             | Twilio developer path documented                                                        |
+| P02.04.05 | READY_FOR_REVIEW     | PR #6  | EV-P02-023             | `pnpm doctor`                                                                           |
+| P02.04.06 | READY_FOR_REVIEW     | PR #6  | EV-P02-022             | 29 s warm; cold download volume recorded; one founder-only step                         |
+
+| P02.05.01 | READY_FOR_REVIEW | PR #7 | EV-P02-028 | Vitest unit + integration projects |
+| P02.05.02 | READY_FOR_REVIEW | PR #7 | EV-P02-029 | Template-database clone per file; found two real defects |
+| P02.05.03 | READY_FOR_REVIEW | PR #7 | EV-P02-030 | German factories; folding bug on Turkish dotless i found and fixed |
+| P02.05.04 | READY_FOR_REVIEW | PR #7 | EV-P02-032 | Playwright + axe; only Chromium installed locally, rest on CI |
+| P02.05.05 | READY_FOR_REVIEW | PR #7 | EV-P02-031 | Fault injection + controllable clock |
+| P02.05.06 | READY_FOR_REVIEW | PR #7 | EV-P02-033 | Every type passes in-suite and standalone on a fresh database |
+
+| P02.06.04 | READY_FOR_REVIEW | PR #8 | EV-P02-034 | Migration safety check; 6 violating fixtures flagged, 3 safe ones not |
+| P02.06.05 | READY_FOR_REVIEW | PR #8 | EV-P02-040 | Reserved slots that fail if their script appears unwired |
+| P02.06.06 | READY_FOR_REVIEW | PR #8 | EV-P02-039 | 18 actions + 5 images pinned; actionlint clean |
+| P02.08.01 | READY_FOR_REVIEW | PR #8 | EV-P02-037 | Renovate config; not exercised until the App is installed |
+| P02.08.02 | READY_FOR_REVIEW | PR #8 | EV-P02-035 | Licence allowlist; LGPL decision flagged for EXT-02 |
+| P02.08.03 | READY_FOR_REVIEW | PR #8 | EV-P02-038 | Install-script allowlist, enforced at two layers |
+| P02.08.04 | READY_FOR_REVIEW | PR #8 | EV-P02-036 | Four executable negative controls |
+| P02.07.01 | READY_FOR_REVIEW | PR #9 | EV-P02-041 | local-setup, testing, conventions |
+| P02.07.02 | READY_FOR_REVIEW | PR #9 | EV-P02-042 | ARCHITECTURE.md, SECURITY.md |
+| P02.06.01 | READY_FOR_REVIEW | PR #8 | EV-P02-043 | verify green: 8 jobs incl. integration on real PostgreSQL |
+| P02.06.02 | READY_FOR_REVIEW | PR #8 | EV-P02-044 | security-scan green |
+| P02.06.03 | READY_FOR_REVIEW | PR #8 | EV-P02-045 | container-scan green; image assertions hold |
+| P02.06.07 | BLOCKED | — | — | Four negative-control PRs; needs the workflows on `main` and the ruleset (EXT-24) |
+| P02.07.03 | BLOCKED | — | — | Fresh-session doc walkthrough; needs a session with no prior context |
+
+| P02.07.01 | READY_FOR_REVIEW | PR #9 | EV-P02-041 | local-setup, testing, conventions |
+| P02.07.02 | READY_FOR_REVIEW | PR #9 | EV-P02-042 | ARCHITECTURE.md, SECURITY.md |
+| P02.07.03 | READY_FOR_REVIEW | PR #9 | EV-P02-046 | Fresh-session walkthrough; 9 real defects found and fixed |
+| P03.01.01 | READY_FOR_REVIEW | PR #10 | EV-P03-001 | ADR process, template, index |
+| P03.01.02 | READY_FOR_REVIEW | PR #10 | EV-P03-002 | Ten core ADRs accepted |
+| P03.01.03 | READY_FOR_REVIEW | PR #10 | EV-P03-003 | ADR-0011/0018/0019 drafted, all PROPOSED |
+| P03.01.04 | READY_FOR_REVIEW | PR #10 | EV-P03-004 | Every ADR names its enforcement; the check found 4 gaps |
+| P03.01.05 | READY_FOR_REVIEW | PR #10 | EV-P03-005 | Every INV covered, or accounted for in the register |
+
+| P03.02.01 | READY_FOR_REVIEW | PR #11 | EV-P03-006 | Glossary; Vorgang flagged as at risk, decided by P01 |
+| P03.02.02 | READY_FOR_REVIEW | PR #11 | EV-P03-007 | Entity model per module |
+| P03.02.03 | READY_FOR_REVIEW | PR #11 | EV-P03-008 | Eleven aggregates with the rule each holds |
+| P03.02.04 | READY_FOR_REVIEW | PR #11 | EV-P03-009 | 16 intents, 11 outcomes, 10 task types, all closed |
+| P03.02.05 | READY_FOR_REVIEW | PR #11 | EV-P03-010 | ~40 events, id-only payloads |
+| P03.02.06 | READY_FOR_REVIEW | PR #11 | EV-P03-011 | 26 blueprint entities, 0 unmapped |
+| P03.03.01 | READY_FOR_REVIEW | PR #11 | EV-P03-012 | Call session, with deadlines as numbers |
+| P03.03.02 | READY_FOR_REVIEW | PR #11 | EV-P03-012 | Interaction finalisation + reconciler contract |
+| P03.03.03 | READY_FOR_REVIEW | PR #11 | EV-P03-012 | Eight further machines |
+| P03.03.04 | READY_FOR_REVIEW | PR #11 | EV-P03-012 | Six property tests generated from the tables |
+
+| P03.06.01 | READY_FOR_REVIEW | PR #12 | EV-P03-013 | Field-level inventory; request_text flagged as riskiest |
+| P03.06.02 | READY_FOR_REVIEW | PR #12 | EV-P03-014 | Retention matrix; 7 questions for EXT-02 |
+| P03.06.03 | READY_FOR_REVIEW | PR #12 | EV-P03-015 | Classification check, proven on a fixture |
+| P03.06.04 | READY_FOR_REVIEW | PR #12 | EV-P03-016 | 0 unclassified columns |
+
+| P03.04.01 | READY_FOR_REVIEW | PR #13 | EV-P03-017 | C4 context and containers |
+| P03.04.02 | READY_FOR_REVIEW | PR #13 | EV-P03-018 | DFD, five trust boundaries, twelve flows |
+| P03.04.03 | READY_FOR_REVIEW | PR #13 | EV-P03-019 | Coverage check; found 3 gaps in the first draft |
+| P03.05.01 | READY_FOR_REVIEW | PR #14 | EV-P03-025 | STRIDE, 63 mitigations, all references verified |
+| P03.05.02 | READY_FOR_REVIEW | PR #14 | EV-P03-026 | Seven abuse cases; two corrected by the review |
+| P03.05.03 | READY_FOR_REVIEW | PR #14 | EV-P03-024 | Independent review: 2 Critical, 7 High, all resolved |
+| P03.07.01 | READY_FOR_REVIEW | PR #14 | EV-P03-020 | Lawyer pack prepared, not sent |
+| P03.07.02 | READY_FOR_REVIEW | PR #14 | EV-P03-021 | 13 questions, each with a fallback |
+| P03.08.01 | READY_FOR_REVIEW | PR #14 | EV-P03-022 | All 20 invariants mapped, with owner |
+| P03.08.02 | READY_FOR_REVIEW | PR #14 | EV-P03-023 | 19 automated, 1 documented manual control |
+| P04.04.01 | READY_FOR_REVIEW | PR #16 | EV-P04-001 | TwiML builder; the disclosure has no option to be interruptible (INV-03) |
+| P04.04.02 | READY_FOR_REVIEW | PR #16 | EV-P04-002 | Codecs; an unknown message type cannot end a call (INV-19) |
+| P04.04.03 | READY_FOR_REVIEW | PR #16 | EV-P04-003 | Signature matches Twilio's published vector; single-use 60 s hashed socket token |
+| P04.04.04 | READY_FOR_REVIEW | PR #16 | EV-P04-004 | Voice role, media socket, scripted measurement call |
+| P04.04.05 | READY_FOR_REVIEW | PR #16 | EV-P04-005 | 301 tests, two of them against a real listening server |
+| P04.04.06 | BLOCKED | — | — | Needs a real call: EXT-10 and EXT-11 |
+| P04.05.01–.04 | WAITING_FOR_EXTERNAL | PR #16 | — | Harness and scripted call built; the calls need a number, volunteers and eu-central-1 |
+| P04.05.05 | IN_PROGRESS | PR #16 | — | Report written with its method, thresholds and empty tables; no result exists |
+| P04.06.01 | READY_FOR_REVIEW | PR #16 | EV-P04-006 | DG-01 criteria recorded before any measurement existed |
+| P04.06.02 | BLOCKED | — | — | The decision is the founder's, on evidence that does not exist |
+| P04.07.04 | READY_FOR_REVIEW | PR #16 | EV-P04-007 | ADR-0034 enforced by a check instead of by review |
+| P04.10.03 | IN_PROGRESS | PR #16 | — | Register written with every party and flow; every DPA status is `NOT_REQUESTED` |
+| P04.10.04 | READY_FOR_REVIEW | PR #16 | EV-P04-008 | All 12 DFD flows resolve to a party with a region, or to the explicit internal list |
 
 ## External waits
 
-| ID | Counterparty | Requested | Expected | Fallback | Blocks |
-|---|---|---|---|---|---|
-| EXT-24 | GitHub | 2026-09-28 | — | Pre-push hook + CI status discipline, recorded as an accepted risk; must be resolved before MT-LIVE | P02.01.01, P02.01.07 |
+| ID     | Counterparty                                 | Requested                              | Expected | Fallback                                                                                                                                                          | Blocks                                           |
+| ------ | -------------------------------------------- | -------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| EXT-24 | GitHub                                       | 2026-09-28                             | —        | Pre-push hook + CI status discipline as an accepted risk; must be resolved before MT-LIVE                                                                         | P02.01.01, P02.01.07, P02.06.07                  |
+| EXT-02 | German data-protection counsel               | **not yet sent — founder action**      | —        | Every question in `docs/legal-briefs/02-questions.md` carries a conservative fallback, except A6 (telecom law), which has none: without it the pilot does not run | P03.07.03, P03.07.04, ADR-0019, the pilot (PG-3) |
+| EXT-10 | Twilio                                       | **not yet requested — founder action** | —        | None. There is no other way to make a German call on this stack; a NO-GO at DG-01 is the fallback, and that is a product decision rather than a workaround        | P04.01, P04.04.06, P04.05, P11                   |
+| EXT-11 | German number regulatory bundle (via Twilio) | **not yet requested — founder action** | —        | Use the customer's own bundle, if the P04.02.01 end-user decision allows it                                                                                       | P04.02, P04.05, the pilot                        |
+| EXT-12 | OpenAI (EU project, DPA, enhanced privacy)   | **not yet requested — founder action** | —        | DG-14: the pre-registered EU alternative becomes primary. The port exists so that costs an adapter, not a rewrite                                                 | P04.03, P10                                      |
+| EXT-01 | Founder identity and address documents       | **not yet prepared — founder action**  | —        | None; EXT-11 cannot start without them                                                                                                                            | EXT-11                                           |
+| EXT-07 | Trademark clearance (DPMA, EUIPO, WIPO)      | **not yet requested — founder action** | —        | Ship under a brand read from configuration and rename later; `check-brand-strings.ts` is what keeps that a configuration change                                   | DG-00, P04.07                                    |
+| EXT-20 | Two volunteer test callers                   | **not yet asked — founder action**     | —        | Founder-only calls, which halves the sample and removes voice variety; the report would have to say so                                                            | P04.05.02                                        |
+
+## Founder actions waiting
+
+| #   | Action                                                                                                                                                                                                                                                          | Blocks                                                                                                     | How to confirm it worked                                                                   |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| F1  | Apply `docs/control-plane/patches/0003-p02-gates.patch` to the founder-only gate configuration                                                                                                                                                                  | Every `gates.py full` claim for P02                                                                        | `control_plane_check.py` passes and `gates.py status` no longer shows the `workspace` stub |
+| F2  | EXT-24: confirm the GitHub plan supports private-repo rulesets, then apply the P02.01.01 ruleset **after** the P02.06 workflows are on `main`                                                                                                                   | P02.01.01, P02.01.07                                                                                       | A direct push to `main` is rejected; a PR with a red required check cannot merge           |
+| F3  | Bookkeeping correction prepared: untick unsupported P00.02.04 and its P00.02 parent; merge the dedicated correction PR after #16                                                                                                                                | Correction is not yet on `main`; a recorded P00 audit remains outstanding                                  | `evidence.py check` exits 0 on the correction branch                                       |
+| F4  | Merge the thirteen-deep stack, #3 through #15, **with merge commits, not squash** — the order and the reason are in `docs/development/merge-queue.md`                                                                                                           | `main` reflecting P02 and P03; everything after it                                                         | `git rev-parse origin/main^{tree}` equals `9335d953ae09a22aca3d9b36e71fbf3d5024d2e9`       |
+| F5  | Create the local environment file from the committed example (the control plane blocks any session command touching it, INV-15)                                                                                                                                 | `pnpm preflight` reporting six of six, and `pnpm test:integration` without exported variables              | `pnpm preflight` exits 0                                                                   |
+| F6  | Optional: confirm setup time on a machine with no Docker image cache (1.73 GiB to pull)                                                                                                                                                                         | The 15-minute criterion measured cold rather than warm                                                     | The timed log                                                                              |
+| F7  | Delete the abandoned remote branch `feat/p04-04-conversationrelay`. It carries three fake 32-hex auth tokens in test files, which were removed before this branch was pushed — but `gitleaks` scans every ref, so the finding survives in any clone that has it | The `secret-scan` gate and the CI secret-scan job, both of which fail for this reason and only this reason | `gitleaks git --log-opts=--all` reports no leaks; on this branch alone it already does     |
+| F8  | Apply `docs/control-plane/patches/0004-p04-gates.patch` (after 0003)                                                                                                                                                                                            | The two new consistency checks running in the gate, and the gate covering `scripts/`                       | `gates.py full` runs 14 gates and the `lint` gate reads `pnpm lint`                        |
+| F9  | Create the local environment file in each worktree from the committed example, including `moin-p04`                                                                                                                                                             | `pnpm preflight`, and the `integration` gate without exported variables                                    | `pnpm preflight` exits 0 in that worktree                                                  |
+| F10 | Start EXT-10, EXT-12 and EXT-07 **today**, and EXT-01 so EXT-11 can follow. Details per provider in `docs/operations/provider-accounts.md`                                                                                                                      | All of P04's measurements, DG-01, and therefore P11 and P12                                                | Each row in that file has an account id and a date                                         |
+| F11 | Send `docs/legal-briefs/` to counsel (EXT-02). It is the longest pole in the programme: A6 (telecom law) has no fallback, and without it the pilot does not run                                                                                                 | P03.07.03, P03.07.04, ADR-0019, the disclosure wording, PG-3                                               | A reply, or an engagement confirmation with a date                                         |
+
+## Deferred with a trigger (from the P02.03 QG-09 review)
+
+| Item                                                                       | Why not now                                                                                                                                                             | Trigger                                                |
+| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| Fastify `helmet` + `rate-limit`, `trustProxy`, fixed-body exception filter | No POST route and no reachable sink yet; PLAN places API hardening in P06/P17. The `/readyz` amplification the review found is already closed by single-flight caching. | The first POST route (P06)                             |
+| Per-role discriminated configuration schema                                | With 12 keys and none role-specific, every branch would be identical — structure with no differentiating content.                                                       | The first role-specific variable (P05)                 |
+| Smaller runtime base image                                                 | 261 MiB of the 379 MiB image is Debian + Node; changing base has its own trade-offs (glibc, debugging tools).                                                           | P17 production baseline, or earlier if pull time hurts |
 
 ## Log
 
+- 2026-09-29 — P04 at its strongest truthful engineering state. The phase exists to answer one question — does German voice over ConversationRelay work well enough to build on — and that question cannot be answered by engineering. It needs an account, a German number, an EU model project and fifty real calls, none of which exist. What was built is everything that must exist before the first real call is worth making: the protocol code the call runs through, the apparatus that turns a call into a number, and the decision record with its criteria written down **in advance**, so the go/no-go is read off evidence rather than argued after it. Three things are structural rather than configurable and each has a test saying why: the disclosure has no option to be interruptible (INV-03), decoding never throws so an unknown provider message cannot end a call (INV-19), and a decode failure reports schema paths only, because what fails validation is what the caller said (INV-12). The signature implementation is checked against the vector Twilio publishes, not only against its own fixtures — a base string that sorts or concatenates wrongly validates perfectly against itself. The media socket is bound by a single-use 60-second hashed token rather than the `CallSid`, which is not a secret.
+- 2026-09-29 — Four defects found by writing the tests rather than by reading the code. The Fastify adapter registers its own body parsers during `init`, so the voice module's second registration threw and the role did not start at all; the parsers turned out to be unnecessary, because the signature for these webhooks is computed over the parsed parameters. The TwiML response was a 201, because that is what the framework answers a POST with. The secret scanner flagged three 32-hex literals in test files and was right to — a fake Twilio auth token is indistinguishable from a real one — so they are generated per run now. And a brand check that looked only inside string literals passed a template whose body read "Ihr Team von Moin", which is the exact case the rule exists for.
+- 2026-09-29 — Two gate gaps closed, both found while wiring new checks in. `turbo run lint` and `turbo run typecheck` run only per-package tasks, and `scripts/` is not a package — so the seven consistency checks and the doctor were the only code in the repository that neither the gate nor CI linted or typechecked. And the consistency checks ran **only** in the local gate: a pull request could break the ADR index, the data-flow-to-subprocessor mapping or a threat-model reference and CI would stay green, on the checks that are meant to be what protects `main`. Both proven with deliberate errors before and after, rather than assumed. The gate configuration is protected, so the same three changes are founder patch 0004.
+- 2026-09-29 — The merge queue was reconciled before any new code was written. `main` is still at the pre-P02 control-plane commit and the whole of P02 and P03 is a thirteen-deep pull-request stack. All three merge methods were simulated against the real branches: **merge commits land all thirteen cleanly and leave `main`'s tree byte-identical to the verified state**; squash conflicts at step 2 and at every step after it, because a squash commit is not an ancestor of the next branch and the merge base falls back to before either side existed; rebase conflicts at #9. Four pull requests also had a failing conventions check — three over-length titles, and #3's workflow reading a `.nvmrc` that its own branch did not have until now. All four are green. `docs/development/merge-queue.md` carries the order, the method and how to verify the result.
+- 2026-09-29 — `gates full` at 252be53a87ba: **13 of 14 pass**. `secret-scan` fails, for one reason and only one: the abandoned branch `feat/p04-04-conversationrelay` still exists on the remote and carries the three fake tokens described above. Scanning this branch's own history alone (`--log-opts=HEAD`) reports no leaks across 33 commits. Deleting a remote branch is founder-only, so this is F7. The `docs-consistency` gate also still runs the pre-0004 command, so the two new checks were verified by running them directly rather than through the gate.
+- 2026-09-29 — CORRECTION forced by the claim-check hook. A progress report said P02 and P03 were "complete"; `gates.py full` is **FAIL** at HEAD 273714ed68 (2 of 3 gates pass; the stub `workspace` gate fails). That is the designed behaviour until founder patch 0003 is applied — but running it surfaced a real defect: **patch 0003 was stale.** It was written before P02.07 moved the test runner off turbo, so its `unit` gate still said `pnpm turbo run test`, a task that no longer exists. Applying it would have produced a gate configuration that could not run. Regenerated with every command executed individually against the current tree first, re-verified against an isolated copy (applies cleanly, byte-identical to the intended file), and extended with `docs-consistency`, `migrations` and `licences` gates for the checks added since. The correct status is: every P02 and P03 item is implemented and individually verified, and `gates full` is BLOCKED on founder action F1, not green.
+- 2026-09-29 — P03 complete except the founder-owned items. The independent threat-model review (P03.05.03) returned BLOCK MERGE with 2 Critical and 7 High, and both Criticals were defects in my own reasoning rather than gaps in coverage. The first: the document asserted that a caller's number is never an authentication factor, which our own intent catalogue and PLAN's identity rules contradict — spoofing a caller ID is nearly free in Germany, and `booking_cancel` was an unauthenticated destructive write against a real customer relationship. The second: the mitigation-to-item mapping was wrong in 18 of 33 rows, and two of those described a _weaker_ control than PLAN actually commits to. Each id looked plausible and none had been resolved; that is worse than no mapping, because it reads as rigour. `scripts/check-threat-model-refs.ts` now resolves all 63 and checks each relates to its mitigation. The review also caught the document claiming, in the past tense, that its own review had already happened — written before it had.
+- 2026-09-29 — P03.06 complete. Field-level rather than category-level, because category level is where erasure requests die: "conversation data" cannot be erased, but a named column can. Four things are stated rather than smoothed over: `conversations.request_text` is the riskiest field in the product and whether it is defensible at all is an open EXT-02 question; contacts are anonymised rather than deleted so tasks are not orphaned; knowledge is flagged as _possibly_ personal because an owner can write a staff member's mobile number into it; and German tax law overrides erasure for billing records for eight years. The classification check is proven on a fixture, which mattered — the real schema is five columns today, so a bare pass would have shown nothing.
+- 2026-09-29 — P03.02 and P03.03 complete. Glossary, entity model, aggregate boundaries, the three closed vocabularies and ten state machines as transition tables. Coverage against the blueprint is mechanical (26 entities, 0 unmapped, 5 explicitly deferred), and the check found a false positive in itself before it found anything else — naive pluralisation flagged `retention_policy` when the table is `retention_policies`. A false positive in a coverage check is worse than none, so it was fixed rather than allowlisted.
+- 2026-09-29 — P03.01 complete: ADR process, ten core ADRs accepted, three drafted and left PROPOSED, plus the invariant enforcement register. The coverage check is mechanical and found two things reading would not have: four P02 ADRs with no Verification section at all, and three invariants with no ADR. Those three are accounted for explicitly rather than excused — INV-14 has none by design, because no linter can tell whether a feature is an excluded sensitive use. Open question recorded rather than resolved: PLAN L2180 lists ADR-0036 for P03 while the register assigns it to P07.
+- 2026-09-29 — P02.07 complete, and the walkthrough was worth more than the documents it checked. A fresh session with no context found nine real defects, the worst two being that the environment checker silently did nothing (its name was shadowed by a pnpm built-in) and that nothing in the repository loaded the local environment file at all — so the first setup step was inert and the checker reported green on a configuration that could not run. Also fixed: `pnpm dev` did not exist, the integration harness silently fell back to an admin connection and failed with what looked like an RLS security defect, and two checkouts silently shared one database, which destroyed this machine's dev volume during the run. P02 PILOT is complete except EXT-24 and the founder items.
+- 2026-09-29 — All three CI workflows green. P02 is now complete except for the items that need the founder or a third party: the ruleset (EXT-24) and, behind it, the four negative-control PRs. Follow-up recorded rather than left to be rediscovered: the arm64 container build runs under emulation on an x86 runner at ~4.5 minutes per run, which will not stay tolerable as the image grows — a native arm64 runner is the remedy.
+- 2026-09-29 — CORRECTION: P02 wrote its two local-emulator decisions as ADR-0035 and ADR-0036, which PLAN's register reserves for Search (P09) and time/locale (P07). Renumbered to ADR-0044 and ADR-0045 and added to the register, with every reference updated. Found while reading the register at the start of P03 — which is the argument for reading the register before writing an ADR, not after.
+- 2026-09-29 — P03 started. Its only dependency, P02.03, is complete. Plan at docs/phases/P03-plan.md; ADR index, template and the first eight core ADRs written on docs/p03-01-adrs.
+- 2026-09-28 — P02.06 and P02.08. The first CI run failed on all three new workflows and every failure was a real defect local runs could not have caught: turbo ran each package's own test script and the web package's picked up the Playwright spec; `next-env.d.ts` is regenerated by the build so formatting it reverts; hadolint was right that setting the platform on each FROM is redundant; the gitleaks action now needs a repository token a contributor-code workflow should not hold; and semgrep flagged the founder-owned control plane and the deliberately-violating lint fixtures. Second run: security-scan green, integration tests green against real PostgreSQL. The licence check found a genuine violation — libvips is LGPL via sharp via Next.js image optimisation — resolved by a written decision (LGPL attaches on distribution, AGPL's network clause reaches a hosted service) and flagged for EXT-02 rather than treated as settled.
+- 2026-09-28 — SCOPE NOTE: `docs/development/{local-setup,testing,conventions}.md` were swept into the P02.06 fix commit by a broad `git add` while they sat untracked during a branch switch. They belong to P02.07. Not corrected by rewriting a pushed commit; the branches are stacked and merged in order, so `main` ends up identical either way.
+- 2026-09-28 — P02.05 complete. 108 unit tests, 5 integration tests against real PostgreSQL, 4 end-to-end tests with an axe scan; every type verified both in-suite and standalone against a database destroyed and rebuilt first. The harness found three real defects the moment it was pointed at itself: the test template was created bare and had no pgvector; migration 0001 described a SELECT grant in a comment and never issued it (fixed as 0002, because the checksum rule correctly forbids editing an applied migration); and the German character folding dropped Turkish dotless i entirely, turning "Yılmaz" into "ylmaz" — plausible-looking and matching nothing. Only Chromium is installed locally, because `playwright install --with-deps` needs sudo; Firefox and WebKit are left to CI and are not claimed as passing.
+- 2026-09-28 — CORRECTION (process): several earlier ledger rows were never actually written. Prettier reformats this file's tables into aligned pipes, and later Python `str.replace()` calls used the unaligned source text, so they matched nothing and failed silently. The Items table has been rebuilt from the evidence registry, which is the authoritative record. Lesson applied: every scripted edit to a tracked file now asserts its match count, as the PLAN.md edits already did.
+- 2026-09-28 — P02.04 complete. Six-service stack, all digest-pinned, healthy in 26 s from empty volumes; fresh clone to a running stack with migrations in 29 s warm (cold adds ~1.73 GiB of image downloads, measured rather than estimated away). Two honest gaps: the local environment file must be created by the founder because the control plane blocks it, and the demo-tenant rows wait for P06's schema rather than creating a tenant table here without FORCE RLS. The health checks initially reported three working services as unhealthy — the probes used a bash builtin none of those images ship.
+- 2026-09-28 — P02.03 QG-09 review and remediation. The security and architecture reviewers returned BLOCK MERGE with 1 Critical and 11 High between them. Every one was reproduced before being fixed. Three findings were defects in work this session had already recorded as passing, and two evidence records (EV-P02-015, EV-P02-017) carried claims that were simply false — both now carry a correction section rather than being quietly rewritten. The most useful lesson: `redaction.test.ts` passed while three separate paths carried personal data to stdout, because it tested the redactor instead of the serialised line. Where the two reviewers disagreed on a fix, the measurement decided it. Tests 65 → 90.
+- 2026-09-28 — P02.03 complete. Workspace: lint exit 0, typecheck 16/16, 65 tests across 5 packages, build 12/12, dependency-cruiser clean. arm64 image built and all four roles verified live under `--read-only --tmpfs /tmp --security-opt no-new-privileges`. Two defects were found and fixed by the work's own tests rather than in review: the log redactor allowlisted `name` and leaked the error message back through `err.stack`; and the readiness probe's two deadlines were equal, which made every specific failure reason unreachable. One was found by inspection: the runtime image carried the whole dev toolchain (589 MB → 84.9 MB).
+- 2026-09-28 — P02.02 complete and locally verified under Node 24.21.0 / pnpm 10.34.5: prettier --check, eslint, depcruise, turbo typecheck/test/build all exit 0; 33 tests pass. TypeScript 6.0.3 chosen over 7.0.2 because typescript-eslint 8.70.1 declares `typescript >=4.8.4 <6.1.0`; marked VALIDATION REQUIRED against Next.js/NestJS in P02.03. `.claude/gates.json` is founder-only, so its P02.02.02 replacement is `docs/control-plane/patches/0003-p02-gates.patch`, verified by applying it to an isolated copy (patch exit 0, result byte-identical to the intended file).
+- 2026-09-28 — CORRECTION to the log entry below and to the P02 plan: `evidence.py check` requires an EV ID on _every_ ticked item outside P00, not only on verification items. P00 is explicitly exempt in the checker, which is what made the P00 checklist look like a counter-example. All 15 ticked P02 items now cite evidence; audit is 11 OK, 0 problems.
 - 2026-09-28 — FINDING (not P02): `evidence.py check` reports `MISSING EV-P00-001`. PLAN.md L1889 ticks P02.02.04's counterpart P00.02.04 citing `EV-P00-001`, but no record exists — the registry it belongs in is only created now, by P02.01.04. The audit result is recorded inline in PLAN.md (HEAD `fb7185e`, remote private, `main` unprotected, Node v22.20.0, pnpm 10.12.1, Terraform absent). Not registered by this session: transcribing another phase's result into an evidence record is not the same as having run it, and P00 is the founder's phase. Founder action, see the P02 action bundle.
 - 2026-09-28 — P02.01 governance scaffolding implemented. `check-no-ai-mentions.ts --self-test` passes (9 patterns, 11 blocked and 7 allowed examples); `check-conventional-commit.ts --self-test` passes (13 cases). Both run clean over `HEAD~2..HEAD`. Node 24.21.0.
 - 2026-09-28 — P02 execution started from `docs/phases/P02-plan.md` (approved). Docker Desktop reachable (server 29.8.0), Node 24.21.0 available via nvm. Branch `chore/p02-01-governance`.
+- 2026-09-29 — F3 bookkeeping correction: no EV-P00-001 record exists in the registry, evidence directory or Git history. Unticked P00.02.04 and its P00.02 parent instead of reconstructing evidence from the historical inline note. The recorded P00 audit remains outstanding; this correction does not claim it was performed. The dedicated correction branch is based on PR #16 and must land after the bootstrap stack.

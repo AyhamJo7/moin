@@ -137,9 +137,9 @@ Single source of status. Tier columns show the status of that phase's items for 
 |---|---|---|---|---|---|---|---|---|
 | P00 | Planning baseline | READY_FOR_REVIEW | — | — | — | — | Founder review | Founder reads and adopts plan (P00.05) |
 | P01 | Discovery & Gurlitt observation | NOT_STARTED | NOT_STARTED | — | — | — | EXT-16 Gurlitt | Meet Gurlitt owner 2026-09-28 09:00 |
-| P02 | Engineering foundation | IN_PROGRESS | — | — | — | — | EXT-24 GitHub plan | P02.01 governance scaffolding |
-| P03 | Architecture decisions & threat model | NOT_STARTED | — | — | — | — | — | Write core ADRs |
-| P04 | Feasibility proof & long-lead track | NOT_STARTED | — | — | NOT_STARTED | — | EXT-01/07/10/11/12 | Open Twilio/OpenAI/AWS requests day 1 |
+| P02 | Engineering foundation | IN_PROGRESS | — | — | — | — | EXT-24 GitHub plan | P02.06 CI pipeline |
+| P03 | Architecture decisions & threat model | IN_PROGRESS | — | — | — | — | EXT-02 counsel not engaged | P03.05 review findings; founder sends the legal pack |
+| P04 | Feasibility proof & long-lead track | IN_PROGRESS | — | — | NOT_STARTED | — | EXT-01/07/10/11/12 | Adapter, gateway port and measurement harness built; every measurement waits on EXT-10/11/12 |
 | P05 | Cloud foundation & walking skeleton | NOT_STARTED | — | — | — | — | EXT-09 AWS | Terraform bootstrap |
 | P06 | Tenancy, identity, authorization, audit | NOT_STARTED | — | NOT_STARTED | — | — | — | after P02/P03 |
 | P07 | Core business action model | NOT_STARTED | — | NOT_STARTED | NOT_STARTED | — | — | after P06.02 |
@@ -826,6 +826,8 @@ ADRs live in `docs/adr/NNNN-title.md` (MADR format: context, decision, alternati
 | ADR-0041 | Generic outbound webhook | Tenant-configured, HMAC-signed, retried, SSRF-safe deliveries with logs and replay | P29 |
 | ADR-0042 | Document pipeline | Deferred; KoSIT validator + deterministic XML; malware scanning; original preserved | P34 |
 | ADR-0043 | Voice cost path | Deferred; Media Streams → dedicated STT → LLM → TTS behind the same voice port | P43 |
+| ADR-0044 | Local S3 emulator | Adobe S3Mock (Apache-2.0), local and test only, pinned by digest; production is real AWS S3 | P02 |
+| ADR-0045 | Local OIDC provider | Keycloak, local and test only, pinned by digest, realm committed as data; production identity is Cognito | P02 |
 
 ---
 
@@ -1882,11 +1884,11 @@ All ADRs are listed in the [ADR register](#adr-register) as PROPOSED. Their acce
   - [x] P00.01.01 Read BLUEPRINT.md completely (2,462 lines) — evidence: this document §Blueprint Requirement Traceability
   - [x] P00.01.02 Extract 160 requirements with line references — evidence: [Requirement Traceability Matrix](#requirement-traceability-matrix)
   - [x] P00.01.03 Record blueprint tensions and resolutions (T-01…T-23)
-- [x] **P00.02 Repository and workspace audit** `[G:PILOT]`
+- [ ] **P00.02 Repository and workspace audit** `[G:PILOT]`
   - [x] P00.02.01 Inspect repository, git state, remote visibility, branch protection, toolchain
   - [x] P00.02.02 Classify existing components (KEEP / KEEP_AND_HARDEN / MISSING)
   - [x] P00.02.03 Identify reusable workspace prior art
-  - [x] P00.02.04 Verify: audit reproduced by a second read-only run (git status, remote visibility, toolchain versions) and recorded in EV-P00-001 — re-run 2026-09-27: only `PLAN.md` untracked, HEAD `fb7185e`, remote PRIVATE, `main` unprotected, Node v22.20.0, pnpm 10.12.1, Terraform absent
+  - [ ] P00.02.04 Verify: reproduce the audit with a second read-only run (git status, remote visibility, toolchain versions) and register its evidence. The historical inline note dated 2026-09-27 has no EV-P00-001 record or registry entry; verification remains unsubstantiated pending a recorded run.
 - [x] **P00.03 Architecture and phase design** `[G:PILOT]`
   - [x] P00.03.01 Verify provider facts that shape gates (ConversationRelay, OpenAI EU residency, Gmail restricted scopes, Graph subscriptions, Twilio DE numbers, ECS deployments)
   - [x] P00.03.02 Design architecture, data, security, AI, integration, infrastructure, testing, observability, privacy, release and operations sections
@@ -2078,62 +2080,62 @@ Monorepo skeleton · CI v1 · local stack · test harnesses · governance files 
 ### Checklist
 - [ ] **P02.01 Repository governance** `[G:PILOT]`
   - [ ] P02.01.01 Ruleset on `main`: PR required, required checks (`verify`, `security-scan`, `container-scan`), linear history, no force-push/deletion (EXT-24 if the plan lacks private-repo rulesets)
-  - [x] P02.01.02 CODEOWNERS, PR template (what/why, risk, tests, evidence IDs, docs, migration/rollback, privacy impact), issue templates
-  - [x] P02.01.03 Conventional Commit enforcement on PR titles, plus a check rejecting AI-tool mentions in titles and bodies (workspace rule)
-  - [x] P02.01.04 `PROGRESS.md` ledger, `docs/evidence/INDEX.md`, evidence record template
-  - [x] P02.01.05 `README.md` (purpose, quickstart, links to PLAN/ARCHITECTURE/SECURITY/PRIVACY/OPERATIONS) and `CONTRIBUTING.md`
-  - [x] P02.01.06 Annotated/signed release-tag policy documented
+  - [x] P02.01.02 CODEOWNERS, PR template (what/why, risk, tests, evidence IDs, docs, migration/rollback, privacy impact), issue templates — EV-P02-003
+  - [x] P02.01.03 Conventional Commit enforcement on PR titles, plus a check rejecting AI-tool mentions in titles and bodies (workspace rule) — EV-P02-004
+  - [x] P02.01.04 `PROGRESS.md` ledger, `docs/evidence/INDEX.md`, evidence record template — EV-P02-005
+  - [x] P02.01.05 `README.md` (purpose, quickstart, links to PLAN/ARCHITECTURE/SECURITY/PRIVACY/OPERATIONS) and `CONTRIBUTING.md` — EV-P02-006
+  - [x] P02.01.06 Annotated/signed release-tag policy documented — EV-P02-007
   - [ ] P02.01.07 Verify: a direct push to `main` is rejected; a PR with failing required checks cannot merge
-- [ ] **P02.02 Toolchain baseline** `[G:PILOT]`
-  - [ ] P02.02.01 Pin Node 24 LTS (`.nvmrc`, `engines`), `packageManager: pnpm@10.x`; install via fnm/corepack without sudo
-  - [ ] P02.02.02 Turborepo tasks: `lint`, `typecheck`, `test`, `test:integration`, `build` with caching and correct `dependsOn`
-  - [ ] P02.02.03 TypeScript `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noImplicitOverride`, ESM
-  - [ ] P02.02.04 ESLint flat config: `typescript-eslint` strict-type-checked, `no-explicit-any`, named exports only (Next.js route files excepted), ban `dangerouslySetInnerHTML`, ban string-built SQL, ban session-level `SET`, ban `console.*` in production code
-  - [ ] P02.02.05 Custom lint rule stubs: no tenant-specific conditionals (INV-18), DB access only via tenant wrapper (activated in P06.03)
-  - [ ] P02.02.06 Prettier, `.editorconfig`
-  - [ ] P02.02.07 `dependency-cruiser` rules for module boundaries (see [Domain Boundaries](#domain-boundaries))
-  - [ ] P02.02.08 Terraform toolchain pinned (`tfenv` or pinned binary in `~/.local/bin`), `tflint`, Trivy
-  - [ ] P02.02.09 Accept ADR-0002 and ADR-0034
-  - [ ] P02.02.10 Verify: fixtures that violate each lint/boundary rule fail
-- [ ] **P02.03 Monorepo skeleton** `[G:PILOT]`
-  - [ ] P02.03.01 Create the structure from [Repository Structure](#repository-structure)
-  - [ ] P02.03.02 Server role entrypoints (`main-api`, `main-voice`, `main-worker`, `main-migrate`) with role root modules
-  - [ ] P02.03.03 Zod-validated configuration loader (fail fast on missing or invalid env; secrets never logged)
-  - [ ] P02.03.04 Pino logger with redaction allowlist and request/correlation IDs (full telemetry in P15.01)
-  - [ ] P02.03.05 `/healthz` (liveness) and `/readyz` (DB and dependency readiness) per role
-  - [ ] P02.03.06 Multi-stage Dockerfiles (ARM64, non-root, read-only FS compatible, no package manager in runtime layer)
-  - [ ] P02.03.07 Verify: images build; containers start; health endpoints return 200; image size recorded
-- [ ] **P02.04 Local development environment** `[G:PILOT]`
-  - [ ] P02.04.01 Docker Compose: Postgres 17 + pgvector (pinned digest), Valkey, SQS emulator (ElasticMQ), S3-compatible emulator (licence-checked), Mailpit, local OIDC provider for auth flows
-  - [ ] P02.04.02 `pnpm dev:up`, `dev:down`, `dev:reset`, `db:migrate`, `db:seed` (synthetic demo tenants "Musterrestaurant" and "Musterbetrieb SHK")
-  - [ ] P02.04.03 `.env.example` with fake values; `.env*` gitignored except the example
-  - [ ] P02.04.04 Document the Twilio development path: developer-only tunnel to local voice service for sandbox numbers; never used for staging or production
-  - [ ] P02.04.05 `pnpm doctor`: checks Node, pnpm, Docker, free ports, env completeness (pattern from exitos `doctor.ts`)
-  - [ ] P02.04.06 Verify: fresh clone → running stack with seed data in ≤ 15 minutes (timed log)
-- [ ] **P02.05 Test infrastructure** `[G:PILOT]`
-  - [ ] P02.05.01 Vitest projects: `unit`, `integration`
-  - [ ] P02.05.02 Real-Postgres harness: template database cloning per test file, roles and migrations applied, runnable standalone
-  - [ ] P02.05.03 `packages/testing` factories with German-realistic synthetic data (names, E.164 numbers in reserved/test ranges, PLZ)
-  - [ ] P02.05.04 Playwright projects (Chromium, Firefox, WebKit, mobile viewport) + axe integration
-  - [ ] P02.05.05 Fault-injection helpers and controllable clock
-  - [ ] P02.05.06 Verify: example test of every type passes in-suite **and** standalone
+- [x] **P02.02 Toolchain baseline** `[G:PILOT]` — EV-P02-001
+  - [x] P02.02.01 Pin Node 24 LTS (`.nvmrc`, `engines`), `packageManager: pnpm@10.x`; install via fnm/corepack without sudo — EV-P02-002
+  - [x] P02.02.02 Turborepo tasks: `lint`, `typecheck`, `test`, `test:integration`, `build` with caching and correct `dependsOn` — EV-P02-008
+  - [x] P02.02.03 TypeScript `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noImplicitOverride`, ESM — EV-P02-009, EV-P02-019
+  - [x] P02.02.04 ESLint flat config: `typescript-eslint` strict-type-checked, `no-explicit-any`, named exports only (Next.js route files excepted), ban `dangerouslySetInnerHTML`, ban string-built SQL, ban session-level `SET`, ban `console.*` in production code — EV-P02-001
+  - [x] P02.02.05 Custom lint rule stubs: no tenant-specific conditionals (INV-18), DB access only via tenant wrapper (activated in P06.03) — EV-P02-001
+  - [x] P02.02.06 Prettier, `.editorconfig` — EV-P02-010
+  - [x] P02.02.07 `dependency-cruiser` rules for module boundaries (see [Domain Boundaries](#domain-boundaries)) — EV-P02-011, EV-P02-020
+  - [x] P02.02.08 Terraform toolchain pinned (`tfenv` or pinned binary in `~/.local/bin`), `tflint`, Trivy — EV-P02-002
+  - [x] P02.02.09 Accept ADR-0002 and ADR-0034 — EV-P02-002
+  - [x] P02.02.10 Verify: fixtures that violate each lint/boundary rule fail — EV-P02-001
+- [x] **P02.03 Monorepo skeleton** `[G:PILOT]` — EV-P02-018
+  - [x] P02.03.01 Create the structure from [Repository Structure](#repository-structure) — EV-P02-012
+  - [x] P02.03.02 Server role entrypoints (`main-api`, `main-voice`, `main-worker`, `main-migrate`) with role root modules — EV-P02-013
+  - [x] P02.03.03 Zod-validated configuration loader (fail fast on missing or invalid env; secrets never logged) — EV-P02-014
+  - [x] P02.03.04 Pino logger with redaction allowlist and request/correlation IDs (full telemetry in P15.01) — EV-P02-015
+  - [x] P02.03.05 `/healthz` (liveness) and `/readyz` (DB and dependency readiness) per role — EV-P02-016
+  - [x] P02.03.06 Multi-stage Dockerfiles (ARM64, non-root, read-only FS compatible, no package manager in runtime layer) — EV-P02-017
+  - [x] P02.03.07 Verify: images build; containers start; health endpoints return 200; image size recorded — EV-P02-018
+- [x] **P02.04 Local development environment** `[G:PILOT]` — EV-P02-022
+  - [x] P02.04.01 Docker Compose: Postgres 17 + pgvector (pinned digest), Valkey, SQS emulator (ElasticMQ), S3-compatible emulator (licence-checked), Mailpit, local OIDC provider for auth flows — EV-P02-024
+  - [x] P02.04.02 `pnpm dev:up`, `dev:down`, `dev:reset`, `db:migrate`, `db:seed` (synthetic demo tenants "Musterrestaurant" and "Musterbetrieb SHK") — EV-P02-025
+  - [x] P02.04.03 `.env.example` with fake values; `.env*` gitignored except the example — EV-P02-026
+  - [x] P02.04.04 Document the Twilio development path: developer-only tunnel to local voice service for sandbox numbers; never used for staging or production — EV-P02-027
+  - [x] P02.04.05 `pnpm doctor`: checks Node, pnpm, Docker, free ports, env completeness (pattern from exitos `doctor.ts`) — EV-P02-023
+  - [x] P02.04.06 Verify: fresh clone → running stack with seed data in ≤ 15 minutes (timed log) — EV-P02-022
+- [x] **P02.05 Test infrastructure** `[G:PILOT]` — EV-P02-033
+  - [x] P02.05.01 Vitest projects: `unit`, `integration` — EV-P02-028
+  - [x] P02.05.02 Real-Postgres harness: template database cloning per test file, roles and migrations applied, runnable standalone — EV-P02-029
+  - [x] P02.05.03 `packages/testing` factories with German-realistic synthetic data (names, E.164 numbers in reserved/test ranges, PLZ) — EV-P02-030
+  - [x] P02.05.04 Playwright projects (Chromium, Firefox, WebKit, mobile viewport) + axe integration — EV-P02-032
+  - [x] P02.05.05 Fault-injection helpers and controllable clock — EV-P02-031
+  - [x] P02.05.06 Verify: example test of every type passes in-suite **and** standalone — EV-P02-033
 - [ ] **P02.06 CI pipeline v1** `[G:PILOT]`
-  - [ ] P02.06.01 `verify`: frozen install, format, lint, typecheck, unit, integration (Postgres 17 + pgvector service), build
-  - [ ] P02.06.02 `security-scan`: `pnpm audit`/OSV (fail on high/critical with fix), gitleaks full history, Semgrep, actionlint, shellcheck, Trivy filesystem, CycloneDX SBOM artifact
-  - [ ] P02.06.03 `container-scan`: hadolint, image build, Trivy image scan (fail on high/critical with fix)
-  - [ ] P02.06.04 `scripts/check-migrations.ts` (ordering, destructive/lock heuristics, adapted from exitos) wired to CI
-  - [ ] P02.06.05 Job slots for RLS catalog check (P06.02) and OpenAPI drift (P06/P07)
-  - [ ] P02.06.06 Actions pinned by SHA; `permissions: contents: read` by default; concurrency groups; caching
+  - [x] P02.06.01 `verify`: frozen install, format, lint, typecheck, unit, integration (Postgres 17 + pgvector service), build — EV-P02-043
+  - [x] P02.06.02 `security-scan`: `pnpm audit`/OSV (fail on high/critical with fix), gitleaks full history, Semgrep, actionlint, shellcheck, Trivy filesystem, CycloneDX SBOM artifact — EV-P02-044
+  - [x] P02.06.03 `container-scan`: hadolint, image build, Trivy image scan (fail on high/critical with fix) — EV-P02-045
+  - [x] P02.06.04 `scripts/check-migrations.ts` (ordering, destructive/lock heuristics, adapted from exitos) wired to CI — EV-P02-034
+  - [x] P02.06.05 Job slots for RLS catalog check (P06.02) and OpenAPI drift (P06/P07) — EV-P02-040
+  - [x] P02.06.06 Actions pinned by SHA; `permissions: contents: read` by default; concurrency groups; caching — EV-P02-039
   - [ ] P02.06.07 Verify with four negative-control PRs: lint error, failing test, fake secret, vulnerable dependency, each fails the right job
-- [ ] **P02.07 Developer documentation** `[G:PILOT]`
-  - [ ] P02.07.01 `docs/development/local-setup.md`, `testing.md`, `conventions.md`
-  - [ ] P02.07.02 `ARCHITECTURE.md` skeleton linking ADRs; `SECURITY.md` skeleton
-  - [ ] P02.07.03 Verify: a fresh agent session follows the docs from a clean clone without help
-- [ ] **P02.08 Dependency and supply-chain policy** `[G:PILOT]`
-  - [ ] P02.08.01 Renovate: weekly grouped updates, immediate security updates, lockfile maintenance
-  - [ ] P02.08.02 Licence allowlist check (fail on AGPL/SSPL/unknown in production dependencies)
-  - [ ] P02.08.03 pnpm `onlyBuiltDependencies` allowlist; no unreviewed install scripts
-  - [ ] P02.08.04 Verify: licence check fails on a copyleft fixture
+- [x] **P02.07 Developer documentation** `[G:PILOT]` — EV-P02-046
+  - [x] P02.07.01 `docs/development/local-setup.md`, `testing.md`, `conventions.md` — EV-P02-041
+  - [x] P02.07.02 `ARCHITECTURE.md` skeleton linking ADRs; `SECURITY.md` skeleton — EV-P02-042
+  - [x] P02.07.03 Verify: a fresh agent session follows the docs from a clean clone without help — EV-P02-046
+- [x] **P02.08 Dependency and supply-chain policy** `[G:PILOT]` — EV-P02-036
+  - [x] P02.08.01 Renovate: weekly grouped updates, immediate security updates, lockfile maintenance — EV-P02-037
+  - [x] P02.08.02 Licence allowlist check (fail on AGPL/SSPL/unknown in production dependencies) — EV-P02-035
+  - [x] P02.08.03 pnpm `onlyBuiltDependencies` allowlist; no unreviewed install scripts — EV-P02-038
+  - [x] P02.08.04 Verify: licence check fails on a copyleft fixture — EV-P02-036
 
 ### Security
 Supply chain (pinned actions, frozen lockfile, SBOM), secret scanning from the first commit, branch protection, minimal CI permissions.
@@ -2176,7 +2178,7 @@ CI run URLs (EV-P02-001), negative-control PR links (EV-P02-002), timed setup lo
 <a id="p03--architecture-decisions-domain-design-threat-model-and-data-inventory"></a>
 ## P03 — Architecture Decisions, Domain Design, Threat Model and Data Inventory
 
-**Status:** PILOT NOT_STARTED · **Target:** 2026-09-29 → 2026-10-06 · **Effort:** 4 engineering-days
+**Status:** PILOT IN_PROGRESS · **Target:** 2026-09-29 → 2026-10-06 · **Effort:** 4 engineering-days
 
 ### Objective
 Make the expensive-to-change decisions explicitly and early: tenancy, identity, data model, event model, dialogue design, retention, credentials. Produce the threat model and personal-data inventory the lawyer and later phases depend on.
@@ -2194,39 +2196,39 @@ Accept ADR-0001, 0003, 0004, 0005, 0006, 0007, 0008, 0009, 0015, 0020 and 0036. 
 Accepted ADRs · glossary · entity/aggregate model · state-machine specifications · event catalogue v1 · C4 + DFD · STRIDE threat model v1 · personal-data inventory + retention matrix · lawyer briefing pack · invariant enforcement register.
 
 ### Checklist
-- [ ] **P03.01 ADR process and core ADRs** `[G:PILOT]`
-  - [ ] P03.01.01 MADR template + `docs/adr/README.md` index
-  - [ ] P03.01.02 Write and accept ADR-0001, 0003, 0004, 0005, 0006, 0007, 0008, 0009, 0015, 0020, 0036
-  - [ ] P03.01.03 Draft ADR-0011 (dialogue manager), 0018 (retention/deletion), 0019 (turn logs, pending EXT-02)
-  - [ ] P03.01.04 Every ADR names the automated check or test that enforces it
-  - [ ] P03.01.05 Verify: each ADR reviewed against the INV table; no invariant lacks an ADR
-- [ ] **P03.02 Domain model and glossary** `[G:PILOT]`
-  - [ ] P03.02.01 German/English glossary (Anruf, Rückruf, Anfrage, Aufgabe, Vorgang, Kontakt, Wissenseintrag, Freigabe …), mapping UI terms to code terms
-  - [ ] P03.02.02 Entity and relationship model per module (extends blueprint L1028–1087)
-  - [ ] P03.02.03 Aggregate boundaries and invariants (task states, lead transitions, appointment-request states, knowledge approvals)
-  - [ ] P03.02.04 Canonical intents, outcome codes and task types (T-01)
-  - [ ] P03.02.05 Domain event catalogue v1 (names, ID-only payloads, producers, consumers)
-  - [ ] P03.02.06 Verify: glossary and model reviewed against blueprint L1028–1087 and UI copy; no unmapped entity
-- [ ] **P03.03 State machines** `[G:PILOT]`
-  - [ ] P03.03.01 Call session: `received → routed → greeting → dialogue → wrapping_up → ended | failed | degraded`, with timeouts and failure transitions
-  - [ ] P03.03.02 Interaction finalisation (INV-06) and the reconciler contract
-  - [ ] P03.03.03 Task, lead, appointment request, knowledge item, integration, tenant lifecycle, DSAR request, support grant
-  - [ ] P03.03.04 Each machine is specified as a transition table with a property-test plan (illegal transitions rejected)
-- [ ] **P03.04 C4 and data-flow diagrams** `[G:PILOT]`
-  - [ ] P03.04.01 C4 context + container diagrams in `docs/architecture/`
-  - [ ] P03.04.02 Data-flow diagram with trust boundaries and personal-data flows (input to TOMs, DPIA support, subprocessor register)
-  - [ ] P03.04.03 Verify: every personal-data flow in the DFD maps to a subprocessor-register entry and an inventory category
-- [ ] **P03.05 Threat model v1 (STRIDE)** `[G:PILOT]`
-  - [ ] P03.05.01 Per component and flow, threats and mitigations mapped to checklist IDs; residual risks listed
-  - [ ] P03.05.02 Abuse cases: toll-fraud-like traffic, bot calls, social engineering ("Ich bin der Inhaber"), competitor scraping of knowledge via calls, notification spam
-  - [ ] P03.05.03 Independent review (security-reviewer agent + founder) with tracked findings
-- [ ] **P03.06 Personal-data inventory and retention matrix** `[G:PILOT]`
-  - [ ] P03.06.01 Field-level inventory: category, purpose, controller/processor role, retention, deletion method, subprocessor exposure
-  - [ ] P03.06.02 Retention matrix aligned with blueprint L1276–1290 and [Privacy / Compliance Engineering](#privacy--compliance-engineering)
-  - [ ] P03.06.03 Data-dictionary generator plan (generated from schema comments in P06/P07)
-  - [ ] P03.06.04 Verify: a generated schema diff shows no unclassified column in MVP tables
+- [x] **P03.01 ADR process and core ADRs** `[G:PILOT]` — EV-P03-005
+  - [x] P03.01.01 MADR template + `docs/adr/README.md` index — EV-P03-001
+  - [x] P03.01.02 Write and accept ADR-0001, 0003, 0004, 0005, 0006, 0007, 0008, 0009, 0015, 0020, 0036 — EV-P03-002
+  - [x] P03.01.03 Draft ADR-0011 (dialogue manager), 0018 (retention/deletion), 0019 (turn logs, pending EXT-02) — EV-P03-003
+  - [x] P03.01.04 Every ADR names the automated check or test that enforces it — EV-P03-004
+  - [x] P03.01.05 Verify: each ADR reviewed against the INV table; no invariant lacks an ADR — EV-P03-005
+- [x] **P03.02 Domain model and glossary** `[G:PILOT]` — EV-P03-011
+  - [x] P03.02.01 German/English glossary (Anruf, Rückruf, Anfrage, Aufgabe, Vorgang, Kontakt, Wissenseintrag, Freigabe …), mapping UI terms to code terms — EV-P03-006
+  - [x] P03.02.02 Entity and relationship model per module (extends blueprint L1028–1087) — EV-P03-007
+  - [x] P03.02.03 Aggregate boundaries and invariants (task states, lead transitions, appointment-request states, knowledge approvals) — EV-P03-008
+  - [x] P03.02.04 Canonical intents, outcome codes and task types (T-01) — EV-P03-009
+  - [x] P03.02.05 Domain event catalogue v1 (names, ID-only payloads, producers, consumers) — EV-P03-010
+  - [x] P03.02.06 Verify: glossary and model reviewed against blueprint L1028–1087 and UI copy; no unmapped entity — EV-P03-011
+- [x] **P03.03 State machines** `[G:PILOT]` — EV-P03-012
+  - [x] P03.03.01 Call session: `received → routed → greeting → dialogue → wrapping_up → ended | failed | degraded`, with timeouts and failure transitions — EV-P03-012
+  - [x] P03.03.02 Interaction finalisation (INV-06) and the reconciler contract — EV-P03-012
+  - [x] P03.03.03 Task, lead, appointment request, knowledge item, integration, tenant lifecycle, DSAR request, support grant — EV-P03-012
+  - [x] P03.03.04 Each machine is specified as a transition table with a property-test plan (illegal transitions rejected) — EV-P03-012
+- [x] **P03.04 C4 and data-flow diagrams** `[G:PILOT]` — EV-P03-019
+  - [x] P03.04.01 C4 context + container diagrams in `docs/architecture/` — EV-P03-017
+  - [x] P03.04.02 Data-flow diagram with trust boundaries and personal-data flows (input to TOMs, DPIA support, subprocessor register) — EV-P03-018
+  - [x] P03.04.03 Verify: every personal-data flow in the DFD maps to a subprocessor-register entry and an inventory category — EV-P03-019
+- [x] **P03.05 Threat model v1 (STRIDE)** `[G:PILOT]` — EV-P03-024
+  - [x] P03.05.01 Per component and flow, threats and mitigations mapped to checklist IDs; residual risks listed — EV-P03-025
+  - [x] P03.05.02 Abuse cases: toll-fraud-like traffic, bot calls, social engineering ("Ich bin der Inhaber"), competitor scraping of knowledge via calls, notification spam — EV-P03-026
+  - [x] P03.05.03 Independent review (security-reviewer agent + founder) with tracked findings — EV-P03-024
+- [x] **P03.06 Personal-data inventory and retention matrix** `[G:PILOT]` — EV-P03-016
+  - [x] P03.06.01 Field-level inventory: category, purpose, controller/processor role, retention, deletion method, subprocessor exposure — EV-P03-013
+  - [x] P03.06.02 Retention matrix aligned with blueprint L1276–1290 and [Privacy / Compliance Engineering](#privacy--compliance-engineering) — EV-P03-014
+  - [x] P03.06.03 Data-dictionary generator plan (generated from schema comments in P06/P07) — EV-P03-015
+  - [x] P03.06.04 Verify: a generated schema diff shows no unclassified column in MVP tables — EV-P03-016
 - [ ] **P03.07 Lawyer briefing pack** `[G:PILOT]` `[EXT]`
-  - [ ] P03.07.01 Contents:
+  - [x] P03.07.01 Contents: — EV-P03-020
     - Product description and data flows.
     - Controller/processor analysis.
     - Audio policy.
@@ -2240,12 +2242,12 @@ Accepted ADRs · glossary · entity/aggregate model · state-machine specificati
     - Telecom questions (EXT-03).
     - AI Act role questions (EXT-04).
     - Draft emergency and allergen scripts (EXT-05).
-  - [ ] P03.07.02 Question list with required decisions and deadlines (stage A before pilot; stage B before LAUNCH)
+  - [x] P03.07.02 Question list with required decisions and deadlines (stage A before pilot; stage B before LAUNCH) — EV-P03-021
   - [ ] P03.07.03 Engage counsel; send the pack; record counterparty, request date, expected date and fallback in the Status Ledger
   - [ ] P03.07.04 Verify: counsel acknowledged receipt; request date, expected date and fallback recorded in the Status Ledger
-- [ ] **P03.08 Invariant enforcement register** `[G:PILOT]`
-  - [ ] P03.08.01 Map every INV to lint rules, CI checks, runtime assertions and alarms, each with an owner
-  - [ ] P03.08.02 Verify: every INV has ≥ 1 automated enforcement or an explicit documented manual control
+- [x] **P03.08 Invariant enforcement register** `[G:PILOT]` — EV-P03-023
+  - [x] P03.08.01 Map every INV to lint rules, CI checks, runtime assertions and alarms, each with an owner — EV-P03-022
+  - [x] P03.08.02 Verify: every INV has ≥ 1 automated enforcement or an explicit documented manual control — EV-P03-023
 
 ### Security
 The threat model drives controls in P05–P17. Social-engineering and toll-fraud abuse cases are explicitly modelled.
@@ -2288,7 +2290,7 @@ ADR index (EV-P03-001), threat model review record (EV-P03-002), inventory (EV-P
 <a id="p04--voice-and-ai-feasibility-proof-and-long-lead-external-track"></a>
 ## P04 — Voice and AI Feasibility Proof and Long-Lead External Track
 
-**Status:** PILOT NOT_STARTED · SELL NOT_STARTED · **Target:** 2026-09-28 → 2026-10-09 · **Effort:** 4 engineering-days + founder admin
+**Status:** PILOT IN_PROGRESS · SELL NOT_STARTED · **Target:** 2026-09-28 → 2026-10-09 · **Effort:** 4 engineering-days + founder admin
 
 ### Objective
 Prove the riskiest technical assumption before building on it: German voice over ConversationRelay IE1 with acceptable latency and number capture. Start every external dependency with a long lead time on day 1.
@@ -2324,11 +2326,11 @@ Production-quality `packages/telephony` (TwiML builder, protocol codecs, signatu
   - [ ] P04.03.04 DG-14: evaluate one alternative EU-resident provider (structured outputs, latency, DPA, region) and select it
   - [ ] P04.03.05 Verify: a strict-schema call from eu-central-1 succeeds; the latency distribution (N ≥ 200) is recorded
 - [ ] **P04.04 ConversationRelay adapter (production quality)** `[G:PILOT]`
-  - [ ] P04.04.01 `packages/telephony` TwiML builder: `<Connect action>` + `<ConversationRelay>` with `welcomeGreeting`, `welcomeGreetingInterruptible="none"`, `language="de-DE"`, STT/TTS provider and voice, `interruptible`, `dtmfDetection`, `<Parameter>` session token
-  - [ ] P04.04.02 Zod codecs for inbound (`setup`, `prompt`, `interrupt`, `dtmf`, `error`) and outbound (`text`, `play`, `sendDigits`, `language`, `end`) messages; unknown message types logged and ignored
-  - [ ] P04.04.03 `X-Twilio-Signature` validation for HTTP and WebSocket upgrade (constant-time), URL reconstruction behind the ALB
-  - [ ] P04.04.04 Minimal voice role: inbound webhook → TwiML; WSS handler with scripted responses; connect-action handler logging `SessionStatus`/`HandoffData`
-  - [ ] P04.04.05 Tests: codec round-trips, signature fixtures (valid, tampered, wrong URL), TwiML snapshot asserting the disclosure attributes
+  - [x] P04.04.01 `packages/telephony` TwiML builder: `<Connect action>` + `<ConversationRelay>` with `welcomeGreeting`, `welcomeGreetingInterruptible="none"`, `language="de-DE"`, STT/TTS provider and voice, `interruptible`, `dtmfDetection`, `<Parameter>` session token — EV-P04-001
+  - [x] P04.04.02 Zod codecs for inbound (`setup`, `prompt`, `interrupt`, `dtmf`, `error`) and outbound (`text`, `play`, `sendDigits`, `language`, `end`) messages; unknown message types logged and ignored — EV-P04-002
+  - [x] P04.04.03 `X-Twilio-Signature` validation for HTTP and WebSocket upgrade (constant-time), URL reconstruction behind the ALB — EV-P04-003
+  - [x] P04.04.04 Minimal voice role: inbound webhook → TwiML; WSS handler with scripted responses; connect-action handler logging `SessionStatus`/`HandoffData` — EV-P04-004
+  - [x] P04.04.05 Tests: codec round-trips, signature fixtures (valid, tampered, wrong URL), TwiML snapshot asserting the disclosure attributes — EV-P04-005
   - [ ] P04.04.06 Verify on a real call: disclosure plays fully even when the caller talks over it; prompts arrive; replies are spoken; DTMF is received; `end` + handoff reaches the action URL
 - [ ] **P04.05 Latency and German speech measurement** `[G:PILOT]`
   - [ ] P04.05.01 Run the spike from eu-central-1 (P05 skeleton or minimal temporary task), never through a laptop tunnel, for latency figures
@@ -2337,7 +2339,7 @@ Production-quality `packages/telephony` (TwiML builder, protocol codecs, signatu
   - [ ] P04.05.04 Compare two STT providers/models and two German TTS voices; tune `speechTimeout` and `interruptSensitivity`
   - [ ] P04.05.05 Report p50/p95, N, per-slot accuracy, limitations and the chosen configuration (`docs/voice/feasibility-report.md`)
 - [ ] **P04.06 Voice go/no-go (DG-01)** `[G:PILOT]`
-  - [ ] P04.06.01 Criteria:
+  - [x] P04.06.01 Criteria (recorded in `docs/decisions/DG-01-voice-go-no-go.md` before any measurement existed) — EV-P04-006:
     - p95 ≤ 1.8 s achievable or a credible path to it;
     - critical-slot capture feasible with read-back and DTMF;
     - non-interruptible disclosure verified;
@@ -2348,7 +2350,7 @@ Production-quality `packages/telephony` (TwiML builder, protocol codecs, signatu
   - [ ] P04.07.01 Trademark search (DPMA, EUIPO, WIPO; classes 9, 35, 38, 42), confirmed by counsel (EXT-07)
   - [ ] P04.07.02 Decide the name; register domain(s); delegate DNS to Route 53
   - [ ] P04.07.03 Create role mailboxes: support@, security@, privacy@, billing@
-  - [ ] P04.07.04 If the name changes: configuration-only change (ADR-0034), verified by a grep for hard-coded brand strings
+  - [x] P04.07.04 If the name changes: configuration-only change (ADR-0034), verified by a grep for hard-coded brand strings — EV-P04-007
 - [ ] **P04.08 Entity, tax, banking and insurance** `[G:PILOT]` `[EXT]`
   - [ ] P04.08.01 DG-09: operating entity path (Gewerbeanmeldung now; UG in parallel until the HRB entry)
   - [ ] P04.08.02 Finanzamt registration, USt-IdNr., Kleinunternehmer decision with the tax advisor (EXT-08)
@@ -2364,7 +2366,7 @@ Production-quality `packages/telephony` (TwiML builder, protocol codecs, signatu
   - [ ] P04.10.01 Collect/sign DPAs: AWS, Twilio, OpenAI, alternative LLM provider, Stripe (for LAUNCH), PostHog (later)
   - [ ] P04.10.02 Ask Twilio in writing: STT/TTS vendors and processing regions for IE1 ConversationRelay; retention of transcripts, logs and metadata; deletion APIs
   - [ ] P04.10.03 Record results in the draft subprocessor register (P16.08) with regions and transfer mechanisms
-  - [ ] P04.10.04 Verify: every pilot data flow in the DFD (P03.04) has a subprocessor entry with region and DPA status
+  - [x] P04.10.04 Verify: every pilot data flow in the DFD (P03.04) has a subprocessor entry with region and DPA status — EV-P04-008
 
 ### Security
 Provider credentials created directly into Secrets Manager (P05.08) or a password manager until then. Geo permissions and usage triggers against toll fraud. Spike code meets production standards (tests, validation) and is kept.

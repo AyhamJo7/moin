@@ -1,0 +1,144 @@
+# Local development stack (P02.04.01).
+#
+# Every image is pinned by digest, not by tag. A tag is mutable, so `pgvector/pgvector:pg17` can
+# resolve to a different build next month and a developer's "works on my machine" stops being
+# reproducible — which is the failure this file exists to prevent.
+#
+# Every service binds to 127.0.0.1 explicitly. Plain `5432:5432` binds 0.0.0.0, which on a laptop
+# on a café network publishes an unauthenticated-ish development database to the LAN.
+#
+# All credentials here are development-only fakes. Real secrets live in AWS Secrets Manager and
+# are referenced by ARN (INV-15); nothing in this file is ever used outside a developer machine.
+
+# Overridable, because it was hard-coded and two checkouts then silently shared one database:
+# a genuinely fresh clone reported "migrations already applied", and a reset in one checkout
+# destroyed the other's data. Set COMPOSE_PROJECT_NAME for a second worktree or review clone.
+name: ${COMPOSE_PROJECT_NAME:-moin}
+
+services:
+  postgres:
+    # Postgres 17 + pgvector. The pgvector image is used rather than the stock one because the
+    # extension has to exist in the image: `CREATE EXTENSION vector` cannot install it.
+    image: pgvector/pgvector@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
+    environment:
+      POSTGRES_USER: moin_owner
+      POSTGRES_PASSWORD: local-development-only
+      POSTGRES_DB: moin
+      # Deterministic collation, so ORDER BY in a test matches ORDER BY in production.
+      POSTGRES_INITDB_ARGS: '--encoding=UTF8 --locale=C'
+    command:
+      - postgres
+      # Louder than production on purpose: a lock or a slow query should be obvious locally,
+      # while it is still cheap to fix.
+      - -c
+      - log_statement=ddl
+      - -c
+      - log_lock_waits=on
+      - -c
+      - log_min_duration_statement=500
+      - -c
+      - max_connections=200
+    ports:
+      - '127.0.0.1:5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # `pg_isready` alone reports true while the init scripts are still running, so a real query
+      # is used instead. The difference is a `db:migrate` that fails once per fresh clone.
+      test: ['CMD-SHELL', 'psql -U moin_owner -d moin -c "select 1" >/dev/null 2>&1']
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  valkey:
+    image: valkey/valkey@sha256:081c2f5cb575efc901aa80ff9cdbd1ec6a301682fd35e1ebb4b0990a4a4a8507
+    command: ['valkey-server', '--save', '', '--appendonly', 'no']
+    ports:
+      - '127.0.0.1:6379:6379'
+    healthcheck:
+      test: ['CMD', 'valkey-cli', 'ping']
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  sqs:
+    # ElasticMQ speaks the SQS API, including FIFO queues and visibility timeouts, which is what
+    # the outbox dispatcher and job runner in P08 actually depend on.
+    image: softwaremill/elasticmq-native@sha256:fe3af4a8dd59f310b20e07ec3499cfdeb16a14f518c95ad7e70f200845dce3f5
+    ports:
+      - '127.0.0.1:9324:9324'
+      - '127.0.0.1:9325:9325'
+    volumes:
+      - ./docker/elasticmq/elasticmq.conf:/opt/elasticmq.conf:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'nc -z 127.0.0.1 9324 || exit 1']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  s3:
+    # Adobe S3Mock (ADR-0044): Apache-2.0, S3-focused, no commercial-use licensing question.
+    image: adobe/s3mock@sha256:c1beb36492706566afdea274fa19a15fe6ca519aa4d82889b13a127237b6d301
+    environment:
+      initialBuckets: 'moin-local-uploads,moin-local-recordings,moin-local-exports'
+      # Off by default: retaining objects across restarts hides "the code never created the
+      # bucket" bugs until they appear in staging.
+      retainFilesOnExit: 'false'
+    ports:
+      - '127.0.0.1:9090:9090'
+    healthcheck:
+      # A real ListBuckets call, not a port probe: S3Mock accepts connections before the initial
+      # buckets exist, and a seed that runs in that window fails with NoSuchBucket.
+      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:9090/ || exit 1']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  mail:
+    # Mailpit catches every outbound mail locally, so a development run can never reach a real
+    # inbox — which matters when the fixtures contain realistic-looking German addresses.
+    image: axllent/mailpit@sha256:c076638db1e15662150be4fb62b8a6e96ef6ba5bde90c838a0239225854830f7
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: '1'
+      MP_SMTP_AUTH_ALLOW_INSECURE: '1'
+      MP_MAX_MESSAGES: '2000'
+    ports:
+      - '127.0.0.1:1025:1025'
+      - '127.0.0.1:8025:8025'
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:8025/api/v1/info || exit 1']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  oidc:
+    # Keycloak as a local OIDC provider (ADR-0045). Production identity is Amazon Cognito; this
+    # exists so the auth boundary can be exercised against real issuer, audience, JWKS-rotation
+    # and token-expiry behaviour instead of a stub that always says yes.
+    image: quay.io/keycloak/keycloak@sha256:82a77884f3af238beab1e7afd63b5f530e1b5c0590bd7aa60b40a40463e29b2c
+    command: ['start-dev', '--import-realm', '--http-port=8080']
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: local-development-only
+      KC_HEALTH_ENABLED: 'true'
+    ports:
+      - '127.0.0.1:8080:8080'
+    volumes:
+      - ./docker/keycloak/realm-moin-local.json:/opt/keycloak/data/import/realm-moin-local.json:ro
+    healthcheck:
+      # Keycloak's own readiness endpoint on the management port, which reports ready only once
+      # the realm import has finished.
+      test:
+        [
+          'CMD-SHELL',
+          "exec 3<>/dev/tcp/127.0.0.1/9000; echo -e 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&3; grep -q UP <&3",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 20s
+
+volumes:
+  postgres-data:

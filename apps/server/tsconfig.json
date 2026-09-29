@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "_comment": "NestJS resolves providers from decorator metadata that only the TypeScript emitter produces, so the server is compiled rather than type-stripped. That makes three overrides of the shared base unavoidable, and they stop at this package: erasableSyntaxOnly off, experimentalDecorators and emitDecoratorMetadata on. Everything else — including every strictness option — is inherited.",
+  "extends": "../../packages/config/tsconfig/node.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "rootDir": ".",
+    "erasableSyntaxOnly": false,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
+  },
+  "include": ["src/**/*.ts"]
+}

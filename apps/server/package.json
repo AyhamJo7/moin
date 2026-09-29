@@ -1,0 +1,38 @@
+{
+  "name": "@moin/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "node --env-file-if-exists=../../.env --watch src/main-api.ts",
+    "lint": "eslint .",
+    "start:api": "node dist/main-api.js",
+    "start:migrate": "node dist/main-migrate.js",
+    "start:voice": "node dist/main-voice.js",
+    "start:worker": "node dist/main-worker.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@fastify/websocket": "11.3.1",
+    "@moin/contracts": "workspace:*",
+    "@moin/db": "workspace:*",
+    "@moin/kernel": "workspace:*",
+    "@moin/observability": "workspace:*",
+    "@moin/telephony": "workspace:*",
+    "@nestjs/common": "12.1.1",
+    "@nestjs/core": "12.1.1",
+    "@nestjs/platform-fastify": "12.1.1",
+    "fastify": "5.12.5",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "12.1.1",
+    "@types/node": "24.19.0",
+    "@types/ws": "8.18.2",
+    "typescript": "6.0.3",
+    "vitest": "5.0.2"
+  }
+}

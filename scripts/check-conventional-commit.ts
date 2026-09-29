@@ -41,7 +41,7 @@ export function checkTitle(title: string): string[] {
   const subject = title.split('\n')[0] ?? '';
 
   // A revert produced by `git revert` keeps the reverted subject in quotes; accept that shape.
-  if (/^Revert "/.test(subject)) return problems;
+  if (subject.startsWith('Revert "')) return problems;
 
   const match = HEADER.exec(subject);
   if (match === null) {
@@ -54,7 +54,9 @@ export function checkTitle(title: string): string[] {
 
   const text = match[5] ?? '';
   if (subject.length > MAX_SUBJECT_LENGTH) {
-    problems.push(`subject is ${subject.length} characters; keep it within ${MAX_SUBJECT_LENGTH}`);
+    problems.push(
+      `subject is ${String(subject.length)} characters; keep it within ${String(MAX_SUBJECT_LENGTH)}`,
+    );
   }
   if (/[.!?]$/.test(text)) {
     problems.push('subject ends with punctuation; drop the final full stop');
@@ -99,7 +101,9 @@ function commitSubjects(range: string): string[] {
     });
   } catch {
     // A CI check that dies with a stack trace tells the reader nothing useful.
-    throw new Error(`cannot read commits for range ${JSON.stringify(range)}: no such revision range`);
+    throw new Error(
+      `cannot read commits for range ${JSON.stringify(range)}: no such revision range`,
+    );
   }
   return out.split('\n').filter((line) => line.trim().length > 0);
 }
@@ -110,7 +114,7 @@ function main(): number {
   let runSelfTest = false;
 
   for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
+    const arg = argv[i] ?? '';
     const value = argv[i + 1];
     if (arg === '--self-test') {
       runSelfTest = true;
@@ -136,7 +140,7 @@ function main(): number {
       }
       return 1;
     }
-    console.log(`conventional-commit self-test passed: ${CASES.length} cases`);
+    console.log(`conventional-commit self-test passed: ${String(CASES.length)} cases`);
   }
 
   if (titles.length === 0) {
@@ -149,20 +153,22 @@ function main(): number {
   for (const title of titles) {
     for (const problem of checkTitle(title)) {
       failed = true;
-      console.error(`${JSON.stringify(title.split('\n')[0])}: ${problem}`);
+      console.error(`${JSON.stringify(title.split('\n')[0] ?? title)}: ${problem}`);
     }
   }
   if (failed) {
     console.error('\nSee CONTRIBUTING.md → Commits.');
     return 1;
   }
-  console.log(`conventional-commit: ${titles.length} title(s) clean`);
+  console.log(`conventional-commit: ${String(titles.length)} title(s) clean`);
   return 0;
 }
 
 try {
   process.exitCode = main();
 } catch (error) {
-  console.error(`check-conventional-commit: ${error instanceof Error ? error.message : String(error)}`);
+  console.error(
+    `check-conventional-commit: ${error instanceof Error ? error.message : String(error)}`,
+  );
   process.exitCode = 2;
 }

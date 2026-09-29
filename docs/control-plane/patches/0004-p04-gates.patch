@@ -1,0 +1,70 @@
+P04.10.04 / P04.07.04 — add the two new consistency checks to the docs gate,
+and make the lint and typecheck gates cover scripts/.
+
+This file is founder-only (protected-paths policy), so this session wrote the
+change as a patch instead of editing it. Apply it yourself:
+
+    git apply docs/control-plane/patches/0004-p04-gates.patch
+    python3 .claude/bin/control_plane_check.py
+    python3 .claude/bin/gates.py full
+
+Apply it after patch 0003, which this builds on.
+
+What changes
+------------
+docs-consistency  gains `check-subprocessors.ts` and `check-brand-strings.ts`.
+                  The first ties the subprocessor register to the data-flow
+                  diagram, so a provider added three phases from now cannot go
+                  unrecorded. The second holds ADR-0034: the brand name is
+                  configuration, and DG-00 is still open.
+
+lint              `pnpm turbo run lint` → `pnpm lint`
+typecheck         `pnpm turbo run typecheck` → `pnpm typecheck`
+
+The last two are the ones worth reading twice. `turbo run` executes only the
+per-package tasks, and `scripts/` is not a package — so the seven consistency
+checks and `doctor.ts` were the only code in the repository that no gate linted
+or typechecked. The root `lint` and `typecheck` scripts now run turbo and then
+cover the root files, and the same change is made in the CI workflow, which had
+the identical gap.
+
+Proven rather than assumed: a deliberate `any` and a deliberate type error were
+placed in `scripts/`, both passed before the change and both failed after it.
+
+Verification of the patch itself
+--------------------------------
+Applied to an isolated copy of the file: applies cleanly, and the result is
+byte-identical to the intended content. Every command the new configuration
+runs was executed against this tree first.
+
+diff --git a/.claude/gates.json b/.claude/gates.json
+index 8fc9279..a9ca5a9 100644
+--- a/.claude/gates.json
++++ b/.claude/gates.json
+@@ -22,7 +22,7 @@
+     },
+     {
+       "name": "docs-consistency",
+-      "run": "node scripts/check-adr-coverage.ts && node scripts/check-domain-coverage.ts && node scripts/check-dfd-coverage.ts && node scripts/check-threat-model-refs.ts && node scripts/check-data-classification.ts",
++      "run": "node scripts/check-adr-coverage.ts && node scripts/check-domain-coverage.ts && node scripts/check-dfd-coverage.ts && node scripts/check-threat-model-refs.ts && node scripts/check-data-classification.ts && node scripts/check-subprocessors.ts && node scripts/check-brand-strings.ts",
+       "requires": ["node"],
+       "timeout": 300
+     },
+@@ -34,7 +34,7 @@
+     },
+     {
+       "name": "lint",
+-      "run": "pnpm turbo run lint",
++      "run": "pnpm lint",
+       "requires": ["pnpm"],
+       "timeout": 900
+     },
+@@ -46,7 +46,7 @@
+     },
+     {
+       "name": "typecheck",
+-      "run": "pnpm turbo run typecheck",
++      "run": "pnpm typecheck",
+       "requires": ["pnpm"],
+       "timeout": 900
+     },

@@ -1,0 +1,156 @@
+# QG-01 — supply chain and secrets (P02.06.02).
+#
+# Separate from `verify` so a dependency advisory published overnight fails its own check with a
+# clear name, rather than turning up as a confusing failure inside the test job.
+name: security-scan
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Daily: a vulnerability can be published against code that has not changed, so a scan that
+    # only runs on push would not find it until someone happened to touch the repository.
+    - cron: '17 4 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-scan-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dependencies:
+    name: dependency audit and licences
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # Fails on high or critical. `--prod` because a devDependency advisory does not reach the
+      # runtime image; it is still reported by the scheduled run, just not merge-blocking.
+      - name: Audit production dependencies
+        run: pnpm audit --prod --audit-level high
+
+      - name: Licence allowlist
+        run: node scripts/check-licences.ts
+
+  secrets:
+    name: secret scan (full history)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history: a secret removed in a later commit is still in the repository, and
+          # anyone who cloned it has it. A shallow scan would report clean.
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The pinned image rather than the action: gitleaks-action now requires a GITHUB_TOKEN to
+      # scan a pull request, and a workflow that checks out contributor code should not hold one.
+      # This runs the same scanner, with the same configuration the local gate uses.
+      - name: gitleaks
+        run: |
+          docker run --rm -v "${PWD}:/repo" -w /repo \
+            zricethezav/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
+            git --redact --no-banner --config /repo/.gitleaks.toml /repo
+
+  static-analysis:
+    name: semgrep, actionlint, shellcheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: actionlint
+        # Workflows are code with a token attached; a typo in an `if:` can turn a gate off
+        # silently. Run through the pinned container rather than a floating action.
+        run: |
+          docker run --rm -v "${PWD}:/repo" -w /repo \
+            rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 \
+            -color
+
+      - name: shellcheck
+        run: |
+          shopt -s globstar nullglob
+          files=(scripts/**/*.sh docker/**/*.sh)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "no shell scripts to check"
+            exit 0
+          fi
+          shellcheck "${files[@]}"
+
+      - name: semgrep
+        run: |
+          docker run --rm -v "${PWD}:/src" -w /src \
+            semgrep/semgrep@sha256:acaac22ffc7b7cc5926de0751b223bce0b2491c33d18422fa72f632c78d81198 \
+            semgrep --config=p/typescript --config=p/security-audit --config=p/secrets \
+              --error --skip-unknown-extensions \
+              --exclude='.claude' \
+              --exclude='**/__fixtures__/**'
+
+  filesystem:
+    name: trivy filesystem and SBOM
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          # Only findings with a fix available block a merge. An unfixable advisory would
+          # otherwise block every pull request until upstream acts, which trains people to
+          # bypass the gate.
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: CycloneDX SBOM
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: cyclonedx
+          output: sbom.cdx.json
+          # Producing the bill of materials must not fail the build; the scan above is the gate.
+          exit-code: '0'
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom
+          path: sbom.cdx.json
+          retention-days: 90
+
+  security-scan:
+    name: security-scan
+    runs-on: ubuntu-24.04
+    needs: [dependencies, secrets, static-analysis, filesystem]
+    if: always()
+    steps:
+      - name: All checks passed
+        run: |
+          results='${{ join(needs.*.result, ' ') }}'
+          echo "job results: $results"
+          for result in $results; do
+            if [ "$result" != "success" ]; then
+              echo "a required job did not succeed: $result" >&2
+              exit 1
+            fi
+          done
