@@ -56,3 +56,12 @@ Rules that follow from this:
   is the worst moment to do a repository-wide string migration.
 - **Two builds, one per brand.** Violates INV-17 (one image digest per release) and INV-18 (no
   tenant-specific code paths).
+
+## Verification
+
+| Enforcement                                   | Where                                                                                                                    |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| No customer-visible brand literal in code     | Review scope, plus the brand configuration being the only source read by the web app and the templates                   |
+| The codename never reaches a customer surface | Caller-facing wording comes from reviewed templates (ADR-0011), never from code; template review is where this is caught |
+| Brand configuration fails fast when missing   | Validated by the configuration loader at startup, so a missing brand string stops a deploy rather than reaching a caller |
+| One image serves every brand                  | INV-17: the image is brand-agnostic; a per-brand build would be a second digest                                          |

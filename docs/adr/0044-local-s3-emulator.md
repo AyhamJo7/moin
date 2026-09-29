@@ -74,3 +74,13 @@ evidence (PLAN's no-fake-completion rule).
   explicit staging gate.
 - `retainFilesOnExit` is off, so a run starts from an empty bucket: a missing `CreateBucket` in the
   application fails locally instead of surviving until staging.
+
+## Verification
+
+| Enforcement                                             | Where                                                                                                     |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| The emulator is pinned by digest                        | `docker-compose.yml`; Renovate keeps the digest current                                                   |
+| No emulator-specific behaviour reaches application code | `provider-sdks-stay-in-adapters` in `.dependency-cruiser.cjs`: no module may import an S3 client directly |
+| The adapter is the AWS SDK in every environment         | Only the endpoint and path-style flag differ; there is no `isLocal` branch                                |
+| The differences are proven against real S3, not assumed | The P05 contract suite runs the same storage tests against staging's real S3                              |
+| A missing bucket fails locally rather than in staging   | `retainFilesOnExit` is off, so each run starts from an empty bucket                                       |
