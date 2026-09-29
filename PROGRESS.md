@@ -5,7 +5,7 @@ mode: interactive
 phase: P03
 tier: PILOT
 plan: docs/phases/P03-plan.md
-next: P03.04 C4 and data-flow diagrams — PR docs/p03-04-diagrams
+next: P04 feasibility and provider adapters — plan docs/phases/P04-plan.md
 updated: 2026-09-28
 ---
 
@@ -108,11 +108,23 @@ Rules
 | P03.06.03 | READY_FOR_REVIEW | PR #12 | EV-P03-015 | Classification check, proven on a fixture |
 | P03.06.04 | READY_FOR_REVIEW | PR #12 | EV-P03-016 | 0 unclassified columns |
 
+| P03.04.01 | READY_FOR_REVIEW | PR #13 | EV-P03-017 | C4 context and containers |
+| P03.04.02 | READY_FOR_REVIEW | PR #13 | EV-P03-018 | DFD, five trust boundaries, twelve flows |
+| P03.04.03 | READY_FOR_REVIEW | PR #13 | EV-P03-019 | Coverage check; found 3 gaps in the first draft |
+| P03.05.01 | READY_FOR_REVIEW | PR #14 | EV-P03-025 | STRIDE, 63 mitigations, all references verified |
+| P03.05.02 | READY_FOR_REVIEW | PR #14 | EV-P03-026 | Seven abuse cases; two corrected by the review |
+| P03.05.03 | READY_FOR_REVIEW | PR #14 | EV-P03-024 | Independent review: 2 Critical, 7 High, all resolved |
+| P03.07.01 | READY_FOR_REVIEW | PR #14 | EV-P03-020 | Lawyer pack prepared, not sent |
+| P03.07.02 | READY_FOR_REVIEW | PR #14 | EV-P03-021 | 13 questions, each with a fallback |
+| P03.08.01 | READY_FOR_REVIEW | PR #14 | EV-P03-022 | All 20 invariants mapped, with owner |
+| P03.08.02 | READY_FOR_REVIEW | PR #14 | EV-P03-023 | 19 automated, 1 documented manual control |
+
 ## External waits
 
-| ID     | Counterparty | Requested  | Expected | Fallback                                                                                  | Blocks               |
-| ------ | ------------ | ---------- | -------- | ----------------------------------------------------------------------------------------- | -------------------- |
-| EXT-24 | GitHub       | 2026-09-28 | —        | Pre-push hook + CI status discipline as an accepted risk; must be resolved before MT-LIVE | P02.01.01, P02.01.07 |
+| ID     | Counterparty                   | Requested                         | Expected | Fallback                                                                                                                                                          | Blocks                                           |
+| ------ | ------------------------------ | --------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| EXT-24 | GitHub                         | 2026-09-28                        | —        | Pre-push hook + CI status discipline as an accepted risk; must be resolved before MT-LIVE                                                                         | P02.01.01, P02.01.07, P02.06.07                  |
+| EXT-02 | German data-protection counsel | **not yet sent — founder action** | —        | Every question in `docs/legal-briefs/02-questions.md` carries a conservative fallback, except A6 (telecom law), which has none: without it the pilot does not run | P03.07.03, P03.07.04, ADR-0019, the pilot (PG-3) |
 
 ## Founder actions waiting
 
@@ -135,6 +147,8 @@ Rules
 
 ## Log
 
+- 2026-09-29 — CORRECTION forced by the claim-check hook. A progress report said P02 and P03 were "complete"; `gates.py full` is **FAIL** at HEAD 273714ed68 (2 of 3 gates pass; the stub `workspace` gate fails). That is the designed behaviour until founder patch 0003 is applied — but running it surfaced a real defect: **patch 0003 was stale.** It was written before P02.07 moved the test runner off turbo, so its `unit` gate still said `pnpm turbo run test`, a task that no longer exists. Applying it would have produced a gate configuration that could not run. Regenerated with every command executed individually against the current tree first, re-verified against an isolated copy (applies cleanly, byte-identical to the intended file), and extended with `docs-consistency`, `migrations` and `licences` gates for the checks added since. The correct status is: every P02 and P03 item is implemented and individually verified, and `gates full` is BLOCKED on founder action F1, not green.
+- 2026-09-29 — P03 complete except the founder-owned items. The independent threat-model review (P03.05.03) returned BLOCK MERGE with 2 Critical and 7 High, and both Criticals were defects in my own reasoning rather than gaps in coverage. The first: the document asserted that a caller's number is never an authentication factor, which our own intent catalogue and PLAN's identity rules contradict — spoofing a caller ID is nearly free in Germany, and `booking_cancel` was an unauthenticated destructive write against a real customer relationship. The second: the mitigation-to-item mapping was wrong in 18 of 33 rows, and two of those described a _weaker_ control than PLAN actually commits to. Each id looked plausible and none had been resolved; that is worse than no mapping, because it reads as rigour. `scripts/check-threat-model-refs.ts` now resolves all 63 and checks each relates to its mitigation. The review also caught the document claiming, in the past tense, that its own review had already happened — written before it had.
 - 2026-09-29 — P03.06 complete. Field-level rather than category-level, because category level is where erasure requests die: "conversation data" cannot be erased, but a named column can. Four things are stated rather than smoothed over: `conversations.request_text` is the riskiest field in the product and whether it is defensible at all is an open EXT-02 question; contacts are anonymised rather than deleted so tasks are not orphaned; knowledge is flagged as _possibly_ personal because an owner can write a staff member's mobile number into it; and German tax law overrides erasure for billing records for eight years. The classification check is proven on a fixture, which mattered — the real schema is five columns today, so a bare pass would have shown nothing.
 - 2026-09-29 — P03.02 and P03.03 complete. Glossary, entity model, aggregate boundaries, the three closed vocabularies and ten state machines as transition tables. Coverage against the blueprint is mechanical (26 entities, 0 unmapped, 5 explicitly deferred), and the check found a false positive in itself before it found anything else — naive pluralisation flagged `retention_policy` when the table is `retention_policies`. A false positive in a coverage check is worse than none, so it was fixed rather than allowlisted.
 - 2026-09-29 — P03.01 complete: ADR process, ten core ADRs accepted, three drafted and left PROPOSED, plus the invariant enforcement register. The coverage check is mechanical and found two things reading would not have: four P02 ADRs with no Verification section at all, and three invariants with no ADR. Those three are accounted for explicitly rather than excused — INV-14 has none by design, because no linter can tell whether a feature is an excluded sensitive use. Open question recorded rather than resolved: PLAN L2180 lists ADR-0036 for P03 while the register assigns it to P07.
