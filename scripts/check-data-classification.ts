@@ -62,7 +62,14 @@ export function schemaColumns(directory: string = MIGRATIONS): Column[] {
     for (const line of (match[2] ?? '').split('\n')) {
       const trimmed = line.trim();
       // Skip constraints and anything that is not a column definition.
-      if (trimmed === '' || /^(primary|foreign|unique|constraint|check|exclude)\b/i.test(trimmed)) {
+      // A constraint, or the continuation line of one. `REFERENCES …` on its own line reads as a
+      // column definition to the expression below, and produced a phantom column named
+      // "REFERENCES" — a parser defect that would have been classified rather than fixed.
+      if (
+        trimmed === '' ||
+        /^(primary|foreign|unique|constraint|check|exclude)\b/i.test(trimmed) ||
+        /^(references|on\s+(delete|update)|deferrable|initially|not\s+deferrable)\b/i.test(trimmed)
+      ) {
         continue;
       }
       const column = /^"?(\w+)"?\s+\w/.exec(trimmed)?.[1];

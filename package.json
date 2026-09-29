@@ -34,6 +34,8 @@
   "devDependencies": {
     "@axe-core/playwright": "4.13.0",
     "@eslint/js": "10.0.1",
+    "@moin/db": "workspace:*",
+    "@moin/testing": "workspace:*",
     "@playwright/test": "1.63.0",
     "@types/node": "24.19.0",
     "dependency-cruiser": "18.4.0",

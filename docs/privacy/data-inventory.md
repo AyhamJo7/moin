@@ -27,6 +27,26 @@ and we provide the tooling. A DSAR from a _customer's user_ comes to us.
 
 ## Inventory
 
+### Tenancy
+
+The customer's own business details, held as controller data about our customer rather than as
+processor data about their callers. A business address is not personal data; a sole trader's
+business address is their home address, and the distinction is not one the schema can make. So it
+is treated as personal throughout, which costs nothing and avoids a judgement call per row.
+
+| Field                                     | Category | Personal?                                   | Retention                    | Method      | Subprocessor |
+| ----------------------------------------- | -------- | ------------------------------------------- | ---------------------------- | ----------- | ------------ |
+| `organisations.slug`                      | Account  | no (chosen identifier, may embed a surname) | life of the contract + 8 y\* | hard delete | —            |
+| `organisations.status`                    | Account  | no                                          | life of the contract + 8 y\* | hard delete | —            |
+| `organisations.time_zone`                 | Account  | no                                          | life of the contract         | hard delete | —            |
+| `organisations.early_access`              | Account  | no                                          | life of the contract         | hard delete | —            |
+| `locations.street`, `postal_code`, `city` | Account  | **yes for a sole trader** — see above       | life of the contract         | hard delete | —            |
+| `locations.country_code`                  | Account  | no                                          | life of the contract         | hard delete | —            |
+| `locations.time_zone`                     | Account  | no                                          | life of the contract         | hard delete | —            |
+
+\* Billing-relevant fields are retained for eight years under German tax law (GoBD/HGB, EXT-08),
+which overrides erasure for those records. The rest is deleted on tenant termination.
+
 ### Call and conversation
 
 | Field                                         | Category        | Personal?                            | Retention                            | Method      | Subprocessor                    |
