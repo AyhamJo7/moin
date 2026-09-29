@@ -6,7 +6,7 @@ phase: P06
 tier: PILOT
 plan: docs/phases/P06-plan.md
 next: submit P06.04 for QG-09 founder review; continue dependency-valid P06 work
-updated: 2026-09-29
+updated: 2026-09-30
 ---
 
 # PROGRESS — moin
@@ -202,6 +202,7 @@ secret-rule fix (#25) merged, with its full-history scan green.
 
 ## Log
 
+- 2026-09-30 — **PR #29 CI repair in progress.** The first `verify` run on `cd35ecd6c673e70d3c5ee433dbb4b3fbd391d5f6` failed only in real-PostgreSQL integration: the workflow supplied admin, migrator and app URLs but omitted `TEST_DATABASE_PROVISIONER_URL`, so all thirteen new provisioning tests failed at setup. The RLS catalog job and the other completed checks passed. The workflow now supplies the CI-only provisioner URL; this new tree is UNVERIFIED until committed and tested at its own HEAD. QG-09 founder review remains pending.
 - 2026-09-29 — **P06.04 resumed from the 290ce67 checkpoint.** The old BLOCKER below was session exhaustion, not a technical impediment. The first real PostgreSQL run with a non-bypass function owner exposed that a FORCE RLS role cannot count all organisations for the Early Access cap; three cap tests failed. The corrected function updates a single global counter under a row lock in the same transaction. A security review also found that an implicit `pg_temp` search path could let a caller shadow unqualified tables; the final function pins it last, with a malicious TEMP-table fixture. `moin_app` cannot change plan/status or insert an organisation, and the provisioner has no direct DML. `gates full` passed 14/14 at clean implementation HEAD `127ba14acb4e4b594a7a6db32180bf30d582c98d`; evidence and ledger changes still require their own final-HEAD run. QG-09 founder review, PR CI and invitation delivery in P06.08 remain pending.
 - 2026-09-29 — **BLOCKER: usage limit reached mid-P06.04.** Not a technical blocker and not an external wait — the session ran out of budget.
   - **What was tried:** `packages/db/migrations/0006_provisioning.sql` was written and applied to the local development database (`pnpm db:migrate` → `applied 1: 0006_provisioning`). It adds `provisioning_limits`, `provisioning_requests` and `app.provision_tenant(...)`.
