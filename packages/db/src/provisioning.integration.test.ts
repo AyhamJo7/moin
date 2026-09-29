@@ -2,6 +2,8 @@
 import { randomUUID } from 'node:crypto';
 import { createTestDatabase, type TestDatabase } from '@moin/testing';
 import { createPool, type Pool } from './pool.ts';
+import { verifyAuditChain } from './audit.ts';
+import { withTenant } from './tenant.ts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 let database: TestDatabase;
@@ -54,7 +56,9 @@ async function count(
     | 'locations'
     | 'tenant_setup'
     | 'owner_invitation_requests'
-    | 'provisioning_requests',
+    | 'provisioning_requests'
+    | 'audit_events'
+    | 'audit_heads',
 ): Promise<number> {
   // Identifiers are selected only from the literal union above, never from untrusted input.
   // eslint-disable-next-line no-restricted-syntax -- test fixture table identifier from a closed union.
@@ -97,6 +101,14 @@ describe('provisioning authority and consistency', () => {
     expect(await count('owner_invitation_requests')).toBe(1);
     expect(await count('provisioning_requests')).toBe(1);
     const app = database.pool();
+    const audit = await withTenant(app, id, async (client) => {
+      const events = await client.query<{ operation: string; correlation_id: string }>(
+        'select operation, correlation_id from audit_events',
+      );
+      return { events: events.rows, chain: await verifyAuditChain(client) };
+    });
+    expect(audit.events).toMatchObject([{ operation: 'tenant.provisioned' }]);
+    expect(audit.chain).toStrictEqual({ valid: true, checked: '1' });
     expect(
       (await app.query<{ n: number }>('select count(*)::int as n from locations')).rows[0]?.n,
     ).toBe(0);
@@ -199,6 +211,8 @@ describe('provisioning authority and consistency', () => {
       'tenant_setup',
       'owner_invitation_requests',
       'provisioning_requests',
+      'audit_events',
+      'audit_heads',
     ] as const) {
       expect(await count(table)).toBe(0);
     }
@@ -213,6 +227,7 @@ describe('provisioning authority and consistency', () => {
     const id = await provision({ requestId, plan: 'reception', earlyAccess: true });
     expect(id).toMatch(/^[0-9a-f-]{36}$/u);
     expect(await count('provisioning_requests')).toBe(1);
+    expect(await count('audit_events')).toBe(1);
     expect(
       (
         await admin.query<{ accepted_paid_early_access: number }>(
@@ -220,6 +235,39 @@ describe('provisioning authority and consistency', () => {
         )
       ).rows[0]?.accepted_paid_early_access,
     ).toBe(1);
+  });
+
+  it('rolls back tenant state and the cap if the audit append fails', async () => {
+    await admin.query(`create function public.reject_provisioning_audit() returns trigger language plpgsql as $$
+      begin raise exception 'injected audit failure'; end $$`);
+    await admin.query(`create trigger reject_provisioning_audit before insert on audit_events
+      for each row execute function public.reject_provisioning_audit()`);
+    const requestId = randomUUID();
+    await expect(provision({ requestId, plan: 'reception', earlyAccess: true })).rejects.toThrow(
+      /injected audit failure/u,
+    );
+    for (const table of [
+      'organisations',
+      'locations',
+      'tenant_setup',
+      'owner_invitation_requests',
+      'provisioning_requests',
+      'audit_events',
+      'audit_heads',
+    ] as const) {
+      expect(await count(table)).toBe(0);
+    }
+    const limit = await admin.query<{ accepted_paid_early_access: number }>(
+      'select accepted_paid_early_access from provisioning_limits',
+    );
+    expect(limit.rows[0]?.accepted_paid_early_access).toBe(0);
+    await admin.query('drop trigger reject_provisioning_audit on audit_events');
+    const id = await provision({ requestId, plan: 'reception', earlyAccess: true });
+    expect(await count('audit_events')).toBe(1);
+    expect(await withTenant(database.pool(), id, verifyAuditChain)).toStrictEqual({
+      valid: true,
+      checked: '1',
+    });
   });
 
   it('returns the same tenant for a repeated or racing request without duplicates', async () => {
@@ -230,6 +278,7 @@ describe('provisioning authority and consistency', () => {
     expect(await count('organisations')).toBe(1);
     expect(await count('locations')).toBe(1);
     expect(await count('owner_invitation_requests')).toBe(1);
+    expect(await count('audit_events')).toBe(1);
   });
 
   it('rejects duplicate slugs and malformed inputs without echoing them', async () => {

@@ -11,7 +11,7 @@ Every business mutation must leave an ordered, tenant-scoped record that a later
 
 ## Decision (draft)
 
-An audit append and the business mutation it describes run in one `withTenant` transaction. The runtime role has SELECT but no direct INSERT, UPDATE, DELETE or TRUNCATE grant on `audit_events` or `audit_heads`. A reviewed `SECURITY DEFINER` function checks a fixed operation and argument policy, locks the tenant head, allocates the next sequence, hashes the previous hash with a canonical payload, inserts the event and advances the head in that transaction. A trigger rejects UPDATE and DELETE even by the table owner. The function has an exact QG-09 allowlist entry, a pinned search path and no dynamic SQL.
+An audit append and the business mutation it describes run in one tenant transaction. Provisioning precedes an application tenant session, so its global request insert triggers the audit append after the provisioning function sets transaction-local tenant context. The runtime role has SELECT but no direct INSERT, UPDATE, DELETE or TRUNCATE grant on `audit_events` or `audit_heads`. A reviewed `SECURITY DEFINER` function checks a fixed operation and argument policy, locks the tenant head, allocates the next sequence, hashes the previous hash with a canonical payload, inserts the event and advances the head in that transaction. A trigger rejects UPDATE and DELETE even by the table owner. The function has an exact QG-09 allowlist entry, a pinned search path and no dynamic SQL.
 
 The stored payload uses explicit typed fields and opaque identifiers. Operation-specific argument keys must be registered with a constrained value kind; an unknown key fails closed. Query and verification APIs always execute under tenant RLS. A daily verifier should traverse each tenant chain and alarm on a gap or mismatch. Until an external immutable anchor is implemented, a privileged actor able to rewrite both events and head can forge a consistent replacement chain; the current chain detects accidental corruption and unauthorised runtime mutation, not that attack.
 
@@ -36,10 +36,10 @@ Pseudonymisation and retention are separate decisions under ADR-0018 and require
 
 ## Verification
 
-| Enforcement                                                    | Where                                                                   |
-| -------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| FORCE RLS, runtime privileges, function owner/path/grants      | `scripts/check-rls-catalog.ts`; real-PostgreSQL audit integration tests |
-| Concurrent sequence and rollback                               | `packages/db/src/audit.integration.test.ts`                             |
-| Restricted argument keys and values, sample personal-data scan | `packages/db/src/audit.integration.test.ts`                             |
-| Chain gap, changed event and missing tail detection            | `packages/db/src/audit.ts`; real-PostgreSQL tamper fixtures             |
-| Daily verifier and alarm                                       | P06.10.05 pending scheduling and alert integration                      |
+| Enforcement                                                    | Where                                                                                           |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| FORCE RLS, runtime privileges, function owner/path/grants      | `scripts/check-rls-catalog.ts`; real-PostgreSQL audit integration tests                         |
+| Concurrent sequence, provisioning audit and rollback           | `packages/db/src/audit.integration.test.ts`, `packages/db/src/provisioning.integration.test.ts` |
+| Restricted argument keys and values, sample personal-data scan | `packages/db/src/audit.integration.test.ts`                                                     |
+| Chain gap, changed event and missing tail detection            | `packages/db/src/audit.ts`; real-PostgreSQL tamper fixtures                                     |
+| Daily verifier and alarm                                       | P06.10.05 pending scheduling and alert integration                                              |

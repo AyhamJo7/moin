@@ -161,6 +161,7 @@ Rules
 | P06.04.04 | READY_FOR_REVIEW | 127ba14 | EV-P06-019 | Retry and racing request IDs return one tenant |
 | P06.04.05 | READY_FOR_REVIEW | 127ba14 | EV-P06-020 | Real PostgreSQL attack suite, catalog defects and rollback tests |
 | P06.10 | IN_PROGRESS | feat/p06-10-audit | — | Audit migration, writer/query APIs, chain verifier, proposed ADR and real-PostgreSQL negative controls are in progress. Daily scheduling/alarm, adoption by business mutations, founder ADR acceptance and erasure design remain open. |
+| P06.10.03 | IN_PROGRESS | feat/p06-10-audit | — | Provisioning now triggers a tenant-scoped audit append in its authoritative transaction; failure rolls back tenant state and cap. Later tool, operator and security actions still need adoption. |
 
 ## External waits
 
