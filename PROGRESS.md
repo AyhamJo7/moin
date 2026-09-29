@@ -160,6 +160,7 @@ Rules
 | P06.04.03 | READY_FOR_REVIEW | 127ba14 | EV-P06-018 | Paid Early Access cap of five via one locked global counter; founder review pending |
 | P06.04.04 | READY_FOR_REVIEW | 127ba14 | EV-P06-019 | Retry and racing request IDs return one tenant |
 | P06.04.05 | READY_FOR_REVIEW | 127ba14 | EV-P06-020 | Real PostgreSQL attack suite, catalog defects and rollback tests |
+| P06.10 | IN_PROGRESS | feat/p06-10-audit | — | Audit migration, writer/query APIs, chain verifier, proposed ADR and real-PostgreSQL negative controls are in progress. Daily scheduling/alarm, adoption by business mutations, founder ADR acceptance and erasure design remain open. |
 
 ## External waits
 

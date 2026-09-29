@@ -47,6 +47,7 @@ names an enforcement.
 | [0011](0011-dialogue-manager-and-response-types.md) | Dialogue manager and response types | PROPOSED                | P03 → P12 |
 | [0012](0012-ai-gateway-and-provider-strategy.md)    | AI gateway and provider strategy    | PROPOSED (needs DG-01)  | P04 → P10 |
 | [0015](0015-business-action-model.md)               | Business action model               | ACCEPTED                | P03       |
+| [0017](0017-audit-architecture.md)                  | Tenant audit architecture           | PROPOSED                | P06       |
 | [0018](0018-retention-and-deletion.md)              | Retention and deletion              | PROPOSED                | P03 → P16 |
 | [0019](0019-turn-logs-and-transcripts.md)           | Turn logs and transcripts           | PROPOSED (needs EXT-02) | P03 → P16 |
 | [0020](0020-integration-credential-storage.md)      | Integration credential storage      | ACCEPTED                | P03       |

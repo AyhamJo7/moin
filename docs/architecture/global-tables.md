@@ -13,11 +13,12 @@ does not count as registered**: the reason is the point of the file.
 
 ## Register
 
-| Table                   | Why it has no tenant column                                                                              | How tenant-relevant access is constrained                              |
-| ----------------------- | -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `schema_migrations`     | Bookkeeping about the schema itself. Contains no customer data of any kind.                              | `SELECT` only for every runtime role; only the migrator writes it      |
-| `provisioning_limits`   | One platform-wide Early Access cap, changed through a reviewed migration.                                | No runtime table grant; the provisioning function reads it.            |
-| `provisioning_requests` | Request ID to tenant ID mapping must be checked before tenant context exists to make retries idempotent. | No runtime table grant; the provisioning function reads and writes it. |
+| Table                      | Why it has no tenant column                                                                                        | How tenant-relevant access is constrained                              |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
+| `schema_migrations`        | Bookkeeping about the schema itself. Contains no customer data of any kind.                                        | `SELECT` only for every runtime role; only the migrator writes it      |
+| `provisioning_limits`      | One platform-wide Early Access cap, changed through a reviewed migration.                                          | No runtime table grant; the provisioning function reads it.            |
+| `provisioning_requests`    | Request ID to tenant ID mapping must be checked before tenant context exists to make retries idempotent.           | No runtime table grant; the provisioning function reads and writes it. |
+| `audit_argument_allowlist` | Platform-wide reviewed argument keys and constrained value kinds, shared by every tenant for each audit operation. | No runtime table grant; only the audit writer reads it.                |
 
 ## Tables PLAN expects to join this register
 

@@ -105,6 +105,65 @@ describe('the QG-09 provisioning registration', () => {
   });
 });
 
+describe('the QG-09 audit registration', () => {
+  it('rejects the exact audit writer without its documented registration', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'moin-audit-definers-'));
+    try {
+      const path = join(directory, 'allowlist.md');
+      writeFileSync(path, '| Function | Why | Role |\n| --- | --- | --- |\n');
+      expect(
+        rulesFor(await inspect(database.migrationUrl, path), 'app.append_audit_event'),
+      ).toContain('security-definer-not-allowlisted');
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects an unsafe audit writer path and extra runtime grant', async () => {
+    await ddl(
+      // eslint-disable-next-line no-restricted-syntax -- defective function-level setting is the negative control.
+      `ALTER FUNCTION app.append_audit_event(uuid, uuid, text, text, text, uuid, jsonb, jsonb, jsonb, text, uuid, uuid, text) SET search_path = public, app, pg_catalog`,
+    );
+    try {
+      expect(rulesFor(await findings(), 'app.append_audit_event')).toContain(
+        'security-definer-unsafe-search-path',
+      );
+    } finally {
+      await ddl(
+        // eslint-disable-next-line no-restricted-syntax -- restore the reviewed setting.
+        `ALTER FUNCTION app.append_audit_event(uuid, uuid, text, text, text, uuid, jsonb, jsonb, jsonb, text, uuid, uuid, text) SET search_path = pg_catalog, public, app, pg_temp`,
+      );
+    }
+    await ddl(
+      `GRANT EXECUTE ON FUNCTION app.append_audit_event(uuid, uuid, text, text, text, uuid, jsonb, jsonb, jsonb, text, uuid, uuid, text) TO moin_provisioner`,
+    );
+    try {
+      expect(rulesFor(await findings(), 'app.append_audit_event')).toContain(
+        'security-definer-unexpected-execute-grant',
+      );
+    } finally {
+      await ddl(
+        `REVOKE EXECUTE ON FUNCTION app.append_audit_event(uuid, uuid, text, text, text, uuid, jsonb, jsonb, jsonb, text, uuid, uuid, text) FROM moin_provisioner`,
+      );
+    }
+  });
+
+  it('rejects an unreviewed audit writer owner', async () => {
+    await ddl(
+      `ALTER FUNCTION app.append_audit_event(uuid, uuid, text, text, text, uuid, jsonb, jsonb, jsonb, text, uuid, uuid, text) OWNER TO moin_app`,
+    );
+    try {
+      expect(rulesFor(await findings(), 'app.append_audit_event')).toContain(
+        'security-definer-unsafe-owner',
+      );
+    } finally {
+      await ddl(
+        `ALTER FUNCTION app.append_audit_event(uuid, uuid, text, text, text, uuid, jsonb, jsonb, jsonb, text, uuid, uuid, text) OWNER TO moin_migrator`,
+      );
+    }
+  });
+});
+
 describe('what the check catches', () => {
   // The case PLAN names. ENABLE without FORCE reads as protected and is not: the policy does not
   // apply to the table's owner, who runs migrations, backfills and admin connections.

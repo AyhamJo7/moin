@@ -22,3 +22,5 @@ export type {
   SystemWorkResult,
 } from './tenant.ts';
 export type { ReadinessCheck, ReadinessResult, PostgresReadinessOptions } from './readiness.ts';
+export { appendAuditEvent, listAuditEvents, verifyAuditChain } from './audit.ts';
+export type { AuditChainResult, AuditEventInput, AuditQuery, AuditEvent } from './audit.ts';

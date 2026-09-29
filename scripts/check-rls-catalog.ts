@@ -102,6 +102,12 @@ const APPROVED_DEFINERS: Readonly<
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
     executeGrantees: ['moin_provisioner'],
   },
+  'app.append_audit_event': {
+    arguments: 'uuid, uuid, text, text, text, uuid, jsonb, jsonb, jsonb, text, uuid, uuid, text',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: ['moin_app'],
+  },
 };
 
 interface RoleRow {
