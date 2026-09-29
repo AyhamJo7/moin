@@ -1,6 +1,7 @@
 {
-  "_doc": "Verification gates (run with python3 .claude/bin/gates.py fast|full; evidence in .git/claude-evidence/; the Stop hook checks completion claims against `full`). STUB until P02.02.02: the 'workspace' gate fails until the Turborepo tasks exist, so `full` cannot pass and no session can claim green before P02 lands. P02.02.02 replaces 'workspace' with the QG-01 set (format, lint, typecheck, unit, integration on real PG17+pgvector, build, gitleaks) and adds a `stress` section. Keep 'control-plane' first. Never delete or weaken a gate to make `full` pass (loosening needs founder approval).",
+  "_doc": "Verification gates (run with python3 .claude/bin/gates.py fast|full; evidence in .git/claude-evidence/; the Stop hook checks completion claims against `full`). P02.02.02 replaced the 'workspace' stub with the QG-01 set and added a `stress` section. Keep 'control-plane' first. Never delete or weaken a gate to make `full` pass (loosening needs founder approval). The integration gate needs the local stack (`pnpm dev:up`) and the environment file. Every command below was run individually before this file was written.",
   "needs": [],
+  "restore_generated": [],
   "gates": [
     {
       "name": "control-plane",
@@ -14,11 +15,91 @@
       "timeout": 600
     },
     {
-      "name": "workspace",
-      "run": "pnpm turbo run lint typecheck test build",
+      "name": "conventions",
+      "run": "node scripts/check-conventional-commit.ts --self-test && node scripts/check-no-ai-mentions.ts --self-test",
+      "requires": ["node"],
+      "timeout": 120
+    },
+    {
+      "name": "docs-consistency",
+      "run": "node scripts/check-adr-coverage.ts && node scripts/check-domain-coverage.ts && node scripts/check-dfd-coverage.ts && node scripts/check-threat-model-refs.ts && node scripts/check-data-classification.ts",
+      "requires": ["node"],
+      "timeout": 300
+    },
+    {
+      "name": "format",
+      "run": "pnpm exec prettier --check .",
+      "requires": ["pnpm"],
+      "timeout": 300
+    },
+    {
+      "name": "lint",
+      "run": "pnpm turbo run lint",
+      "requires": ["pnpm"],
+      "timeout": 900
+    },
+    {
+      "name": "boundaries",
+      "run": "pnpm exec depcruise apps packages scripts --config .dependency-cruiser.cjs",
+      "requires": ["pnpm"],
+      "timeout": 600
+    },
+    {
+      "name": "typecheck",
+      "run": "pnpm turbo run typecheck",
+      "requires": ["pnpm"],
+      "timeout": 900
+    },
+    {
+      "name": "unit",
+      "run": "pnpm test",
       "requires": ["pnpm"],
       "timeout": 1800
+    },
+    {
+      "name": "integration",
+      "run": "pnpm test:integration",
+      "requires": ["pnpm", "docker"],
+      "timeout": 2400
+    },
+    {
+      "name": "migrations",
+      "run": "node scripts/check-migrations.ts",
+      "requires": ["node"],
+      "timeout": 300
+    },
+    {
+      "name": "build",
+      "run": "pnpm turbo run build",
+      "requires": ["pnpm"],
+      "timeout": 1800
+    },
+    {
+      "name": "licences",
+      "run": "node scripts/check-licences.ts",
+      "requires": ["pnpm", "node"],
+      "timeout": 600
+    },
+    {
+      "name": "secret-scan",
+      "run": "gitleaks git --redact --no-banner --config .gitleaks.toml .",
+      "requires": ["gitleaks"],
+      "timeout": 900
     }
   ],
-  "fast": ["control-plane"]
+  "fast": [
+    "control-plane",
+    "conventions",
+    "docs-consistency",
+    "format",
+    "lint",
+    "typecheck",
+    "unit"
+  ],
+  "stress": {
+    "run": "pnpm exec vitest run --project unit {targets}",
+    "iterations": 20,
+    "default_targets": "packages scripts apps",
+    "timeout": 2400
+  }
 }
