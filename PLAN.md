@@ -1884,11 +1884,11 @@ All ADRs are listed in the [ADR register](#adr-register) as PROPOSED. Their acce
   - [x] P00.01.01 Read BLUEPRINT.md completely (2,462 lines) — evidence: this document §Blueprint Requirement Traceability
   - [x] P00.01.02 Extract 160 requirements with line references — evidence: [Requirement Traceability Matrix](#requirement-traceability-matrix)
   - [x] P00.01.03 Record blueprint tensions and resolutions (T-01…T-23)
-- [x] **P00.02 Repository and workspace audit** `[G:PILOT]`
+- [ ] **P00.02 Repository and workspace audit** `[G:PILOT]`
   - [x] P00.02.01 Inspect repository, git state, remote visibility, branch protection, toolchain
   - [x] P00.02.02 Classify existing components (KEEP / KEEP_AND_HARDEN / MISSING)
   - [x] P00.02.03 Identify reusable workspace prior art
-  - [x] P00.02.04 Verify: audit reproduced by a second read-only run (git status, remote visibility, toolchain versions) and recorded in EV-P00-001 — re-run 2026-09-27: only `PLAN.md` untracked, HEAD `fb7185e`, remote PRIVATE, `main` unprotected, Node v22.20.0, pnpm 10.12.1, Terraform absent
+  - [ ] P00.02.04 Verify: reproduce the audit with a second read-only run (git status, remote visibility, toolchain versions) and register its evidence. The historical inline note dated 2026-09-27 has no EV-P00-001 record or registry entry; verification remains unsubstantiated pending a recorded run.
 - [x] **P00.03 Architecture and phase design** `[G:PILOT]`
   - [x] P00.03.01 Verify provider facts that shape gates (ConversationRelay, OpenAI EU residency, Gmail restricted scopes, Graph subscriptions, Twilio DE numbers, ECS deployments)
   - [x] P00.03.02 Design architecture, data, security, AI, integration, infrastructure, testing, observability, privacy, release and operations sections
