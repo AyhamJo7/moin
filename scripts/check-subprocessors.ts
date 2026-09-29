@@ -24,9 +24,14 @@ const REGISTER = join(REPO_ROOT, 'docs', 'privacy', 'subprocessors.md');
 
 const STATUSES = new Set(['NOT_REQUESTED', 'REQUESTED', 'SIGNED', 'NOT_APPLICABLE']);
 
-/** A party row: | party | role | what | region | `DPA` | flows | */
+/**
+ * A party row: | party | role | what | region | `DPA` | flows |
+ * Consume each cell once, including its padding; values are trimmed below. Overlapping `\s*`
+ * and cell captures backtrack over aligned headers whose fifth cell is not a quoted DPA status.
+ * Cells stay on one physical line, as Markdown table rows do.
+ */
 const PARTY_ROW =
-  /^\|\s*([^|]+?)\s*\|\s*([^|]*?)\s*\|\s*([^|]*?)\s*\|\s*([^|]*?)\s*\|\s*`([A-Z_]+)`\s*\|\s*([^|]*?)\s*\|/gm;
+  /^\|([^|\r\n]+)\|([^|\r\n]*)\|([^|\r\n]*)\|([^|\r\n]*)\|[ \t]*`([A-Z_]+)`[ \t]*\|([^|\r\n]*)\|/gm;
 /** An internal-flow row: | F5 | reason | */
 const INTERNAL_ROW = /^\|\s*(F\d+)\s*\|\s*([^|]+?)\s*\|\s*$/gm;
 const FLOW_ID = /F\d+/g;

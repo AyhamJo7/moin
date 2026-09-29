@@ -1,8 +1,15 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { coverage, internalFlows, parties } from './check-subprocessors.ts';
+
+const PADDED_CELL_WIDTH = 128;
+const fixtureDirectories: string[] = [];
+
+afterEach(() => {
+  for (const directory of fixtureDirectories.splice(0)) rmSync(directory, { recursive: true });
+});
 
 describe('the subprocessor register (P04.10.04)', () => {
   it('the real register accounts for every flow in the diagram', () => {
@@ -38,12 +45,32 @@ describe('the subprocessor register (P04.10.04)', () => {
 
 function register(body: string): string {
   const dir = mkdtempSync(join(tmpdir(), 'subproc-'));
+  fixtureDirectories.push(dir);
   const path = join(dir, 'subprocessors.md');
   writeFileSync(path, body, 'utf8');
   return path;
 }
 
 describe('what the check catches', () => {
+  it('ignores heavily padded headers without backtracking and preserves valid party cells', () => {
+    // Aligned Markdown headers have the party shape, but no backticked DPA status. The old
+    // whitespace/cell quantifiers explored combinations of padding before rejecting this row.
+    const header = ['party', 'role', 'what', 'region', 'DPA', 'flows']
+      .map((cell) => cell.padEnd(PADDED_CELL_WIDTH))
+      .join(' | ');
+    const path = register(
+      [
+        `| ${header} |`,
+        '| **Twilio** | telephony | call metadata | IE1 | `SIGNED` | F2, F3 |',
+        '| Unknown | telephony | call metadata | EU | `UNKNOWN` | F4 |',
+      ].join('\r\n'),
+    );
+
+    expect(parties(path)).toStrictEqual([
+      { name: 'Twilio', region: 'IE1', dpa: 'SIGNED', flows: ['F2', 'F3'] },
+    ]);
+  });
+
   // This is the whole point: a provider added later, by someone who did not know this file exists.
   it('fails when a flow is covered by nobody', () => {
     const path = register(
