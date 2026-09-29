@@ -28,7 +28,7 @@ env:
 
 jobs:
   static:
-    name: format, lint, typecheck, boundaries
+    name: format, lint, typecheck, boundaries, docs
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -52,9 +52,25 @@ jobs:
           node scripts/check-no-ai-mentions.ts --self-test
 
       - run: pnpm exec prettier --check .
-      - run: pnpm turbo run lint
-      - run: pnpm turbo run typecheck
+      # `pnpm lint` and `pnpm typecheck`, not `turbo run`: turbo only runs the per-package tasks,
+      # which left scripts/ — the seven consistency checks and the doctor — unlinted and
+      # untypechecked. The root scripts run turbo and then cover the root files.
+      - run: pnpm lint
+      - run: pnpm typecheck
       - run: pnpm exec depcruise apps packages scripts --config .dependency-cruiser.cjs
+
+      # These ran only in the local gate, so a pull request could break the ADR index, the
+      # data-flow-to-subprocessor mapping or a threat-model reference and CI would stay green —
+      # on the checks that are meant to protect `main`.
+      - name: Documentation consistency
+        run: |
+          node scripts/check-adr-coverage.ts
+          node scripts/check-domain-coverage.ts
+          node scripts/check-dfd-coverage.ts
+          node scripts/check-threat-model-refs.ts
+          node scripts/check-data-classification.ts
+          node scripts/check-subprocessors.ts
+          node scripts/check-brand-strings.ts
 
   unit:
     name: unit tests
