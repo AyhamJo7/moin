@@ -10,7 +10,10 @@
 # All credentials here are development-only fakes. Real secrets live in AWS Secrets Manager and
 # are referenced by ARN (INV-15); nothing in this file is ever used outside a developer machine.
 
-name: moin
+# Overridable, because it was hard-coded and two checkouts then silently shared one database:
+# a genuinely fresh clone reported "migrations already applied", and a reset in one checkout
+# destroyed the other's data. Set COMPOSE_PROJECT_NAME for a second worktree or review clone.
+name: ${COMPOSE_PROJECT_NAME:-moin}
 
 services:
   postgres:

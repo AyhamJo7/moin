@@ -5,12 +5,13 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "dev": "node --env-file-if-exists=../../.env --watch src/main-api.ts",
     "lint": "eslint .",
     "start:api": "node dist/main-api.js",
+    "start:migrate": "node dist/main-migrate.js",
     "start:voice": "node dist/main-voice.js",
     "start:worker": "node dist/main-worker.js",
-    "start:migrate": "node dist/main-migrate.js"
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@moin/contracts": "workspace:*",

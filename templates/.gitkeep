@@ -1,0 +1,3 @@
+# Vertical templates as versioned data. Populated in P10.
+# Git does not track empty directories, so this file keeps the shape
+# of the repository honest on a fresh clone.
