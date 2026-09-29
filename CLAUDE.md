@@ -14,15 +14,15 @@ gates, INV/EXT/DG/LG/QG IDs, evidence rules). `BLUEPRINT.md` is the founder's pr
 
 PLAN.md has ~6,250 lines; a hook blocks Read without `limit` ≤ 400 and `cat` of either file. Use:
 
-| Need | Command |
-|---|---|
-| Status of every phase | `python3 .claude/bin/plan_section.py --ledger` |
-| Status model, gate tiers, IDs, evidence rules | `python3 .claude/bin/plan_section.py --conventions` |
-| Principles and INV-01…INV-20 | `python3 .claude/bin/plan_section.py --invariants` |
-| One phase (anchor `<a id="p02--…">` to the next) | `python3 .claude/bin/plan_section.py P02` |
-| One checklist section / item | `python3 .claude/bin/plan_section.py P02.04` · `P02.04.03` |
-| The row defining an ID | `python3 .claude/bin/plan_section.py --id ADR-0003` (EXT-24, QG-09, FS-12, A-22, BR-048, …) |
-| Any heading | `python3 .claude/bin/plan_section.py --section "Testing Strategy"` |
+| Need                                             | Command                                                                                     |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| Status of every phase                            | `python3 .claude/bin/plan_section.py --ledger`                                              |
+| Status model, gate tiers, IDs, evidence rules    | `python3 .claude/bin/plan_section.py --conventions`                                         |
+| Principles and INV-01…INV-20                     | `python3 .claude/bin/plan_section.py --invariants`                                          |
+| One phase (anchor `<a id="p02--…">` to the next) | `python3 .claude/bin/plan_section.py P02`                                                   |
+| One checklist section / item                     | `python3 .claude/bin/plan_section.py P02.04` · `P02.04.03`                                  |
+| The row defining an ID                           | `python3 .claude/bin/plan_section.py --id ADR-0003` (EXT-24, QG-09, FS-12, A-22, BR-048, …) |
+| Any heading                                      | `python3 .claude/bin/plan_section.py --section "Testing Strategy"`                          |
 
 Fallback without Python: `grep -n '<a id="p02--' PLAN.md`, then Read with offset/limit.
 BLUEPRINT.md is read only by the line range a `BR-nnn` row cites (`--id BR-048` → `L432`), with
@@ -47,7 +47,7 @@ Ledger, Invariants, the target phase, and the IDs that phase references.
   verification are separate items. The "no fake completion" list is binding
   (`plan_section.py --section "Checklist rules — no fake completion"`).
 - Evidence records: `python3 .claude/bin/evidence.py new --phase P02 --item P02.05.06 --slug … --summary …
-  --from-gates full` → `docs/evidence/P02/EV-P02-nnn-<slug>.md` + INDEX row. Audit: `evidence.py check`.
+--from-gates full` → `docs/evidence/P02/EV-P02-nnn-<slug>.md` + INDEX row. Audit: `evidence.py check`.
   Sensitive evidence is stored by reference only (location, SHA-256, date, counterparty).
 - A session raises a phase tier to at most `READY_FOR_REVIEW`. `VERIFIED`/`COMPLETE` of a tier are the
   founder's call. Tightening a gate never needs approval; loosening always does.
@@ -111,13 +111,13 @@ Ledger, Invariants, the target phase, and the IDs that phase references.
 
 Greenfield until P02.02; P02.07.01 adds the pnpm/turbo/docker commands here.
 
-| Purpose | Command |
-|---|---|
+| Purpose                                     | Command                                                                                         |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | Gates (evidence in `.git/claude-evidence/`) | `python3 .claude/bin/gates.py fast` · `full` · `status` · `stress --targets "<tests>"` · `refs` |
-| Prove a regression test | `python3 .claude/bin/mutation_check.py --test "<test command>"` |
-| Watch a long run | `python3 .claude/bin/progress_probe.py <name> --repo .` |
-| Control-plane self-check | `python3 .claude/bin/control_plane_check.py` |
-| Toolchain | Node 24 (`.nvmrc`, `nvm use`), pnpm 10 (`packageManager`), Terraform pinned binary |
+| Prove a regression test                     | `python3 .claude/bin/mutation_check.py --test "<test command>"`                                 |
+| Watch a long run                            | `python3 .claude/bin/progress_probe.py <name> --repo .`                                         |
+| Control-plane self-check                    | `python3 .claude/bin/control_plane_check.py`                                                    |
+| Toolchain                                   | Node 24 (`.nvmrc`, `nvm use`), pnpm 10 (`packageManager`), Terraform pinned binary              |
 
 ## 10. Reviews (QG-09)
 

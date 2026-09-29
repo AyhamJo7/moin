@@ -1,0 +1,9 @@
+packages:
+  - apps/*
+  - packages/*
+
+# P02.08.03 — no dependency may run an install script unless it is listed here and the reason
+# was reviewed. An unreviewed postinstall is arbitrary code execution at `pnpm install` time,
+# on every developer machine and every CI runner.
+onlyBuiltDependencies:
+  - esbuild

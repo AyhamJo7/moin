@@ -15,16 +15,16 @@ Greenfield. Phase **P02 — Engineering Foundation** is the first phase that pro
 code. `PLAN.md` is the authoritative execution plan (phases P00–P33); `BLUEPRINT.md` is the
 founder's product specification and is read-only.
 
-| Document | What it is |
-|---|---|
-| [`PLAN.md`](PLAN.md) | Execution plan: phases, checklists, gates, invariants, evidence rules. Authoritative. |
-| [`PROGRESS.md`](PROGRESS.md) | Append-only item-level execution ledger |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | Architecture overview and the ADR index |
-| [`SECURITY.md`](SECURITY.md) | Security posture and vulnerability reporting |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Branches, commits, PRs, gates |
-| [`docs/adr/`](docs/adr/) | Architecture Decision Records |
-| [`docs/development/`](docs/development/) | Local setup, testing, conventions |
-| [`docs/evidence/`](docs/evidence/) | Evidence records backing every verified checklist item |
+| Document                                 | What it is                                                                            |
+| ---------------------------------------- | ------------------------------------------------------------------------------------- |
+| [`PLAN.md`](PLAN.md)                     | Execution plan: phases, checklists, gates, invariants, evidence rules. Authoritative. |
+| [`PROGRESS.md`](PROGRESS.md)             | Append-only item-level execution ledger                                               |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md)     | Architecture overview and the ADR index                                               |
+| [`SECURITY.md`](SECURITY.md)             | Security posture and vulnerability reporting                                          |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md)     | Branches, commits, PRs, gates                                                         |
+| [`docs/adr/`](docs/adr/)                 | Architecture Decision Records                                                         |
+| [`docs/development/`](docs/development/) | Local setup, testing, conventions                                                     |
+| [`docs/evidence/`](docs/evidence/)       | Evidence records backing every verified checklist item                                |
 
 `PRIVACY.md` and `OPERATIONS.md` arrive with P16 and P15 respectively.
 
@@ -62,7 +62,7 @@ scripts/          doctor, migration checks, licence checks, SBOM
 ```
 
 One server image is built per release and started with a different command per role (INV-17).
-Module boundaries are described in PLAN.md *Domain Boundaries* and enforced by `dependency-cruiser`.
+Module boundaries are described in PLAN.md _Domain Boundaries_ and enforced by `dependency-cruiser`.
 
 ## Verification
 
@@ -73,7 +73,7 @@ python3 .claude/bin/gates.py full          # the repository's own gate runner
 ```
 
 Nothing is "done" without evidence: see [`CONTRIBUTING.md`](CONTRIBUTING.md#evidence) and
-`PLAN.md` *Evidence rules*.
+`PLAN.md` _Evidence rules_.
 
 ## Privacy
 

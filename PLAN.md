@@ -2078,23 +2078,23 @@ Monorepo skeleton · CI v1 · local stack · test harnesses · governance files 
 ### Checklist
 - [ ] **P02.01 Repository governance** `[G:PILOT]`
   - [ ] P02.01.01 Ruleset on `main`: PR required, required checks (`verify`, `security-scan`, `container-scan`), linear history, no force-push/deletion (EXT-24 if the plan lacks private-repo rulesets)
-  - [x] P02.01.02 CODEOWNERS, PR template (what/why, risk, tests, evidence IDs, docs, migration/rollback, privacy impact), issue templates
-  - [x] P02.01.03 Conventional Commit enforcement on PR titles, plus a check rejecting AI-tool mentions in titles and bodies (workspace rule)
-  - [x] P02.01.04 `PROGRESS.md` ledger, `docs/evidence/INDEX.md`, evidence record template
-  - [x] P02.01.05 `README.md` (purpose, quickstart, links to PLAN/ARCHITECTURE/SECURITY/PRIVACY/OPERATIONS) and `CONTRIBUTING.md`
-  - [x] P02.01.06 Annotated/signed release-tag policy documented
+  - [x] P02.01.02 CODEOWNERS, PR template (what/why, risk, tests, evidence IDs, docs, migration/rollback, privacy impact), issue templates — EV-P02-003
+  - [x] P02.01.03 Conventional Commit enforcement on PR titles, plus a check rejecting AI-tool mentions in titles and bodies (workspace rule) — EV-P02-004
+  - [x] P02.01.04 `PROGRESS.md` ledger, `docs/evidence/INDEX.md`, evidence record template — EV-P02-005
+  - [x] P02.01.05 `README.md` (purpose, quickstart, links to PLAN/ARCHITECTURE/SECURITY/PRIVACY/OPERATIONS) and `CONTRIBUTING.md` — EV-P02-006
+  - [x] P02.01.06 Annotated/signed release-tag policy documented — EV-P02-007
   - [ ] P02.01.07 Verify: a direct push to `main` is rejected; a PR with failing required checks cannot merge
-- [ ] **P02.02 Toolchain baseline** `[G:PILOT]`
-  - [ ] P02.02.01 Pin Node 24 LTS (`.nvmrc`, `engines`), `packageManager: pnpm@10.x`; install via fnm/corepack without sudo
-  - [ ] P02.02.02 Turborepo tasks: `lint`, `typecheck`, `test`, `test:integration`, `build` with caching and correct `dependsOn`
-  - [ ] P02.02.03 TypeScript `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noImplicitOverride`, ESM
-  - [ ] P02.02.04 ESLint flat config: `typescript-eslint` strict-type-checked, `no-explicit-any`, named exports only (Next.js route files excepted), ban `dangerouslySetInnerHTML`, ban string-built SQL, ban session-level `SET`, ban `console.*` in production code
-  - [ ] P02.02.05 Custom lint rule stubs: no tenant-specific conditionals (INV-18), DB access only via tenant wrapper (activated in P06.03)
-  - [ ] P02.02.06 Prettier, `.editorconfig`
-  - [ ] P02.02.07 `dependency-cruiser` rules for module boundaries (see [Domain Boundaries](#domain-boundaries))
-  - [ ] P02.02.08 Terraform toolchain pinned (`tfenv` or pinned binary in `~/.local/bin`), `tflint`, Trivy
-  - [ ] P02.02.09 Accept ADR-0002 and ADR-0034
-  - [ ] P02.02.10 Verify: fixtures that violate each lint/boundary rule fail
+- [x] **P02.02 Toolchain baseline** `[G:PILOT]` — EV-P02-001
+  - [x] P02.02.01 Pin Node 24 LTS (`.nvmrc`, `engines`), `packageManager: pnpm@10.x`; install via fnm/corepack without sudo — EV-P02-002
+  - [x] P02.02.02 Turborepo tasks: `lint`, `typecheck`, `test`, `test:integration`, `build` with caching and correct `dependsOn` — EV-P02-008
+  - [x] P02.02.03 TypeScript `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noImplicitOverride`, ESM — EV-P02-009
+  - [x] P02.02.04 ESLint flat config: `typescript-eslint` strict-type-checked, `no-explicit-any`, named exports only (Next.js route files excepted), ban `dangerouslySetInnerHTML`, ban string-built SQL, ban session-level `SET`, ban `console.*` in production code — EV-P02-001
+  - [x] P02.02.05 Custom lint rule stubs: no tenant-specific conditionals (INV-18), DB access only via tenant wrapper (activated in P06.03) — EV-P02-001
+  - [x] P02.02.06 Prettier, `.editorconfig` — EV-P02-010
+  - [x] P02.02.07 `dependency-cruiser` rules for module boundaries (see [Domain Boundaries](#domain-boundaries)) — EV-P02-011
+  - [x] P02.02.08 Terraform toolchain pinned (`tfenv` or pinned binary in `~/.local/bin`), `tflint`, Trivy — EV-P02-002
+  - [x] P02.02.09 Accept ADR-0002 and ADR-0034 — EV-P02-002
+  - [x] P02.02.10 Verify: fixtures that violate each lint/boundary rule fail — EV-P02-001
 - [ ] **P02.03 Monorepo skeleton** `[G:PILOT]`
   - [ ] P02.03.01 Create the structure from [Repository Structure](#repository-structure)
   - [ ] P02.03.02 Server role entrypoints (`main-api`, `main-voice`, `main-worker`, `main-migrate`) with role root modules

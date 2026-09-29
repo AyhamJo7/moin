@@ -64,16 +64,60 @@ export function toJsRegExp(source: string, id: string): RegExp {
   try {
     return new RegExp(body, [...flags].join(''));
   } catch (cause) {
-    throw new Error(`pattern ${id} is not usable as a JavaScript regular expression: ${String(cause)}`, {
-      cause,
-    });
+    throw new Error(
+      `pattern ${id} is not usable as a JavaScript regular expression: ${String(cause)}`,
+      {
+        cause,
+      },
+    );
   }
 }
 
-export function compile(policy: Policy): CompiledPattern[] {
-  if (!Array.isArray(policy.patterns) || policy.patterns.length === 0) {
-    throw new Error('policy contains no patterns — refusing to run a check that can never fail');
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
+function isPatternArray(value: unknown): value is PolicyPattern[] {
+  return (
+    Array.isArray(value) &&
+    value.every((item): boolean => {
+      if (typeof item !== 'object' || item === null) return false;
+      const record = item as Record<string, unknown>;
+      return (
+        typeof record['id'] === 'string' &&
+        typeof record['regex'] === 'string' &&
+        typeof record['why'] === 'string'
+      );
+    })
+  );
+}
+
+/**
+ * Validate the parsed policy file. This is a trust boundary: the file is founder-owned and
+ * machine-read, so a malformed one must stop the check rather than silently produce a checker
+ * that matches nothing.
+ */
+export function parsePolicy(raw: unknown): Policy {
+  if (typeof raw !== 'object' || raw === null) {
+    throw new Error('policy file is not an object');
   }
+  const record = raw as Record<string, unknown>;
+  if (!isPatternArray(record['patterns']) || record['patterns'].length === 0) {
+    throw new Error(
+      'policy contains no usable patterns — refusing to run a check that can never fail',
+    );
+  }
+  if (!isStringArray(record['block_examples']) || !isStringArray(record['allow_examples'])) {
+    throw new Error('policy is missing its executable block_examples / allow_examples');
+  }
+  return {
+    patterns: record['patterns'],
+    block_examples: record['block_examples'],
+    allow_examples: record['allow_examples'],
+  };
+}
+
+export function compile(policy: Policy): CompiledPattern[] {
   return policy.patterns.map((p) => ({ id: p.id, why: p.why, regex: toJsRegExp(p.regex, p.id) }));
 }
 
