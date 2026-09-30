@@ -109,6 +109,12 @@ const APPROVED_DEFINERS: Readonly<
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
     executeGrantees: ['moin_app'],
   },
+  'app.claim_audit_chains': {
+    arguments: 'integer, uuid',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: ['moin_app'],
+  },
 };
 
 interface RoleRow {
@@ -215,12 +221,43 @@ interface AuditTriggerRow {
 const AUDIT_TRIGGER_QUERY = `
   SELECT t.tgname::text AS name, t.tgenabled::text AS enabled,
          t.tgtype::int AS trigger_type,
-         COALESCE(t.tgfoid = to_regprocedure('app.reject_audit_mutation()'), false) AS correct_function
+         COALESCE(t.tgfoid = to_regprocedure($2), false) AS correct_function
   FROM pg_trigger t
   JOIN pg_class c ON c.oid = t.tgrelid
   JOIN pg_namespace n ON n.oid = c.relnamespace
-  WHERE n.nspname = 'public' AND c.relname = 'audit_events' AND NOT t.tgisinternal
+  WHERE n.nspname = 'public' AND c.relname = $1 AND NOT t.tgisinternal
 `;
+
+/**
+ * The append-only guards, each named with the exact function it must call.
+ *
+ * `audit_chain_registry` is here for the same reason `audit_events` is: it is the list of chains the
+ * daily verifier walks, so a deletable registration would make "remove the row" the cheapest way to
+ * hide a tampered chain — the sweep would skip that tenant and report a clean run.
+ */
+const APPEND_ONLY_TABLES: readonly {
+  readonly table: string;
+  readonly trigger: string;
+  readonly fn: string;
+}[] = [
+  {
+    table: 'audit_events',
+    trigger: 'audit_events_append_only',
+    fn: 'app.reject_audit_mutation()',
+  },
+  {
+    table: 'audit_chain_registry',
+    trigger: 'audit_chain_registry_append_only',
+    fn: 'app.reject_registry_mutation()',
+  },
+];
+
+/** The trigger that registers a tenant's chain when its organisation row is created. */
+const REGISTRY_TRIGGER = {
+  table: 'organisations',
+  trigger: 'organisations_register_audit_chain',
+  fn: 'app.register_audit_chain()',
+} as const;
 
 const ROLE_QUERY = `SELECT rolname::text, rolbypassrls, rolsuper FROM pg_roles WHERE rolname = ANY($1)`;
 
@@ -389,13 +426,17 @@ export async function inspect(
       }
     }
 
-    if (tables.some((table) => table.table_name === 'audit_events')) {
-      const triggers = (await pool.query<AuditTriggerRow>(AUDIT_TRIGGER_QUERY)).rows;
-      const guard = triggers.find((trigger) => trigger.name === 'audit_events_append_only');
+    const present = new Set(tables.map((table) => table.table_name));
+    for (const guarded of APPEND_ONLY_TABLES) {
+      if (!present.has(guarded.table)) continue;
+      const triggers = (
+        await pool.query<AuditTriggerRow>(AUDIT_TRIGGER_QUERY, [guarded.table, guarded.fn])
+      ).rows;
+      const guard = triggers.find((trigger) => trigger.name === guarded.trigger);
       if (guard === undefined) {
         findings.push({
           rule: 'audit-append-only-trigger-missing',
-          subject: 'audit_events',
+          subject: guarded.table,
           detail: 'the reviewed UPDATE/DELETE rejection trigger is absent.',
         });
       } else if (
@@ -405,8 +446,29 @@ export async function inspect(
       ) {
         findings.push({
           rule: 'audit-append-only-trigger-unsafe',
-          subject: 'audit_events',
+          subject: guarded.table,
           detail: 'the reviewed row-level BEFORE UPDATE/DELETE trigger is disabled or changed.',
+        });
+      }
+    }
+
+    // Without this trigger a new tenant is never registered, so the daily verifier silently stops
+    // covering it — a gap that looks exactly like "no breaks found".
+    if (present.has(REGISTRY_TRIGGER.table) && present.has('audit_chain_registry')) {
+      const triggers = (
+        await pool.query<AuditTriggerRow>(AUDIT_TRIGGER_QUERY, [
+          REGISTRY_TRIGGER.table,
+          REGISTRY_TRIGGER.fn,
+        ])
+      ).rows;
+      const guard = triggers.find((trigger) => trigger.name === REGISTRY_TRIGGER.trigger);
+      if (guard?.enabled !== 'O' || !guard.correct_function) {
+        findings.push({
+          rule: 'audit-chain-registration-trigger-unsafe',
+          subject: REGISTRY_TRIGGER.table,
+          detail:
+            'the trigger registering a new tenant’s audit chain is absent, disabled or changed, ' +
+            'so the daily verifier would stop covering new tenants without reporting anything.',
         });
       }
     }

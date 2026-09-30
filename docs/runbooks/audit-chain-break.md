@@ -1,0 +1,96 @@
+# Runbook — audit chain break (SEV2)
+
+- **Alarms:** `audit.chain.broken` (SEV2) · `audit.chain.unchecked` (SEV3) · `audit.chain.run.failed` (SEV3)
+- **Emitted by:** `pnpm db:verify-audit` (`packages/db/src/cli.ts`, P06.10.05) · **Invariants:** INV-10, INV-12
+- **Related:** ADR-0017, ADR-0018, `docs/architecture/security-definer-allowlist.md`
+
+## What the alarm means
+
+Every business mutation appends an event to its tenant's audit chain in the same transaction
+(INV-10). Each event stores the hash of the previous one, so the chain is a tamper-evident sequence:
+changing, reordering or removing a committed event breaks it. The daily verifier walks every
+registered tenant and re-derives the whole chain. A `audit.chain.broken` line means a chain did not
+re-derive.
+
+This is not a cosmetic failure. `audit_events` is append-only — `UPDATE` and `DELETE` are rejected by
+a trigger for the table's owner as well, and no runtime role holds a write grant — so a break means
+one of:
+
+1. a privileged actor (database administrator, a manual repair, a restore) changed committed rows;
+2. storage-level corruption;
+3. a defect in the writer or in the verifier itself.
+
+Nothing the application can do through its normal privileges produces a break.
+
+## The three signals are different incidents
+
+| Line                     | Severity | Means                                 | First question                                      |
+| ------------------------ | -------- | ------------------------------------- | --------------------------------------------------- |
+| `audit.chain.broken`     | SEV2     | a chain exists and does not re-derive | who had write access to that tenant's rows          |
+| `audit.chain.unchecked`  | SEV3     | a tenant could not be verified at all | is this a permission change or a connection fault   |
+| `audit.chain.run.failed` | SEV3     | the sweep could not enumerate tenants | is the register readable; **today has no coverage** |
+
+Exit codes carry the same split: `3` is a break, `1` is "did not verify", `0` is a clean sweep. They
+are deliberately distinct so a database outage does not page someone for suspected tampering.
+
+An `unchecked` or `run.failed` result is **not** a clean run. It means the day has a coverage gap,
+and it must be resolved and re-run, not acknowledged.
+
+## Fields on the alarm
+
+`organisationId` (opaque), `reason`, `seq`, `checked`, and counts. No personal data appears in these
+lines by construction (INV-12): an audit event carries opaque identifiers, allowlisted argument keys
+and constrained values, never a name, a number or a request payload.
+
+`reason` is where the walk stopped:
+
+| `reason`           | Meaning                                                            |
+| ------------------ | ------------------------------------------------------------------ |
+| `missing-head`     | events exist but the chain head row is gone                        |
+| `missing-event`    | the head claims a sequence the events do not reach                 |
+| `sequence-gap`     | a committed sequence number is absent                              |
+| `previous-hash`    | an event's `prev_hash` does not match its predecessor's `hash`     |
+| `payload-mismatch` | a stored column no longer agrees with the stored canonical payload |
+| `hash-mismatch`    | the canonical payload does not hash to the stored `hash`           |
+| `head-mismatch`    | the chain re-derives but the head records a different final hash   |
+
+`payload-mismatch` and `hash-mismatch` point at a changed row. `sequence-gap`, `missing-event` and
+`missing-head` point at a removed one. `previous-hash` points at reordering or an insertion.
+
+## Immediate steps
+
+1. **Do not repair the chain.** Rewriting rows to make the verifier pass destroys the only evidence
+   of what happened. The chain is an evidence artefact before it is a health check.
+2. Record the alarm line verbatim (tenant, reason, seq, checked) in the incident.
+3. Re-run the verifier for confirmation and to get the current picture:
+   ```
+   pnpm db:verify-audit
+   ```
+   It is read-only and safe to run repeatedly. The break is deterministic: a second clean result
+   means the first was a defect in the verifier, which is itself a SEV2 finding.
+4. Establish the affected range. `checked` is the last sound sequence and `seq` is where it broke,
+   so events after `checked` for that tenant are the ones in question.
+5. Determine who could have written those rows: database audit logs, recent restores, recent manual
+   sessions, recent deploys of the writer function.
+
+## What is in and out of the trust boundary
+
+ADR-0017 states the limit plainly: until an external immutable anchor exists, an actor who can
+rewrite **both** the events and the head can forge a consistent replacement chain, which this
+verifier would report as sound. What the chain detects is accidental corruption and unauthorised
+runtime mutation. A clean verifier run is therefore evidence, not proof, and the incident review
+should say which of the two it is relying on.
+
+## Escalation
+
+A confirmed `audit.chain.broken` is a personal-data integrity incident until shown otherwise, so it
+follows the security incident path rather than the availability one, and the founder decides on any
+Art. 33 GDPR notification. Preserve a snapshot of the affected tenant's `audit_events` and
+`audit_heads` rows before any remediation.
+
+## Scheduling
+
+The verifier is a scheduled daily task. Its trigger and the CloudWatch alarms that match these
+lines are Terraform-managed (P05/P15) and are **not** yet provisioned — until they are, this runbook
+is reached by running the command manually. That gap is recorded on P06.10.05 as
+`WAITING_FOR_EXTERNAL`, not as done.
