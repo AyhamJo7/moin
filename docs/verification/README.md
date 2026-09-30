@@ -20,6 +20,14 @@ node scripts/mutation-sweep.ts --validate     # anchors resolve; changes nothing
 node scripts/mutation-sweep.ts                # the full sweep
 node scripts/mutation-sweep.ts --only B4-1-head-and-orphan-read-in-two-statements
 node scripts/mutation-sweep.ts --report docs/verification/audit-mutation-report.md
+node scripts/mutation-sweep.ts --json results.json        # machine-readable, for a diff
+```
+
+The report is generated, so format it before committing — the `format` gate checks it like any
+other file:
+
+```
+pnpm exec prettier --write docs/verification/audit-mutation-report.md
 ```
 
 It needs the local stack (`pnpm dev:up`) and the environment file, like any integration run.
