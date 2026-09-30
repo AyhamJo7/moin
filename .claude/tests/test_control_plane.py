@@ -195,23 +195,62 @@ class HookWiringTest(unittest.TestCase):
             },
             "StopFailure": {"cwd": str(self.repo), "session_id": "wiring", "error": "server_error"},
         }
-        count = 0
+        configured: list[tuple[str, dict[str, object]]] = []
+        seen: set[tuple[str, str | None, str | None, str, tuple[str, ...]]] = set()
         for event, groups in self.settings["hooks"].items():
+            self.assertIn(event, events)
+            self.assertIsInstance(groups, list)
             for group in groups:
+                self.assertIsInstance(group, dict)
+                matcher = group.get("matcher")
+                self.assertTrue(matcher is None or isinstance(matcher, str))
+                self.assertIsInstance(group.get("hooks"), list)
                 for hook in group["hooks"]:
-                    count += 1
-                    with self.subTest(event=event, hook=hook["args"]):
-                        res = self.invoke(hook, events[event])
-                        self.assertEqual(res.returncode, 0, res.stderr)
-        self.assertEqual(count, 12)
+                    self.assertIsInstance(hook, dict)
+                    self.assertEqual(hook.get("type"), "command")
+                    command = hook.get("command")
+                    args = hook.get("args")
+                    condition = hook.get("if")
+                    self.assertIsInstance(command, str)
+                    self.assertTrue(command)
+                    self.assertIsInstance(args, list)
+                    self.assertTrue(all(isinstance(arg, str) for arg in args))
+                    self.assertTrue(condition is None or isinstance(condition, str))
+                    identity = (event, matcher, condition, command, tuple(args))
+                    self.assertNotIn(identity, seen, f"duplicate hook wiring: {event}")
+                    seen.add(identity)
+                    configured.append((event, hook))
+        self.assertTrue(configured)
+        exercised = 0
+        for event, hook in configured:
+            with self.subTest(event=event, hook=hook["args"]):
+                res = self.invoke(hook, events[event])
+                self.assertEqual(res.returncode, 0, res.stderr)
+                exercised += 1
+        self.assertEqual(exercised, len(configured))
         self.assertTrue((self.repo / ".git" / "claude-evidence" / "latest-checkpoint.md").is_file())
+
+    def test_duplicate_or_malformed_wiring_fails(self) -> None:
+        groups = self.settings["hooks"]["PostToolUse"]
+        hooks = groups[0]["hooks"]
+        hooks.append(dict(hooks[0]))
+        with self.assertRaisesRegex(AssertionError, "duplicate hook wiring"):
+            self.test_every_handler_starts_and_accepts_a_harmless_event()
+        hooks.pop()
+        hooks[0]["args"] = "not an argument list"
+        with self.assertRaises(AssertionError):
+            self.test_every_handler_starts_and_accepts_a_harmless_event()
 
     def test_wiring_run_leaves_this_repository_untouched(self) -> None:
         checkpoint = REPO_ROOT / ".git" / "claude-evidence" / "latest-checkpoint.md"
         before = checkpoint.stat().st_mtime_ns if checkpoint.exists() else None
+        status_before = git(REPO_ROOT, "status", "--porcelain", "--untracked-files=all")
         self.test_every_handler_starts_and_accepts_a_harmless_event()
         after = checkpoint.stat().st_mtime_ns if checkpoint.exists() else None
         self.assertEqual(before, after)
+        self.assertEqual(
+            git(REPO_ROOT, "status", "--porcelain", "--untracked-files=all"), status_before
+        )
 
     def test_policy_guard_blocks_through_the_real_wiring(self) -> None:
         hook = next(
@@ -240,6 +279,20 @@ class HookWiringTest(unittest.TestCase):
                     self.assertTrue(os.access(path, os.X_OK))
         ignore = (CLAUDE_DIR / ".gitignore").read_text()
         self.assertIn("state/", ignore)
+        self.assertEqual(
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(REPO_ROOT),
+                    "check-ignore",
+                    "-q",
+                    ".claude/state/worktrees/probe.json",
+                ],
+                check=False,
+            ).returncode,
+            0,
+        )
 
 
 if __name__ == "__main__":

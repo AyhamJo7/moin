@@ -211,7 +211,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"## Session context (kit)\n- session-context could not parse its hook input ({exc})."
         )
         return 0
-    root = _kit.repo_root(str(payload.get("cwd") or ""))
+    root = _kit.repo_root(str(payload.get("cwd") or ""), str(payload.get("session_id") or ""))
     if root is None:
         return 0
     lines: list[str] = []

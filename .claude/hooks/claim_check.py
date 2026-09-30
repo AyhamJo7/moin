@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import os
 import re
@@ -96,6 +97,40 @@ def toplevel(start: str | None) -> Path | None:
         check=False,
     )
     return Path(proc.stdout.strip()) if proc.returncode == 0 else None
+
+
+def active_root(payload: dict[str, Any]) -> Path | None:
+    """Use the worktree observed for this session, not the checkout housing this hook."""
+    project = os.environ.get("CLAUDE_PROJECT_DIR")
+    session = payload.get("session_id")
+    if project and isinstance(session, str) and session:
+        key = hashlib.sha256(session.encode()).hexdigest()[:24]
+        path = Path(project) / ".claude" / "state" / "worktrees" / f"{key}.json"
+        if path.exists():
+            data = json.loads(path.read_text())
+            candidate = Path(data["worktree"])
+            expected = Path(data["common_dir"]).resolve()
+            for checkout in (Path(project), candidate):
+                proc = subprocess.run(
+                    [
+                        "git",
+                        "-C",
+                        str(checkout),
+                        "rev-parse",
+                        "--path-format=absolute",
+                        "--git-common-dir",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if proc.returncode != 0 or Path(proc.stdout.strip()).resolve() != expected:
+                    raise RuntimeError("active session worktree is no longer valid")
+            root = toplevel(str(candidate))
+            if root is None or root.resolve() != candidate.resolve():
+                raise RuntimeError("active session worktree was replaced")
+            return root
+    return toplevel(str(payload.get("cwd") or "")) or toplevel(project)
 
 
 def evidence_dir(root: Path) -> Path:
@@ -282,7 +317,7 @@ def evaluate(payload: dict[str, Any], max_age_s: float) -> tuple[Path | None, st
     progress = first_match(PROGRESS_PATTERNS, text)
     if not completion and not progress:
         return None, None
-    root = toplevel(str(payload.get("cwd") or "")) or toplevel(os.environ.get("CLAUDE_PROJECT_DIR"))
+    root = active_root(payload)
     if root is None:
         return None, None
     configured = (root / ".claude" / "gates.json").is_file() or bool(os.environ.get("GATES_CONFIG"))
