@@ -5,8 +5,8 @@ mode: autonomous
 phase: P06
 tier: PILOT
 plan: docs/phases/P06-plan.md
-next: P06.04 provisioning (provision_tenant, Early Access cap), then P06.10 audit
-updated: 2026-09-29
+next: submit P06.04 for QG-09 founder review; continue dependency-valid P06 work
+updated: 2026-09-30
 ---
 
 # PROGRESS — moin
@@ -155,6 +155,11 @@ Rules
 | P06.03.07 | IN_PROGRESS | PR #28 | EV-P06-015 | The job half is done; the forged-header half needs the HTTP session layer |
 | P06.14.01 | READY_FOR_REVIEW | PR #28 | EV-P06-014 | Claims identifiers only; each item processed in its own tenant transaction |
 | P06.14.02 | READY_FOR_REVIEW | PR #28 | EV-P06-015 | A mismatched envelope updates zero rows rather than the wrong tenant's |
+| P06.04.01 | READY_FOR_REVIEW | 127ba14 | EV-P06-016 | Organisation and location lifecycle tables; FORCE RLS retained |
+| P06.04.02 | READY_FOR_REVIEW | 127ba14 | EV-P06-017 | Privileged function creates setup and pending owner invitation; P06.08 issues and delivers token |
+| P06.04.03 | READY_FOR_REVIEW | 127ba14 | EV-P06-018 | Paid Early Access cap of five via one locked global counter; founder review pending |
+| P06.04.04 | READY_FOR_REVIEW | 127ba14 | EV-P06-019 | Retry and racing request IDs return one tenant |
+| P06.04.05 | READY_FOR_REVIEW | 127ba14 | EV-P06-020 | Real PostgreSQL attack suite, catalog defects and rollback tests |
 
 ## External waits
 
@@ -197,6 +202,13 @@ secret-rule fix (#25) merged, with its full-history scan green.
 
 ## Log
 
+- 2026-09-30 — **PR #29 CI repair in progress.** The first `verify` run on `cd35ecd6c673e70d3c5ee433dbb4b3fbd391d5f6` failed only in real-PostgreSQL integration: the workflow supplied admin, migrator and app URLs but omitted `TEST_DATABASE_PROVISIONER_URL`, so all thirteen new provisioning tests failed at setup. The RLS catalog job and the other completed checks passed. The workflow now supplies the CI-only provisioner URL; this new tree is UNVERIFIED until committed and tested at its own HEAD. QG-09 founder review remains pending.
+- 2026-09-29 — **P06.04 resumed from the 290ce67 checkpoint.** The old BLOCKER below was session exhaustion, not a technical impediment. The first real PostgreSQL run with a non-bypass function owner exposed that a FORCE RLS role cannot count all organisations for the Early Access cap; three cap tests failed. The corrected function updates a single global counter under a row lock in the same transaction. A security review also found that an implicit `pg_temp` search path could let a caller shadow unqualified tables; the final function pins it last, with a malicious TEMP-table fixture. `moin_app` cannot change plan/status or insert an organisation, and the provisioner has no direct DML. `gates full` passed 14/14 at clean implementation HEAD `127ba14acb4e4b594a7a6db32180bf30d582c98d`; evidence and ledger changes still require their own final-HEAD run. QG-09 founder review, PR CI and invitation delivery in P06.08 remain pending.
+- 2026-09-29 — **BLOCKER: usage limit reached mid-P06.04.** Not a technical blocker and not an external wait — the session ran out of budget.
+  - **What was tried:** `packages/db/migrations/0006_provisioning.sql` was written and applied to the local development database (`pnpm db:migrate` → `applied 1: 0006_provisioning`). It adds `provisioning_limits`, `provisioning_requests` and `app.provision_tenant(...)`.
+  - **Why it is not progressing:** nothing after that ran. No tests, no `gates full`, no commit until this entry. **Nothing about P06.04 is verified**, and the migration has been applied to one developer database only.
+  - **What is needed next, in order:** (1) register `app.provision_tenant` in `docs/architecture/security-definer-allowlist.md` with its justification — **the catalog check fails until this exists**, by design; (2) add `provisioning_limits` and `provisioning_requests` to `docs/architecture/global-tables.md`; (3) classify the new columns in `docs/privacy/data-inventory.md`, or `check-data-classification` fails; (4) write the P06.04.05 tests — one consistent tenant, `moin_app` cannot call the function, the cap holds under concurrency, a failure leaves nothing, and a negative control proving `moin_provisioner` cannot INSERT directly; (5) `gates full` **at the final committed HEAD**, then the PR.
+  - **Design intent, so it is not re-derived:** the function does not bypass row-level security, it satisfies it — it sets the tenant context to the organisation it is about to create, and `organisations.organisation_id` is generated from `id`, so the ordinary policy passes by construction. FORCE RLS stays on and no role gains `BYPASSRLS`. `moin_provisioner` has `EXECUTE` and no DML on what the function writes, so the only way that role can create a tenant is the way that enforces the cap and the idempotency. The cap lives in a single-row table changed only by a reviewed migration, which is what makes an override signed and audited here. `pg_advisory_xact_lock` before the count is what makes it hold under concurrency rather than merely be checked.
 - 2026-09-29 — **P06.03 and P06.14: the tenant wrapper.** `withTenant` is the only place the tenant setting is written, and it writes it **transaction-locally**: a session-level `SET` would survive the transaction and ride the pooled connection into the next request — one caller's tenant applied to another caller's query, which is the single worst bug this codebase could have. `withSystemWork` is the other half: sweeps and reconcilers run across tenants by definition, and the tempting shortcut is a role that can see all of them at once. There is no such role — the claim returns identifiers only, and each is processed inside `withTenant` as the ordinary application role. A job envelope that names the wrong organisation therefore updates **zero rows**: an empty path rather than an error path, which is what makes a mismatch harmless rather than merely detected.
 - 2026-09-29 — Nesting a _different_ tenant now throws. Nesting the same one is ordinary — a service calls a service — but nesting a different one means code is about to act for organisation B inside a transaction opened for organisation A, and whichever the database ends up applying, something is wrong. Also: a malformed organisation id is rejected at the boundary rather than by the policy's cast, so the caller gets a clear failure instead of something that reads like a database fault, and the rejected value is never echoed into the error.
 - 2026-09-29 — Two lint findings worth recording rather than suppressing quietly. Thirteen `async` arrows in the new tests had no `await`; they were rewritten rather than suppressed. One suppression was kept, in `TenantClient.query<R>`: the rule is right that `R` appears only in the return type and is therefore an assertion rather than an inference — but the shape of a result set is decided by the database, and the alternatives are worse. The comment says so rather than naming the rule and moving on.

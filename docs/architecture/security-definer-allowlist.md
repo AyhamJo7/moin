@@ -2,9 +2,9 @@
 
 - **Enforced by:** `scripts/check-rls-catalog.ts` (P06.02.04) · **Invariants:** INV-01, INV-02 · **Review:** QG-09
 
-A `SECURITY DEFINER` function runs with its owner's privileges rather than its caller's. In this
-database that means it runs as a role that can see every tenant, which makes each one a deliberate
-hole in the isolation everything else is built on.
+A `SECURITY DEFINER` function runs with its owner's privileges rather than its caller's. This
+can grant a caller access to writes it cannot perform directly. The owner must still be
+`NOBYPASSRLS`; each definer is a reviewed privilege boundary, not an RLS bypass.
 
 There are legitimate reasons to need one — resolving a dialled number to a tenant cannot itself be
 tenant-scoped without circularity — so the answer is not "never". It is: each one is named here,
@@ -16,17 +16,16 @@ does not pin `search_path`. **A row with no reason does not count as registered.
 
 ## Why `search_path` is not optional
 
-An unpinned `search_path` on an elevated function lets its caller decide which `public.foo()` it
-resolves to. The caller creates a schema, puts a function called `foo` in it, puts that schema
-first on the search path, and the elevated function calls the attacker's code with the owner's
-privileges. It is the standard PostgreSQL privilege-escalation primitive, and it is one line to
-prevent.
+An unpinned `search_path` on an elevated function lets its caller influence resolution of
+unqualified names. The caller can also create temporary tables: unless `pg_temp` is explicitly
+placed last, PostgreSQL may resolve an unqualified table to the caller's temporary copy before
+the intended table. Every registered path is checked exactly against its reviewed value.
 
 ## Register
 
-| Function     | What it returns, and why it must be elevated    | Who may execute it |
-| ------------ | ----------------------------------------------- | ------------------ |
-| _(none yet)_ | The first is `provision_tenant(…)` in P06.04.02 | —                  |
+| Function               | What it returns, and why it must be elevated                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Who may execute it                                             |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------- |
+| `app.provision_tenant` | Returns the organisation UUID. Creates tenant state before an ordinary tenant session exists; transaction-local context still subjects every tenant row to FORCE RLS (P06.04.02, INV-01/02, QG-09). Exact signature: `(uuid, citext, text, text, text, text, text, boolean, text)`. Reviewed owners: `moin_migrator` in the test template and direct-migrator deployment, or `moin_owner` when a deployment uses `SET ROLE`. Fixed path: `pg_catalog, public, app, pg_temp` with caller-created temporary objects last. No dynamic SQL or caller-controlled identifiers. | `moin_provisioner` only; the owner retains implicit execution. |
 
 ## Functions PLAN expects here
 

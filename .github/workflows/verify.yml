@@ -111,7 +111,9 @@ jobs:
           --health-retries 30
     env:
       TEST_DATABASE_ADMIN_URL: postgres://moin_owner:ci-only-not-a-secret@127.0.0.1:5432/postgres
+      TEST_DATABASE_MIGRATOR_URL: postgres://moin_migrator:ci-only-not-a-secret@127.0.0.1:5432/postgres
       TEST_DATABASE_APP_URL: postgres://moin_app:ci-only-not-a-secret@127.0.0.1:5432/postgres
+      TEST_DATABASE_PROVISIONER_URL: postgres://moin_provisioner:ci-only-not-a-secret@127.0.0.1:5432/postgres
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

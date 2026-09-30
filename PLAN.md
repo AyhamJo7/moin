@@ -2580,11 +2580,11 @@ Roles and RLS framework · `withTenant` / `withSystemWork` · catalog check · o
   - [x] P06.03.06 Logger and trace enrichment with a pseudonymous tenant ID — EV-P06-013
   - [ ] P06.03.07 Tests: a request with a forged org header or body field cannot change the tenant; a job with a mismatched org has no effect
 - [ ] **P06.04 Organisation, location and provisioning path** `[G:PILOT]`
-  - [ ] P06.04.01 `organisations` and `locations` tables and lifecycle states (trial, pilot, active, suspended, terminating, deleted)
-  - [ ] P06.04.02 `provision_tenant(…)` `SECURITY DEFINER` function executed by `moin_provisioner`: creates organisation, first location, template binding, default retention policies and settings, owner invitation
-  - [ ] P06.04.03 **Early Access cap** check in provisioning (≤ 5 organisations with `early_access = true` and a paid plan until the P30 pentest is complete; override needs a founder-signed flag change, audited)
-  - [ ] P06.04.04 Idempotent provisioning (same request ID → same tenant)
-  - [ ] P06.04.05 Tests: provisioning creates exactly one consistent tenant; the app role cannot call the provisioning function; the cap is enforced
+  - [x] P06.04.01 `organisations` and `locations` tables and lifecycle states (trial, pilot, active, suspended, terminating, deleted) — EV-P06-016
+  - [x] P06.04.02 `provision_tenant(…)` `SECURITY DEFINER` function executed by `moin_provisioner`: creates organisation, first location, template binding, default retention policies and settings, owner invitation request (issuance/delivery in P06.08) — EV-P06-017
+  - [x] P06.04.03 **Early Access cap** check in provisioning (≤ 5 organisations with `early_access = true` and a paid plan until the P30 pentest is complete; override needs a founder-signed flag change, audited) — EV-P06-018
+  - [x] P06.04.04 Idempotent provisioning (same request ID → same tenant) — EV-P06-019
+  - [x] P06.04.05 Tests: provisioning creates exactly one consistent tenant; the app role cannot call the provisioning function; the cap is enforced — EV-P06-020
 - [ ] **P06.05 Cognito user pool and MFA** `[G:PILOT]`
   - [ ] P06.05.01 Terraform: customer pool (EU), app client (confidential, PKCE), managed login with German locale, email via SES, custom domain `auth.<domain>`
   - [ ] P06.05.02 MFA required for all users: TOTP and passkeys; SMS MFA disabled

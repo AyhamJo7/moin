@@ -53,11 +53,22 @@ export async function setup(): Promise<void> {
       // eslint-disable-next-line no-restricted-syntax -- database identifier. The extension names come from a literal array in this file.
       await template.query(`create extension if not exists ${extension}`);
     }
+    // The template database is created by the local owner. Migrations must run as the
+    // NOBYPASSRLS migrator so SECURITY DEFINER tests exercise FORCE RLS in earnest.
+    await template.query('alter schema public owner to moin_migrator');
+    // eslint-disable-next-line no-restricted-syntax -- TEMPLATE_DATABASE is a module constant, never user input.
+    await template.query(`grant create on database "${TEMPLATE_DATABASE}" to moin_migrator`);
   } finally {
     await template.end();
   }
 
-  await migrate(templateUrl.toString());
+  const migratorBase = process.env['TEST_DATABASE_MIGRATOR_URL'];
+  if (migratorBase === undefined || migratorBase.length === 0) {
+    throw new Error('TEST_DATABASE_MIGRATOR_URL is required for non-bypass migration tests');
+  }
+  const migratorUrl = new URL(migratorBase);
+  migratorUrl.pathname = `/${TEMPLATE_DATABASE}`;
+  await migrate(migratorUrl.toString());
 
   // Marking it a template lets Postgres copy it cheaply and refuses accidental writes to it.
   const mark = createPool({ connectionString: admin, max: 1 });
