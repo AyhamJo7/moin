@@ -71,7 +71,15 @@ async function sweep(variant: Variant): Promise<Verdict> {
     try {
       const { stdout, stderr } = await run(
         process.execPath,
-        ['./node_modules/vitest/vitest.mjs', 'run', '--project', 'integration', variant.test, '-t', variant.kills],
+        [
+          './node_modules/vitest/vitest.mjs',
+          'run',
+          '--project',
+          'integration',
+          variant.test,
+          '-t',
+          variant.kills,
+        ],
         { cwd: REPO, timeout: TEST_TIMEOUT_MS, maxBuffer: 64 * 1024 * 1024 },
       );
       // Exit 0 with no matching test is a manifest error, not a surviving defect.
