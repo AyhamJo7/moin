@@ -170,6 +170,7 @@ Rules
 | P06.10.07 | READY_FOR_REVIEW | 8e5bf76 | EV-P06-025 | Tamper, privileged-mutation and argument-scanner suites; 25 injected defect variants all KILLED |
 | P06.10.07 | READY_FOR_REVIEW | 23d70ae | EV-P06-026 | QG-09 review of the diff by three independent reviewers; every High/Critical reproduced against real PostgreSQL, fixed and mutation-proven; 42 defect variants all KILLED; five residuals recorded with owners |
 | P06.10.07 | READY_FOR_REVIEW | c1bde7a | EV-P06-027 | Four HIGH defects from the independent post-fix QG-09 review, each reproduced against real PostgreSQL, fixed and mutation-proven; sweep now 54/54 KILLED with an inspectable manifest |
+| P06.10.07 | READY_FOR_REVIEW | fcc4473 | EV-P06-028 | Population-snapshot design replacing UUID-cursor paging; mutation harness rewritten so its outcomes are evidence — 62 KILLED_ASSERTION, 2 documented INFRA_FAILURE |
 | P06.10 | IN_PROGRESS | 8e5bf76 | EV-P06-021…025 | Table, chain, query API, daily verifier, argument scanner and runbook done. Open: .03 adoption by the tool guard, operator and security paths (needs P10.08, P06.11/.12), .05 scheduling (EXT-09) and .06 founder acceptance of ADR-0017 |
 
 ## External waits
@@ -353,3 +354,42 @@ secret-rule fix (#25) merged, with its full-history scan green.
   `FOUNDER_DECISION_REQUIRED`; `pg_temp` last in a definer search path is acceptable for this PR
   only and must not be read as a general conclusion. P06.10.03 and P06.10.05 remain open as
   recorded. P06.10 as a whole is not complete.
+
+- 2026-10-01 — **Third QG-09 review of P06.10: a paging model that could not see its own gap, and a
+  harness whose numbers were not evidence.** Both worth recording for the general lesson.
+  The register was paged by `tenant_id`. With one tenant registered, a sweep that had claimed it,
+  and a second tenant registered concurrently: the next page returned 0 rows, the shortfall count
+  returned 0, and the unregistered-tenant witness returned 0 — the last because the new tenant _was_
+  registered. A complete-coverage verdict over half the estate, and none of the three checks could
+  see it. UUID order does not encode registration order, so no cursor over it can distinguish
+  "nothing left" from "something arrived behind me"; and counting cannot either, because a late
+  tenant ahead of the cursor is processed and pushes the total up while an original member is still
+  unvisited. The previous round's count-after-cursor fix was a patch on the wrong axis.
+  The fix records registration order — a monotonic sequence, immutable once assigned — and bounds
+  each sweep by a high-water mark read once. The guarantee is now stated rather than implied:
+  **sound for the register population captured at sweep start**, with the mark on the alarm line,
+  because "sound" is not interpretable without the population it is sound for. Continuous-current
+  soundness would need one snapshot held across every tenant's chain, and that is not worth pinning
+  `xmin` on the fastest-growing table in the schema.
+  The mutation harness counted any non-zero exit as a kill. Pointed at a closed database port it
+  reported every variant killed; given a nonexistent test name it reported survived. So "54/54" was
+  a count of failures of any kind. Rewritten, the first honest run said **47 killed, 4 unusable
+  baselines, 6 infra failures, 5 no-match, 2 survived** — seventeen of the previous kills were not
+  evidence, and every one was a defect in the _tests or the variants_, not the code: three tests
+  passed only in file order, five variants broke a migration instead of the behaviour, two mutated
+  code a later migration had replaced, one changed `const` to `let`, and two classifier bugs came
+  from matching on what the runner seems to print rather than what it does.
+  The generalisable lesson, and it is the third time this phase has taught it: **a verification
+  tool is a control, and an unverified control tends to be generous.** The way to find out is to
+  make it fail on purpose. Final distribution at `fcc44730ace5`: `KILLED_ASSERTION: 62`,
+  `INFRA_FAILURE: 2` — the two documented in the manifest as rejected by an assertion inside a
+  migration during global setup, where no test can claim the kill. Not rounded up to 64.
+  Incidental, and closed: the personal-data gate parsed only `CREATE TABLE`, so a column added by
+  `ALTER TABLE` never reached the inventory and an erasure request would have missed it silently.
+  Found by adding one and noticing the checked-column count had not moved. Coverage went 73 → 76.
+  `gates full` at the final HEAD follows this entry. ADR-0017 stays **PROPOSED** and its five
+  residuals are unchanged: `moin_app` enumeration `EXTERNAL_DEPENDENCY` (EXT-09); caller-supplied
+  operation/target-kind/versions, the `locations` DML capability and the alarm lines bypassing the
+  redacting logger each `FOUNDER_DECISION_REQUIRED`; `pg_temp` last acceptable for this PR only.
+  P06.10.03 remains open; P06.10.05 remains `WAITING_FOR_EXTERNAL` on EXT-09; P06.10 is not
+  complete.
