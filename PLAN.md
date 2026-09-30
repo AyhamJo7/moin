@@ -141,7 +141,7 @@ Single source of status. Tier columns show the status of that phase's items for 
 | P03 | Architecture decisions & threat model | IN_PROGRESS | — | — | — | — | EXT-02 counsel not engaged | P03.05 review findings; founder sends the legal pack |
 | P04 | Feasibility proof & long-lead track | IN_PROGRESS | — | — | NOT_STARTED | — | EXT-01/07/10/11/12 | Adapter, gateway port and measurement harness built; every measurement waits on EXT-10/11/12 |
 | P05 | Cloud foundation & walking skeleton | NOT_STARTED | — | — | — | — | EXT-09 AWS | Terraform bootstrap |
-| P06 | Tenancy, identity, authorization, audit | IN_PROGRESS | — | NOT_STARTED | — | — | P05 for Cognito, Secrets Manager, pgaudit | Roles, FORCE RLS and the catalog check done |
+| P06 | Tenancy, identity, authorization, audit | IN_PROGRESS | — | NOT_STARTED | — | — | P05 for Cognito, Secrets Manager, pgaudit; EXT-09 for the audit alarm schedule | Audit table, chain, query API, daily verifier and argument scanner done; P06.10.03 adoption, .05 scheduling and .06 ADR acceptance open |
 | P07 | Core business action model | NOT_STARTED | — | NOT_STARTED | NOT_STARTED | — | — | after P06.02 |
 | P08 | Async, events, scheduling, realtime | NOT_STARTED | — | — | — | — | — | after P06.03 |
 | P09 | Knowledge system | NOT_STARTED | — | NOT_STARTED | NOT_STARTED | — | — | after P07 |
@@ -2616,13 +2616,13 @@ Roles and RLS framework · `withTenant` / `withSystemWork` · catalog check · o
   - [ ] P06.09.03 Runbook `docs/runbooks/mfa-reset.md` and `compromised-account.md`
   - [ ] P06.09.04 Verify: tabletop run of both runbooks
 - [ ] **P06.10 Audit event infrastructure** `[G:PILOT]`
-  - [ ] P06.10.01 `audit_events` table; trigger blocking UPDATE/DELETE (except the pseudonymisation function); privileges revoked (nis2 pattern)
-  - [ ] P06.10.02 Per-tenant sequence + hash chain (`prev_hash`, `hash` over canonical JSON)
+  - [x] P06.10.01 `audit_events` table; trigger blocking UPDATE/DELETE (except the pseudonymisation function); privileges revoked (nis2 pattern) — EV-P06-021
+  - [x] P06.10.02 Per-tenant sequence + hash chain (`prev_hash`, `hash` over canonical JSON) — EV-P06-022
   - [ ] P06.10.03 Writer API used by the tool guard, application services, operator actions and security events; sanitised arguments via per-operation allowlists
-  - [ ] P06.10.04 Query API (by target, actor, correlation ID) for support and the owner-visible activity log (later UI)
-  - [ ] P06.10.05 Chain-verification job (daily) with alarm on break
+  - [x] P06.10.04 Query API (by target, actor, correlation ID) for support and the owner-visible activity log (later UI) — EV-P06-023
+  - [ ] P06.10.05 Chain-verification job (daily) with alarm on break — sweep, alarm signal and runbook built and verified (EV-P06-024); `WAITING_FOR_EXTERNAL` on the Terraform daily trigger and CloudWatch alarms (EXT-09)
   - [ ] P06.10.06 Accept ADR-0017
-  - [ ] P06.10.07 Tests: tampering detected; `moin_app` cannot update or delete; no PII in `args_sanitized` for sample operations (scanner)
+  - [x] P06.10.07 Tests: tampering detected; `moin_app` cannot update or delete; no PII in `args_sanitized` for sample operations (scanner) — EV-P06-025
 - [ ] **P06.11 Operator identity and support access grants** `[G:PILOT]`
   - [ ] P06.11.01 Operator Cognito pool (WebAuthn only); ALB `authenticate-oidc` on the `ops` host (UI arrives in P15.08)
   - [ ] P06.11.02 `support_access_grants`: created by owner/admin (step-up), scope, reason, expiry ≤ 72 h, revocable; visible to the tenant

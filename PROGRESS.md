@@ -5,7 +5,7 @@ mode: autonomous
 phase: P06
 tier: PILOT
 plan: docs/phases/P06-plan.md
-next: submit P06.04 for QG-09 founder review; continue dependency-valid P06 work
+next: founder — QG-09 review of P06.04 and P06.10, and acceptance of ADR-0017 (P06.10.06)
 updated: 2026-09-30
 ---
 
@@ -162,6 +162,12 @@ Rules
 | P06.04.05 | READY_FOR_REVIEW | 127ba14 | EV-P06-020 | Real PostgreSQL attack suite, catalog defects and rollback tests |
 | P06.10 | IN_PROGRESS | feat/p06-10-audit | — | Audit migration, writer/query APIs, chain verifier, proposed ADR and real-PostgreSQL negative controls are in progress. Daily scheduling/alarm, adoption by business mutations, founder ADR acceptance and erasure design remain open. |
 | P06.10.03 | IN_PROGRESS | feat/p06-10-audit | — | Provisioning now triggers a tenant-scoped audit append in its authoritative transaction; failure rolls back tenant state and cap. Later tool, operator and security actions still need adoption. |
+| P06.10.01 | READY_FOR_REVIEW | 8e5bf76 | EV-P06-021 | Append-only tenant audit table; the trigger refuses UPDATE and DELETE for the owner too, and the catalog check proves the guard from `pg_catalog` |
+| P06.10.02 | READY_FOR_REVIEW | 8e5bf76 | EV-P06-022 | Per-tenant gap-free sequence and hash chain; concurrent appends serialise at the head rather than racing |
+| P06.10.04 | READY_FOR_REVIEW | 8e5bf76 | EV-P06-023 | Tenant-scoped query by target, actor and correlation ID; malformed filters refused without echoing the input |
+| P06.10.05 | WAITING_FOR_EXTERNAL | 8e5bf76 | EV-P06-024 | Daily cross-tenant sweep, SEV2 alarm, runbook and exit-code split built and verified. **Counterparty:** AWS (EXT-09), founder-owned. **Requested:** 2026-09-30. **Expected:** with P05 cloud foundation. **Fallback:** run `pnpm db:verify-audit` manually and record the result, which is what the runbook says today. The daily trigger and the CloudWatch alarms are Terraform and are not provisioned |
+| P06.10.07 | READY_FOR_REVIEW | 8e5bf76 | EV-P06-025 | Tamper, privileged-mutation and argument-scanner suites; 25 injected defect variants all KILLED |
+| P06.10 | IN_PROGRESS | 8e5bf76 | EV-P06-021…025 | Table, chain, query API, daily verifier, argument scanner and runbook done. Open: .03 adoption by the tool guard, operator and security paths (needs P10.08, P06.11/.12), .05 scheduling (EXT-09) and .06 founder acceptance of ADR-0017 |
 
 ## External waits
 
@@ -251,3 +257,34 @@ secret-rule fix (#25) merged, with its full-history scan green.
 - 2026-09-28 — P02.01 governance scaffolding implemented. `check-no-ai-mentions.ts --self-test` passes (9 patterns, 11 blocked and 7 allowed examples); `check-conventional-commit.ts --self-test` passes (13 cases). Both run clean over `HEAD~2..HEAD`. Node 24.21.0.
 - 2026-09-28 — P02 execution started from `docs/phases/P02-plan.md` (approved). Docker Desktop reachable (server 29.8.0), Node 24.21.0 available via nvm. Branch `chore/p02-01-governance`.
 - 2026-09-29 — F3 bookkeeping correction: no EV-P00-001 record exists in the registry, evidence directory or Git history. Unticked P00.02.04 and its P00.02 parent instead of reconstructing evidence from the historical inline note. The recorded P00 audit remains outstanding; this correction does not claim it was performed. The dedicated correction branch is based on PR #16 and must land after the bootstrap stack.
+
+- 2026-09-30 — **P06.10 audit infrastructure: the daily verifier, and the wall it ran into.** The
+  chain verifier existed for one tenant inside a caller's transaction, which is the wrong shape for
+  an alarm — the break that matters is in the tenant no request touched today. Walking every tenant
+  needs the tenant list, and there is no role permitted to read it: FORCE ROW LEVEL SECURITY applies
+  to the table owner, so with no tenant context `moin_migrator` counts **zero** organisations, and a
+  `SECURITY DEFINER` function owned by it returns nothing for the same reason. That was measured
+  against real PostgreSQL before anything was designed on top of it, and the assertion now lives in
+  the suite so the premise cannot rot silently. The only way round would have been `BYPASSRLS`,
+  which INV-01 forbids outright, so the tenant list became a global register of opaque identifiers —
+  filled by a trigger on `organisations` rather than by the provisioning function (a migration or
+  repair script can also create a tenant, and those are the paths that forget a bookkeeping step),
+  append-only for the owner too (a deletable registration makes "remove the row" the cheapest way to
+  hide a tampered chain), and enumerated instead of `audit_heads` (a deleted head must become a
+  `missing-head` finding, not a tenant that quietly leaves the worklist).
+  The sweep keeps `sound`, `broken` and `unchecked` disjoint and refuses to return an empty clean
+  report when it could not enumerate anything, because "verified nothing" must never read as
+  "nothing wrong". Exit codes split a break (3) from a sweep that could not finish (1), so a
+  database outage does not page anyone for suspected tampering.
+  The argument scanner is the check that the writer's policy held, which the writer cannot do for
+  itself. Its useful rule turned out to be structural, not pattern-based: the only string-valued
+  argument kind the registry permits is `uuid`, so any stored argument string that is not a UUID is
+  unreviewed — which catches a business name that no pattern list would have predicted.
+  Twenty-five defect variants were injected and all 25 were KILLED. Two initially SURVIVED, and both
+  were weak tests rather than weak code: the page-cap assertion could not tell a missing cap from a
+  working one with only three tenants, and the INV-12 field assertion ran only over a sound sweep, so
+  it never exercised the failure path where a driver message would leak. Both were fixed and
+  re-proven. `gates full` 14/14 at clean `8e5bf76f5ac9`; the final-HEAD run follows this entry.
+  Not done, and not claimed: P06.10.03 adoption by the tool guard, operator and security paths waits
+  on P10.08 and P06.11/.12; P06.10.05 scheduling and the CloudWatch alarms are Terraform and wait on
+  EXT-09; P06.10.06 acceptance of ADR-0017 is the founder's, so the ADR stays `PROPOSED`.

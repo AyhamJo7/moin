@@ -145,3 +145,8 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P06-018 | P06.04.03 | 2026-09-29 | `127ba14acb4e` | Atomic five-customer paid Early Access cap | [EV-P06-018-early-access-cap.md](P06/EV-P06-018-early-access-cap.md) |
 | EV-P06-019 | P06.04.04 | 2026-09-29 | `127ba14acb4e` | Retry and concurrent request idempotency | [EV-P06-019-provisioning-idempotency.md](P06/EV-P06-019-provisioning-idempotency.md) |
 | EV-P06-020 | P06.04.05 | 2026-09-29 | `127ba14acb4e` | Real PostgreSQL privilege, rollback, isolation and catalog attacks | [EV-P06-020-provisioning-attacks.md](P06/EV-P06-020-provisioning-attacks.md) |
+| EV-P06-021 | P06.10.01 | 2026-09-30 | `8e5bf76f5ac9` | Tenant audit table with append-only trigger and no runtime write grant | [EV-P06-021-append-only-audit-table.md](P06/EV-P06-021-append-only-audit-table.md) |
+| EV-P06-022 | P06.10.02 | 2026-09-30 | `8e5bf76f5ac9` | Per-tenant sequence and hash chain over a stored canonical payload | [EV-P06-022-per-tenant-hash-chain.md](P06/EV-P06-022-per-tenant-hash-chain.md) |
+| EV-P06-023 | P06.10.04 | 2026-09-30 | `8e5bf76f5ac9` | Tenant-scoped audit query by target, actor and correlation ID | [EV-P06-023-audit-query-api.md](P06/EV-P06-023-audit-query-api.md) |
+| EV-P06-024 | P06.10.05 | 2026-09-30 | `8e5bf76f5ac9` | Daily cross-tenant chain sweep with SEV2 alarm and exit-code split | [EV-P06-024-daily-chain-verifier-and-alarm.md](P06/EV-P06-024-daily-chain-verifier-and-alarm.md) |
+| EV-P06-025 | P06.10.07 | 2026-09-30 | `8e5bf76f5ac9` | Tamper detection, privileged-mutation refusal and the stored-argument scanner | [EV-P06-025-audit-tamper-and-argument-scanner.md](P06/EV-P06-025-audit-tamper-and-argument-scanner.md) |
