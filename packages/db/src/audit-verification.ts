@@ -68,6 +68,22 @@ export interface AuditVerificationReport {
   /** Tenants whose chain could not be checked. */
   readonly unchecked: number;
   /**
+   * Registered tenants the deadline stopped the sweep from ever claiming.
+   *
+   * Counted from the **register**, not from the worklist. Deriving it from the tenants that were
+   * claimed is fail-open: with one tenant per page and a deadline that expires after the first
+   * page, "one claimed, one sound" reads exactly like a complete estate.
+   */
+  readonly unreached: number;
+  /**
+   * True only when the sweep is known to have covered every registered tenant.
+   *
+   * False when the deadline fired with tenants still ahead of the cursor, **and** when the shortfall
+   * could not be established at all — not knowing whether coverage was complete is not the same as
+   * it being complete.
+   */
+  readonly coverageComplete: boolean;
+  /**
    * Provisioned tenants missing from the register — tenants the sweep could not even know about.
    *
    * Without this the register is its own witness: a registration trigger disabled and re-enabled
@@ -88,6 +104,8 @@ export interface VerifyAuditChainsOptions {
   readonly onFailure?: (failure: AuditChainFailure) => void;
   /** Called for a provisioned tenant that is missing from the register. */
   readonly onUnregistered?: (organisationId: string) => void;
+  /** Called once when the deadline fired with tenants still unreached. */
+  readonly onIncompleteCoverage?: (unreached: number) => void;
   /** Tenants per claim page. Defaults to 200; only tests need to shrink it. */
   readonly pageSize?: number;
   /**
@@ -106,13 +124,18 @@ export interface VerifyAuditChainsOptions {
 /**
  * A run that covered every tenant there is and found nothing wrong.
  *
- * `unregistered` counts, and so does the case of a register that named nobody: a sweep that
- * verified nothing must never read as a sweep that found nothing wrong. `tenants === 0` is only
- * sound when reconciliation also found no provisioned tenant missing — which, on a database that
- * has any tenants at all, it will have.
+ * Four things have to hold, and each of them has been a fail-open bug at some point in this file's
+ * history: nothing broken, nothing unchecked, no provisioned tenant missing from the register, and
+ * the sweep known to have reached the end of it. A sweep that verified nothing must never read as a
+ * sweep that found nothing wrong.
  */
 export function isSound(report: AuditVerificationReport): boolean {
-  return report.broken === 0 && report.unchecked === 0 && report.unregistered === 0;
+  return (
+    report.broken === 0 &&
+    report.unchecked === 0 &&
+    report.unregistered === 0 &&
+    report.coverageComplete
+  );
 }
 
 /**
@@ -150,11 +173,6 @@ export async function verifyAuditChains(
   let deadlineReached = false;
 
   for (;;) {
-    if (options.deadlineMs !== undefined && now() - startedAt >= options.deadlineMs) {
-      deadlineReached = true;
-      break;
-    }
-
     // Captured from the claim itself rather than re-queried: asking the database a second time for
     // "the last id of that page" would race with a provisioning landing mid-sweep.
     let page: readonly ClaimedItem[] = [];
@@ -203,6 +221,32 @@ export async function verifyAuditChains(
     // A short page is the last page. `last === undefined` covers an empty register.
     if (result.claimed < pageSize || last === undefined) break;
     after = last.organisationId;
+
+    // The deadline is checked here rather than at the top of the loop, so a sweep always claims at
+    // least one page. A run that exits having verified nothing because its deadline had already
+    // expired is strictly worse than one that verifies a page and reports the shortfall, and the
+    // deadline's job is to stop claiming *further* pages rather than to cancel the sweep.
+    if (options.deadlineMs !== undefined && now() - startedAt >= options.deadlineMs) {
+      deadlineReached = true;
+      break;
+    }
+  }
+
+  // How many registered tenants are still ahead of the cursor. Asked of the register, because the
+  // worklist cannot answer it: every tenant the sweep claimed was also processed, so subtracting
+  // outcomes from claims yields zero whether or not anything remains.
+  let unreached = 0;
+  let coverageComplete = true;
+  if (deadlineReached) {
+    try {
+      unreached = await remaining(pool, after);
+    } catch {
+      // Not knowing the shortfall is not the same as there being none. Fail closed, and let the
+      // count stay 0 rather than inventing one.
+      coverageComplete = false;
+    }
+    if (unreached > 0) coverageComplete = false;
+    if (!coverageComplete) options.onIncompleteCoverage?.(unreached);
   }
 
   const unregisteredTenants = await unregistered(pool);
@@ -216,19 +260,36 @@ export async function verifyAuditChains(
     if (outcome === 'sound') sound += 1;
     else broken += 1;
   }
-  // A tenant the deadline stopped us reaching is unchecked, not absent.
-  const unreached = deadlineReached ? Math.max(tenants - (sound + broken + failures.length), 0) : 0;
 
   return {
     tenants,
     sound,
     broken,
+    // A tenant the deadline stopped us reaching is unchecked, not absent.
     unchecked: failures.length + unreached,
+    unreached,
+    coverageComplete,
     unregistered: unregisteredTenants.length,
     breaks,
     failures,
     unregisteredTenants,
   };
+}
+
+/** Registered tenants after the cursor — a count only, never identifiers. */
+async function remaining(pool: Pool, after: string | null): Promise<number> {
+  const client = await pool.connect();
+  try {
+    const result = await client.query<{ n: string }>(
+      'select app.count_audit_chains($1::uuid)::text as n',
+      [after],
+    );
+    const value = result.rows[0]?.n;
+    if (value === undefined) throw new Error('audit chain count returned no row');
+    return Number(value);
+  } finally {
+    client.release();
+  }
 }
 
 /**

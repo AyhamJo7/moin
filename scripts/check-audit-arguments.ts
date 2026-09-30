@@ -50,6 +50,40 @@ import { withSystemWork, type ClaimedItem, type TenantClient } from '@moin/db';
 /** The value kinds the reviewed registry permits. Widening this set is a QG-09 review. */
 const REVIEWED_VALUE_KINDS = ['uuid', 'boolean', 'count'] as const;
 
+/**
+ * `count`'s bounds, taken from the writer's own check in `0008_audit_events.sql`:
+ * `^(0|[1-9][0-9]{0,8})$` — a non-negative integer of at most nine digits.
+ */
+const COUNT_MAX = 999_999_999;
+
+/**
+ * What the registered kind actually requires of a stored value.
+ *
+ * Being *registered* used to be treated as sufficient, and it is not: the check read the kind and
+ * then only ever tested strings for UUID shape, so `related_id` (kind `uuid`) holding `true`
+ * produced **no finding at all** — measured — and `was_confirmed` (kind `boolean`) holding a UUID
+ * string passed because the string happened to look like a UUID. Non-string values were skipped
+ * outright.
+ *
+ * This mirrors `app.append_audit_event`'s validation exactly, which is the point: the writer is the
+ * control and this is the check that the control held, so a divergence between them is itself the
+ * finding.
+ *
+ * `jsonType` is what `jsonb_typeof` must return. `check` receives the value as text, which is what
+ * `#>> '{}'` yields for every scalar.
+ */
+const KIND_RULES: Readonly<
+  Record<string, { readonly jsonType: string; readonly check: (value: string) => boolean }>
+> = {
+  uuid: { jsonType: 'string', check: (value) => UUID.test(value) },
+  // A JSON boolean renders as exactly `true` or `false`; nothing else can reach here.
+  boolean: { jsonType: 'boolean', check: (value) => value === 'true' || value === 'false' },
+  count: {
+    jsonType: 'number',
+    check: (value) => /^(0|[1-9][0-9]{0,8})$/u.test(value) && Number(value) <= COUNT_MAX,
+  },
+};
+
 /** The one string-valued kind. Any other stored string is a leak by construction. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 
@@ -87,6 +121,13 @@ export interface ScanResult {
   readonly tenants: number;
   /** Audit events actually inspected. Zero with tenants present means the scan proved nothing. */
   readonly events: number;
+  /**
+   * Provisioned tenants absent from the register, so outside everything this check inspected.
+   *
+   * Success is impossible while this is non-zero: the scan cannot vouch for rows it could not
+   * reach, and a tenant missing from the register is the one an attacker would choose.
+   */
+  readonly unregistered: number;
 }
 
 /** A printable label for a finding, so a forged key cannot reach the output (INV-12). */
@@ -182,6 +223,19 @@ const EVENT_COUNT_QUERY = `SELECT count(*)::text AS n FROM audit_events`;
 
 const CLAIM_QUERY = 'select organisation_id, id from app.claim_audit_chains($1::integer, $2::uuid)';
 
+/**
+ * The same independent witness the daily sweep reconciles against.
+ *
+ * Walking the register tells you about the tenants the register knows. It says nothing about a
+ * tenant that is provisioned and *not* in the register — and that tenant's events are exactly the
+ * ones nobody is looking at. Measured: with one registered tenant holding a valid event and one
+ * provisioned-but-unregistered tenant holding a planted leak, this check enumerated the registered
+ * tenants, inspected their events, and reported the leak-bearing tenant not at all.
+ */
+const UNREGISTERED_QUERY = 'select id from app.unregistered_audit_chains($1::integer)';
+/** How many unregistered tenants to name before the finding simply says there are more. */
+const UNREGISTERED_SAMPLE = 100;
+
 /** The value kinds `versions` may carry, mirroring the writer's own check in 0008. */
 const VERSION_KEYS = new Set(['model', 'prompt', 'policy', 'template']);
 const VERSION_VALUE = /^[A-Za-z0-9._:-]{1,64}$/u;
@@ -194,6 +248,7 @@ export async function scan(url: string): Promise<ScanResult> {
   const seen = new Set<string>();
   let tenants = 0;
   let events = 0;
+  let unregistered = 0;
 
   /** One finding per subject and rule, however many tenants exhibit it. */
   const report = (finding: Finding): void => {
@@ -255,10 +310,41 @@ export async function scan(url: string): Promise<ScanResult> {
               });
               continue;
             }
-            if (row.kind !== 'string') continue;
-            // The only string kind the registry permits is `uuid`. Anything else is a value nobody
-            // reviewed, whatever it happens to contain.
-            if (!UUID.test(row.value)) {
+
+            const rule = KIND_RULES[kind];
+            if (rule === undefined) {
+              // Fail closed. A kind nobody wrote a validator for cannot be said to have been
+              // checked, and the registry row that introduced it is reported separately.
+              report({
+                rule: 'unvalidatable-argument-kind',
+                subject,
+                detail:
+                  `is registered with kind "${SAFE_KIND.test(kind) ? kind : 'unprintable'}", for ` +
+                  'which this check has no validator, so nothing about its stored values is proven.',
+              });
+              continue;
+            }
+
+            // Wrong JSON type first: a boolean under a `uuid` kind used to be skipped entirely
+            // because only strings were examined.
+            if (row.kind !== rule.jsonType) {
+              report({
+                rule: 'argument-kind-mismatch',
+                subject,
+                detail:
+                  `is registered as ${kind}, which requires a JSON ${rule.jsonType}, but a ` +
+                  `${SAFE_KIND.test(row.kind) ? row.kind : 'non-scalar'} is stored. The value is ` +
+                  'not printed.',
+              });
+              continue;
+            }
+
+            if (rule.check(row.value)) continue;
+
+            // Right type, wrong value. A malformed UUID under a `uuid` kind keeps its existing two
+            // rules, because a contact detail there is worth naming as such; every other kind gets
+            // the bounds finding.
+            if (kind === 'uuid') {
               const contact = CONTACT_PATTERNS.find((c) => c.pattern.test(row.value));
               report({
                 rule: contact === undefined ? 'free-text-argument' : 'personal-data-in-argument',
@@ -270,7 +356,16 @@ export async function scan(url: string): Promise<ScanResult> {
                       'printing it would be the leak.'
                     : `looks like a ${contact.name} (INV-12). The value is not printed.`,
               });
+              continue;
             }
+            report({
+              rule: 'argument-value-out-of-range',
+              subject,
+              detail:
+                `is registered as ${kind} and its stored value does not satisfy that kind's ` +
+                'reviewed bounds (a `count` is a non-negative integer of at most nine digits). The ' +
+                'value is not printed.',
+            });
           }
 
           for (const row of (await client.query<ValidationRow>(VALIDATION_QUERY)).rows) {
@@ -324,11 +419,27 @@ export async function scan(url: string): Promise<ScanResult> {
       if (result.claimed < TENANT_PAGE_SIZE || last === undefined) break;
       after = last.organisationId;
     }
+
+    // Reconciliation, against the same global witness the daily sweep uses. This runs after the
+    // sweep and before any success is declared, because the question it answers — did I look at
+    // everything I should have — cannot be answered by the worklist that was drained.
+    const missing = await pool.query<{ id: string }>(UNREGISTERED_QUERY, [UNREGISTERED_SAMPLE]);
+    for (const row of missing.rows) {
+      unregistered += 1;
+      report({
+        rule: 'unregistered-tenant-not-scanned',
+        // An organisation id is an opaque business identifier, not personal data (INV-12).
+        subject: row.id,
+        detail:
+          'is provisioned but has no audit chain register row, so this check never reached its ' +
+          'events and nothing is proven about the arguments stored under it.',
+      });
+    }
   } finally {
     await pool.end();
   }
 
-  return { findings, tenants, events };
+  return { findings, tenants, events, unregistered };
 }
 
 /** `jsonb_typeof` output, which is a fixed vocabulary — but the row is data, so it is checked. */
@@ -359,6 +470,17 @@ async function main(): Promise<number> {
     return 1;
   }
 
+  // Coverage before content, and printed **before** any findings rather than instead of them: a
+  // run can have both, and the gap is the more important of the two. Reporting findings and
+  // returning early hid the coverage message exactly when there was something to hide.
+  if (result.unregistered > 0) {
+    console.error(
+      `audit argument scan could not reach ${String(result.unregistered)} provisioned tenant(s): ` +
+        'they have no audit chain register row. Nothing is proven about the arguments stored under ' +
+        'them — see docs/runbooks/audit-chain-break.md.',
+    );
+  }
+
   if (result.findings.length > 0) {
     console.error('Audit argument findings (INV-10, INV-12):');
     for (const finding of result.findings) {
@@ -366,8 +488,9 @@ async function main(): Promise<number> {
       console.error(`    ${finding.detail}`);
     }
     console.error('');
-    return 1;
   }
+
+  if (result.unregistered > 0 || result.findings.length > 0) return 1;
 
   // A scan that inspected nothing is not a clean scan. This is the failure the first version of
   // this file shipped: FORCE RLS returned zero rows and it printed a reassuring sentence.
@@ -388,8 +511,9 @@ async function main(): Promise<number> {
   }
 
   console.log(
-    `audit arguments: ${String(result.events)} event(s) across ${String(result.tenants)} tenant(s); ` +
-      'every stored argument is a registered key with a reviewed value kind.',
+    `audit arguments: ${String(result.events)} event(s) across ${String(result.tenants)} tenant(s), ` +
+      'with every provisioned tenant registered; every stored argument is a registered key whose ' +
+      'value satisfies its reviewed kind.',
   );
   return 0;
 }

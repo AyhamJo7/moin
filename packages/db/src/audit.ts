@@ -133,9 +133,16 @@ interface AuditRow extends Record<string, unknown> {
   readonly rebuilt_payload: string;
 }
 
+/**
+ * The three facts verification starts from, all read in **one** statement.
+ *
+ * `last_seq` and `last_hash` are null when the tenant has no chain head yet, which is why they are
+ * scalar subqueries rather than a `FROM audit_heads`: a statement with no row cannot also tell us
+ * whether any event exists, and asking separately is the bug this shape exists to prevent.
+ */
 interface HeadRow extends Record<string, unknown> {
-  readonly last_seq: string;
-  readonly last_hash: Buffer;
+  readonly last_seq: string | null;
+  readonly last_hash: Buffer | null;
   /** The highest sequence actually present, read in the same snapshot as the head. */
   readonly max_seq: string | null;
 }
@@ -155,20 +162,36 @@ export type AuditChainResult =
  */
 export async function verifyAuditChain(client: TenantClient): Promise<AuditChainResult> {
   if (currentTenant() === undefined) throw new Error('audit verification requires tenant context');
-  // The head and the highest present sequence are read in **one statement**, so they come from one
-  // snapshot. Two statements would let an append that commits in between look like an event past
-  // the head, and a false integrity alarm is a very expensive thing to cry wolf about.
+  // ## Why this is one statement and not three
+  //
+  // Verification needs to know whether a head exists, what it says, and whether any event exists
+  // beyond it. Asking separately is a false-alarm generator, because these run at READ COMMITTED
+  // and each statement takes a fresh snapshot. Measured: a verifier that read "no head", then had a
+  // tenant's legitimate *first* append commit underneath it, then asked whether any event existed,
+  // saw the new event and reported `missing-head` for a chain that was perfectly sound. An
+  // integrity alarm that cries wolf is worse than no alarm, because the next real one is ignored.
+  //
+  // So all three facts come from scalar subqueries in a single statement, which is evaluated
+  // against one snapshot. This also always returns exactly one row — `from audit_heads` returned
+  // none when there was no head, which is precisely the case that then needed a second question.
   const heads = await client.query<HeadRow>(
-    `select last_seq, last_hash,
-       (select max(seq)::text from audit_events) as max_seq
-     from audit_heads`,
+    `select (select last_seq::text from audit_heads) as last_seq,
+            (select last_hash from audit_heads) as last_hash,
+            (select max(seq)::text from audit_events) as max_seq`,
   );
   const head = heads.rows[0];
   if (head === undefined) {
-    const orphan = await client.query('select 1 from audit_events limit 1');
-    return orphan.rows.length === 0
+    // A statement of scalar subqueries always returns a row; this is unreachable, and saying so
+    // beats an unchecked index.
+    throw new Error('audit verification read returned no row');
+  }
+
+  if (head.last_seq === null || head.last_hash === null) {
+    // No head. In the same snapshot, either there are no events — an empty chain, which is sound —
+    // or events exist without a head, which is a genuine break and still detected.
+    return head.max_seq === null
       ? { valid: true, checked: '0' }
-      : { valid: false, checked: '0', reason: 'missing-head', seq: '1' };
+      : { valid: false, checked: '0', reason: 'missing-head', seq: head.max_seq };
   }
 
   const finalSeq = BigInt(head.last_seq);

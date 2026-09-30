@@ -29,6 +29,28 @@ const EXIT_OK = 0;
 const ADVISORY_LOCK_KEY = 'moin.verify_audit_chains';
 /** Stop claiming new pages after this long, so an overrun is reported rather than killed silently. */
 const SWEEP_DEADLINE_MS = 30 * 60 * 1000;
+
+/**
+ * The deadline, overridable by environment.
+ *
+ * It exists so the exit-code behaviour on a truncated sweep can be tested from outside the process,
+ * which is the only place that behaviour is observable. A malformed or negative value falls back to
+ * the default rather than disabling the deadline: this is an operational knob, not a way to turn the
+ * coverage check off.
+ */
+function sweepPageSize(): number | undefined {
+  const raw = process.env['MOIN_AUDIT_SWEEP_PAGE_SIZE'];
+  if (raw === undefined) return undefined;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value >= 1 && value <= 1000 ? value : undefined;
+}
+
+function sweepDeadlineMs(): number {
+  const raw = process.env['MOIN_AUDIT_SWEEP_DEADLINE_MS'];
+  if (raw === undefined) return SWEEP_DEADLINE_MS;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value >= 0 ? value : SWEEP_DEADLINE_MS;
+}
 const EXIT_FAILED = 1;
 const EXIT_USAGE = 2;
 const EXIT_CHAIN_BROKEN = 3;
@@ -76,6 +98,7 @@ interface AlarmLine {
   readonly sound?: number;
   readonly broken?: number;
   readonly unchecked?: number;
+  readonly unreached?: number;
   readonly unregistered?: number;
   readonly durationMs?: number;
   readonly runbook?: string;
@@ -110,6 +133,9 @@ async function verifyAudit(): Promise<number> {
     return EXIT_FAILED;
   }
 
+  // Bound once: `exactOptionalPropertyTypes` rejects a spread whose branch type still admits
+  // `undefined`, which calling the accessor twice inside the ternary does.
+  const pageSize = sweepPageSize();
   const pool = createPool({ connectionString, max: 4 });
   let report: AuditVerificationReport;
   const startedAt = Date.now();
@@ -133,7 +159,19 @@ async function verifyAudit(): Promise<number> {
     }
 
     report = await verifyAuditChains(pool, {
-      deadlineMs: SWEEP_DEADLINE_MS,
+      deadlineMs: sweepDeadlineMs(),
+      ...(pageSize === undefined ? {} : { pageSize }),
+      onIncompleteCoverage: (unreached) => {
+        // The sweep ran out of time with tenants it never looked at. Not a break, but not a clean
+        // day either: those chains are unverified and the report must not average them away.
+        emit({
+          event: 'audit.chain.run.incomplete',
+          severity: 'SEV3',
+          outcome: 'incomplete-coverage',
+          unreached,
+          runbook: 'docs/runbooks/audit-chain-break.md',
+        });
+      },
       onUnregistered: (organisationId) => {
         // Not a broken chain — a chain the sweep could not even know it should check. Same
         // severity as a break, because "no coverage" and "corrupted" are equally unacceptable
@@ -198,6 +236,7 @@ async function verifyAudit(): Promise<number> {
     sound: report.sound,
     broken: report.broken,
     unchecked: report.unchecked,
+    unreached: report.unreached,
     unregistered: report.unregistered,
     durationMs: Date.now() - startedAt,
   });
@@ -216,8 +255,12 @@ async function verifyAudit(): Promise<number> {
   }
 
   if (report.broken > 0) return EXIT_CHAIN_BROKEN;
-  // A tenant that is unchecked, or absent from the register entirely, is a gap in today's coverage.
-  if (report.unchecked > 0 || report.unregistered > 0) return EXIT_FAILED;
+  // A tenant that is unchecked, absent from the register entirely, or never reached before the
+  // deadline is a gap in today's coverage. `coverageComplete` is checked in its own right, because
+  // a shortfall that could not even be counted reports `unreached: 0` and must still fail.
+  if (report.unchecked > 0 || report.unregistered > 0 || !report.coverageComplete) {
+    return EXIT_FAILED;
+  }
   return EXIT_OK;
 }
 

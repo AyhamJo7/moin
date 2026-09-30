@@ -115,6 +115,7 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.audit_provisioning_request': '9af333f9b77604a27d522f64fd020a07',
   'app.claim_audit_chains': '27d62c364aa768d834cd5f2e3fc7643a',
   'app.unregistered_audit_chains': '280c72481f5bfcdb4eab663d46840947',
+  'app.count_audit_chains': 'e3255f5c5acaa1464eb57a6df4cc5df6',
   'app.provision_tenant': '187d4a4589e54a39cdadc6f3726cce26',
 };
 
@@ -151,6 +152,12 @@ const APPROVED_DEFINERS: Readonly<
   },
   'app.unregistered_audit_chains': {
     arguments: 'integer',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: ['moin_app'],
+  },
+  'app.count_audit_chains': {
+    arguments: 'uuid',
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
     executeGrantees: ['moin_app'],

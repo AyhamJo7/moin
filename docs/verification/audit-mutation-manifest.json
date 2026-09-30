@@ -1,0 +1,542 @@
+[
+  {
+    "id": "M1-unchecked-collapsed-into-sound",
+    "invariant": "INV-10: a tenant that could not be verified is not a verified tenant",
+    "expected": "A tenant whose chain could not be checked would be counted sound, so an unverifiable estate would report a clean day.",
+    "file": "packages/db/src/audit-verification.ts",
+    "find": "        const failure: AuditChainFailure = { organisationId: item.organisationId, error };\n        failures.push(failure);\n        options.onFailure?.(failure);",
+    "replace": "        const failure: AuditChainFailure = { organisationId: item.organisationId, error };\n        void failure;\n        sound += 1;",
+    "test": "packages/db/src/audit-verification.integration.test.ts",
+    "kills": "counts a tenant it could not check as unchecked"
+  },
+  {
+    "id": "M2-claim-error-swallowed",
+    "invariant": "INV-10: a sweep that enumerated nothing has verified nothing",
+    "expected": "A failure to read the register would return an empty, sound-looking report instead of rejecting.",
+    "file": "packages/db/src/audit-verification.ts",
+    "find": "        const claimed = await client.query<{ organisation_id: string; id: string }>(\n          'select organisation_id, id from app.claim_audit_chains($1::integer, $2::uuid)',\n          [pageSize, after],\n        );",
+    "replace": "        let claimed;\n        try {\n          claimed = await client.query<{ organisation_id: string; id: string }>(\n            'select organisation_id, id from app.claim_audit_chains($1::integer, $2::uuid)',\n            [pageSize, after],\n          );\n        } catch {\n          return [];\n        }",
+    "test": "packages/db/src/audit-verification.integration.test.ts",
+    "kills": "refuses to report a clean run when the register cannot be read"
+  },
+  {
+    "id": "M3-paging-stops-after-first-page",
+    "invariant": "INV-10: every registered tenant is walked",
+    "expected": "Only the first page of tenants would ever be verified; the rest would be silently skipped.",
+    "file": "packages/db/src/audit-verification.ts",
+    "find": "    if (result.claimed < pageSize || last === undefined) break;\n    after = last.organisationId;",
+    "replace": "    void last;\n    break;",
+    "test": "packages/db/src/audit-verification.integration.test.ts",
+    "kills": "walks every tenant across page boundaries"
+  },
+  {
+    "id": "M4-page-size-validation-removed",
+    "invariant": "Bounded work: a caller cannot request an unbounded or empty page",
+    "expected": "A page size of 0 or 1001 would be accepted, yielding an empty or oversized sweep.",
+    "file": "packages/db/src/audit-verification.ts",
+    "find": "  if (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > MAX_PAGE_SIZE) {\n    throw new Error('invalid audit verification page size');\n  }",
+    "replace": "  void MAX_PAGE_SIZE;",
+    "test": "packages/db/src/audit-verification.integration.test.ts",
+    "kills": "rejects a page size outside the reviewed bounds"
+  },
+  {
+    "id": "M5-isSound-ignores-unchecked",
+    "invariant": "INV-10: 'not verified' must never read as 'nothing wrong'",
+    "expected": "A report with unchecked tenants would be declared sound.",
+    "file": "packages/db/src/audit-verification.ts",
+    "find": "    report.unchecked === 0 &&\n",
+    "replace": "",
+    "test": "packages/db/src/audit-verification.integration.test.ts",
+    "kills": "counts a tenant it could not check as unchecked"
+  },
+  {
+    "id": "M6-enumerate-heads-instead-of-register",
+    "invariant": "INV-10: a deleted head is a finding, not a tenant leaving the worklist",
+    "expected": "Deleting a tenant's chain head would remove it from the sweep entirely and report success.",
+    "file": "packages/db/migrations/0010_audit_chain_verification.sql",
+    "find": "  SELECT r.tenant_id AS organisation_id, r.tenant_id AS id\n  FROM audit_chain_registry r\n  WHERE p_after IS NULL OR r.tenant_id > p_after\n  ORDER BY r.tenant_id",
+    "replace": "  SELECT h.organisation_id AS organisation_id, h.organisation_id AS id\n  FROM audit_heads h\n  WHERE p_after IS NULL OR h.organisation_id > p_after\n  ORDER BY h.organisation_id",
+    "test": "packages/db/src/audit-verification.integration.test.ts",
+    "kills": "still covers a tenant whose chain head was deleted"
+  },
+  {
+    "id": "M7-register-append-only-trigger-dropped",
+    "invariant": "INV-10: a chain registration cannot be removed",
+    "expected": "Deleting a register row would hide that tenant's chain from every future sweep.",
+    "file": "packages/db/migrations/0010_audit_chain_verification.sql",
+    "find": "CREATE TRIGGER audit_chain_registry_append_only BEFORE UPDATE OR DELETE ON audit_chain_registry\n  FOR EACH ROW EXECUTE FUNCTION app.reject_registry_mutation();",
+    "replace": "",
+    "test": "packages/db/src/audit-verification.integration.test.ts",
+    "kills": "rejects a privileged DELETE and UPDATE"
+  },
+  {
+    "id": "M8-claim-cap-removed",
+    "invariant": "Bounded work: a page is capped however much the caller asks for",
+    "expected": "A caller could request the entire register in one call, unbounded.",
+    "file": "packages/db/migrations/0010_audit_chain_verification.sql",
+    "find": "  LIMIT least(greatest(coalesce(p_limit, 0), 0), 1000)",
+    "replace": "  LIMIT greatest(coalesce(p_limit, 0), 0)",
+    "test": "packages/db/src/audit-verification.integration.test.ts",
+    "kills": "caps a page at the reviewed maximum"
+  },
+  {
+    "id": "M9-registration-trigger-dropped",
+    "invariant": "INV-10: registration cannot be forgotten",
+    "expected": "A new tenant would never be registered, so its chain would never be verified.",
+    "file": "packages/db/migrations/0010_audit_chain_verification.sql",
+    "find": "CREATE TRIGGER organisations_register_audit_chain AFTER INSERT ON organisations\n  FOR EACH ROW EXECUTE FUNCTION app.register_audit_chain();",
+    "replace": "",
+    "test": "packages/db/src/audit-verification.integration.test.ts",
+    "kills": "is filled by the trigger, not by the caller remembering"
+  },
+  {
+    "id": "M10-register-readable-by-runtime-role",
+    "invariant": "INV-01/least privilege: the runtime role has no grant on the register",
+    "expected": "`moin_app` could select and join the tenant register directly instead of a capped identifier list.",
+    "file": "packages/db/migrations/0010_audit_chain_verification.sql",
+    "find": "REVOKE ALL ON audit_chain_registry FROM moin_app, moin_provisioner;",
+    "replace": "REVOKE ALL ON audit_chain_registry FROM moin_app, moin_provisioner;\nGRANT SELECT ON audit_chain_registry TO moin_app;",
+    "test": "packages/db/src/audit-verification.integration.test.ts",
+    "kills": "cannot be enumerated unelevated"
+  },
+  {
+    "id": "M11-catalog-drops-register-from-append-only",
+    "invariant": "QG-09: the catalog check asserts the register's guard from pg_catalog",
+    "expected": "A disabled or dropped register guard would pass CI.",
+    "file": "scripts/check-rls-catalog.ts",
+    "find": "  {\n    table: 'audit_chain_registry',\n    trigger: 'audit_chain_registry_append_only',\n    fn: 'app.reject_registry_mutation()',\n    triggerType: AUDIT_TRIGGER_TYPE,\n  },\n",
+    "replace": "",
+    "test": "scripts/check-rls-catalog.integration.test.ts",
+    "kills": "rejects a disabled and a dropped register guard"
+  },
+  {
+    "id": "M12-catalog-drops-registration-trigger-check",
+    "invariant": "QG-09: the catalog check asserts the registration trigger",
+    "expected": "A dropped registration trigger would pass CI while new tenants went unverified.",
+    "file": "scripts/check-rls-catalog.ts",
+    "find": "      if (guard?.enabled !== TRIGGER_ALWAYS || !guard.correct_function) {",
+    "replace": "      if (false) {",
+    "test": "scripts/check-rls-catalog.integration.test.ts",
+    "kills": "rejects a dropped and a disabled chain-registration trigger"
+  },
+  {
+    "id": "M13-catalog-drops-claim-fn-registration",
+    "invariant": "QG-09: every reviewed SECURITY DEFINER is pinned by signature, owner, path and grants",
+    "expected": "The claim function could be downgraded to SECURITY INVOKER, or regranted, without CI noticing.",
+    "file": "scripts/check-rls-catalog.ts",
+    "find": "  'app.claim_audit_chains': {\n    arguments: 'integer, uuid',\n    owners: ['moin_migrator', 'moin_owner'],\n    searchPath: 'search_path=pg_catalog, public, app, pg_temp',\n    executeGrantees: ['moin_app'],\n  },\n",
+    "replace": "",
+    "test": "scripts/check-rls-catalog.integration.test.ts",
+    "kills": "rejects the claim function changed to SECURITY INVOKER"
+  },
+  {
+    "id": "C1-exit-codes-collapsed",
+    "invariant": "Operability: a break and an incomplete run are different incidents",
+    "expected": "A database outage would page someone for suspected tampering.",
+    "file": "packages/db/src/cli.ts",
+    "find": "const EXIT_CHAIN_BROKEN = 3;",
+    "replace": "const EXIT_CHAIN_BROKEN = 1;",
+    "test": "packages/db/src/cli-verify-audit.integration.test.ts",
+    "kills": "raises a SEV2 alarm with its runbook and a distinct exit code"
+  },
+  {
+    "id": "C2-break-severity-downgraded",
+    "invariant": "Operability: a broken chain is SEV2",
+    "expected": "An integrity break would be routed as a low-severity alert.",
+    "file": "packages/db/src/cli.ts",
+    "find": "          event: 'audit.chain.broken',\n          severity: 'SEV2',",
+    "replace": "          event: 'audit.chain.broken',\n          severity: 'SEV3',",
+    "test": "packages/db/src/cli-verify-audit.integration.test.ts",
+    "kills": "raises a SEV2 alarm with its runbook and a distinct exit code"
+  },
+  {
+    "id": "C3-enumeration-failure-reported-clean",
+    "invariant": "INV-10: a sweep that could not run exits non-zero",
+    "expected": "A sweep that never enumerated a tenant would exit 0.",
+    "file": "packages/db/src/cli.ts",
+    "find": "      runbook: 'docs/runbooks/audit-chain-break.md',\n    });\n    return EXIT_FAILED;",
+    "replace": "      runbook: 'docs/runbooks/audit-chain-break.md',\n    });\n    return EXIT_OK;",
+    "test": "packages/db/src/cli-verify-audit.integration.test.ts",
+    "kills": "reports a failure rather than a clean run when it cannot enumerate tenants"
+  },
+  {
+    "id": "C4-driver-message-leaked-into-log",
+    "invariant": "INV-12: no personal data or driver text on the log stream",
+    "expected": "A database error message \u2014 which routinely quotes its input \u2014 would be written to the alarm line.",
+    "file": "packages/db/src/cli.ts",
+    "find": "          reason: sqlState(failure.error),",
+    "replace": "          reason: String(failure.error),",
+    "test": "packages/db/src/cli-verify-audit.integration.test.ts",
+    "kills": "emits only the reviewed non-personal fields on every line kind"
+  },
+  {
+    "id": "C5-runbook-link-dropped",
+    "invariant": "Operability: every alarm names its runbook",
+    "expected": "A SEV2 integrity alarm would arrive with no runbook to follow.",
+    "file": "packages/db/src/cli.ts",
+    "find": "          seq: found.seq,\n          checked: found.checked,\n          runbook: 'docs/runbooks/audit-chain-break.md',",
+    "replace": "          seq: found.seq,\n          checked: found.checked,",
+    "test": "packages/db/src/cli-verify-audit.integration.test.ts",
+    "kills": "raises a SEV2 alarm with its runbook and a distinct exit code"
+  },
+  {
+    "id": "C6-broken-run-reported-sound",
+    "invariant": "INV-10: a broken chain exits non-zero",
+    "expected": "A run that found a broken chain would exit 0.",
+    "file": "packages/db/src/cli.ts",
+    "find": "  if (report.broken > 0) return EXIT_CHAIN_BROKEN;",
+    "replace": "",
+    "test": "packages/db/src/cli-verify-audit.integration.test.ts",
+    "kills": "raises a SEV2 alarm with its runbook and a distinct exit code"
+  },
+  {
+    "id": "S1-structural-rule-removed",
+    "invariant": "INV-12: the only string-valued argument kind is `uuid`",
+    "expected": "A business name or any other free text stored as an argument would pass unreported.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "  uuid: { jsonType: 'string', check: (value) => UUID.test(value) },",
+    "replace": "  uuid: { jsonType: 'string', check: () => true },",
+    "test": "scripts/check-audit-arguments.integration.test.ts",
+    "kills": "a name, which no pattern would predict"
+  },
+  {
+    "id": "S2-unregistered-key-ignored",
+    "invariant": "INV-10: every stored argument key is on the reviewed allowlist",
+    "expected": "A key that never passed the writer \u2014 a restore, a bulk import \u2014 would pass unreported.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "            if (kind === undefined) {",
+    "replace": "            if (false && kind === undefined) {",
+    "test": "scripts/check-audit-arguments.integration.test.ts",
+    "kills": "a key that never passed the writer at all"
+  },
+  {
+    "id": "S3-value-kind-widening-ignored",
+    "invariant": "QG-09: the argument registry's value kinds cannot be widened silently",
+    "expected": "A migration adding a free-text value kind would turn the audit trail into a text sink unreported.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "      if (!reviewedKinds.has(row.value_kind)) {",
+    "replace": "      if (false && !reviewedKinds.has(row.value_kind)) {",
+    "test": "scripts/check-audit-arguments.integration.test.ts",
+    "kills": "a value kind the registry was widened to accept"
+  },
+  {
+    "id": "S4-validation-rule-removed",
+    "invariant": "INV-12: validation values are bounded scalars",
+    "expected": "A validation entry carrying text would pass unreported.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "          for (const row of (await client.query<ValidationRow>(VALIDATION_QUERY)).rows) {",
+    "replace": "          for (const row of ([] as ValidationRow[])) {",
+    "test": "scripts/check-audit-arguments.integration.test.ts",
+    "kills": "a validation entry carrying something other than a bounded scalar"
+  },
+  {
+    "id": "S5-contact-classification-lost",
+    "invariant": "INV-12: a contact detail is named as such",
+    "expected": "An email or phone number in an argument would be reported only as generic free text.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "          rule: contact === undefined ? 'free-text-argument' : 'personal-data-in-argument',",
+    "replace": "          rule: 'free-text-argument',",
+    "test": "scripts/check-audit-arguments.integration.test.ts",
+    "kills": "a contact detail, named as such"
+  },
+  {
+    "id": "S6-finding-quotes-the-value",
+    "invariant": "INV-12: the check never prints the value it found",
+    "expected": "The check itself would write the personal data it detected into CI logs.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "                      'printing it would be the leak.'",
+    "replace": "                      'printing it would be the leak: ' + row.value",
+    "test": "scripts/check-audit-arguments.integration.test.ts",
+    "kills": "a name, which no pattern would predict"
+  },
+  {
+    "id": "N1-head-rollback-allowed",
+    "invariant": "INV-10: a chain head may only advance by one",
+    "expected": "Setting `last_seq = 0` would silence verification for that tenant with every event still in place.",
+    "file": "packages/db/migrations/0008_audit_events.sql",
+    "find": "    OR NEW.last_seq < OLD.last_seq\n    OR NEW.last_seq > OLD.last_seq + 1",
+    "replace": "    OR false",
+    "test": "packages/db/src/audit-verification.integration.test.ts",
+    "kills": "detects a head rolled back to zero"
+  },
+  {
+    "id": "N2-event-past-head-undetected",
+    "invariant": "INV-10: nothing exists beyond the head unreported",
+    "expected": "A forged insert past the head, or a rolled-back head, would verify as sound.",
+    "file": "packages/db/src/audit.ts",
+    "find": "  if (head.max_seq !== null && BigInt(head.max_seq) > finalSeq) {",
+    "replace": "  if (false && head.max_seq !== null && BigInt(head.max_seq) > finalSeq) {",
+    "test": "packages/db/src/audit-verification.integration.test.ts",
+    "kills": "detects a head rolled back to zero"
+  },
+  {
+    "id": "N3-insert-link-guard-dropped",
+    "invariant": "INV-10: an event may only be inserted correctly linked to the head",
+    "expected": "A privileged direct INSERT could place an unlinked forged event in the trail.",
+    "file": "packages/db/migrations/0008_audit_events.sql",
+    "find": "CREATE TRIGGER audit_events_linked_only BEFORE INSERT ON audit_events\n  FOR EACH ROW EXECUTE FUNCTION app.reject_unlinked_audit_event();",
+    "replace": "",
+    "test": "packages/db/src/audit-verification.integration.test.ts",
+    "kills": "detects a forged event written past the head"
+  },
+  {
+    "id": "N4-truncate-guards-dropped",
+    "invariant": "INV-10: TRUNCATE is refused on the audit tables",
+    "expected": "`TRUNCATE audit_events` would erase the whole trail and the next sweep would report it clean.",
+    "file": "packages/db/migrations/0008_audit_events.sql",
+    "find": "CREATE TRIGGER audit_events_no_truncate BEFORE TRUNCATE ON audit_events\n  FOR EACH STATEMENT EXECUTE FUNCTION app.reject_audit_mutation();",
+    "replace": "",
+    "test": "packages/db/src/audit-verification.integration.test.ts",
+    "kills": "refuses TRUNCATE on the register"
+  },
+  {
+    "id": "N5-registry-truncate-guard-dropped",
+    "invariant": "INV-10: TRUNCATE is refused on the register",
+    "expected": "Emptying the register would take every tenant off the worklist at once.",
+    "file": "packages/db/migrations/0010_audit_chain_verification.sql",
+    "find": "CREATE TRIGGER audit_chain_registry_no_truncate BEFORE TRUNCATE ON audit_chain_registry\n  FOR EACH STATEMENT EXECUTE FUNCTION app.reject_registry_mutation();",
+    "replace": "",
+    "test": "packages/db/src/audit-verification.integration.test.ts",
+    "kills": "refuses TRUNCATE on the register"
+  },
+  {
+    "id": "N6-reconciliation-removed",
+    "invariant": "INV-10: the register is reconciled against an independent witness",
+    "expected": "A tenant provisioned but never registered would be invisible to the sweep forever.",
+    "file": "packages/db/src/audit-verification.ts",
+    "find": "  const unregisteredTenants = await unregistered(pool);",
+    "replace": "  const unregisteredTenants: readonly string[] = [];\n  void unregistered;",
+    "test": "packages/db/src/audit-verification.integration.test.ts",
+    "kills": "reports a provisioned tenant that never reached the register"
+  },
+  {
+    "id": "N7-isSound-ignores-unregistered",
+    "invariant": "INV-10: an unregistered tenant is never 'sound'",
+    "expected": "A sweep would report a clean estate while a tenant sat outside it.",
+    "file": "packages/db/src/audit-verification.ts",
+    "find": "    report.unregistered === 0 &&\n",
+    "replace": "",
+    "test": "packages/db/src/audit-verification.integration.test.ts",
+    "kills": "reports a provisioned tenant that never reached the register"
+  },
+  {
+    "id": "N8-backfill-removed",
+    "invariant": "INV-10/INV-17: the register covers tenants that predate it",
+    "expected": "Every tenant existing when the migration landed would be permanently unverifiable.",
+    "file": "packages/db/migrations/0010_audit_chain_verification.sql",
+    "find": "INSERT INTO audit_chain_registry(tenant_id) SELECT id FROM organisations ON CONFLICT DO NOTHING;",
+    "replace": "",
+    "test": "packages/db/src/audit-chain-backfill.integration.test.ts",
+    "kills": "registers every pre-existing organisation"
+  },
+  {
+    "id": "N9-catalog-accepts-origin-only-trigger",
+    "invariant": "INV-10: guards are ENABLE ALWAYS, not origin-only",
+    "expected": "`session_replication_role = 'replica'` would bypass every append-only guard with no schema change.",
+    "file": "scripts/check-rls-catalog.ts",
+    "find": "const TRIGGER_ALWAYS = 'A';",
+    "replace": "const TRIGGER_ALWAYS = 'O';",
+    "test": "scripts/check-rls-catalog.integration.test.ts",
+    "kills": "rejects a disabled mutation guard"
+  },
+  {
+    "id": "N10-catalog-body-pinning-removed",
+    "invariant": "QG-09: a reviewed function's body is pinned, not only its identity",
+    "expected": "A guard could be replaced with one that returns without raising, keeping name, owner and triggers.",
+    "file": "scripts/check-rls-catalog.ts",
+    "find": "      if (fn.body_digest !== expected) {",
+    "replace": "      if (false && fn.body_digest !== expected) {",
+    "test": "scripts/check-rls-catalog.integration.test.ts",
+    "kills": "rejects a guard whose body was replaced"
+  },
+  {
+    "id": "N11-registry-reconciliation-catalog-removed",
+    "invariant": "QG-09: CI fails on a register that misses a provisioned tenant",
+    "expected": "A registration gap would pass CI even after the trigger was put back.",
+    "file": "scripts/check-rls-catalog.ts",
+    "find": "      if (missing > 0) {",
+    "replace": "      if (false && missing > 0) {",
+    "test": "scripts/check-rls-catalog.integration.test.ts",
+    "kills": "rejects a register that does not account for every provisioned tenant"
+  },
+  {
+    "id": "N12-scanner-reads-without-tenant-scope",
+    "invariant": "INV-01: the scanner reads under tenant scope as the runtime role",
+    "expected": "FORCE RLS would return zero rows and the check would report a clean trail having inspected nothing.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "          const counted = await client.query<{ n: string }>(EVENT_COUNT_QUERY);",
+    "replace": "          const counted = await pool.query<{ n: string }>(EVENT_COUNT_QUERY);",
+    "test": "scripts/check-audit-arguments.integration.test.ts",
+    "kills": "a name, which no pattern would predict"
+  },
+  {
+    "id": "N13-scanner-vacuous-pass-refused-by-main",
+    "invariant": "INV-10: a scan that inspected nothing is not a clean scan",
+    "expected": "A vacuous scan would print a reassuring sentence and exit 0.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "  if (result.events === 0) {",
+    "replace": "  if (false && result.events === 0) {",
+    "test": "scripts/check-audit-arguments.integration.test.ts",
+    "kills": "refuses to pass when tenants exist but it inspected no events"
+  },
+  {
+    "id": "N14-scanner-prints-forged-key",
+    "invariant": "INV-12: an argument key is not printed unless its shape is safe",
+    "expected": "A forged key that is itself personal data would be written into CI logs by the check.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "  const safeKey = SAFE_KEY.test(key) ? key : '<unprintable key>';",
+    "replace": "  const safeKey = key;",
+    "test": "scripts/check-audit-arguments.integration.test.ts",
+    "kills": "a forged argument key that is itself personal data"
+  },
+  {
+    "id": "N15-scanner-shape-rule-removed",
+    "invariant": "INV-12: operation and target_kind shapes are asserted",
+    "expected": "A dropped column CHECK would let free text into retained, un-erasable columns unreported.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "            if (!SAFE_OPERATION.test(row.operation) || !SAFE_TARGET_KIND.test(row.target_kind)) {",
+    "replace": "            if (false) {",
+    "test": "scripts/check-audit-arguments.integration.test.ts",
+    "kills": "an operation or target kind that only a dropped CHECK could have allowed"
+  },
+  {
+    "id": "N16-empty-register-reported-clean",
+    "invariant": "INV-10: a sweep of zero tenants is not a clean day",
+    "expected": "A truncated or unreadable register would exit 0, indistinguishable from a healthy estate.",
+    "file": "packages/db/src/cli.ts",
+    "find": "  if (report.tenants === 0) {",
+    "replace": "  if (false && report.tenants === 0) {",
+    "test": "packages/db/src/cli-verify-audit.integration.test.ts",
+    "kills": "exits non-zero on a sweep of zero tenants"
+  },
+  {
+    "id": "N17-sqlstate-replaced-by-error-name",
+    "invariant": "Operability: the unchecked alarm carries a SQLSTATE",
+    "expected": "Every database failure would emit the same useless reason, since `pg` sets `name` to 'error'.",
+    "file": "packages/db/src/cli.ts",
+    "find": "  const code = (error as { code?: unknown } | null)?.code;\n  if (typeof code === 'string' && /^[0-9A-Z]{5}$/u.test(code)) return code;",
+    "replace": "",
+    "test": "packages/db/src/cli-verify-audit.integration.test.ts",
+    "kills": "emits only the reviewed non-personal fields on every line kind"
+  },
+  {
+    "id": "B1-1-deadline-shortfall-inferred-from-claims",
+    "invariant": "INV-10: coverage is a property of the register, not of the worklist drained from it",
+    "expected": "A deadline expiring between pages would report `unreached: 0` and a sound sweep, having verified one tenant out of many.",
+    "file": "packages/db/src/audit-verification.ts",
+    "find": "      unreached = await remaining(pool, after);",
+    "replace": "      unreached = Math.max(tenants - (outcomes.size + failures.length), 0);",
+    "test": "packages/db/src/audit-verification.integration.test.ts",
+    "kills": "does not call a deadline-truncated sweep sound"
+  },
+  {
+    "id": "B1-2-coverage-ignored-by-isSound",
+    "invariant": "INV-10: a sweep that did not reach the end of the register is not sound",
+    "expected": "An incomplete sweep would be declared sound despite reporting a shortfall.",
+    "file": "packages/db/src/audit-verification.ts",
+    "find": "    report.unregistered === 0 &&\n    report.coverageComplete\n  );",
+    "replace": "    report.unregistered === 0\n  );",
+    "test": "packages/db/src/audit-verification.integration.test.ts",
+    "kills": "treats a shortfall it could not count as incomplete"
+  },
+  {
+    "id": "B1-3-uncountable-shortfall-treated-as-none",
+    "invariant": "INV-10: not knowing whether coverage was complete is not the same as it being complete",
+    "expected": "If the shortfall could not be counted, the sweep would claim complete coverage.",
+    "file": "packages/db/src/audit-verification.ts",
+    "find": "    } catch {\n      // Not knowing the shortfall is not the same as there being none. Fail closed, and let the\n      // count stay 0 rather than inventing one.\n      coverageComplete = false;\n    }",
+    "replace": "    } catch {\n      unreached = 0;\n    }",
+    "test": "packages/db/src/audit-verification.integration.test.ts",
+    "kills": "treats a shortfall it could not count as incomplete"
+  },
+  {
+    "id": "B1-4-cli-ignores-incomplete-coverage",
+    "invariant": "Operability: an incomplete sweep exits non-zero",
+    "expected": "A deadline-truncated sweep would exit 0, so the schedule would record a clean day.",
+    "file": "packages/db/src/cli.ts",
+    "find": "  if (report.unchecked > 0 || report.unregistered > 0 || !report.coverageComplete) {",
+    "replace": "  if (false && (report.unchecked > 0 || report.unregistered > 0 || !report.coverageComplete)) {",
+    "test": "packages/db/src/cli-verify-audit.integration.test.ts",
+    "kills": "fails when it cannot even establish whether coverage was complete"
+  },
+  {
+    "id": "B2-1-scanner-skips-coverage-reconciliation",
+    "invariant": "INV-10: the scanner reconciles its coverage against the provisioning witness",
+    "expected": "A tenant provisioned but absent from the register would be outside the scan, and a planted leak under it would go unreported.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "    const missing = await pool.query<{ id: string }>(UNREGISTERED_QUERY, [UNREGISTERED_SAMPLE]);",
+    "replace": "    const missing = { rows: [] as { id: string }[] };",
+    "test": "scripts/check-audit-arguments.integration.test.ts",
+    "kills": "fails when a provisioned tenant hides a leaking argument outside the register"
+  },
+  {
+    "id": "B2-2-coverage-gap-not-explained",
+    "invariant": "Operability: the scanner names the coverage gap, not just a finding count",
+    "expected": "An operator would see a list of findings with no statement that whole tenants were never reached.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "    console.error(\n      `audit argument scan could not reach ${String(result.unregistered)} provisioned tenant(s): ` +\n        'they have no audit chain register row. Nothing is proven about the arguments stored under ' +\n        'them \u2014 see docs/runbooks/audit-chain-break.md.',\n    );",
+    "replace": "",
+    "test": "scripts/check-audit-arguments.integration.test.ts",
+    "kills": "fails when a provisioned tenant hides a leaking argument outside the register"
+  },
+  {
+    "id": "B3-1-nonstring-values-skipped",
+    "invariant": "INV-10/INV-12: a stored value must match its registered kind's JSON type",
+    "expected": "A `uuid`-kind argument holding a boolean or a number would produce no finding at all.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "            if (row.kind !== rule.jsonType) {",
+    "replace": "            if (false && row.kind !== rule.jsonType) {",
+    "test": "scripts/check-audit-arguments.integration.test.ts",
+    "kills": "catches a uuid kind holding a boolean"
+  },
+  {
+    "id": "B3-2-registered-is-treated-as-sufficient",
+    "invariant": "INV-10/INV-12: a stored value is validated against its registered kind, not merely typed",
+    "expected": "Value validation would be skipped entirely: a non-UUID string under a `uuid` kind, and any out-of-bounds count, would pass.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "            if (rule.check(row.value)) continue;",
+    "replace": "            continue;",
+    "test": "scripts/check-audit-arguments.integration.test.ts",
+    "kills": "a name, which no pattern would predict"
+  },
+  {
+    "id": "B3-3-count-bounds-not-enforced",
+    "invariant": "INV-10: a `count` is a non-negative integer within its reviewed bound",
+    "expected": "A negative, fractional or oversized count would be stored and reported as conforming.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "    check: (value) => /^(0|[1-9][0-9]{0,8})$/u.test(value) && Number(value) <= COUNT_MAX,",
+    "replace": "    check: () => true,",
+    "test": "scripts/check-audit-arguments.integration.test.ts",
+    "kills": "catches a count kind holding a negative number"
+  },
+  {
+    "id": "B3-4-unknown-kind-fails-open",
+    "invariant": "INV-10: an argument kind with no validator fails closed",
+    "expected": "A kind the check cannot validate would be silently accepted, so widening the registry would bypass the scanner.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "            if (rule === undefined) {",
+    "replace": "            if (false && rule === undefined) {",
+    "test": "scripts/check-audit-arguments.integration.test.ts",
+    "kills": "fails closed on a registered kind it has no validator for"
+  },
+  {
+    "id": "B4-1-head-and-orphan-read-in-two-statements",
+    "invariant": "INV-10: 'head absent' and 'event exists' come from one snapshot",
+    "expected": "A legitimate first append committing mid-verification would be reported as `missing-head` \u2014 a false integrity alarm on a sound chain.",
+    "file": "packages/db/src/audit.ts",
+    "find": "  if (head.last_seq === null || head.last_hash === null) {\n    // No head. In the same snapshot, either there are no events \u2014 an empty chain, which is sound \u2014\n    // or events exist without a head, which is a genuine break and still detected.\n    return head.max_seq === null\n      ? { valid: true, checked: '0' }\n      : { valid: false, checked: '0', reason: 'missing-head', seq: head.max_seq };\n  }",
+    "replace": "  if (head.last_seq === null || head.last_hash === null) {\n    const orphan = await client.query<{ n: string }>('select max(seq)::text as n from audit_events');\n    const n = orphan.rows[0]?.n ?? null;\n    return n === null\n      ? { valid: true, checked: '0' }\n      : { valid: false, checked: '0', reason: 'missing-head', seq: n };\n  }",
+    "test": "packages/db/src/audit-verification.integration.test.ts",
+    "kills": "does not report missing-head when a first append commits mid-verification"
+  },
+  {
+    "id": "B4-2-missing-head-suppressed",
+    "invariant": "INV-10: events without a head are a break",
+    "expected": "Fixing the false alarm by suppressing the real one: an orphaned trail with no head would verify as sound.",
+    "file": "packages/db/src/audit.ts",
+    "find": "    return head.max_seq === null\n      ? { valid: true, checked: '0' }\n      : { valid: false, checked: '0', reason: 'missing-head', seq: head.max_seq };",
+    "replace": "    return { valid: true, checked: '0' };",
+    "test": "packages/db/src/audit-verification.integration.test.ts",
+    "kills": "still detects a genuine orphan event with no head"
+  }
+]

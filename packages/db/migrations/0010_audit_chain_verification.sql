@@ -176,3 +176,29 @@ REVOKE ALL ON FUNCTION app.unregistered_audit_chains(integer) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app.unregistered_audit_chains(integer) TO moin_app;
 COMMENT ON FUNCTION app.unregistered_audit_chains(integer)
   IS 'QG-09: identifiers only — provisioned tenants whose audit chain is missing from the register.';
+
+-- ---------------------------------------------------------------------------------------------
+-- How many tenants are still ahead of the cursor?
+-- ---------------------------------------------------------------------------------------------
+--
+-- The sweep has a wall-clock deadline, and when it fires it has to say whether it finished. It
+-- cannot answer that from the tenants it claimed: with one tenant per page and a deadline that
+-- expires after the first page, "one tenant claimed, one tenant sound" is indistinguishable from a
+-- complete estate, and the sweep would report a clean day having looked at one tenant out of
+-- hundreds. Coverage is a property of the register, not of the worklist that was drained from it.
+--
+-- This returns a count, not identifiers — strictly less than the claim function already hands the
+-- caller — so the exact shortfall can be reported without widening what `moin_app` can enumerate.
+CREATE FUNCTION app.count_audit_chains(p_after uuid)
+  RETURNS bigint
+  LANGUAGE sql STABLE SECURITY DEFINER
+  SET search_path = pg_catalog, public, app, pg_temp
+AS $$
+  SELECT count(*)::bigint
+  FROM audit_chain_registry r
+  WHERE p_after IS NULL OR r.tenant_id > p_after
+$$;
+REVOKE ALL ON FUNCTION app.count_audit_chains(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app.count_audit_chains(uuid) TO moin_app;
+COMMENT ON FUNCTION app.count_audit_chains(uuid)
+  IS 'QG-09: a count only — registered tenants after the cursor, so a deadline can report its shortfall.';

@@ -1,6 +1,6 @@
 # Runbook — audit chain break (SEV2)
 
-- **Alarms:** `audit.chain.broken` (SEV2) · `audit.chain.unregistered` (SEV2) · `audit.chain.unchecked` (SEV3) · `audit.chain.registry.empty` (SEV3) · `audit.chain.run.failed` (SEV3) · `audit.chain.run.skipped` (SEV3)
+- **Alarms:** `audit.chain.broken` (SEV2) · `audit.chain.unregistered` (SEV2) · `audit.chain.unchecked` (SEV3) · `audit.chain.registry.empty` (SEV3) · `audit.chain.run.incomplete` (SEV3) · `audit.chain.run.failed` (SEV3) · `audit.chain.run.skipped` (SEV3)
 - **Emitted by:** `pnpm db:verify-audit` (`packages/db/src/cli.ts`, P06.10.05) · **Invariants:** INV-10, INV-12
 - **Related:** ADR-0017, ADR-0018, `docs/architecture/security-definer-allowlist.md`
 
@@ -33,8 +33,8 @@ Nothing the application can do through its normal privileges produces a break.
 Exit codes carry the same split: `3` is a break, `1` is "did not verify", `0` is a clean sweep. They
 are deliberately distinct so a database outage does not page someone for suspected tampering.
 
-An `unchecked`, `unregistered`, `registry.empty`, `run.failed` or `run.skipped` result is **not** a
-clean run. Each means the day has a coverage gap, and each must be resolved and re-run, not
+An `unchecked`, `unregistered`, `registry.empty`, `run.incomplete`, `run.failed` or `run.skipped`
+result is **not** a clean run. Each means the day has a coverage gap, and each must be resolved and re-run, not
 acknowledged. `audit.chain.unregistered` is SEV2 rather than SEV3 because a chain nobody enumerates
 is not a degraded check — it is no check at all, and it looks exactly like a healthy tenant.
 
@@ -92,6 +92,23 @@ follows the security incident path rather than the availability one, and the fou
 Art. 33 GDPR notification. Preserve a snapshot of the affected tenant's `audit_events` and
 `audit_heads` rows before any remediation.
 
+## An incomplete sweep
+
+`audit.chain.run.incomplete` means the sweep stopped claiming pages because its wall-clock deadline
+fired, with `unreached` tenants never examined. Those chains are unverified — not sound, not broken.
+
+The shortfall is counted from the register rather than from the tenants the sweep happened to claim,
+because the worklist cannot report on what was never drained from it. If `unreached` is `0` **and**
+the run still failed, the count itself could not be established (typically a revoked grant on
+`app.count_audit_chains`): completeness is unknown, which fails closed.
+
+1. Re-run the sweep. A single overrun on a slow day needs no more than that.
+2. If it recurs, the sweep is now longer than its interval. `MOIN_AUDIT_SWEEP_DEADLINE_MS` raises
+   the deadline, but that is a stopgap: full verification is O(every event that has ever existed),
+   so the real answer is a reviewed checkpointing design, which trades tamper-detection latency for
+   cost and needs its own decision.
+3. Never widen the deadline to make the alarm stop without recording why.
+
 ## Checking the arguments as well as the chain
 
 The chain proves the trail has not been altered. It says nothing about what the trail _contains_,
@@ -100,8 +117,15 @@ with a reviewed value kind, and the only string-valued kind is `uuid`. Run it al
 incident, because a restore that broke a chain is exactly the kind of event that also writes rows
 the reviewed writer would have refused.
 
-It exits non-zero if it inspected nothing. That is deliberate — the first version of the check
-returned zero rows under every production role and printed a reassuring sentence.
+It exits non-zero if it inspected nothing, and it also refuses to pass while any provisioned tenant
+is missing from the register: a tenant outside the register is outside the scan, so nothing is proven
+about what is stored under it. Both are deliberate — the first version of the check returned zero
+rows under every production role and printed a reassuring sentence, and the second walked only the
+register and never noticed a tenant that was not in it.
+
+Values are validated against their registered kind, not merely against being registered. A
+`uuid`-kind argument holding a boolean, a `boolean`-kind argument holding a UUID string, and a
+`count` outside its bounds are all findings; a kind with no validator fails closed.
 
 ## Scheduling
 

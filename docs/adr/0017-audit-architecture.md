@@ -41,6 +41,22 @@ head, read in the same snapshot as the head so a concurrent append cannot raise 
 one check covers both attacks, because a rolled-back head and a forged insert look identical from
 below.
 
+### One snapshot, because two questions invent breaks
+
+Verification needs three facts to start: whether a head exists, what it says, and whether any event
+exists beyond it. Asking separately is a false-alarm generator. These run at READ COMMITTED, so each
+statement takes its own snapshot, and a verifier that read "no head" and then asked "any events?"
+would see a tenant's legitimate **first** append land in between and report `missing-head` for a
+chain that was perfectly sound — measured: statement one saw zero head rows, statement two saw one
+event. An integrity alarm that cries wolf is worse than no alarm, because the next real one is
+ignored.
+
+All three facts therefore come from scalar subqueries in a single statement, evaluated against one
+snapshot. That shape also always returns exactly one row, which removes the case that made a second
+question necessary at all: `from audit_heads` returned nothing precisely when there was no head. The
+genuine defect — events present with no head — is still a break, and is reported with the highest
+orphan sequence rather than a placeholder.
+
 ### The daily verifier, and the register it needs
 
 A daily sweep walks every tenant chain and alarms on a gap or mismatch. It connects as the
@@ -70,6 +86,24 @@ Three properties make the register load-bearing rather than incidental bookkeepi
 `moin_app` has no grant on the register. It reads a key-paged, capped set of identifiers through
 `app.claim_audit_chains`, the `withSystemWork` claim shape this repository already reviews
 (P06.14.01), and re-reads each chain inside `withTenant` as itself.
+
+### Coverage is a property of the register, not of the worklist
+
+The sweep has a wall-clock deadline, and when it fires it has to say whether it finished. It cannot
+answer that from the tenants it claimed: every claimed tenant is also processed, so subtracting
+outcomes from claims yields zero whether or not anything remains. With one tenant per page and a
+deadline expiring after the first page, "one claimed, one sound" read exactly like a complete estate
+— a sweep reporting a clean day having looked at one tenant out of hundreds.
+
+So the shortfall is counted from the register, through `app.count_audit_chains`, which returns a
+count and no identifiers. The report carries `unreached` and an explicit `coverageComplete`, and
+`isSound` requires both. A shortfall that could not even be counted sets `coverageComplete` false
+with `unreached` at zero, because not knowing whether coverage was complete is not the same as it
+being complete.
+
+The deadline is also checked _after_ a page rather than before one, so a sweep always makes progress
+on at least one page. A run that exits having verified nothing because its deadline had already
+expired is strictly worse than one that verifies a page and reports the shortfall.
 
 ### A break, a gap and an outage are three different incidents
 
@@ -121,13 +155,13 @@ Pseudonymisation and retention are separate decisions under ADR-0018 and require
 These are open. Each was found by adversarial review of this design and each needs a decision that
 is outside P06.10's scope; none is claimed as handled.
 
-| Residual                                                                                                                                                                                                                                                                                                                                                        | Why it is still open                                                                                                                                                                                                                                                                                                                          | Owner         |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
-| **`moin_app` can enumerate every tenant id.** The daily sweep runs as the request-serving role, so a SQL-injection flaw reachable as `moin_app` yields the tenant inventory and the customer count. RLS still prevents data access and tenant context is server-derived, so this costs the unguessable-identifier layer, not isolation.                         | The fix is a dedicated non-superuser role for the verifier (`DATABASE_AUDIT_URL`), and roles are cluster-level objects that `moin_migrator` deliberately cannot create — Terraform provisions them (P05, EXT-09). Until then the capability is granted to `moin_app`, which is the reviewed claim-function shape P06.14.01 already sanctions. | founder / P05 |
-| **`operation`, `target_kind` and `versions` are caller-supplied and only pattern-constrained.** `hans.mueller-at-example.de` satisfies the `operation` CHECK, so a future handler that derives an operation name from request data could write personal data into an append-only, un-erasable column.                                                           | Closing it properly means a reviewed registry of permitted `(operation, target_kind)` pairs and a writer that fails closed on an unregistered pair — a change to the writer contract every future caller depends on. The scanner currently catches only values that violate the CHECK, i.e. a dropped constraint.                             | P07 / P16     |
-| **`locations` carries full DML for `moin_app` with no audit obligation.** A location rename or delete leaves no audit event and the chain still verifies. Latent today: no application code mutates `locations` yet.                                                                                                                                            | The general shape is already acknowledged below ("Infrastructure alone cannot prove that every future caller does so"), but this is the one concrete place the database _hands out_ the capability. The fix belongs with the business-action model, which decides how mutations and their audit appends are bound together.                   | P07           |
-| **The alarm lines bypass `@moin/observability`.** `verify-audit` writes JSON to stdout with `console.log`, which skips the INV-12 redaction allowlist that every service log line goes through. The emitted shape is a closed TypeScript type and is asserted field-by-field across all line kinds, so the current output is safe; the risk is the next commit. | Routing it through `createLogger` requires adding `severity`, `seq`, `checked`, `runbook`, `sound`, `broken`, `unchecked` and `unregistered` to `ALLOWED_FIELDS`. All are non-personal counters and enums and the net effect is stricter, but it edits the INV-12 allowlist, which is a privacy control and not a session's call to loosen.   | founder       |
-| **`pg_temp` sits in every definer `search_path`.** Last in the list and not exploitable for these functions, but a definer has no legitimate need to resolve caller temp objects.                                                                                                                                                                               | It is the existing repository-wide convention; changing it is a project-wide change, not a P06.10 one.                                                                                                                                                                                                                                        | founder       |
+| Residual                                                                                        | Why it is still open                                 | Owner                                                                                                                                                                                                                                                                                                         |
+| ----------------------------------------------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`moin_app` can enumerate every tenant id.**                                                   | `EXTERNAL_DEPENDENCY` (EXT-09)                       | The daily sweep runs as the request-serving role, so a SQL-injection flaw reachable as `moin_app` yields the tenant inventory and the customer count. RLS still prevents data access and tenant context is server-derived, so this costs the unguessable-identifier layer, not isolation.                     | The fix is a dedicated non-superuser role for the verifier (`DATABASE_AUDIT_URL`), and roles are cluster-level objects that `moin_migrator` deliberately cannot create — Terraform provisions them (P05, EXT-09). Until then the capability is granted to `moin_app`, which is the reviewed claim-function shape P06.14.01 already sanctions. | founder / P05 |
+| **`operation`, `target_kind` and `versions` are caller-supplied and only pattern-constrained.** | `FOUNDER_DECISION_REQUIRED`                          | `hans.mueller-at-example.de` satisfies the `operation` CHECK, so a future handler that derives an operation name from request data could write personal data into an append-only, un-erasable column.                                                                                                         | Closing it properly means a reviewed registry of permitted `(operation, target_kind)` pairs and a writer that fails closed on an unregistered pair — a change to the writer contract every future caller depends on. The scanner currently catches only values that violate the CHECK, i.e. a dropped constraint.                             | P07 / P16     |
+| **`locations` carries full DML for `moin_app` with no audit obligation.**                       | `FOUNDER_DECISION_REQUIRED`                          | A location rename or delete leaves no audit event and the chain still verifies. Latent today: no application code mutates `locations` yet.                                                                                                                                                                    | The general shape is already acknowledged below ("Infrastructure alone cannot prove that every future caller does so"), but this is the one concrete place the database _hands out_ the capability. The fix belongs with the business-action model, which decides how mutations and their audit appends are bound together.                   | P07           |
+| **The alarm lines bypass `@moin/observability`.**                                               | `FOUNDER_DECISION_REQUIRED`                          | `verify-audit` writes JSON to stdout with `console.log`, which skips the INV-12 redaction allowlist that every service log line goes through. The emitted shape is a closed TypeScript type and is asserted field-by-field across all line kinds, so the current output is safe; the risk is the next commit. | Routing it through `createLogger` requires adding `severity`, `seq`, `checked`, `runbook`, `sound`, `broken`, `unchecked` and `unregistered` to `ALLOWED_FIELDS`. All are non-personal counters and enums and the net effect is stricter, but it edits the INV-12 allowlist, which is a privacy control and not a session's call to loosen.   | founder       |
+| **`pg_temp` sits in every definer `search_path`.**                                              | Acceptable for this PR; **not** a general conclusion | Last in the list and not exploitable for these functions, but a definer has no legitimate need to resolve caller temp objects.                                                                                                                                                                                | It is the existing repository-wide convention; changing it is a project-wide change, not a P06.10 one.                                                                                                                                                                                                                                        | founder       |
 
 ## Alternatives considered
 
@@ -166,6 +200,10 @@ is outside P06.10's scope; none is claimed as handled.
 | Restricted argument keys and values, sample personal-data scan                               | `packages/db/src/audit.integration.test.ts`                                                                                          |
 | Chain gap, changed event and missing tail detection                                          | `packages/db/src/audit.ts`; real-PostgreSQL tamper fixtures                                                                          |
 | Head advances by one only; an event must be linked to the head; `event-past-head` detected   | `packages/db/migrations/0008_audit_events.sql`; `packages/db/src/audit.ts`; `packages/db/src/audit-verification.integration.test.ts` |
+| Head absence and orphan events determined in one snapshot; no false `missing-head`           | `packages/db/src/audit.ts`; `packages/db/src/audit-verification.integration.test.ts`                                                 |
+| Deadline shortfall counted from the register; `coverageComplete` required for a sound run    | `app.count_audit_chains`; `packages/db/src/audit-verification.ts`; `packages/db/src/cli.ts`                                          |
+| Scanner reconciles its own coverage and validates values against their registered kind       | `scripts/check-audit-arguments.ts`; `scripts/check-audit-arguments.integration.test.ts`                                              |
+| Every guard has a defective variant that its test provably kills                             | `docs/verification/audit-mutation-manifest.json`; `scripts/mutation-sweep.ts`                                                        |
 | `TRUNCATE` refused on events, heads and the register; every guard is `ENABLE ALWAYS`         | `packages/db/migrations/0008_audit_events.sql`; `0010_audit_chain_verification.sql`; `scripts/check-rls-catalog.ts`                  |
 | Guard and writer function **bodies** pinned by digest, not only their identity               | `scripts/check-rls-catalog.ts`; `scripts/check-rls-catalog.integration.test.ts`                                                      |
 | Tenant register filled by trigger, backfilled on apply, append-only, not readable unelevated | `packages/db/migrations/0010_audit_chain_verification.sql`; `packages/db/src/audit-chain-backfill.integration.test.ts`               |

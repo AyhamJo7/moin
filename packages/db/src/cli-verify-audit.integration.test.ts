@@ -165,6 +165,7 @@ describe('the scheduled verifier process', () => {
       'sound',
       'broken',
       'unchecked',
+      'unreached',
       'unregistered',
       'durationMs',
     ]);
@@ -217,6 +218,106 @@ describe('the scheduled verifier process', () => {
       await empty.drop();
     }
   }, 90_000);
+
+  it('fails and names the shortfall when the deadline truncates the sweep', async () => {
+    // The process-level half of the deadline property. `MOIN_AUDIT_SWEEP_DEADLINE_MS` exists only
+    // so this is testable from outside: a sweep that ran out of time has unverified chains, and the
+    // exit code is what the schedule gates on.
+    const many = await createTestDatabase('cli-verify-deadline');
+    const owner = createPool({ connectionString: many.migrationUrl, max: 1 });
+    try {
+      await owner.query(
+        `insert into organisations(id, slug, name)
+         select gen_random_uuid(), 'deadline-' || g, 'Deadline ' || g from generate_series(1, 6) g`,
+      );
+      let code = 0;
+      let stdout = '';
+      await run(process.execPath, [CLI, 'verify-audit'], {
+        cwd: REPO,
+        env: {
+          ...process.env,
+          DATABASE_URL: many.appUrl,
+          // One tenant per page; the deadline expires as soon as that page is done, so five of the
+          // six tenants are never reached.
+          MOIN_AUDIT_SWEEP_PAGE_SIZE: '1',
+          MOIN_AUDIT_SWEEP_DEADLINE_MS: '0',
+        },
+      })
+        .then(({ stdout: out }) => {
+          stdout = out;
+        })
+        .catch((error: unknown) => {
+          const failure = error as { code?: number; stdout?: string };
+          code = failure.code ?? -1;
+          stdout = failure.stdout ?? '';
+        });
+
+      const lines = parse(stdout);
+      expect(code).not.toBe(0);
+      expect(lines.find((line) => line['event'] === 'audit.chain.run.incomplete')).toMatchObject({
+        outcome: 'incomplete-coverage',
+        unreached: 5,
+      });
+      expect(lines.find((line) => line['event'] === 'audit.chain.run.completed')).toMatchObject({
+        outcome: 'attention',
+        count: 1,
+        unreached: 5,
+      });
+    } finally {
+      await owner.end();
+      await many.drop();
+    }
+  }, 120_000);
+
+  it('fails when it cannot even establish whether coverage was complete', async () => {
+    // The narrow case that isolates the coverage check from the unchecked count: the shortfall
+    // cannot be counted, so `unreached` is 0 and `unchecked` is 0, and the only thing that makes
+    // this a failed run is that completeness is unknown. Not knowing is not the same as complete.
+    const opaque = await createTestDatabase('cli-verify-uncountable');
+    const owner = createPool({ connectionString: opaque.migrationUrl, max: 1 });
+    try {
+      await owner.query(
+        `insert into organisations(id, slug, name)
+         select gen_random_uuid(), 'opaque-' || g, 'Opaque ' || g from generate_series(1, 3) g`,
+      );
+      await owner.query('revoke execute on function app.count_audit_chains(uuid) from moin_app');
+
+      let code = 0;
+      let stdout = '';
+      await run(process.execPath, [CLI, 'verify-audit'], {
+        cwd: REPO,
+        env: {
+          ...process.env,
+          DATABASE_URL: opaque.appUrl,
+          // One tenant per page, and the deadline expires the moment that page is done. So exactly
+          // one tenant is verified, tenants is non-zero, and — with the count function revoked —
+          // the shortfall cannot be established. `unchecked` is therefore 0 and the run is unsound
+          // only because completeness is unknown, which is the term this isolates.
+          MOIN_AUDIT_SWEEP_PAGE_SIZE: '1',
+          MOIN_AUDIT_SWEEP_DEADLINE_MS: '0',
+        },
+      })
+        .then(({ stdout: out }) => {
+          stdout = out;
+        })
+        .catch((error: unknown) => {
+          const failure = error as { code?: number; stdout?: string };
+          code = failure.code ?? -1;
+          stdout = failure.stdout ?? '';
+        });
+
+      const lines = parse(stdout);
+      const completed = lines.find((line) => line['event'] === 'audit.chain.run.completed');
+      // Nothing broken, nothing unchecked, no shortfall counted, tenants > 0 — and still not a
+      // clean run, because whether it covered everything is unknown.
+      expect(completed).toMatchObject({ count: 1, broken: 0, unchecked: 0, unreached: 0 });
+      expect(lines.find((line) => line['event'] === 'audit.chain.run.incomplete')).toBeDefined();
+      expect(code).not.toBe(0);
+    } finally {
+      await owner.end();
+      await opaque.drop();
+    }
+  }, 120_000);
 
   it('reports a failure rather than a clean run when it cannot enumerate tenants', async () => {
     await privileged.query(

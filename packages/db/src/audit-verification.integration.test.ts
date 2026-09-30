@@ -11,7 +11,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createPool, type Pool } from './pool.ts';
 import { appendAuditEvent } from './audit.ts';
 import { isSound, verifyAuditChains, type AuditChainBreak } from './audit-verification.ts';
-import { withTenant } from './tenant.ts';
+import { verifyAuditChain } from './audit.ts';
+import { withTenant, type TenantClient } from './tenant.ts';
 
 const ORG_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const ORG_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -189,6 +190,86 @@ describe('the daily sweep', () => {
     expect(report.tenants).toBe(4);
     expect(report.sound).toBe(4);
     expect(isSound(report)).toBe(true);
+  });
+
+  it('does not call a deadline-truncated sweep sound, even when every tenant it reached was', async () => {
+    // The fail-open shape this guards: one tenant per page, the first tenant verifies, the deadline
+    // expires before the next claim. Deriving the shortfall from the tenants that were *claimed*
+    // gives zero — every claimed tenant was processed — so "1 claimed, 1 sound" read exactly like a
+    // complete estate while three tenants were never looked at.
+    // The clock is read once at entry and then once after each completed page. Expiring on the
+    // first of those readings ends the sweep after exactly one tenant.
+    let ticks = 0;
+    const clock = (): number => {
+      ticks += 1;
+      return ticks <= 1 ? 0 : 10_000;
+    };
+
+    const report = await verifyAuditChains(app, { pageSize: 1, deadlineMs: 1_000, now: clock });
+
+    expect(report.tenants).toBe(1);
+    expect(report.sound).toBe(1);
+    expect(report.broken).toBe(0);
+    // The three the deadline stopped us reaching, counted from the register rather than inferred.
+    expect(report.unreached).toBe(3);
+    expect(report.unchecked).toBe(3);
+    expect(report.coverageComplete).toBe(false);
+    expect(isSound(report)).toBe(false);
+  });
+
+  it('reports the shortfall at the exact boundary between two pages', async () => {
+    // The deadline is checked at the top of the loop, so the boundary that matters is "expired
+    // after page N, before page N+1". Two of four reached, two not.
+    let ticks = 0;
+    const clock = (): number => {
+      ticks += 1;
+      return ticks <= 2 ? 0 : 10_000;
+    };
+    const seen: number[] = [];
+    const report = await verifyAuditChains(app, {
+      pageSize: 1,
+      deadlineMs: 1_000,
+      now: clock,
+      onIncompleteCoverage: (unreached) => seen.push(unreached),
+    });
+
+    expect(report.tenants).toBe(2);
+    expect(report.sound + report.broken).toBe(2);
+    expect(report.unreached).toBe(2);
+    expect(report.coverageComplete).toBe(false);
+    expect(seen).toStrictEqual([2]);
+    expect(isSound(report)).toBe(false);
+  });
+
+  it('calls a sweep that ran to the end of the register complete', async () => {
+    // The other half of the property: a deadline that never fires must not mark coverage
+    // incomplete, or the check becomes noise and gets ignored.
+    const report = await verifyAuditChains(app, { pageSize: 1, deadlineMs: 600_000 });
+    expect(report.tenants).toBe(4);
+    expect(report.unreached).toBe(0);
+    expect(report.coverageComplete).toBe(true);
+    expect(isSound(report)).toBe(true);
+  });
+
+  it('treats a shortfall it could not count as incomplete, not as zero', async () => {
+    // Not knowing whether coverage was complete is not the same as it being complete.
+    await privileged.query('revoke execute on function app.count_audit_chains(uuid) from moin_app');
+    let ticks = 0;
+    try {
+      const report = await verifyAuditChains(app, {
+        pageSize: 1,
+        deadlineMs: 1_000,
+        now: () => {
+          ticks += 1;
+          return ticks <= 1 ? 0 : 10_000;
+        },
+      });
+      expect(report.unreached).toBe(0);
+      expect(report.coverageComplete).toBe(false);
+      expect(isSound(report)).toBe(false);
+    } finally {
+      await privileged.query('grant execute on function app.count_audit_chains(uuid) to moin_app');
+    }
   });
 
   it('rejects a page size outside the reviewed bounds instead of silently clamping', async () => {
@@ -434,5 +515,87 @@ describe('what the sweep finds', () => {
         'grant execute on function app.claim_audit_chains(integer, uuid) to moin_app',
       );
     }
+  });
+});
+
+describe('the head-and-orphan determination', () => {
+  /**
+   * A client that lets a legitimate append commit *between* the verifier's queries.
+   *
+   * This is the whole test. The old code asked two questions — "is there a head?" then "is there an
+   * event?" — and at READ COMMITTED each took its own snapshot, so an append landing in between
+   * made a sound chain look like `missing-head`: measured, statement 1 saw 0 head rows and
+   * statement 2 saw 1 event. A false integrity alarm is worse than none, because the next real one
+   * is ignored.
+   *
+   * The fix is that both facts now come from one statement, and the proof is that there is no
+   * longer an injection point that produces the false alarm. `after` is the query index the append
+   * commits after; with a single statement, nothing the injector does can split it.
+   */
+  function injectingClient(
+    inner: TenantClient,
+    after: number,
+    inject: () => Promise<void>,
+  ): TenantClient {
+    let queries = 0;
+    return {
+      async query(sql, params) {
+        const result = await inner.query(sql, params);
+        queries += 1;
+        if (queries === after) await inject();
+        return result as never;
+      },
+    };
+  }
+
+  it('does not report missing-head when a first append commits mid-verification', async () => {
+    const fresh = '2a2a2a2a-2a2a-4a2a-8a2a-2a2a2a2a2a2a';
+    await organisation(fresh, 'verify-race');
+
+    const outcome = await withTenant(app, fresh, async (client) =>
+      verifyAuditChain(
+        injectingClient(client, 1, async () => {
+          // A legitimate first append for this tenant, committed from its own connection.
+          await event(fresh);
+        }),
+      ),
+    );
+
+    // Sound: either the single statement saw no head and no event (an empty chain) or it saw both.
+    // What it can never see is one without the other.
+    expect(outcome.valid).toBe(true);
+    if (!outcome.valid) throw new Error(`unexpected break: ${outcome.reason}`);
+  });
+
+  it('still detects a genuine orphan event with no head', async () => {
+    // The other half: the alarm must not have been silenced to fix the false positive.
+    const orphaned = '3b3b3b3b-3b3b-4b3b-8b3b-3b3b3b3b3b3b';
+    await organisation(orphaned, 'verify-orphan');
+    await event(orphaned);
+    await event(orphaned);
+
+    await privileged.query('alter table audit_heads disable trigger audit_heads_advance_only');
+    try {
+      await privileged.query('delete from audit_heads where organisation_id = $1', [orphaned]);
+    } finally {
+      await privileged.query(
+        'alter table audit_heads enable always trigger audit_heads_advance_only',
+      );
+    }
+
+    const outcome = await withTenant(app, orphaned, (client) => verifyAuditChain(client));
+    expect(outcome.valid).toBe(false);
+    if (outcome.valid) throw new Error('expected a break');
+    expect(outcome.reason).toBe('missing-head');
+    // The reported sequence names the highest orphan rather than a hardcoded 1.
+    expect(outcome.seq).toBe('2');
+  });
+
+  it('still reports an empty chain as sound', async () => {
+    const quiet = '4c4c4c4c-4c4c-4c4c-8c4c-4c4c4c4c4c4c';
+    await organisation(quiet, 'verify-quiet');
+    const outcome = await withTenant(app, quiet, (client) => verifyAuditChain(client));
+    expect(outcome.valid).toBe(true);
+    expect(outcome.checked).toBe('0');
   });
 });
