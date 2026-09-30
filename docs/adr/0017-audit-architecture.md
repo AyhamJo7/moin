@@ -36,10 +36,11 @@ Pseudonymisation and retention are separate decisions under ADR-0018 and require
 
 ## Verification
 
-| Enforcement                                                    | Where                                                                                           |
-| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| FORCE RLS, runtime privileges, function owner/path/grants      | `scripts/check-rls-catalog.ts`; real-PostgreSQL audit integration tests                         |
-| Concurrent sequence, provisioning audit and rollback           | `packages/db/src/audit.integration.test.ts`, `packages/db/src/provisioning.integration.test.ts` |
-| Restricted argument keys and values, sample personal-data scan | `packages/db/src/audit.integration.test.ts`                                                     |
-| Chain gap, changed event and missing tail detection            | `packages/db/src/audit.ts`; real-PostgreSQL tamper fixtures                                     |
-| Daily verifier and alarm                                       | P06.10.05 pending scheduling and alert integration                                              |
+| Enforcement                                                                 | Where                                                                                           |
+| --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| FORCE RLS, runtime privileges, function owner/path/grants                   | `scripts/check-rls-catalog.ts`; real-PostgreSQL audit integration tests                         |
+| Writer remains SECURITY DEFINER; append-only trigger is present and enabled | `scripts/check-rls-catalog.ts`; defective-catalog fixtures                                      |
+| Concurrent sequence, provisioning audit and rollback                        | `packages/db/src/audit.integration.test.ts`, `packages/db/src/provisioning.integration.test.ts` |
+| Restricted argument keys and values, sample personal-data scan              | `packages/db/src/audit.integration.test.ts`                                                     |
+| Chain gap, changed event and missing tail detection                         | `packages/db/src/audit.ts`; real-PostgreSQL tamper fixtures                                     |
+| Daily verifier and alarm                                                    | P06.10.05 pending scheduling and alert integration                                              |

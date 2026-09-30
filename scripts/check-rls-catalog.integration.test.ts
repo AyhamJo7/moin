@@ -106,6 +106,39 @@ describe('the QG-09 provisioning registration', () => {
 });
 
 describe('the QG-09 audit registration', () => {
+  it('rejects a missing reviewed audit writer signature', async () => {
+    await ddl(
+      `ALTER FUNCTION app.append_audit_event(uuid, uuid, text, text, text, uuid, jsonb, jsonb, jsonb, text, uuid, uuid, text) RENAME TO append_audit_event_mutant`,
+    );
+    try {
+      expect(rulesFor(await findings(), 'app.append_audit_event')).toContain(
+        'reviewed-function-missing',
+      );
+      expect(rulesFor(await findings(), 'app.append_audit_event_mutant')).toContain(
+        'security-definer-not-allowlisted',
+      );
+    } finally {
+      await ddl(
+        `ALTER FUNCTION app.append_audit_event_mutant(uuid, uuid, text, text, text, uuid, jsonb, jsonb, jsonb, text, uuid, uuid, text) RENAME TO append_audit_event`,
+      );
+    }
+  });
+
+  it('rejects a reviewed audit writer changed to SECURITY INVOKER', async () => {
+    await ddl(
+      `ALTER FUNCTION app.append_audit_event(uuid, uuid, text, text, text, uuid, jsonb, jsonb, jsonb, text, uuid, uuid, text) SECURITY INVOKER`,
+    );
+    try {
+      expect(rulesFor(await findings(), 'app.append_audit_event')).toContain(
+        'reviewed-function-not-security-definer',
+      );
+    } finally {
+      await ddl(
+        `ALTER FUNCTION app.append_audit_event(uuid, uuid, text, text, text, uuid, jsonb, jsonb, jsonb, text, uuid, uuid, text) SECURITY DEFINER`,
+      );
+    }
+  });
+
   it('rejects the exact audit writer without its documented registration', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'moin-audit-definers-'));
     try {
@@ -160,6 +193,31 @@ describe('the QG-09 audit registration', () => {
       await ddl(
         `ALTER FUNCTION app.append_audit_event(uuid, uuid, text, text, text, uuid, jsonb, jsonb, jsonb, text, uuid, uuid, text) OWNER TO moin_migrator`,
       );
+    }
+  });
+});
+
+describe('audit append-only catalog control', () => {
+  it('rejects a disabled mutation guard', async () => {
+    await ddl('ALTER TABLE audit_events DISABLE TRIGGER audit_events_append_only');
+    try {
+      expect(rulesFor(await findings(), 'audit_events')).toContain(
+        'audit-append-only-trigger-unsafe',
+      );
+    } finally {
+      await ddl('ALTER TABLE audit_events ENABLE TRIGGER audit_events_append_only');
+    }
+  });
+
+  it('rejects a dropped mutation guard', async () => {
+    await ddl('DROP TRIGGER audit_events_append_only ON audit_events');
+    try {
+      expect(rulesFor(await findings(), 'audit_events')).toContain(
+        'audit-append-only-trigger-missing',
+      );
+    } finally {
+      await ddl(`CREATE TRIGGER audit_events_append_only BEFORE UPDATE OR DELETE ON audit_events
+        FOR EACH ROW EXECUTE FUNCTION app.reject_audit_mutation()`);
     }
   });
 });

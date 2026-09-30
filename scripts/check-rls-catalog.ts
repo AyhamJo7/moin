@@ -78,6 +78,7 @@ interface ForeignKeyRow {
 interface FunctionRow {
   readonly function_name: string;
   readonly identity_arguments: string;
+  readonly security_definer: boolean;
   readonly owner_name: string;
   readonly search_path: string | null;
   readonly execute_grantees: string[];
@@ -191,6 +192,7 @@ const FK_QUERY = `
 const FUNCTION_QUERY = `
   SELECT (n.nspname || '.' || p.proname)::text AS function_name,
          oidvectortypes(p.proargtypes)::text AS identity_arguments,
+         p.prosecdef AS security_definer,
          pg_get_userbyid(p.proowner)::text AS owner_name,
          (SELECT s FROM unnest(COALESCE(p.proconfig, '{}')) s WHERE s LIKE 'search_path=%') AS search_path,
          COALESCE((SELECT array_agg((CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee) END)::text ORDER BY a.grantee)
@@ -198,7 +200,26 @@ const FUNCTION_QUERY = `
            WHERE a.privilege_type = 'EXECUTE' AND a.grantee <> p.proowner), ARRAY[]::text[]) AS execute_grantees
   FROM pg_proc p
   JOIN pg_namespace n ON n.oid = p.pronamespace
-  WHERE p.prosecdef AND n.nspname IN ('public', 'app')
+  WHERE n.nspname IN ('public', 'app')
+`;
+
+const AUDIT_TRIGGER_TYPE = 27; // row (1) + before (2) + delete (8) + update (16)
+
+interface AuditTriggerRow {
+  readonly name: string;
+  readonly enabled: string;
+  readonly trigger_type: number;
+  readonly correct_function: boolean;
+}
+
+const AUDIT_TRIGGER_QUERY = `
+  SELECT t.tgname::text AS name, t.tgenabled::text AS enabled,
+         t.tgtype::int AS trigger_type,
+         COALESCE(t.tgfoid = to_regprocedure('app.reject_audit_mutation()'), false) AS correct_function
+  FROM pg_trigger t
+  JOIN pg_class c ON c.oid = t.tgrelid
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE n.nspname = 'public' AND c.relname = 'audit_events' AND NOT t.tgisinternal
 `;
 
 const ROLE_QUERY = `SELECT rolname::text, rolbypassrls, rolsuper FROM pg_roles WHERE rolname = ANY($1)`;
@@ -302,8 +323,20 @@ export async function inspect(
       }
     }
 
+    const reviewedFunctionsSeen = new Set<string>();
     for (const fn of (await pool.query<FunctionRow>(FUNCTION_QUERY)).rows) {
       const approved = APPROVED_DEFINERS[fn.function_name];
+      if (fn.identity_arguments === approved?.arguments) {
+        reviewedFunctionsSeen.add(fn.function_name);
+        if (!fn.security_definer) {
+          findings.push({
+            rule: 'reviewed-function-not-security-definer',
+            subject: fn.function_name,
+            detail: 'reviewed privileged function was changed to SECURITY INVOKER.',
+          });
+        }
+      }
+      if (!fn.security_definer) continue;
       if (!definers.has(fn.function_name) || fn.identity_arguments !== approved?.arguments) {
         findings.push({
           rule: 'security-definer-not-allowlisted',
@@ -344,6 +377,37 @@ export async function inspect(
             detail: 'explicit EXECUTE grants differ from the reviewed role set.',
           });
         }
+      }
+    }
+    for (const name of Object.keys(APPROVED_DEFINERS)) {
+      if (!reviewedFunctionsSeen.has(name)) {
+        findings.push({
+          rule: 'reviewed-function-missing',
+          subject: name,
+          detail: 'the exact reviewed privileged function signature is absent from the catalog.',
+        });
+      }
+    }
+
+    if (tables.some((table) => table.table_name === 'audit_events')) {
+      const triggers = (await pool.query<AuditTriggerRow>(AUDIT_TRIGGER_QUERY)).rows;
+      const guard = triggers.find((trigger) => trigger.name === 'audit_events_append_only');
+      if (guard === undefined) {
+        findings.push({
+          rule: 'audit-append-only-trigger-missing',
+          subject: 'audit_events',
+          detail: 'the reviewed UPDATE/DELETE rejection trigger is absent.',
+        });
+      } else if (
+        guard.enabled !== 'O' ||
+        guard.trigger_type !== AUDIT_TRIGGER_TYPE ||
+        !guard.correct_function
+      ) {
+        findings.push({
+          rule: 'audit-append-only-trigger-unsafe',
+          subject: 'audit_events',
+          detail: 'the reviewed row-level BEFORE UPDATE/DELETE trigger is disabled or changed.',
+        });
       }
     }
 
