@@ -171,7 +171,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise ValueError("not a JSON object")
     except ValueError as exc:
         return fail_closed(f"could not parse hook input ({exc})")
-    root = _kit.repo_root(str(payload.get("cwd") or ""))
+    root = _kit.repo_root(str(payload.get("cwd") or ""), str(payload.get("session_id") or ""))
     if root is None:
         return 0
     session = str(payload.get("session_id") or "unknown")

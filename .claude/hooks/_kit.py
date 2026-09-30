@@ -81,7 +81,32 @@ def toplevel(start: Path) -> Path | None:
     return Path(proc.stdout.strip()) if proc.returncode == 0 else None
 
 
-def repo_root(cwd: str | None) -> Path | None:
+def repo_root(cwd: str | None, session: str | None = None) -> Path | None:
+    project = os.environ.get("CLAUDE_PROJECT_DIR")
+    if session and project:
+        key = hashlib.sha256(session.encode()).hexdigest()[:24]
+        record = Path(project) / ".claude" / "state" / "worktrees" / f"{key}.json"
+        if record.exists():
+            data = json.loads(record.read_text())
+            active = Path(data["worktree"])
+            expected = Path(data["common_dir"])
+            project_common = git_lines(
+                Path(project), "rev-parse", "--path-format=absolute", "--git-common-dir"
+            )
+            active_common = git_lines(
+                active, "rev-parse", "--path-format=absolute", "--git-common-dir"
+            )
+            if (
+                not project_common
+                or not active_common
+                or Path(project_common[0]).resolve() != expected
+                or Path(active_common[0]).resolve() != expected
+            ):
+                raise RuntimeError("active session worktree is no longer valid")
+            top = toplevel(active)
+            if top is None or top.resolve() != active.resolve():
+                raise RuntimeError("active session worktree was replaced")
+            return top
     for cand in (cwd, os.environ.get("CLAUDE_PROJECT_DIR")):
         if cand:
             top = toplevel(Path(cand))
