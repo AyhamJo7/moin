@@ -1,3 +1,4 @@
+-- migration-check: allow truncate because the only TRUNCATE here is inside a BEFORE TRUNCATE guard that rejects it; no data is destroyed.
 -- 0010 — the tenant register the daily chain verifier walks (P06.10.05, INV-10).
 --
 -- ## Why this table has to exist
@@ -48,8 +49,18 @@ AS $$ BEGIN
   RAISE EXCEPTION 'audit chain registrations are append-only' USING ERRCODE = 'insufficient_privilege';
 END $$;
 REVOKE ALL ON FUNCTION app.reject_registry_mutation() FROM PUBLIC;
+
+-- `ENABLE ALWAYS` and a separate `TRUNCATE` guard, for the reasons 0008 sets out: a guard that
+-- `session_replication_role = 'replica'` switches off is not a guard, and `TRUNCATE` is a third
+-- row-removing verb that neither `BEFORE UPDATE` nor `BEFORE DELETE` sees. Emptying this table is
+-- precisely the attack the append-only rule exists to stop — every tenant would leave the worklist
+-- at once and the next sweep would report a clean run over nobody.
 CREATE TRIGGER audit_chain_registry_append_only BEFORE UPDATE OR DELETE ON audit_chain_registry
   FOR EACH ROW EXECUTE FUNCTION app.reject_registry_mutation();
+ALTER TABLE audit_chain_registry ENABLE ALWAYS TRIGGER audit_chain_registry_append_only;
+CREATE TRIGGER audit_chain_registry_no_truncate BEFORE TRUNCATE ON audit_chain_registry
+  FOR EACH STATEMENT EXECUTE FUNCTION app.reject_registry_mutation();
+ALTER TABLE audit_chain_registry ENABLE ALWAYS TRIGGER audit_chain_registry_no_truncate;
 
 -- Registration rides along with the insert that creates the tenant. Not SECURITY DEFINER: every
 -- path that may insert an organisation (the provisioning definer, a migration) already owns or is
@@ -64,6 +75,41 @@ END $$;
 REVOKE ALL ON FUNCTION app.register_audit_chain() FROM PUBLIC;
 CREATE TRIGGER organisations_register_audit_chain AFTER INSERT ON organisations
   FOR EACH ROW EXECUTE FUNCTION app.register_audit_chain();
+ALTER TABLE organisations ENABLE ALWAYS TRIGGER organisations_register_audit_chain;
+
+-- ---------------------------------------------------------------------------------------------
+-- Backfill: the trigger only sees inserts that come after it.
+-- ---------------------------------------------------------------------------------------------
+--
+-- Every organisation that already exists when this migration lands would otherwise be absent from
+-- the register **permanently** — and because the register is append-only and `organisations` cannot
+-- be enumerated by any non-superuser role, no later repair script could add it. The window to get
+-- this right closes when the migration is first applied.
+--
+-- The obvious backfill is also the trap: `INSERT … SELECT id FROM organisations` inserts **zero
+-- rows and raises nothing**, because FORCE ROW LEVEL SECURITY applies to the migrator that owns the
+-- table and `app.current_org()` is NULL here — a silent no-op that looks like success. So FORCE is
+-- lifted for the length of this transaction, which is the one place it is legitimate: the migration
+-- runs in a single transaction as the table's owner, the setting is restored below, and a failure
+-- anywhere in between rolls the whole thing back. The catalog check independently fails on any
+-- tenant table that is not FORCEd, so a migration that forgets to restore it cannot reach `main`.
+ALTER TABLE organisations NO FORCE ROW LEVEL SECURITY;
+INSERT INTO audit_chain_registry(tenant_id) SELECT id FROM organisations ON CONFLICT DO NOTHING;
+DO $$
+DECLARE
+  organisation_count bigint;
+  registered_count bigint;
+BEGIN
+  SELECT count(*) INTO organisation_count FROM organisations;
+  SELECT count(*) INTO registered_count FROM audit_chain_registry;
+  IF organisation_count <> registered_count THEN
+    RAISE EXCEPTION
+      'audit chain register backfill covered % of % organisation(s). Every tenant must be registered before the daily verifier can claim full coverage (INV-10).',
+      registered_count, organisation_count;
+  END IF;
+END
+$$;
+ALTER TABLE organisations FORCE ROW LEVEL SECURITY;
 
 -- ---------------------------------------------------------------------------------------------
 -- The claim function the verifier's `withSystemWork` sweep calls.
@@ -75,8 +121,12 @@ CREATE TRIGGER organisations_register_audit_chain AFTER INSERT ON organisations
 -- the register: constraining the runtime role to a paged list of identifiers is narrower than
 -- letting it select the table and join against it.
 --
--- Paging is by key. `OFFSET` would re-scan and, worse, could skip a tenant if the set changed
--- between pages — a provisioning that lands mid-run must not drop a chain out of the sweep.
+-- Paging is by key rather than `OFFSET`, which would re-scan and could shift rows between pages so
+-- that an existing tenant is skipped. Note what this does *not* promise: identifiers are random
+-- UUIDs, so a tenant registered while a sweep is in flight sorts before the cursor about half the
+-- time and is then picked up by the next run rather than this one. That is acceptable — its chain is
+-- at most one event old — and it is stated here rather than implied, because the reconciliation
+-- function below is what actually guarantees no tenant is missed indefinitely.
 
 CREATE FUNCTION app.claim_audit_chains(p_limit integer, p_after uuid)
   RETURNS TABLE (organisation_id uuid, id uuid)
@@ -93,3 +143,36 @@ REVOKE ALL ON FUNCTION app.claim_audit_chains(integer, uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app.claim_audit_chains(integer, uuid) TO moin_app;
 COMMENT ON FUNCTION app.claim_audit_chains(integer, uuid)
   IS 'QG-09: identifiers only — one page of tenants whose audit chain the daily verifier must check.';
+
+-- ---------------------------------------------------------------------------------------------
+-- Reconciliation: is the register itself complete?
+-- ---------------------------------------------------------------------------------------------
+--
+-- The sweep treats the register as its worklist, so on its own it cannot tell a clean estate from a
+-- register that is missing tenants. The registration trigger can be disabled and re-enabled around
+-- an insert, leaving nothing in the catalog to find afterwards, and that gap would otherwise read as
+-- a clean run forever.
+--
+-- `provisioning_requests` is the independent witness: it is global, deliberately outside RLS so that
+-- retries can be made idempotent before tenant context exists (`0007`), and every tenant the
+-- application can create leaves an accepted row in it. Comparing it with the register turns a
+-- missing registration into a finding instead of silence. Identifiers only, as ever.
+CREATE FUNCTION app.unregistered_audit_chains(p_limit integer)
+  RETURNS TABLE (organisation_id uuid, id uuid)
+  LANGUAGE sql STABLE SECURITY DEFINER
+  SET search_path = pg_catalog, public, app, pg_temp
+AS $$
+  SELECT r.tenant_id AS organisation_id, r.tenant_id AS id
+  FROM provisioning_requests r
+  WHERE r.tenant_id IS NOT NULL
+    AND NOT EXISTS (
+      SELECT 1 FROM audit_chain_registry c WHERE c.tenant_id = r.tenant_id
+    )
+  GROUP BY r.tenant_id
+  ORDER BY r.tenant_id
+  LIMIT least(greatest(coalesce(p_limit, 0), 0), 1000)
+$$;
+REVOKE ALL ON FUNCTION app.unregistered_audit_chains(integer) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app.unregistered_audit_chains(integer) TO moin_app;
+COMMENT ON FUNCTION app.unregistered_audit_chains(integer)
+  IS 'QG-09: identifiers only — provisioned tenants whose audit chain is missing from the register.';

@@ -14,6 +14,16 @@
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).
 
+**Deviation, flagged rather than done quietly.** P06.10.01 reads "trigger blocking UPDATE/DELETE
+(**except the pseudonymisation function**)". No such exception exists, and that is deliberate: the
+pseudonymisation function is P16.05.02's erasure pipeline and does not exist yet, so an exception
+now would be a hole in the append-only guarantee with nothing legitimate on the other side of it.
+ADR-0017 records the position explicitly — pseudonymisation and retention are ADR-0018 decisions and
+need a reviewed chain-preserving design before implementation, because rewriting an event changes
+the hash it contributed and therefore every hash after it. The table, the blocking trigger and the
+revoked grants — the nis2 pattern this item asks for — are delivered and verified. The exception is
+outstanding against P16.05.02, not against this item.
+
 Standalone real-PostgreSQL run: `packages/db/src/audit.integration.test.ts` 11/11.
 
 `audit_events` and `audit_heads` are tenant tables under FORCE RLS with `UNIQUE (organisation_id,

@@ -24,19 +24,49 @@
  * anyone having to predict their shape. The patterns below are kept as well, because they name the
  * finding usefully when it is a contact detail.
  *
- *   node scripts/check-audit-arguments.ts              # uses DATABASE_URL
+ * ## Why it sweeps tenant by tenant instead of selecting the table
+ *
+ * The first version of this file ran one plain `SELECT` over `audit_events` with no tenant context,
+ * and it was worse than useless. Measured, not reasoned about: as `moin_app` it died on
+ * `permission denied` for the allowlist; as `moin_migrator` — which *owns* the tables in production
+ * — FORCE ROW LEVEL SECURITY returned **zero rows**, so it printed "every stored argument is a
+ * registered key with a reviewed value kind" and exited 0 without inspecting anything. It only
+ * appeared to work in its own test, because the test handed it the local bootstrap superuser.
+ *
+ * That is the same trap migration 0010's header documents for `organisations`, and this check now
+ * has the same shape as the daily verifier: enumerate tenants through the reviewed claim function,
+ * then read each tenant's rows inside `withTenant` as the ordinary application role. A scan that
+ * inspected no rows while tenants exist is a **failure**, not a pass.
+ *
+ *   node scripts/check-audit-arguments.ts              # uses DATABASE_URL (the application role)
  *   node scripts/check-audit-arguments.ts --url <url>
  */
 
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { createPool } from '@moin/db/pool';
+import { withSystemWork, type ClaimedItem, type TenantClient } from '@moin/db';
 
 /** The value kinds the reviewed registry permits. Widening this set is a QG-09 review. */
 const REVIEWED_VALUE_KINDS = ['uuid', 'boolean', 'count'] as const;
 
 /** The one string-valued kind. Any other stored string is a leak by construction. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+
+/** Tenants per claim page, matching the daily verifier's shape. */
+const TENANT_PAGE_SIZE = 200;
+
+/**
+ * The shape an argument key is allowed to have.
+ *
+ * `args_sanitized` is only `jsonb_typeof(...) = 'object'` at the column level, so a row that did
+ * not come through the writer — this file's whole threat model — can carry any key at all,
+ * including `{"hans.mueller@example.test": true}`. The subject of a finding is printed, so an
+ * unvalidated key would make this check the very leak it exists to catch.
+ */
+const SAFE_KEY = /^[a-z][a-z0-9_]{0,63}$/u;
+/** Same reasoning for the operation, which is CHECK-constrained but only on rows the writer wrote. */
+const SAFE_OPERATION = /^[a-z][a-z0-9_.-]{0,127}$/u;
 
 /** Named so a finding reads usefully when the leak is a contact detail. */
 const CONTACT_PATTERNS: readonly { readonly name: string; readonly pattern: RegExp }[] = [
@@ -51,22 +81,49 @@ export interface Finding {
   readonly detail: string;
 }
 
-interface AllowlistRow {
+export interface ScanResult {
+  readonly findings: readonly Finding[];
+  /** Tenants enumerated through the claim function. */
+  readonly tenants: number;
+  /** Audit events actually inspected. Zero with tenants present means the scan proved nothing. */
+  readonly events: number;
+}
+
+/** A printable label for a finding, so a forged key cannot reach the output (INV-12). */
+function subjectFor(operation: string, key: string): string {
+  const safeOperation = SAFE_OPERATION.test(operation) ? operation : '<unprintable operation>';
+  const safeKey = SAFE_KEY.test(key) ? key : '<unprintable key>';
+  return `${safeOperation}.${safeKey}`;
+}
+
+interface AllowlistRow extends Record<string, unknown> {
   readonly operation: string;
   readonly argument_key: string;
   readonly value_kind: string;
 }
 
-interface ArgumentRow {
+interface ArgumentRow extends Record<string, unknown> {
   readonly operation: string;
   readonly key: string;
   readonly value: string;
   readonly kind: string;
-  readonly registered_kind: string | null;
   readonly occurrences: string;
 }
 
-interface ValidationRow {
+interface ShapeRow extends Record<string, unknown> {
+  readonly operation: string;
+  readonly target_kind: string;
+  readonly occurrences: string;
+}
+
+interface VersionRow extends Record<string, unknown> {
+  readonly operation: string;
+  readonly key: string;
+  readonly value: string;
+  readonly occurrences: string;
+}
+
+interface ValidationRow extends Record<string, unknown> {
   readonly operation: string;
   readonly key: string;
   readonly kind: string;
@@ -78,19 +135,17 @@ const ALLOWLIST_QUERY = `
 `;
 
 /**
- * Stored arguments, grouped. The value is returned as text only for the shape rules below; it is
- * never printed, because printing it is the leak this check exists to find.
+ * Stored arguments for the current tenant, grouped. The value is returned as text only for the
+ * shape rules below; it is never printed, because printing it is the leak this check exists to find.
  */
 const ARGUMENT_QUERY = `
   SELECT e.operation::text AS operation,
          arg.key::text AS key,
          arg.value #>> '{}' AS value,
          jsonb_typeof(arg.value)::text AS kind,
-         (SELECT a.value_kind::text FROM audit_argument_allowlist a
-           WHERE a.operation = e.operation AND a.argument_key = arg.key) AS registered_kind,
          count(*)::text AS occurrences
   FROM audit_events e, LATERAL jsonb_each(e.args_sanitized) AS arg(key, value)
-  GROUP BY 1, 2, 3, 4, 5
+  GROUP BY 1, 2, 3, 4
 `;
 
 const VALIDATION_QUERY = `
@@ -101,69 +156,183 @@ const VALIDATION_QUERY = `
   GROUP BY 1, 2, 3
 `;
 
-export async function scan(url: string): Promise<Finding[]> {
-  const pool = createPool({ connectionString: url, max: 1 });
+/**
+ * The columns the writer constrains with a CHECK but nothing inspects afterwards.
+ *
+ * `operation`, `target_kind` and the values in `versions` are all caller-supplied and all
+ * free-text-capable within their patterns: `hans.mueller-at-example.de` satisfies the `operation`
+ * CHECK. They sit in the same 2-year, un-erasable, append-only column family as the arguments, so
+ * they get the same structural treatment — a shape that a person's name cannot satisfy.
+ */
+const SHAPE_QUERY = `
+  SELECT e.operation::text AS operation, e.target_kind::text AS target_kind,
+         count(*)::text AS occurrences
+  FROM audit_events e
+  GROUP BY 1, 2
+`;
+
+const VERSION_QUERY = `
+  SELECT e.operation::text AS operation, ver.key::text AS key,
+         ver.value AS value, count(*)::text AS occurrences
+  FROM audit_events e, LATERAL jsonb_each_text(e.versions) AS ver(key, value)
+  GROUP BY 1, 2, 3
+`;
+
+const EVENT_COUNT_QUERY = `SELECT count(*)::text AS n FROM audit_events`;
+
+const CLAIM_QUERY = 'select organisation_id, id from app.claim_audit_chains($1::integer, $2::uuid)';
+
+/** The value kinds `versions` may carry, mirroring the writer's own check in 0008. */
+const VERSION_KEYS = new Set(['model', 'prompt', 'policy', 'template']);
+const VERSION_VALUE = /^[A-Za-z0-9._:-]{1,64}$/u;
+/** `target_kind`'s CHECK pattern. A name cannot satisfy it; a forged row need not respect it. */
+const SAFE_TARGET_KIND = /^[a-z][a-z0-9_]{0,63}$/u;
+
+export async function scan(url: string): Promise<ScanResult> {
+  const pool = createPool({ connectionString: url, max: 4 });
   const findings: Finding[] = [];
+  const seen = new Set<string>();
+  let tenants = 0;
+  let events = 0;
+
+  /** One finding per subject and rule, however many tenants exhibit it. */
+  const report = (finding: Finding): void => {
+    const key = `${finding.rule}\u0000${finding.subject}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    findings.push(finding);
+  };
+
   try {
-    const reviewed = new Set<string>(REVIEWED_VALUE_KINDS);
-    for (const row of (await pool.query<AllowlistRow>(ALLOWLIST_QUERY)).rows) {
-      if (!reviewed.has(row.value_kind)) {
-        findings.push({
+    // The allowlist is platform reference data and is read once, outside any tenant scope.
+    const reviewedKinds = new Set<string>(REVIEWED_VALUE_KINDS);
+    const registered = new Map<string, string>();
+    const allowlist = await pool.query<AllowlistRow>(ALLOWLIST_QUERY);
+    for (const row of allowlist.rows) {
+      registered.set(`${row.operation}\u0000${row.argument_key}`, row.value_kind);
+      if (!reviewedKinds.has(row.value_kind)) {
+        report({
           rule: 'unreviewed-value-kind',
-          subject: `${row.operation}.${row.argument_key}`,
+          subject: subjectFor(row.operation, row.argument_key),
           detail:
-            `is registered with value kind "${row.value_kind}", which is not one of ` +
-            `${REVIEWED_VALUE_KINDS.join(', ')}. Widening the kinds is how the audit trail ` +
-            'becomes a free-text sink, so it is a QG-09 review, not a migration.',
+            `is registered with a value kind that is not one of ${REVIEWED_VALUE_KINDS.join(', ')}. ` +
+            'Widening the kinds is how the audit trail becomes a free-text sink, so it is a QG-09 ' +
+            'review, not a migration.',
         });
       }
     }
 
-    for (const row of (await pool.query<ArgumentRow>(ARGUMENT_QUERY)).rows) {
-      const subject = `${row.operation}.${row.key}`;
-      if (row.registered_kind === null) {
-        findings.push({
-          rule: 'unregistered-argument-key',
-          subject,
-          detail:
-            `is stored on ${row.occurrences} event(s) but is not on the argument allowlist, so it ` +
-            'did not come through the reviewed writer.',
-        });
-        continue;
-      }
-      if (row.kind !== 'string') continue;
-      // The only string kind the registry permits is `uuid`. Anything else is a value nobody
-      // reviewed, whatever it happens to contain.
-      if (!UUID.test(row.value)) {
-        const contact = CONTACT_PATTERNS.find((candidate) => candidate.pattern.test(row.value));
-        findings.push({
-          rule: contact === undefined ? 'free-text-argument' : 'personal-data-in-argument',
-          subject,
-          detail:
-            contact === undefined
-              ? `holds a non-UUID string on ${row.occurrences} event(s). The only string-valued ` +
-                'argument kind is `uuid`, so this is an unreviewed value. The value itself is not ' +
-                'printed here, because printing it would be the leak.'
-              : `looks like a ${contact.name} on ${row.occurrences} event(s) (INV-12). The value ` +
-                'is not printed.',
-        });
-      }
-    }
+    let after: string | null = null;
+    for (;;) {
+      let page: readonly ClaimedItem[] = [];
+      const result = await withSystemWork(
+        pool,
+        async (client: TenantClient) => {
+          const claimed = await client.query<{ organisation_id: string; id: string }>(CLAIM_QUERY, [
+            TENANT_PAGE_SIZE,
+            after,
+          ]);
+          page = claimed.rows.map((row) => ({
+            organisationId: row.organisation_id,
+            id: row.id,
+          }));
+          return page;
+        },
+        async (_item: ClaimedItem, client: TenantClient) => {
+          const counted = await client.query<{ n: string }>(EVENT_COUNT_QUERY);
+          events += Number(counted.rows[0]?.n ?? '0');
 
-    for (const row of (await pool.query<ValidationRow>(VALIDATION_QUERY)).rows) {
-      findings.push({
-        rule: 'non-scalar-validation-value',
-        subject: `${row.operation}.${row.key}`,
-        detail:
-          `is a ${row.kind} on ${row.occurrences} event(s). Validation values are booleans and ` +
-          'bounded numbers; anything else can carry text.',
-      });
+          for (const row of (await client.query<ArgumentRow>(ARGUMENT_QUERY)).rows) {
+            const subject = subjectFor(row.operation, row.key);
+            const kind = registered.get(`${row.operation}\u0000${row.key}`);
+            if (kind === undefined) {
+              report({
+                rule: 'unregistered-argument-key',
+                subject,
+                detail:
+                  'is stored on at least one event but is not on the argument allowlist, so it did ' +
+                  'not come through the reviewed writer.',
+              });
+              continue;
+            }
+            if (row.kind !== 'string') continue;
+            // The only string kind the registry permits is `uuid`. Anything else is a value nobody
+            // reviewed, whatever it happens to contain.
+            if (!UUID.test(row.value)) {
+              const contact = CONTACT_PATTERNS.find((c) => c.pattern.test(row.value));
+              report({
+                rule: contact === undefined ? 'free-text-argument' : 'personal-data-in-argument',
+                subject,
+                detail:
+                  contact === undefined
+                    ? 'holds a non-UUID string. The only string-valued argument kind is `uuid`, so ' +
+                      'this is an unreviewed value. The value itself is not printed here, because ' +
+                      'printing it would be the leak.'
+                    : `looks like a ${contact.name} (INV-12). The value is not printed.`,
+              });
+            }
+          }
+
+          for (const row of (await client.query<ValidationRow>(VALIDATION_QUERY)).rows) {
+            report({
+              rule: 'non-scalar-validation-value',
+              subject: subjectFor(row.operation, row.key),
+              detail:
+                `is a ${SAFE_KIND.test(row.kind) ? row.kind : 'non-scalar'} value. Validation ` +
+                'values are booleans and bounded numbers; anything else can carry text.',
+            });
+          }
+
+          for (const row of (await client.query<ShapeRow>(SHAPE_QUERY)).rows) {
+            if (!SAFE_OPERATION.test(row.operation) || !SAFE_TARGET_KIND.test(row.target_kind)) {
+              report({
+                rule: 'malformed-operation-or-target-kind',
+                subject: subjectFor(row.operation, row.target_kind),
+                detail:
+                  'does not match the reviewed operation and target-kind shapes, so it did not come ' +
+                  'through the writer. These columns are retained as long as the event and can ' +
+                  'carry text (INV-12).',
+              });
+            }
+          }
+
+          for (const row of (await client.query<VersionRow>(VERSION_QUERY)).rows) {
+            if (!VERSION_KEYS.has(row.key) || !VERSION_VALUE.test(row.value)) {
+              report({
+                rule: 'unreviewed-version-entry',
+                subject: subjectFor(row.operation, row.key),
+                detail:
+                  'is not one of the reviewed version keys, or its value does not match the ' +
+                  'reviewed shape. The value is not printed.',
+              });
+            }
+          }
+        },
+        (item: ClaimedItem) => {
+          report({
+            rule: 'tenant-not-scanned',
+            subject: item.organisationId,
+            detail:
+              'could not be scanned, so nothing is proven about its stored arguments. A scan that ' +
+              'skipped a tenant is not a clean scan.',
+          });
+        },
+      );
+
+      tenants += result.claimed;
+      const last = page.at(-1);
+      if (result.claimed < TENANT_PAGE_SIZE || last === undefined) break;
+      after = last.organisationId;
     }
   } finally {
     await pool.end();
   }
-  return findings;
+
+  return { findings, tenants, events };
 }
+
+/** `jsonb_typeof` output, which is a fixed vocabulary — but the row is data, so it is checked. */
+const SAFE_KIND = /^[a-z]{1,16}$/u;
 
 function urlFromArgv(): string {
   const index = process.argv.indexOf('--url');
@@ -182,28 +351,47 @@ function urlFromArgv(): string {
 }
 
 async function main(): Promise<number> {
-  let findings: Finding[];
+  let result: ScanResult;
   try {
-    findings = await scan(urlFromArgv());
+    result = await scan(urlFromArgv());
   } catch (error) {
     console.error(`audit argument scan could not run: ${String(error)}`);
     return 1;
   }
 
-  if (findings.length === 0) {
-    console.log(
-      'audit arguments: every stored argument is a registered key with a reviewed value kind.',
-    );
-    return 0;
+  if (result.findings.length > 0) {
+    console.error('Audit argument findings (INV-10, INV-12):');
+    for (const finding of result.findings) {
+      console.error(`  [${finding.rule}] ${finding.subject}`);
+      console.error(`    ${finding.detail}`);
+    }
+    console.error('');
+    return 1;
   }
 
-  console.error('Audit argument findings (INV-10, INV-12):');
-  for (const finding of findings) {
-    console.error(`  [${finding.rule}] ${finding.subject}`);
-    console.error(`    ${finding.detail}`);
+  // A scan that inspected nothing is not a clean scan. This is the failure the first version of
+  // this file shipped: FORCE RLS returned zero rows and it printed a reassuring sentence.
+  if (result.tenants === 0) {
+    console.error(
+      'audit argument scan enumerated no tenants, so it proved nothing. Either the register is ' +
+        'empty or the claim function is unreadable by this role — see docs/runbooks/audit-chain-break.md.',
+    );
+    return 1;
   }
-  console.error('');
-  return 1;
+  if (result.events === 0) {
+    console.error(
+      `audit argument scan inspected 0 events across ${String(result.tenants)} tenant(s). On a ` +
+        'database with an audit trail this means the rows are not visible to this role, which is ' +
+        'exactly the vacuous pass this check is written to refuse.',
+    );
+    return 1;
+  }
+
+  console.log(
+    `audit arguments: ${String(result.events)} event(s) across ${String(result.tenants)} tenant(s); ` +
+      'every stored argument is a registered key with a reviewed value kind.',
+  );
+  return 0;
 }
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -25,6 +25,10 @@ import { isSound, verifyAuditChains, type AuditVerificationReport } from './audi
  * mean a database outage paging someone for suspected tampering.
  */
 const EXIT_OK = 0;
+/** Advisory-lock name for the sweep, so two scheduled runs cannot overlap. */
+const ADVISORY_LOCK_KEY = 'moin.verify_audit_chains';
+/** Stop claiming new pages after this long, so an overrun is reported rather than killed silently. */
+const SWEEP_DEADLINE_MS = 30 * 60 * 1000;
 const EXIT_FAILED = 1;
 const EXIT_USAGE = 2;
 const EXIT_CHAIN_BROKEN = 3;
@@ -41,18 +45,15 @@ function connectionString(): string {
   return value;
 }
 
-/** The application role, because that is the privilege level the chain must be intact at. */
-function applicationConnectionString(): string {
+/**
+ * The application role, because that is the privilege level the chain must be intact at.
+ *
+ * Returns rather than exiting: `process.exit` does not flush an async stderr, so exiting from here
+ * loses the explanation whenever stderr is a pipe — which is every scheduled-container case.
+ */
+function applicationConnectionString(): string | undefined {
   const value = process.env['DATABASE_URL'];
-  if (value === undefined || value.length === 0) {
-    console.error(
-      'DATABASE_URL is not set. The audit verifier connects as the application role on purpose: ' +
-        'a privileged connection would prove the chain is intact for a reader production does ' +
-        'not have.',
-    );
-    process.exit(EXIT_FAILED);
-  }
-  return value;
+  return value === undefined || value.length === 0 ? undefined : value;
 }
 
 /**
@@ -62,16 +63,89 @@ function applicationConnectionString(): string {
  * the fields below are safe by construction. They are written as JSON rather than prose because the
  * consumer is a log-metric filter that has to match them, and a sentence is not a contract.
  */
-function emit(line: Record<string, string | number>): void {
+interface AlarmLine {
+  readonly event: string;
+  readonly severity?: 'SEV2' | 'SEV3';
+  readonly outcome: string;
+  readonly organisationId?: string;
+  /** A SQLSTATE, or one of the verifier's fixed break reasons. Never a driver message. */
+  readonly reason?: string;
+  readonly seq?: string;
+  readonly checked?: string;
+  readonly count?: number;
+  readonly sound?: number;
+  readonly broken?: number;
+  readonly unchecked?: number;
+  readonly unregistered?: number;
+  readonly durationMs?: number;
+  readonly runbook?: string;
+}
+
+/**
+ * The shape is closed on purpose.
+ *
+ * An open `Record<string, string | number>` is one commit away from "include the error detail so we
+ * can triage faster", which passes lint, passes every test, and ships a driver message quoting its
+ * input. A named field has to be added here, where the INV-12 question gets asked.
+ */
+function emit(line: AlarmLine): void {
   console.log(JSON.stringify(line));
 }
 
+/** SQLSTATE if the driver supplied one, else the error class. Never a message. */
+function sqlState(error: unknown): string {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (typeof code === 'string' && /^[0-9A-Z]{5}$/u.test(code)) return code;
+  return error instanceof Error && error.name !== 'error' ? error.name : 'unknown';
+}
+
 async function verifyAudit(): Promise<number> {
-  const pool = createPool({ connectionString: applicationConnectionString(), max: 4 });
+  const connectionString = applicationConnectionString();
+  if (connectionString === undefined) {
+    console.error(
+      'DATABASE_URL is not set. The audit verifier connects as the application role on purpose: ' +
+        'a privileged connection would prove the chain is intact for a reader production does ' +
+        'not have.',
+    );
+    return EXIT_FAILED;
+  }
+
+  const pool = createPool({ connectionString, max: 4 });
   let report: AuditVerificationReport;
   const startedAt = Date.now();
   try {
+    // One sweep at a time. A full verification is O(events that have ever existed), so it will one
+    // day overrun its daily window; two overlapping sweeps would then double the load on the table
+    // they are reading and neither would finish. The lock is session-scoped and released when this
+    // process's connection closes, including on a crash.
+    const lock = await pool.query<{ locked: boolean }>(
+      'select pg_try_advisory_lock(hashtext($1)) as locked',
+      [ADVISORY_LOCK_KEY],
+    );
+    if (lock.rows[0]?.locked !== true) {
+      emit({
+        event: 'audit.chain.run.skipped',
+        severity: 'SEV3',
+        outcome: 'already-running',
+        runbook: 'docs/runbooks/audit-chain-break.md',
+      });
+      return EXIT_FAILED;
+    }
+
     report = await verifyAuditChains(pool, {
+      deadlineMs: SWEEP_DEADLINE_MS,
+      onUnregistered: (organisationId) => {
+        // Not a broken chain — a chain the sweep could not even know it should check. Same
+        // severity as a break, because "no coverage" and "corrupted" are equally unacceptable
+        // answers to "is the audit trail intact".
+        emit({
+          event: 'audit.chain.unregistered',
+          severity: 'SEV2',
+          outcome: 'unregistered',
+          organisationId,
+          runbook: 'docs/runbooks/audit-chain-break.md',
+        });
+      },
       // Emitted as each one is found rather than at the end: a sweep over many tenants that is
       // killed halfway must still have alarmed on what it already saw.
       onBreak: (found) => {
@@ -92,8 +166,12 @@ async function verifyAudit(): Promise<number> {
           severity: 'SEV3',
           outcome: 'unchecked',
           organisationId: failure.organisationId,
-          // The error message is not echoed: it routinely quotes the input that caused it (INV-12).
-          reason: failure.error instanceof Error ? failure.error.name : 'unknown',
+          // Not the message — it routinely quotes the input that caused it (INV-12) — and not
+          // `name` either: `pg` sets that to the literal "error" for every database failure, so a
+          // revoked grant and a dropped connection produced the identical alarm and the runbook's
+          // first question was unanswerable. SQLSTATE is non-personal by construction and tells
+          // 42501 (permission denied) from 57P01 (admin shutdown) immediately.
+          reason: sqlState(failure.error),
           runbook: 'docs/runbooks/audit-chain-break.md',
         });
       },
@@ -105,7 +183,7 @@ async function verifyAudit(): Promise<number> {
       event: 'audit.chain.run.failed',
       severity: 'SEV3',
       outcome: 'failed',
-      reason: error instanceof Error ? error.name : 'unknown',
+      reason: sqlState(error),
       runbook: 'docs/runbooks/audit-chain-break.md',
     });
     return EXIT_FAILED;
@@ -120,12 +198,26 @@ async function verifyAudit(): Promise<number> {
     sound: report.sound,
     broken: report.broken,
     unchecked: report.unchecked,
+    unregistered: report.unregistered,
     durationMs: Date.now() - startedAt,
   });
 
+  // A sweep that walked nobody has verified nothing. On a database with tenants that means the
+  // register is empty or unreadable, and "sound over zero tenants" is the single worst thing this
+  // job could report — it is indistinguishable from a healthy day.
+  if (report.tenants === 0) {
+    emit({
+      event: 'audit.chain.registry.empty',
+      severity: 'SEV3',
+      outcome: 'no-coverage',
+      runbook: 'docs/runbooks/audit-chain-break.md',
+    });
+    return EXIT_FAILED;
+  }
+
   if (report.broken > 0) return EXIT_CHAIN_BROKEN;
-  // An unchecked tenant is not a clean run: it is a gap in today's coverage.
-  if (report.unchecked > 0) return EXIT_FAILED;
+  // A tenant that is unchecked, or absent from the register entirely, is a gap in today's coverage.
+  if (report.unchecked > 0 || report.unregistered > 0) return EXIT_FAILED;
   return EXIT_OK;
 }
 
@@ -153,8 +245,10 @@ async function main(): Promise<number> {
     console.error('usage: db migrate | db seed | db verify-audit');
     return EXIT_USAGE;
   } catch (error) {
-    // The connection string can carry a password, so the driver's message is not echoed (INV-15).
-    console.error(error instanceof Error ? error.message : 'the command failed');
+    // Neither the message nor `error.name` (see `sqlState`): a server message names internal
+    // objects and can quote the input that caused it, and stdout and stderr are collected together
+    // by every container log driver, so the INV-12 guarantee has to hold on both (INV-15).
+    console.error(`the command failed (${sqlState(error)}); see the runbook for this job`);
     return EXIT_FAILED;
   }
 }

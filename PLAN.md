@@ -2616,7 +2616,7 @@ Roles and RLS framework · `withTenant` / `withSystemWork` · catalog check · o
   - [ ] P06.09.03 Runbook `docs/runbooks/mfa-reset.md` and `compromised-account.md`
   - [ ] P06.09.04 Verify: tabletop run of both runbooks
 - [ ] **P06.10 Audit event infrastructure** `[G:PILOT]`
-  - [x] P06.10.01 `audit_events` table; trigger blocking UPDATE/DELETE (except the pseudonymisation function); privileges revoked (nis2 pattern) — EV-P06-021
+  - [x] P06.10.01 `audit_events` table; trigger blocking UPDATE/DELETE (except the pseudonymisation function); privileges revoked (nis2 pattern) — EV-P06-021 · **Resolution:** the pseudonymisation exception is *not* implemented and is deferred to P16.05.02, which is where that function arrives; an exception now would be a hole with nothing legitimate behind it. ADR-0017/ADR-0018 own the chain-preserving design. Table, blocking trigger (plus `TRUNCATE` and head guards) and revoked grants are delivered.
   - [x] P06.10.02 Per-tenant sequence + hash chain (`prev_hash`, `hash` over canonical JSON) — EV-P06-022
   - [ ] P06.10.03 Writer API used by the tool guard, application services, operator actions and security events; sanitised arguments via per-operation allowlists
   - [x] P06.10.04 Query API (by target, actor, correlation ID) for support and the owner-visible activity log (later UI) — EV-P06-023

@@ -201,23 +201,35 @@ describe('audit append-only catalog control', () => {
   it('rejects a disabled mutation guard', async () => {
     await ddl('ALTER TABLE audit_events DISABLE TRIGGER audit_events_append_only');
     try {
-      expect(rulesFor(await findings(), 'audit_events')).toContain(
+      expect(rulesFor(await findings(), 'audit_events.audit_events_append_only')).toContain(
         'audit-append-only-trigger-unsafe',
       );
     } finally {
-      await ddl('ALTER TABLE audit_events ENABLE TRIGGER audit_events_append_only');
+      await ddl('ALTER TABLE audit_events ENABLE ALWAYS TRIGGER audit_events_append_only');
+    }
+
+    // `ENABLE` alone is "origin only", which replica mode skips — the weaker of the two states,
+    // and the one a careless restore leaves behind.
+    await ddl('ALTER TABLE audit_events ENABLE TRIGGER audit_events_append_only');
+    try {
+      expect(rulesFor(await findings(), 'audit_events.audit_events_append_only')).toContain(
+        'audit-append-only-trigger-unsafe',
+      );
+    } finally {
+      await ddl('ALTER TABLE audit_events ENABLE ALWAYS TRIGGER audit_events_append_only');
     }
   });
 
   it('rejects a dropped mutation guard', async () => {
     await ddl('DROP TRIGGER audit_events_append_only ON audit_events');
     try {
-      expect(rulesFor(await findings(), 'audit_events')).toContain(
+      expect(rulesFor(await findings(), 'audit_events.audit_events_append_only')).toContain(
         'audit-append-only-trigger-missing',
       );
     } finally {
       await ddl(`CREATE TRIGGER audit_events_append_only BEFORE UPDATE OR DELETE ON audit_events
         FOR EACH ROW EXECUTE FUNCTION app.reject_audit_mutation()`);
+      await ddl('ALTER TABLE audit_events ENABLE ALWAYS TRIGGER audit_events_append_only');
     }
   });
 });
@@ -228,22 +240,27 @@ describe('audit chain verification catalog controls', () => {
     // the sweep keeps reporting that it found nothing wrong.
     await ddl('ALTER TABLE audit_chain_registry DISABLE TRIGGER audit_chain_registry_append_only');
     try {
-      expect(rulesFor(await findings(), 'audit_chain_registry')).toContain(
-        'audit-append-only-trigger-unsafe',
-      );
+      expect(
+        rulesFor(await findings(), 'audit_chain_registry.audit_chain_registry_append_only'),
+      ).toContain('audit-append-only-trigger-unsafe');
     } finally {
-      await ddl('ALTER TABLE audit_chain_registry ENABLE TRIGGER audit_chain_registry_append_only');
+      await ddl(
+        'ALTER TABLE audit_chain_registry ENABLE ALWAYS TRIGGER audit_chain_registry_append_only',
+      );
     }
 
     await ddl('DROP TRIGGER audit_chain_registry_append_only ON audit_chain_registry');
     try {
-      expect(rulesFor(await findings(), 'audit_chain_registry')).toContain(
-        'audit-append-only-trigger-missing',
-      );
+      expect(
+        rulesFor(await findings(), 'audit_chain_registry.audit_chain_registry_append_only'),
+      ).toContain('audit-append-only-trigger-missing');
     } finally {
       await ddl(`CREATE TRIGGER audit_chain_registry_append_only
         BEFORE UPDATE OR DELETE ON audit_chain_registry
         FOR EACH ROW EXECUTE FUNCTION app.reject_registry_mutation()`);
+      await ddl(
+        'ALTER TABLE audit_chain_registry ENABLE ALWAYS TRIGGER audit_chain_registry_append_only',
+      );
     }
   });
 
@@ -260,14 +277,16 @@ describe('audit chain verification catalog controls', () => {
     `,
     );
     try {
-      expect(rulesFor(await findings(), 'audit_chain_registry')).toContain(
-        'audit-append-only-trigger-unsafe',
-      );
+      expect(
+        rulesFor(await findings(), 'audit_chain_registry.audit_chain_registry_append_only'),
+      ).toContain('audit-append-only-trigger-unsafe');
     } finally {
       await ddl(`DROP TRIGGER audit_chain_registry_append_only ON audit_chain_registry;
         CREATE TRIGGER audit_chain_registry_append_only
           BEFORE UPDATE OR DELETE ON audit_chain_registry
           FOR EACH ROW EXECUTE FUNCTION app.reject_registry_mutation();
+        ALTER TABLE audit_chain_registry
+          ENABLE ALWAYS TRIGGER audit_chain_registry_append_only;
         DROP FUNCTION app.pretend_reject();`);
     }
   });
@@ -283,6 +302,9 @@ describe('audit chain verification catalog controls', () => {
     } finally {
       await ddl(`CREATE TRIGGER organisations_register_audit_chain AFTER INSERT ON organisations
         FOR EACH ROW EXECUTE FUNCTION app.register_audit_chain()`);
+      await ddl(
+        'ALTER TABLE organisations ENABLE ALWAYS TRIGGER organisations_register_audit_chain',
+      );
     }
 
     await ddl('ALTER TABLE organisations DISABLE TRIGGER organisations_register_audit_chain');
@@ -291,7 +313,62 @@ describe('audit chain verification catalog controls', () => {
         'audit-chain-registration-trigger-unsafe',
       );
     } finally {
-      await ddl('ALTER TABLE organisations ENABLE TRIGGER organisations_register_audit_chain');
+      await ddl(
+        'ALTER TABLE organisations ENABLE ALWAYS TRIGGER organisations_register_audit_chain',
+      );
+    }
+  });
+
+  it('rejects a guard whose body was replaced with one that does not raise', async () => {
+    // The cheapest attack on a guard, and the one every identity rule misses: same OID, same name,
+    // same owner, same signature, same trigger — a body that just returns.
+    await ddl(
+      // eslint-disable-next-line no-restricted-syntax -- function-level setting in a DDL fixture, not a pooled session.
+      `CREATE OR REPLACE FUNCTION app.reject_registry_mutation() RETURNS trigger
+      LANGUAGE plpgsql SET search_path = pg_catalog
+      AS $$ BEGIN RETURN NEW; END $$`,
+    );
+    try {
+      expect(rulesFor(await findings(), 'app.reject_registry_mutation')).toStrictEqual([
+        'reviewed-function-body-changed',
+      ]);
+    } finally {
+      await ddl(
+        // eslint-disable-next-line no-restricted-syntax -- restoring the reviewed function-level setting.
+        `CREATE OR REPLACE FUNCTION app.reject_registry_mutation() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = pg_catalog
+AS $$ BEGIN
+  RAISE EXCEPTION 'audit chain registrations are append-only' USING ERRCODE = 'insufficient_privilege';
+END $$`,
+      );
+    }
+    // The restore has to bring the digest back, or every later case would inherit the finding.
+    expect(rulesFor(await findings(), 'app.reject_registry_mutation')).toStrictEqual([]);
+  });
+
+  it('rejects a register that does not account for every provisioned tenant', async () => {
+    // The register is otherwise its own witness: disabling the registration trigger around one
+    // insert leaves nothing in the catalog to find afterwards.
+    // A literal rather than an interpolated value: the lint rule that forbids building SQL by
+    // interpolation is right, and `ddl()` takes no parameters.
+    await ddl('ALTER TABLE organisations DISABLE TRIGGER organisations_register_audit_chain');
+    await ddl('ALTER TABLE provisioning_requests DISABLE TRIGGER provisioning_request_audit');
+    try {
+      await ddl(`INSERT INTO organisations(id, slug, name)
+        VALUES ('19191919-1919-4919-8919-191919191919', 'catalog-hidden', 'Hidden')`);
+      await ddl(`INSERT INTO provisioning_requests(request_id, tenant_id)
+        VALUES (gen_random_uuid(), '19191919-1919-4919-8919-191919191919')`);
+      expect(rulesFor(await findings(), 'audit_chain_registry')).toContain(
+        'audit-chain-registry-incomplete',
+      );
+    } finally {
+      await ddl(`DELETE FROM provisioning_requests
+        WHERE tenant_id = '19191919-1919-4919-8919-191919191919'`);
+      await ddl(`DELETE FROM organisations WHERE id = '19191919-1919-4919-8919-191919191919'`);
+      await ddl('ALTER TABLE provisioning_requests ENABLE TRIGGER provisioning_request_audit');
+      await ddl(
+        'ALTER TABLE organisations ENABLE ALWAYS TRIGGER organisations_register_audit_chain',
+      );
     }
   });
 
@@ -311,7 +388,9 @@ describe('audit chain verification catalog controls', () => {
   it('rejects a missing reviewed claim function signature', async () => {
     await ddl('DROP FUNCTION app.claim_audit_chains(integer, uuid)');
     try {
+      // Two findings, because identity and body are pinned separately and both are now absent.
       expect(rulesFor(await findings(), 'app.claim_audit_chains')).toStrictEqual([
+        'reviewed-function-body-missing',
         'reviewed-function-missing',
       ]);
     } finally {
@@ -322,10 +401,12 @@ describe('audit chain verification catalog controls', () => {
           LANGUAGE sql STABLE SECURITY DEFINER
           SET search_path = pg_catalog, public, app, pg_temp
         AS $$
-          SELECT r.tenant_id, r.tenant_id FROM audit_chain_registry r
-          WHERE p_after IS NULL OR r.tenant_id > p_after
-          ORDER BY r.tenant_id LIMIT least(greatest(coalesce(p_limit, 0), 0), 1000)
-        $$;
+  SELECT r.tenant_id AS organisation_id, r.tenant_id AS id
+  FROM audit_chain_registry r
+  WHERE p_after IS NULL OR r.tenant_id > p_after
+  ORDER BY r.tenant_id
+  LIMIT least(greatest(coalesce(p_limit, 0), 0), 1000)
+$$;
         REVOKE ALL ON FUNCTION app.claim_audit_chains(integer, uuid) FROM PUBLIC;
         GRANT EXECUTE ON FUNCTION app.claim_audit_chains(integer, uuid) TO moin_app;`,
       );

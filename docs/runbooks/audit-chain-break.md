@@ -1,6 +1,6 @@
 # Runbook — audit chain break (SEV2)
 
-- **Alarms:** `audit.chain.broken` (SEV2) · `audit.chain.unchecked` (SEV3) · `audit.chain.run.failed` (SEV3)
+- **Alarms:** `audit.chain.broken` (SEV2) · `audit.chain.unregistered` (SEV2) · `audit.chain.unchecked` (SEV3) · `audit.chain.registry.empty` (SEV3) · `audit.chain.run.failed` (SEV3) · `audit.chain.run.skipped` (SEV3)
 - **Emitted by:** `pnpm db:verify-audit` (`packages/db/src/cli.ts`, P06.10.05) · **Invariants:** INV-10, INV-12
 - **Related:** ADR-0017, ADR-0018, `docs/architecture/security-definer-allowlist.md`
 
@@ -33,8 +33,10 @@ Nothing the application can do through its normal privileges produces a break.
 Exit codes carry the same split: `3` is a break, `1` is "did not verify", `0` is a clean sweep. They
 are deliberately distinct so a database outage does not page someone for suspected tampering.
 
-An `unchecked` or `run.failed` result is **not** a clean run. It means the day has a coverage gap,
-and it must be resolved and re-run, not acknowledged.
+An `unchecked`, `unregistered`, `registry.empty`, `run.failed` or `run.skipped` result is **not** a
+clean run. Each means the day has a coverage gap, and each must be resolved and re-run, not
+acknowledged. `audit.chain.unregistered` is SEV2 rather than SEV3 because a chain nobody enumerates
+is not a degraded check — it is no check at all, and it looks exactly like a healthy tenant.
 
 ## Fields on the alarm
 
@@ -66,6 +68,8 @@ and constrained values, never a name, a number or a request payload.
    ```
    pnpm db:verify-audit
    ```
+   If it reports `audit.chain.run.skipped`, a previous sweep still holds the advisory lock — find
+   and end that process first rather than forcing a second one.
    It is read-only and safe to run repeatedly. The break is deterministic: a second clean result
    means the first was a defect in the verifier, which is itself a SEV2 finding.
 4. Establish the affected range. `checked` is the last sound sequence and `seq` is where it broke,
@@ -88,9 +92,31 @@ follows the security incident path rather than the availability one, and the fou
 Art. 33 GDPR notification. Preserve a snapshot of the affected tenant's `audit_events` and
 `audit_heads` rows before any remediation.
 
+## Checking the arguments as well as the chain
+
+The chain proves the trail has not been altered. It says nothing about what the trail _contains_,
+which is what `pnpm check:audit-arguments` is for: every stored argument must be a registered key
+with a reviewed value kind, and the only string-valued kind is `uuid`. Run it alongside a chain
+incident, because a restore that broke a chain is exactly the kind of event that also writes rows
+the reviewed writer would have refused.
+
+It exits non-zero if it inspected nothing. That is deliberate — the first version of the check
+returned zero rows under every production role and printed a reassuring sentence.
+
 ## Scheduling
 
 The verifier is a scheduled daily task. Its trigger and the CloudWatch alarms that match these
 lines are Terraform-managed (P05/P15) and are **not** yet provisioned — until they are, this runbook
 is reached by running the command manually. That gap is recorded on P06.10.05 as
 `WAITING_FOR_EXTERNAL`, not as done.
+
+Two things to configure when they are:
+
+- **Alarm on absence, not only on the lines above.** No `audit.chain.run.completed` line within a
+  day is itself an incident: a sweep killed by the scheduler emits nothing, and silence is
+  indistinguishable from a healthy day.
+- **The sweep re-derives every event that has ever existed**, so its runtime grows with the trail.
+  It stops claiming new pages after 30 minutes and reports the tenants it did not reach as
+  `unchecked`. When that starts happening regularly the answer is a reviewed checkpointing design —
+  which trades tamper-detection latency for cost and so needs its own decision — not a longer
+  deadline.

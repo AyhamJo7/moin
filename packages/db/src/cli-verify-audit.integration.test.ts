@@ -144,8 +144,13 @@ describe('the scheduled verifier process', () => {
       );
     }
     // The sample must actually contain the line kinds this test is about.
-    expect(lineFor(result, 'audit.chain.unchecked')).toBeDefined();
+    const unchecked = lineFor(result, 'audit.chain.unchecked');
+    expect(unchecked).toBeDefined();
     expect(lineFor(result, 'audit.chain.run.completed')).toBeDefined();
+    // A SQLSTATE, not `Error.name`: `pg` sets that to the literal "error" for every database
+    // failure, which made a revoked grant and a dropped connection produce the same alarm and left
+    // the runbook's first question unanswerable. 42501 is permission denied.
+    expect(unchecked?.['reason']).toBe('42501');
 
     const allowed = new Set([
       'event',
@@ -160,6 +165,7 @@ describe('the scheduled verifier process', () => {
       'sound',
       'broken',
       'unchecked',
+      'unregistered',
       'durationMs',
     ]);
     const unexpected = result.lines.flatMap((line) =>
@@ -172,6 +178,45 @@ describe('the scheduled verifier process', () => {
       /password|postgres:\/\/|moin_app|permission denied/u,
     );
   }, 60_000);
+
+  it('refuses to call a sweep of zero tenants a clean run', async () => {
+    // Its own database, with no tenants at all. "sound over zero tenants" is the single worst
+    // thing this job could report: it is indistinguishable from a healthy day.
+    const empty = await createTestDatabase('cli-verify-empty');
+    try {
+      const { stdout } = await run(process.execPath, [CLI, 'verify-audit'], {
+        cwd: REPO,
+        env: { ...process.env, DATABASE_URL: empty.appUrl },
+      }).catch((error: unknown) => {
+        const failure = error as { code?: number; stdout?: string };
+        return { stdout: failure.stdout ?? '', code: failure.code };
+      });
+      const lines = parse(stdout);
+      expect(lines.find((line) => line['event'] === 'audit.chain.registry.empty')).toMatchObject({
+        outcome: 'no-coverage',
+      });
+      const completed = lines.find((line) => line['event'] === 'audit.chain.run.completed');
+      expect(completed).toMatchObject({ count: 0 });
+    } finally {
+      await empty.drop();
+    }
+  }, 90_000);
+
+  it('exits non-zero on a sweep of zero tenants', async () => {
+    const empty = await createTestDatabase('cli-verify-empty-code');
+    try {
+      let code = 0;
+      await run(process.execPath, [CLI, 'verify-audit'], {
+        cwd: REPO,
+        env: { ...process.env, DATABASE_URL: empty.appUrl },
+      }).catch((error: unknown) => {
+        code = (error as { code?: number }).code ?? -1;
+      });
+      expect(code).not.toBe(0);
+    } finally {
+      await empty.drop();
+    }
+  }, 90_000);
 
   it('reports a failure rather than a clean run when it cannot enumerate tenants', async () => {
     await privileged.query(

@@ -11,9 +11,35 @@ Every business mutation must leave an ordered, tenant-scoped record that a later
 
 ## Decision (draft)
 
-An audit append and the business mutation it describes run in one tenant transaction. Provisioning precedes an application tenant session, so its global request insert triggers the audit append after the provisioning function sets transaction-local tenant context. The runtime role has SELECT but no direct INSERT, UPDATE, DELETE or TRUNCATE grant on `audit_events` or `audit_heads`. A reviewed `SECURITY DEFINER` function checks a fixed operation and argument policy, locks the tenant head, allocates the next sequence, hashes the previous hash with a canonical payload, inserts the event and advances the head in that transaction. A trigger rejects UPDATE and DELETE even by the table owner. The function has an exact QG-09 allowlist entry, a pinned search path and no dynamic SQL.
+An audit append and the business mutation it describes run in one tenant transaction. Provisioning precedes an application tenant session, so its global request insert triggers the audit append after the provisioning function sets transaction-local tenant context. The runtime role has SELECT but no direct INSERT, UPDATE, DELETE or TRUNCATE grant on `audit_events` or `audit_heads`. A reviewed `SECURITY DEFINER` function checks a fixed operation and argument policy, locks the tenant head, allocates the next sequence, hashes the previous hash with a canonical payload, inserts the event and advances the head in that transaction. A trigger rejects UPDATE and DELETE even by the table owner, and a second one rejects `TRUNCATE`,
+which is a third row-removing verb that no row-level trigger sees. Every guard is `ENABLE ALWAYS`
+rather than the default `ENABLE`: the default is origin-only and does not fire when
+`session_replication_role` is `replica`, which is a session setting rather than DDL and would let a
+guard be switched off with no schema change and nothing left behind to find. The function has an exact QG-09 allowlist entry, a pinned search path and no dynamic SQL.
 
 The stored payload uses explicit typed fields and opaque identifiers. Operation-specific argument keys must be registered with a constrained value kind; an unknown key fails closed. Query and verification APIs always execute under tenant RLS. Until an external immutable anchor is implemented, a privileged actor able to rewrite both events and head can forge a consistent replacement chain; the current chain detects accidental corruption and unauthorised runtime mutation, not that attack.
+
+### The head and the insert path are part of the chain, not around it
+
+Verification walks `seq <= last_seq` and then compares its running hash with `last_hash`. That makes
+the head, and the INSERT path, the cheapest things to attack — and neither requires rewriting a
+committed event. Both were measured before they were guarded:
+
+- `UPDATE audit_heads SET last_seq = 0, last_hash = <zeros>` left every event in place and made
+  verification return `valid: true, checked: 0` for a tenant with a full trail. One statement per
+  tenant turned the whole daily sweep into a no-op with no alarm.
+- inserting a row at `seq = last_seq + 1000000` with arbitrary hashes was not an UPDATE or a DELETE,
+  so the append-only trigger never saw it. Verification reported the chain sound while
+  `listAuditEvents`, which has no head bound, served the forged row as genuine.
+
+So the head may only ever move **forward by exactly one** — the writer's re-lock, which leaves it
+unchanged, is the only other permitted update, and its hash may not change while its sequence stands
+— and an event may only be inserted correctly linked to the head: right sequence, right `prev_hash`,
+and a hash that is actually the SHA-256 over them. The reviewed writer satisfies both by
+construction. The verifier additionally reports `event-past-head` when any sequence exceeds the
+head, read in the same snapshot as the head so a concurrent append cannot raise a false alarm. That
+one check covers both attacks, because a rolled-back head and a forged insert look identical from
+below.
 
 ### The daily verifier, and the register it needs
 
@@ -53,6 +79,32 @@ not a pass. The process exit code carries the same split — `0` sound, `3` a br
 sweep that could not complete — so that a database outage does not page somebody for suspected
 tampering. `docs/runbooks/audit-chain-break.md` is named on every alarm line.
 
+### The register is reconciled against an independent witness
+
+On its own the register is its own witness, and that is not enough: the registration trigger can be
+disabled and re-enabled around a single insert, leaving nothing in the catalog to find afterwards and
+that tenant's chain reading as absent rather than unchecked, forever.
+`provisioning_requests` is the independent witness — global, deliberately outside RLS so retries can
+be made idempotent before tenant context exists, and written for every tenant the application can
+create. `app.unregistered_audit_chains` returns the difference, the sweep reports it as
+`unregistered`, and `isSound` is false whenever it is non-zero. The catalog check asserts the same
+property, so CI fails on a gap even after the trigger has been put back.
+
+The migration that creates the register also backfills it, which is not optional: the trigger only
+sees inserts that come after it, the register is append-only, and no non-superuser role can
+enumerate `organisations` — so a tenant that misses registration could never be added later. The
+backfill lifts FORCE for the length of that one transaction, because the obvious
+`INSERT … SELECT id FROM organisations` inserts zero rows and raises nothing.
+
+### Pinning what the guards do, not only what they are
+
+Every catalog rule pins a function's _identity_ — signature, owner, `search_path`, grants,
+`prosecdef` — and none of them says anything about its behaviour. `CREATE OR REPLACE FUNCTION
+app.reject_registry_mutation() … BEGIN RETURN NEW; END` keeps the same OID, name, owner, signature
+and trigger wiring while removing the guard outright: cheaper than repointing a trigger, and
+invisible to every identity rule. So the body of each guard and each privileged writer is pinned by
+digest as well. A deliberate change is a one-line edit to the reviewed list, which is the point.
+
 ### Checking that the argument policy held
 
 The writer refuses an unregistered key and a value of the wrong kind. That is the control, and
@@ -63,6 +115,19 @@ so any stored argument string that is not a UUID is an unreviewed value, whateve
 never prints the value it finds, because printing it would be the leak.
 
 Pseudonymisation and retention are separate decisions under ADR-0018 and require a reviewed chain-preserving design before implementation. The current append-only trigger provides no erasure exception.
+
+## Known residuals, named rather than implied
+
+These are open. Each was found by adversarial review of this design and each needs a decision that
+is outside P06.10's scope; none is claimed as handled.
+
+| Residual                                                                                                                                                                                                                                                                                                                                                        | Why it is still open                                                                                                                                                                                                                                                                                                                          | Owner         |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
+| **`moin_app` can enumerate every tenant id.** The daily sweep runs as the request-serving role, so a SQL-injection flaw reachable as `moin_app` yields the tenant inventory and the customer count. RLS still prevents data access and tenant context is server-derived, so this costs the unguessable-identifier layer, not isolation.                         | The fix is a dedicated non-superuser role for the verifier (`DATABASE_AUDIT_URL`), and roles are cluster-level objects that `moin_migrator` deliberately cannot create — Terraform provisions them (P05, EXT-09). Until then the capability is granted to `moin_app`, which is the reviewed claim-function shape P06.14.01 already sanctions. | founder / P05 |
+| **`operation`, `target_kind` and `versions` are caller-supplied and only pattern-constrained.** `hans.mueller-at-example.de` satisfies the `operation` CHECK, so a future handler that derives an operation name from request data could write personal data into an append-only, un-erasable column.                                                           | Closing it properly means a reviewed registry of permitted `(operation, target_kind)` pairs and a writer that fails closed on an unregistered pair — a change to the writer contract every future caller depends on. The scanner currently catches only values that violate the CHECK, i.e. a dropped constraint.                             | P07 / P16     |
+| **`locations` carries full DML for `moin_app` with no audit obligation.** A location rename or delete leaves no audit event and the chain still verifies. Latent today: no application code mutates `locations` yet.                                                                                                                                            | The general shape is already acknowledged below ("Infrastructure alone cannot prove that every future caller does so"), but this is the one concrete place the database _hands out_ the capability. The fix belongs with the business-action model, which decides how mutations and their audit appends are bound together.                   | P07           |
+| **The alarm lines bypass `@moin/observability`.** `verify-audit` writes JSON to stdout with `console.log`, which skips the INV-12 redaction allowlist that every service log line goes through. The emitted shape is a closed TypeScript type and is asserted field-by-field across all line kinds, so the current output is safe; the risk is the next commit. | Routing it through `createLogger` requires adding `severity`, `seq`, `checked`, `runbook`, `sound`, `broken`, `unchecked` and `unregistered` to `ALLOWED_FIELDS`. All are non-personal counters and enums and the net effect is stricter, but it edits the INV-12 allowlist, which is a privacy control and not a session's call to loosen.   | founder       |
+| **`pg_temp` sits in every definer `search_path`.** Last in the list and not exploitable for these functions, but a definer has no legitimate need to resolve caller temp objects.                                                                                                                                                                               | It is the existing repository-wide convention; changing it is a project-wide change, not a P06.10 one.                                                                                                                                                                                                                                        | founder       |
 
 ## Alternatives considered
 
@@ -83,6 +148,9 @@ Pseudonymisation and retention are separate decisions under ADR-0018 and require
 - Adding a new argument requires a reviewed schema row and a value-kind decision. Empty arguments work by default.
 - The audit append must be called in the same transaction as each business mutation. Infrastructure alone cannot prove that every future caller does so; mutation-level tests and review remain necessary.
 - Long chains require paged verification. Both the tenant sweep and each chain walk are paged, and the claim function caps a page at 1000 however much the caller asks for.
+- **Full verification is O(events that have ever existed)**, because the chain is never truncated and every run re-derives it. The sweep takes an advisory lock so two runs cannot overlap, and stops claiming new pages after 30 minutes, reporting tenants it did not reach as `unchecked`. When that starts happening regularly the answer is a reviewed checkpointing design — which trades tamper-detection latency for cost — not a longer deadline.
+- **No `audit.chain.run.completed` line within a day is itself an incident.** A sweep killed by its scheduler emits nothing, and silence is indistinguishable from a healthy day, so the alarm set must include absence.
+- ADR-0018's erasure design will have to **drop the `audit_chain_registry → organisations` foreign key**, not merely add an exception to a trigger: with the register append-only and the key in place, an `organisations` row can never be deleted at all.
 - A privileged database administrator remains in the trust boundary until external anchoring exists. A clean verifier run is therefore evidence, not proof, and the runbook says so.
 - Every tenant that has ever existed keeps a register row, including a terminated one. Erasure that would remove it needs the chain-preserving design ADR-0018 owns; the append-only trigger has no erasure exception today.
 - The daily _trigger_ and the CloudWatch alarms that match the emitted lines are Terraform-managed (P05/P15) and are not yet provisioned. Until they are, the sweep is run manually and P06.10.05 is not complete.
@@ -90,16 +158,20 @@ Pseudonymisation and retention are separate decisions under ADR-0018 and require
 
 ## Verification
 
-| Enforcement                                                                 | Where                                                                                                                |
-| --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| FORCE RLS, runtime privileges, function owner/path/grants                   | `scripts/check-rls-catalog.ts`; real-PostgreSQL audit integration tests                                              |
-| Writer remains SECURITY DEFINER; append-only trigger is present and enabled | `scripts/check-rls-catalog.ts`; defective-catalog fixtures                                                           |
-| Concurrent sequence, provisioning audit and rollback                        | `packages/db/src/audit.integration.test.ts`, `packages/db/src/provisioning.integration.test.ts`                      |
-| Restricted argument keys and values, sample personal-data scan              | `packages/db/src/audit.integration.test.ts`                                                                          |
-| Chain gap, changed event and missing tail detection                         | `packages/db/src/audit.ts`; real-PostgreSQL tamper fixtures                                                          |
-| Tenant register filled by trigger, append-only, not readable unelevated     | `packages/db/migrations/0010_audit_chain_verification.sql`; `packages/db/src/audit-verification.integration.test.ts` |
-| Register guard, registration trigger and claim function in the catalog      | `scripts/check-rls-catalog.ts`; `scripts/check-rls-catalog.integration.test.ts`                                      |
-| Daily sweep: every tenant walked, break and gap distinguished from sound    | `packages/db/src/audit-verification.ts`; `packages/db/src/audit-verification.integration.test.ts`                    |
-| Alarm severity, runbook link, exit-code split, no personal data on the log  | `packages/db/src/cli.ts`; `packages/db/src/cli-verify-audit.integration.test.ts`                                     |
-| Stored arguments carry no unreviewed or personal value                      | `scripts/check-audit-arguments.ts`; `scripts/check-audit-arguments.integration.test.ts`                              |
-| Daily schedule and CloudWatch alarm provisioning                            | **Not done.** Terraform (P05/P15), founder-owned; P06.10.05 stays open on it                                         |
+| Enforcement                                                                                  | Where                                                                                                                                |
+| -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| FORCE RLS, runtime privileges, function owner/path/grants                                    | `scripts/check-rls-catalog.ts`; real-PostgreSQL audit integration tests                                                              |
+| Writer remains SECURITY DEFINER; append-only trigger is present and enabled                  | `scripts/check-rls-catalog.ts`; defective-catalog fixtures                                                                           |
+| Concurrent sequence, provisioning audit and rollback                                         | `packages/db/src/audit.integration.test.ts`, `packages/db/src/provisioning.integration.test.ts`                                      |
+| Restricted argument keys and values, sample personal-data scan                               | `packages/db/src/audit.integration.test.ts`                                                                                          |
+| Chain gap, changed event and missing tail detection                                          | `packages/db/src/audit.ts`; real-PostgreSQL tamper fixtures                                                                          |
+| Head advances by one only; an event must be linked to the head; `event-past-head` detected   | `packages/db/migrations/0008_audit_events.sql`; `packages/db/src/audit.ts`; `packages/db/src/audit-verification.integration.test.ts` |
+| `TRUNCATE` refused on events, heads and the register; every guard is `ENABLE ALWAYS`         | `packages/db/migrations/0008_audit_events.sql`; `0010_audit_chain_verification.sql`; `scripts/check-rls-catalog.ts`                  |
+| Guard and writer function **bodies** pinned by digest, not only their identity               | `scripts/check-rls-catalog.ts`; `scripts/check-rls-catalog.integration.test.ts`                                                      |
+| Tenant register filled by trigger, backfilled on apply, append-only, not readable unelevated | `packages/db/migrations/0010_audit_chain_verification.sql`; `packages/db/src/audit-chain-backfill.integration.test.ts`               |
+| Register reconciled against `provisioning_requests`; an unregistered tenant is never "sound" | `app.unregistered_audit_chains`; `packages/db/src/audit-verification.ts`; `scripts/check-rls-catalog.ts`                             |
+| Register guard, registration trigger and claim function in the catalog                       | `scripts/check-rls-catalog.ts`; `scripts/check-rls-catalog.integration.test.ts`                                                      |
+| Daily sweep: every tenant walked, break and gap distinguished from sound                     | `packages/db/src/audit-verification.ts`; `packages/db/src/audit-verification.integration.test.ts`                                    |
+| Alarm severity, runbook link, exit-code split, no personal data on the log                   | `packages/db/src/cli.ts`; `packages/db/src/cli-verify-audit.integration.test.ts`                                                     |
+| Stored arguments carry no unreviewed or personal value                                       | `scripts/check-audit-arguments.ts`; `scripts/check-audit-arguments.integration.test.ts`                                              |
+| Daily schedule and CloudWatch alarm provisioning                                             | **Not done.** Terraform (P05/P15), founder-owned; P06.10.05 stays open on it                                                         |

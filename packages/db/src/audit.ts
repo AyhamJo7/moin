@@ -136,6 +136,8 @@ interface AuditRow extends Record<string, unknown> {
 interface HeadRow extends Record<string, unknown> {
   readonly last_seq: string;
   readonly last_hash: Buffer;
+  /** The highest sequence actually present, read in the same snapshot as the head. */
+  readonly max_seq: string | null;
 }
 
 export type AuditChainResult =
@@ -153,7 +155,14 @@ export type AuditChainResult =
  */
 export async function verifyAuditChain(client: TenantClient): Promise<AuditChainResult> {
   if (currentTenant() === undefined) throw new Error('audit verification requires tenant context');
-  const heads = await client.query<HeadRow>('select last_seq, last_hash from audit_heads');
+  // The head and the highest present sequence are read in **one statement**, so they come from one
+  // snapshot. Two statements would let an append that commits in between look like an event past
+  // the head, and a false integrity alarm is a very expensive thing to cry wolf about.
+  const heads = await client.query<HeadRow>(
+    `select last_seq, last_hash,
+       (select max(seq)::text from audit_events) as max_seq
+     from audit_heads`,
+  );
   const head = heads.rows[0];
   if (head === undefined) {
     const orphan = await client.query('select 1 from audit_events limit 1');
@@ -162,9 +171,21 @@ export async function verifyAuditChain(client: TenantClient): Promise<AuditChain
       : { valid: false, checked: '0', reason: 'missing-head', seq: '1' };
   }
 
+  const finalSeq = BigInt(head.last_seq);
+  // Anything beyond the head is invisible to the walk below, which is what makes both a forged
+  // insert and a rolled-back head cheap attacks: the walk simply stops before reaching them. A head
+  // reset to 0 with events still present is the same finding, which is why one check covers both.
+  if (head.max_seq !== null && BigInt(head.max_seq) > finalSeq) {
+    return {
+      valid: false,
+      checked: '0',
+      reason: 'event-past-head',
+      seq: head.max_seq,
+    };
+  }
+
   let seq = 0n;
   let previous: Buffer = Buffer.alloc(SHA256_BYTES);
-  const finalSeq = BigInt(head.last_seq);
   while (seq < finalSeq) {
     const rows = await client.query<AuditRow>(
       `select seq, prev_hash, hash, canonical_payload,
