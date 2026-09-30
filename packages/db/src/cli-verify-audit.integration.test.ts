@@ -166,6 +166,7 @@ describe('the scheduled verifier process', () => {
       'broken',
       'unchecked',
       'unreached',
+      'populationHighWater',
       'unregistered',
       'durationMs',
     ]);

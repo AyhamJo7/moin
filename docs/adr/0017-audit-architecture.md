@@ -87,6 +87,42 @@ Three properties make the register load-bearing rather than incidental bookkeepi
 `app.claim_audit_chains`, the `withSystemWork` claim shape this repository already reviews
 (P06.14.01), and re-reads each chain inside `withTenant` as itself.
 
+### The population a sweep covers is captured, not current
+
+A sweep's verdict is **sound for the register population captured at its start** — not "sound now".
+The distinction is load-bearing and the previous design got it silently wrong.
+
+The register was paged by `tenant_id`, a random UUID. Measured: the register holding `bbbb…`, a
+sweep that had claimed it, and `aaaa…` registered concurrently gave _page after the cursor: 0 rows;
+count after the cursor: 0; unregistered tenants: 0_ — the last because `aaaa…` **is** registered.
+The sweep reported complete coverage over one tenant while a second had been registered and never
+verified, and the independent provisioning witness could not help, because nothing was missing from
+the register.
+
+UUID order does not encode registration order, so no cursor over it can distinguish "nothing left"
+from "something arrived behind me". Counting is no better: a late tenant _ahead_ of the cursor is
+processed and pushes the processed total up to the original count while an original member is still
+unvisited.
+
+So registration order is recorded rather than inferred. `audit_chain_registry.registration_seq` is a
+`bigint` from a sequence, immutable once assigned — the append-only guard already binds the owner, so
+nothing new was needed to keep it that way. A sweep reads `max(registration_seq)` **once**, and its
+population is exactly the registrations at or below that mark. Three properties follow:
+
+- a member at or below the mark must be verified or counted as unreached, whatever its UUID sorts
+  like;
+- a registration above the mark is not this sweep's population at all, so it cannot make this sweep
+  look incomplete;
+- nothing falls between two sweeps, because a sweep's cursor starts at zero rather than at the
+  previous mark — every member at or below the _current_ mark is in the current population,
+  whenever it was registered.
+
+The alternative is continuous-current soundness, which needs one snapshot held across the whole
+sweep; a REPEATABLE READ transaction spanning every tenant's chain would pin `xmin` on the
+fastest-growing table in the schema for its duration. A captured population is achievable, cheap,
+and says what it means. The sweep reports the mark it used, because "sound" is not interpretable
+without the population it is sound for.
+
 ### Coverage is a property of the register, not of the worklist
 
 The sweep has a wall-clock deadline, and when it fires it has to say whether it finished. It cannot
@@ -182,6 +218,7 @@ is outside P06.10's scope; none is claimed as handled.
 - Adding a new argument requires a reviewed schema row and a value-kind decision. Empty arguments work by default.
 - The audit append must be called in the same transaction as each business mutation. Infrastructure alone cannot prove that every future caller does so; mutation-level tests and review remain necessary.
 - Long chains require paged verification. Both the tenant sweep and each chain walk are paged, and the claim function caps a page at 1000 however much the caller asks for.
+- **A sweep's verdict names a population, not a moment.** Two consecutive sweeps cover overlapping populations and nothing falls between them, but "the audit trail is intact" is only ever asserted of registrations captured at some sweep's start.
 - **Full verification is O(events that have ever existed)**, because the chain is never truncated and every run re-derives it. The sweep takes an advisory lock so two runs cannot overlap, and stops claiming new pages after 30 minutes, reporting tenants it did not reach as `unchecked`. When that starts happening regularly the answer is a reviewed checkpointing design — which trades tamper-detection latency for cost — not a longer deadline.
 - **No `audit.chain.run.completed` line within a day is itself an incident.** A sweep killed by its scheduler emits nothing, and silence is indistinguishable from a healthy day, so the alarm set must include absence.
 - ADR-0018's erasure design will have to **drop the `audit_chain_registry → organisations` foreign key**, not merely add an exception to a trigger: with the register append-only and the key in place, an `organisations` row can never be deleted at all.

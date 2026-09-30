@@ -99,6 +99,8 @@ interface AlarmLine {
   readonly broken?: number;
   readonly unchecked?: number;
   readonly unreached?: number;
+  /** The register high-water mark the sweep's population was captured at. */
+  readonly populationHighWater?: string;
   readonly unregistered?: number;
   readonly durationMs?: number;
   readonly runbook?: string;
@@ -237,6 +239,9 @@ async function verifyAudit(): Promise<number> {
     broken: report.broken,
     unchecked: report.unchecked,
     unreached: report.unreached,
+    // Which population this verdict covers. Without it "sound" is not interpretable: a sound sweep
+    // is sound for the registrations captured at its start, not for the register as it stands now.
+    populationHighWater: report.populationHighWater,
     unregistered: report.unregistered,
     durationMs: Date.now() - startedAt,
   });

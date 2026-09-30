@@ -184,14 +184,12 @@ describe('what the scanner catches', () => {
     // at least one event of its own rather than borrowing one from an earlier test in the file.
     // Relying on file order made it pass in the suite and fail standalone, which the mutation
     // sweep surfaced as an unusable baseline.
-    await withTenant(app, ORG, (client) =>
-      appendAuditEvent(client, {
-        source: 'api',
-        operation: 'test.scan',
-        targetKind: 'organisation',
-        result: 'succeeded',
-      }),
-    );
+    //
+    // Forged rather than appended through the writer: earlier tests in this file forge rows, which
+    // advances `max(seq)` without advancing the head, so a later legitimate append collides on
+    // `(organisation_id, seq)`. The value is a registered key holding a valid UUID, so it is not
+    // itself a finding.
+    await forge('test.scan', { related_id: '44444444-4444-4444-8444-444444444444' });
 
     // The CHECK constraint has to go first, which is the point: a migration that widens the kinds
     // is a one-line change that reads as harmless.

@@ -92,13 +92,25 @@ follows the security incident path rather than the availability one, and the fou
 Art. 33 GDPR notification. Preserve a snapshot of the affected tenant's `audit_events` and
 `audit_heads` rows before any remediation.
 
+## What a clean sweep actually claims
+
+`audit.chain.run.completed` with `outcome: sound` means **sound for the register population captured
+at that sweep's start**, and the line carries `populationHighWater` so you can see which population
+that was. A tenant registered while the sweep was running is not in it and is covered by the next
+run; nothing falls between two runs, because a sweep's cursor starts at the beginning of the register
+rather than where the last one stopped.
+
+So "yesterday's sweep was clean" is not the same as "the trail is intact now". For an incident, the
+question to ask is which sweep covered the tenant and what its `populationHighWater` was.
+
 ## An incomplete sweep
 
 `audit.chain.run.incomplete` means the sweep stopped claiming pages because its wall-clock deadline
 fired, with `unreached` tenants never examined. Those chains are unverified — not sound, not broken.
 
-The shortfall is counted from the register rather than from the tenants the sweep happened to claim,
-because the worklist cannot report on what was never drained from it. If `unreached` is `0` **and**
+The shortfall is counted from the register, inside the captured population, rather than from the
+tenants the sweep happened to claim — the worklist cannot report on what was never drained from it,
+and a cursor over tenant UUIDs could not even see a registration that landed behind it. If `unreached` is `0` **and**
 the run still failed, the count itself could not be established (typically a revoked grant on
 `app.count_audit_chains`): completeness is unknown, which fails closed.
 

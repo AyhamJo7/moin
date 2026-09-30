@@ -36,6 +36,40 @@ which merely have tests next to them. Each entry therefore carries four fields:
 | `expected`       | What would go wrong if the defect shipped — the reviewer's check on whether the variant is worth having |
 | `test` + `kills` | The exact test that must fail, so a passing sweep names its own evidence                                |
 
+### The outcomes, and why only one of them is evidence
+
+An earlier version of the runner treated **any** non-zero exit as a kill. Measured: pointing the
+test database at a closed port reported every variant killed, and a manifest entry naming a test
+that does not exist reported it survived. "54/54 killed" was a count of failures of any kind.
+
+Classification now happens in [`../../scripts/mutation-outcome.ts`](../../scripts/mutation-outcome.ts)
+over the runner's structured JSON report, and it is a pure function with its own tests against
+report fixtures captured from real runs.
+
+| Outcome                 | Meaning                                                                          | Evidence?                                      |
+| ----------------------- | -------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `KILLED_ASSERTION`      | the named test ran and rejected the mutation on an assertion                     | **yes — the only one**                         |
+| `KILLED_BY_TIMEOUT`     | the mutation made the code hang, so the named test failed without asserting      | no: a real detection, weaker than an assertion |
+| `SURVIVED`              | the named test ran and passed under the mutation                                 | no                                             |
+| `BASELINE_FAILED`       | the named test did not pass cleanly on the pristine tree                         | no                                             |
+| `NO_TEST_MATCH`         | tests were collected but none matched the filter — a manifest error              | no                                             |
+| `INFRA_FAILURE`         | unreachable database, revoked grant, setup failure, or no tests collected at all | no                                             |
+| `BUILD_OR_LOAD_FAILURE` | a suite would not transform or load on the pristine tree                         | no                                             |
+| `INVALID_MUTANT`        | the mutated source would not transform or load, so the edit is untestable        | no                                             |
+
+Two rules make the count mean something:
+
+1. **A baseline first.** The named test runs against the pristine tree and must actually run and
+   pass. Without it, a variant "killed" by an already-red test would be counted as evidence, which
+   is how a broken suite launders itself into a perfect score. Baselines are cached per test file
+   and filter for the life of one sweep.
+2. **The outcome comes from the report, not the exit code.**
+
+A variant may also carry a `note`, for the case where `KILLED_ASSERTION` is impossible _and_
+correct: two variants here are rejected by an assertion inside a migration during global setup, so
+no suite runs and no test can claim the kill. That is a stronger control than a test, and the report
+says so rather than inflating the count.
+
 ### Reading a SURVIVED verdict
 
 A survivor is **not** a code defect. It means the named test does not distinguish the defect — the
