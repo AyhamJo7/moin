@@ -150,3 +150,4 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P06-023 | P06.10.04 | 2026-09-30 | `8e5bf76f5ac9` | Tenant-scoped audit query by target, actor and correlation ID | [EV-P06-023-audit-query-api.md](P06/EV-P06-023-audit-query-api.md) |
 | EV-P06-024 | P06.10.05 | 2026-09-30 | `8e5bf76f5ac9` | Daily cross-tenant chain sweep with SEV2 alarm and exit-code split | [EV-P06-024-daily-chain-verifier-and-alarm.md](P06/EV-P06-024-daily-chain-verifier-and-alarm.md) |
 | EV-P06-025 | P06.10.07 | 2026-09-30 | `8e5bf76f5ac9` | Tamper detection, privileged-mutation refusal and the stored-argument scanner | [EV-P06-025-audit-tamper-and-argument-scanner.md](P06/EV-P06-025-audit-tamper-and-argument-scanner.md) |
+| EV-P06-026 | P06.10.07 | 2026-09-30 | `23d70ae293e4` | QG-09 review of the audit diff and the remediation of its High and Critical findings | [EV-P06-026-qg09-review-remediation.md](P06/EV-P06-026-qg09-review-remediation.md) |

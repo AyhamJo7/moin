@@ -168,6 +168,7 @@ Rules
 | P06.10.04 | READY_FOR_REVIEW | 8e5bf76 | EV-P06-023 | Tenant-scoped query by target, actor and correlation ID; malformed filters refused without echoing the input |
 | P06.10.05 | WAITING_FOR_EXTERNAL | 8e5bf76 | EV-P06-024 | Daily cross-tenant sweep, SEV2 alarm, runbook and exit-code split built and verified. **Counterparty:** AWS (EXT-09), founder-owned. **Requested:** 2026-09-30. **Expected:** with P05 cloud foundation. **Fallback:** run `pnpm db:verify-audit` manually and record the result, which is what the runbook says today. The daily trigger and the CloudWatch alarms are Terraform and are not provisioned |
 | P06.10.07 | READY_FOR_REVIEW | 8e5bf76 | EV-P06-025 | Tamper, privileged-mutation and argument-scanner suites; 25 injected defect variants all KILLED |
+| P06.10.07 | READY_FOR_REVIEW | 23d70ae | EV-P06-026 | QG-09 review of the diff by three independent reviewers; every High/Critical reproduced against real PostgreSQL, fixed and mutation-proven; 42 defect variants all KILLED; five residuals recorded with owners |
 | P06.10 | IN_PROGRESS | 8e5bf76 | EV-P06-021…025 | Table, chain, query API, daily verifier, argument scanner and runbook done. Open: .03 adoption by the tool guard, operator and security paths (needs P10.08, P06.11/.12), .05 scheduling (EXT-09) and .06 founder acceptance of ADR-0017 |
 
 ## External waits
@@ -289,3 +290,34 @@ secret-rule fix (#25) merged, with its full-history scan green.
   Not done, and not claimed: P06.10.03 adoption by the tool guard, operator and security paths waits
   on P10.08 and P06.11/.12; P06.10.05 scheduling and the CloudWatch alarms are Terraform and wait on
   EXT-09; P06.10.06 acceptance of ADR-0017 is the founder's, so the ADR stays `PROPOSED`.
+
+- 2026-09-30 — **QG-09 review of P06.10, and what it found.** Three reviewers ran independently on
+  the diff and all three returned BLOCK MERGE. Two findings are worth recording beyond their fix,
+  because both were failures of _verification_ rather than of design, and both had passing tests
+  over them.
+  The argument scanner could not see a single row under any production role. As the runtime role it
+  died on a missing grant; as the role that owns the tables in production, FORCE RLS returned zero
+  rows, so it printed "every stored argument is a registered key with a reviewed value kind" and
+  exited 0 with a planted leak sitting in the table. It passed its own test only because the test
+  handed it the local bootstrap superuser — which is the exact trap this branch documents for
+  `organisations`, in a test two files away, not carried across. A check that fails open is worse
+  than no check, because it reports green and means nothing.
+  The verifier could be silenced without touching a committed event. Its upper bound is the chain
+  head, and the head had no guard: `last_seq = 0` left a full trail in place and returned
+  `valid: true, checked: 0`, while an insert past the head was neither an UPDATE nor a DELETE and so
+  never met the append-only trigger, leaving a forged row that the query API serves as genuine. Both
+  were reproduced before being fixed, and both measurements are now assertions.
+  The pattern in both: the code was checked against the threat it was designed for, and not against
+  the privilege level it would actually run at. Everything here now runs as `moin_app`, and where a
+  measured database fact underpins a design decision — FORCE RLS hiding a table from its own owner —
+  that fact is asserted in the suite rather than recorded in a comment.
+  42 defect variants were injected and all 42 KILLED. Ten initially SURVIVED and every one was a weak
+  test, not weak code; the two most instructive were an INV-12 assertion that only ever ran over a
+  sound sweep, so it never exercised the failure path where a driver message would leak, and a
+  vacuous-pass guard that no test reached because nothing ran the check as a process.
+  `gates full` 14/14 at clean `23d70ae293e4`. Five findings are open with named owners in ADR-0017's
+  "Known residuals" table rather than quietly closed: the verifier still runs as the request-serving
+  role until Terraform can provision a dedicated one (EXT-09); an `(operation, target_kind)` registry
+  needs a writer-contract change (P07/P16); `locations` still carries unaudited DML (P07); routing
+  the alarm lines through the redacting logger would edit the INV-12 allowlist, which is the
+  founder's call; and `pg_temp` in definer search paths is a repository-wide convention.
