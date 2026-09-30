@@ -180,6 +180,19 @@ describe('what the scanner catches', () => {
   });
 
   it('a value kind the registry was widened to accept', async () => {
+    // Its own precondition: `findings()` refuses a scan that inspected nothing, so this test needs
+    // at least one event of its own rather than borrowing one from an earlier test in the file.
+    // Relying on file order made it pass in the suite and fail standalone, which the mutation
+    // sweep surfaced as an unusable baseline.
+    await withTenant(app, ORG, (client) =>
+      appendAuditEvent(client, {
+        source: 'api',
+        operation: 'test.scan',
+        targetKind: 'organisation',
+        result: 'succeeded',
+      }),
+    );
+
     // The CHECK constraint has to go first, which is the point: a migration that widens the kinds
     // is a one-line change that reads as harmless.
     await privileged.query(

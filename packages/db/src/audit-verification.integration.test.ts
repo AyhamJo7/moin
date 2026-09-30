@@ -362,6 +362,10 @@ describe('what the sweep finds', () => {
   });
 
   it('still covers a tenant whose chain head was deleted, because it walks the register', async () => {
+    // Its own precondition: a tenant with no events has no head to delete, so without this the
+    // test passes only when an earlier test in this file has written one.
+    await event(ORG_B);
+
     // The point of enumerating the register rather than `audit_heads`: deleting the head must not
     // remove the tenant from the worklist, or "delete the head" would hide a whole chain.
     // Deleting a head is now refused outright, which is the guard working. A restore with triggers
@@ -504,6 +508,11 @@ describe('what the sweep finds', () => {
   });
 
   it('counts a tenant it could not check as unchecked, never as sound', async () => {
+    // Its own precondition: verification only *fails* for a tenant that has events, and relying on
+    // an earlier test in this file to have written them makes this test pass in suite order and
+    // fail standalone — which the mutation sweep surfaced as an unusable baseline.
+    await event(ORG_A);
+
     // A revoked EXECUTE on the canonical-payload helper makes verification fail for every tenant
     // that has events, without making any chain unsound.
     await privileged.query(

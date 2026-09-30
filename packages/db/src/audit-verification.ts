@@ -271,6 +271,10 @@ export async function verifyAuditChains(
 
     tenants += result.claimed;
     await options.onPageComplete?.(tenants);
+    // An empty page always ends the sweep. `result.claimed < pageSize` covers this for any sane
+    // page size; this is the belt: a page size of 0 would otherwise satisfy neither condition and
+    // the loop would spin for ever on a claim that returns nothing.
+    if (result.claimed === 0) break;
     // A short page is the last page of the captured population; an empty one means the sweep has
     // reached the high-water mark. Either way there is nothing further *in this population*, which
     // is a statement the sequence bound makes safe to act on.

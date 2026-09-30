@@ -60,6 +60,15 @@ interface Variant {
   readonly replace: string;
   readonly test: string;
   readonly kills: string;
+  /**
+   * Why this variant's outcome is not `KILLED_ASSERTION`, when that is expected and correct.
+   *
+   * Some defects are rejected by a guard that runs *before* any test — an assertion inside a
+   * migration, for instance — so the suite never starts and no test can claim the kill. That is a
+   * stronger control than a test, not a missing one, and saying so here keeps the report honest
+   * without inflating the evidence count.
+   */
+  readonly note?: string;
 }
 
 interface Result {
@@ -233,7 +242,7 @@ function reportMarkdown(results: readonly Result[]): string {
           `\`${result.variant.test}\` — “${result.variant.kills}”`,
           result.baseline === 'PASSED' ? 'passed' : `**${result.baseline}**`,
           `**${result.outcome}**`,
-          result.detail.replace(/\|/gu, '\\|'),
+          `${result.detail.replace(/\|/gu, '\\|')}${result.variant.note === undefined ? '' : ` — *${result.variant.note.replace(/\|/gu, '\\|')}*`}`,
           `${String(Math.round(result.baselineMs / 100) / 10)}s / ${String(Math.round(result.mutantMs / 100) / 10)}s`,
         ].join(' | ') + ' |',
     )
@@ -321,6 +330,7 @@ async function main(): Promise<number> {
     console.error('Variants that did not produce evidence:');
     for (const result of notEvidence) {
       console.error(`  [${result.outcome}] ${result.variant.id}: ${result.detail}`);
+      if (result.variant.note !== undefined) console.error(`      note: ${result.variant.note}`);
     }
     return 1;
   }

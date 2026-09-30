@@ -32,7 +32,9 @@ export type MutationOutcome =
   /** A suite could not be transformed or loaded on the pristine tree. */
   | 'BUILD_OR_LOAD_FAILURE'
   /** The mutated source could not be transformed or loaded, so the mutation is not testable. */
-  | 'INVALID_MUTANT';
+  | 'INVALID_MUTANT'
+  /** The named test ran and failed by hanging. A real detection, but not an assertion. */
+  | 'KILLED_BY_TIMEOUT';
 
 /** The subset of Vitest's JSON report this decision needs. */
 export interface VitestAssertion {
@@ -86,8 +88,19 @@ export interface Classification {
 const LOAD_FAILURE =
   /Transform failed|PARSE_ERROR|Failed to load|Cannot find module|Cannot find package|Error: Failed to resolve|SyntaxError|Unexpected token|error TS\d+/u;
 
-/** An assertion rejecting a value, as opposed to the test dying of something else. */
-const ASSERTION_FAILURE = /AssertionError|expected .* to |toStrictEqual|toMatchObject|toThrow/u;
+/**
+ * An assertion rejecting a value, as opposed to the test dying of something else.
+ *
+ * `promise resolved … instead of rejecting` is how Vitest reports a failed `expect(...).rejects`,
+ * and it is an assertion failure like any other — it was initially missing here, which made four
+ * genuine kills read as crashes. The lesson is the same one this whole module exists for: match on
+ * what the runner actually prints, not on what it seems like it would print.
+ */
+const ASSERTION_FAILURE =
+  /AssertionError|expected .* to |toStrictEqual|toMatchObject|toThrow|promise resolved .* instead of rejecting|promise rejected .* instead of resolving/u;
+
+/** The named test ran and failed, but by hanging rather than by rejecting a value. */
+const TEST_TIMEOUT = /Test timed out in \d+ms/u;
 
 function firstLine(text: string): string {
   const line = text.split('\n').find((candidate) => candidate.trim().length > 0) ?? '';
@@ -156,6 +169,19 @@ export function classifyRun(observation: RunObservation, expectedTest: string): 
   );
 
   if (named.length === 0) {
+    // "The filter matched nothing" and "no tests were collected" are different failures, and
+    // conflating them hid five suites that never loaded: a migration the mutation had broken failed
+    // in global setup, so there were no assertions to match and it read as a manifest error.
+    // Vitest's real no-match report still lists every test, skipped — hence this distinction.
+    if (assertions.length === 0) {
+      return {
+        outcome: 'INFRA_FAILURE',
+        detail:
+          'the run collected no tests at all, so it never reached the filter — a setup or global ' +
+          'fixture failed before any suite ran',
+        ...empty,
+      };
+    }
     return {
       outcome: 'NO_TEST_MATCH',
       detail: `no test's name contained "${expectedTest}", so the manifest names a test that does not exist`,
@@ -173,12 +199,30 @@ export function classifyRun(observation: RunObservation, expectedTest: string): 
   const failedNamed = named.filter((assertion) => assertion.status === 'failed');
   if (failedNamed.length > 0) {
     const messages = failedNamed.flatMap((assertion) => assertion.failureMessages ?? []);
-    const byAssertion = messages.some((message) => ASSERTION_FAILURE.test(message));
+    if (messages.some((message) => ASSERTION_FAILURE.test(message))) {
+      return {
+        outcome: 'KILLED_ASSERTION',
+        detail: `the named test ran and rejected the mutation: ${firstLine(messages[0] ?? '')}`,
+        matched: named.length,
+        unrelatedFailures,
+      };
+    }
+    if (messages.some((message) => TEST_TIMEOUT.test(message))) {
+      // Reported separately rather than as a kill: the mutation made the code hang and the test
+      // could not complete, so it never rejected anything. That is a real detection and weaker
+      // evidence than an assertion, and collapsing the two would hide which one happened.
+      return {
+        outcome: 'KILLED_BY_TIMEOUT',
+        detail:
+          'the mutation made the code hang and the named test timed out rather than asserting: ' +
+          firstLine(messages[0] ?? ''),
+        matched: named.length,
+        unrelatedFailures,
+      };
+    }
     return {
-      outcome: byAssertion ? 'KILLED_ASSERTION' : 'INFRA_FAILURE',
-      detail: byAssertion
-        ? `the named test ran and rejected the mutation: ${firstLine(messages[0] ?? '')}`
-        : `the named test ran but died of something other than an assertion: ${firstLine(messages[0] ?? '')}`,
+      outcome: 'INFRA_FAILURE',
+      detail: `the named test ran but died of something other than an assertion: ${firstLine(messages[0] ?? '')}`,
       matched: named.length,
       unrelatedFailures,
     };

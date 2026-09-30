@@ -53,9 +53,9 @@
     "id": "M6-enumerate-heads-instead-of-register",
     "invariant": "INV-10: a deleted head is a finding, not a tenant leaving the worklist",
     "expected": "Deleting a tenant's chain head would remove it from the sweep entirely and report success.",
-    "file": "packages/db/migrations/0010_audit_chain_verification.sql",
-    "find": "  SELECT r.tenant_id AS organisation_id, r.tenant_id AS id\n  FROM audit_chain_registry r\n  WHERE p_after IS NULL OR r.tenant_id > p_after\n  ORDER BY r.tenant_id",
-    "replace": "  SELECT h.organisation_id AS organisation_id, h.organisation_id AS id\n  FROM audit_heads h\n  WHERE p_after IS NULL OR h.organisation_id > p_after\n  ORDER BY h.organisation_id",
+    "file": "packages/db/migrations/0011_audit_chain_population.sql",
+    "find": "  SELECT r.tenant_id AS organisation_id, r.tenant_id AS id, r.registration_seq\n  FROM audit_chain_registry r\n  WHERE r.registration_seq > coalesce(p_after, 0)\n    AND r.registration_seq <= coalesce(p_high_water, 0)\n  ORDER BY r.registration_seq\n  LIMIT least(greatest(coalesce(p_limit, 0), 0), 1000)",
+    "replace": "  SELECT h.organisation_id, h.organisation_id AS id,\n         (row_number() OVER (ORDER BY h.organisation_id))::bigint AS registration_seq\n  FROM audit_heads h\n  WHERE (row_number() OVER (ORDER BY h.organisation_id)) > coalesce(p_after, 0)\n  ORDER BY h.organisation_id\n  LIMIT least(greatest(coalesce(p_limit, 0), 0), 1000)",
     "test": "packages/db/src/audit-verification.integration.test.ts",
     "kills": "still covers a tenant whose chain head was deleted"
   },
@@ -64,8 +64,8 @@
     "invariant": "INV-10: a chain registration cannot be removed",
     "expected": "Deleting a register row would hide that tenant's chain from every future sweep.",
     "file": "packages/db/migrations/0010_audit_chain_verification.sql",
-    "find": "CREATE TRIGGER audit_chain_registry_append_only BEFORE UPDATE OR DELETE ON audit_chain_registry\n  FOR EACH ROW EXECUTE FUNCTION app.reject_registry_mutation();",
-    "replace": "",
+    "find": "CREATE TRIGGER audit_chain_registry_append_only BEFORE UPDATE OR DELETE ON audit_chain_registry\n  FOR EACH ROW EXECUTE FUNCTION app.reject_registry_mutation();\nALTER TABLE audit_chain_registry ENABLE ALWAYS TRIGGER audit_chain_registry_append_only;",
+    "replace": "CREATE TRIGGER audit_chain_registry_append_only BEFORE UPDATE OR DELETE ON audit_chain_registry\n  FOR EACH ROW EXECUTE FUNCTION app.reject_registry_mutation();\nALTER TABLE audit_chain_registry DISABLE TRIGGER audit_chain_registry_append_only;",
     "test": "packages/db/src/audit-verification.integration.test.ts",
     "kills": "rejects a privileged DELETE and UPDATE"
   },
@@ -73,9 +73,9 @@
     "id": "M8-claim-cap-removed",
     "invariant": "Bounded work: a page is capped however much the caller asks for",
     "expected": "A caller could request the entire register in one call, unbounded.",
-    "file": "packages/db/migrations/0010_audit_chain_verification.sql",
-    "find": "  LIMIT least(greatest(coalesce(p_limit, 0), 0), 1000)",
-    "replace": "  LIMIT greatest(coalesce(p_limit, 0), 0)",
+    "file": "packages/db/migrations/0011_audit_chain_population.sql",
+    "find": "  ORDER BY r.registration_seq\n  LIMIT least(greatest(coalesce(p_limit, 0), 0), 1000)",
+    "replace": "  ORDER BY r.registration_seq\n  LIMIT greatest(coalesce(p_limit, 0), 0)",
     "test": "packages/db/src/audit-verification.integration.test.ts",
     "kills": "caps a page at the reviewed maximum"
   },
@@ -84,8 +84,8 @@
     "invariant": "INV-10: registration cannot be forgotten",
     "expected": "A new tenant would never be registered, so its chain would never be verified.",
     "file": "packages/db/migrations/0010_audit_chain_verification.sql",
-    "find": "CREATE TRIGGER organisations_register_audit_chain AFTER INSERT ON organisations\n  FOR EACH ROW EXECUTE FUNCTION app.register_audit_chain();",
-    "replace": "",
+    "find": "CREATE TRIGGER organisations_register_audit_chain AFTER INSERT ON organisations\n  FOR EACH ROW EXECUTE FUNCTION app.register_audit_chain();\nALTER TABLE organisations ENABLE ALWAYS TRIGGER organisations_register_audit_chain;",
+    "replace": "CREATE TRIGGER organisations_register_audit_chain AFTER INSERT ON organisations\n  FOR EACH ROW EXECUTE FUNCTION app.register_audit_chain();\nALTER TABLE organisations DISABLE TRIGGER organisations_register_audit_chain;",
     "test": "packages/db/src/audit-verification.integration.test.ts",
     "kills": "is filled by the trigger, not by the caller remembering"
   },
@@ -274,8 +274,8 @@
     "invariant": "INV-10: an event may only be inserted correctly linked to the head",
     "expected": "A privileged direct INSERT could place an unlinked forged event in the trail.",
     "file": "packages/db/migrations/0008_audit_events.sql",
-    "find": "CREATE TRIGGER audit_events_linked_only BEFORE INSERT ON audit_events\n  FOR EACH ROW EXECUTE FUNCTION app.reject_unlinked_audit_event();",
-    "replace": "",
+    "find": "CREATE TRIGGER audit_events_linked_only BEFORE INSERT ON audit_events\n  FOR EACH ROW EXECUTE FUNCTION app.reject_unlinked_audit_event();\nALTER TABLE audit_events ENABLE ALWAYS TRIGGER audit_events_linked_only;",
+    "replace": "CREATE TRIGGER audit_events_linked_only BEFORE INSERT ON audit_events\n  FOR EACH ROW EXECUTE FUNCTION app.reject_unlinked_audit_event();\nALTER TABLE audit_events DISABLE TRIGGER audit_events_linked_only;",
     "test": "packages/db/src/audit-verification.integration.test.ts",
     "kills": "detects a forged event written past the head"
   },
@@ -284,8 +284,8 @@
     "invariant": "INV-10: TRUNCATE is refused on the audit tables",
     "expected": "`TRUNCATE audit_events` would erase the whole trail and the next sweep would report it clean.",
     "file": "packages/db/migrations/0008_audit_events.sql",
-    "find": "CREATE TRIGGER audit_events_no_truncate BEFORE TRUNCATE ON audit_events\n  FOR EACH STATEMENT EXECUTE FUNCTION app.reject_audit_mutation();",
-    "replace": "",
+    "find": "CREATE TRIGGER audit_events_no_truncate BEFORE TRUNCATE ON audit_events\n  FOR EACH STATEMENT EXECUTE FUNCTION app.reject_audit_mutation();\nALTER TABLE audit_events ENABLE ALWAYS TRIGGER audit_events_no_truncate;",
+    "replace": "CREATE TRIGGER audit_events_no_truncate BEFORE TRUNCATE ON audit_events\n  FOR EACH STATEMENT EXECUTE FUNCTION app.reject_audit_mutation();\nALTER TABLE audit_events DISABLE TRIGGER audit_events_no_truncate;",
     "test": "packages/db/src/audit-verification.integration.test.ts",
     "kills": "refuses TRUNCATE on the register"
   },
@@ -294,8 +294,8 @@
     "invariant": "INV-10: TRUNCATE is refused on the register",
     "expected": "Emptying the register would take every tenant off the worklist at once.",
     "file": "packages/db/migrations/0010_audit_chain_verification.sql",
-    "find": "CREATE TRIGGER audit_chain_registry_no_truncate BEFORE TRUNCATE ON audit_chain_registry\n  FOR EACH STATEMENT EXECUTE FUNCTION app.reject_registry_mutation();",
-    "replace": "",
+    "find": "CREATE TRIGGER audit_chain_registry_no_truncate BEFORE TRUNCATE ON audit_chain_registry\n  FOR EACH STATEMENT EXECUTE FUNCTION app.reject_registry_mutation();\nALTER TABLE audit_chain_registry ENABLE ALWAYS TRIGGER audit_chain_registry_no_truncate;",
+    "replace": "CREATE TRIGGER audit_chain_registry_no_truncate BEFORE TRUNCATE ON audit_chain_registry\n  FOR EACH STATEMENT EXECUTE FUNCTION app.reject_registry_mutation();\nALTER TABLE audit_chain_registry DISABLE TRIGGER audit_chain_registry_no_truncate;",
     "test": "packages/db/src/audit-verification.integration.test.ts",
     "kills": "refuses TRUNCATE on the register"
   },
@@ -327,7 +327,8 @@
     "find": "INSERT INTO audit_chain_registry(tenant_id) SELECT id FROM organisations ON CONFLICT DO NOTHING;",
     "replace": "",
     "test": "packages/db/src/audit-chain-backfill.integration.test.ts",
-    "kills": "registers every pre-existing organisation"
+    "kills": "registers every pre-existing organisation",
+    "note": "Rejected by an assertion inside the migration itself, during the integration project's global setup, so no suite runs and no test can claim the kill. The control is stronger than a test rather than absent; the expected outcome is INFRA_FAILURE."
   },
   {
     "id": "N9-catalog-accepts-origin-only-trigger",
@@ -554,8 +555,8 @@
     "invariant": "INV-10: the high-water mark is read once per sweep, not once per page",
     "expected": "The population would grow underneath the sweep meant to be bounded by it, so 'complete coverage' would mean nothing.",
     "file": "packages/db/src/audit-verification.ts",
-    "find": "  const highWater = await populationHighWater(pool);",
-    "replace": "  let highWater = await populationHighWater(pool);",
+    "find": "    if (result.claimed === 0) break;",
+    "replace": "    if (result.claimed === 0) break;\n    highWater = await populationHighWater(pool);",
     "test": "packages/db/src/audit-chain-population.integration.test.ts",
     "kills": "reads the high-water mark once, not once per page"
   },
@@ -617,7 +618,8 @@
     "find": "UPDATE audit_chain_registry r\nSET registration_seq = ordered.position\nFROM ordered\nWHERE r.tenant_id = ordered.tenant_id AND r.registration_seq IS NULL;",
     "replace": "UPDATE audit_chain_registry r\nSET registration_seq = NULL\nFROM ordered\nWHERE false;",
     "test": "packages/db/src/audit-chain-backfill.integration.test.ts",
-    "kills": "backfills every existing row deterministically and keeps advancing afterwards"
+    "kills": "backfills every existing row deterministically and keeps advancing afterwards",
+    "note": "Rejected by an assertion inside the migration itself, during the integration project's global setup, so no suite runs and no test can claim the kill. The control is stronger than a test rather than absent; the expected outcome is INFRA_FAILURE."
   },
   {
     "id": "P9-sequence-writable-by-runtime-role",

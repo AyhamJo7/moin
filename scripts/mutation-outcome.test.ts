@@ -159,6 +159,70 @@ describe('what must never be counted as a kill', () => {
   });
 });
 
+describe('failures that look like other failures', () => {
+  it('reads a failed `.rejects` as the assertion it is', () => {
+    // This wording cost four genuine kills, which the harness reported as crashes. Vitest prints
+    // it when `expect(...).rejects` is given a promise that resolved.
+    const report: VitestReport = {
+      testResults: [
+        {
+          status: 'failed',
+          message: '',
+          assertionResults: [
+            {
+              status: 'failed',
+              fullName: 'suite the named test',
+              failureMessages: [
+                'Error: promise resolved "Result{ command: \'UPDATE\' }" instead of rejecting',
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    expect(classifyRun(observation({ report }), 'the named test').outcome).toBe('KILLED_ASSERTION');
+  });
+
+  it('separates a hang from an assertion', () => {
+    // The mutation made the code loop, so the test never got to reject anything. A real detection,
+    // but weaker evidence than an assertion, so it is reported as itself.
+    const report: VitestReport = {
+      testResults: [
+        {
+          status: 'failed',
+          message: '',
+          assertionResults: [
+            {
+              status: 'failed',
+              fullName: 'suite the named test',
+              failureMessages: ['Error: Test timed out in 30000ms.'],
+            },
+          ],
+        },
+      ],
+    };
+    const result = classifyRun(observation({ report }), 'the named test');
+    expect(result.outcome).toBe('KILLED_BY_TIMEOUT');
+    expect(result.outcome).not.toBe('KILLED_ASSERTION');
+  });
+
+  it('separates "no tests collected" from "the filter matched nothing"', () => {
+    // A global fixture that fails leaves a report with no assertions. Calling that a manifest error
+    // hid five suites whose migrations the mutation had broken.
+    const nothingRan: VitestReport = {
+      numTotalTests: 0,
+      testResults: [{ status: 'failed', message: '', assertionResults: [] }],
+    };
+    expect(classifyRun(observation({ report: nothingRan }), 'anything').outcome).toBe(
+      'INFRA_FAILURE',
+    );
+    // Whereas a real no-match still lists every test, skipped.
+    expect(
+      classifyRun(observation({ report: fixture('no-test-matched'), exitCode: 0 }), 'nope').outcome,
+    ).toBe('NO_TEST_MATCH');
+  });
+});
+
 describe('a survivor', () => {
   it('is the named test passing under the mutation', () => {
     const report: VitestReport = {
