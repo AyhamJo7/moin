@@ -117,7 +117,9 @@ export interface Finding {
 
 export interface ScanResult {
   readonly findings: readonly Finding[];
-  /** Tenants enumerated through the claim function. */
+  /** The register high-water mark this run's population was captured at. */
+  readonly populationHighWater: string;
+  /** Members of the captured population that were scanned. */
   readonly tenants: number;
   /** Audit events actually inspected. Zero with tenants present means the scan proved nothing. */
   readonly events: number;
@@ -221,7 +223,26 @@ const VERSION_QUERY = `
 
 const EVENT_COUNT_QUERY = `SELECT count(*)::text AS n FROM audit_events`;
 
-const CLAIM_QUERY = 'select organisation_id, id from app.claim_audit_chains($1::integer, $2::uuid)';
+/**
+ * One page of the register population this run captured at its start.
+ *
+ * Two independent checks are needed and neither replaces the other:
+ *
+ *  1. **population traversal** — did this run scan every register member in the captured
+ *     population? Paging by `tenant_id` could not answer that: a registration landing behind the
+ *     UUID cursor was invisible, so the run reported clean having skipped it. Registration order is
+ *     now recorded, and the population is bounded by a high-water mark read once.
+ *  2. **the independent provisioning witness** below — is some provisioned tenant missing from the
+ *     register *entirely*? Traversal cannot see that, because the register is what it traverses.
+ *
+ * A tenant registered after the high-water mark belongs to the next run and must not fail this one.
+ * A tenant provisioned but absent from the register must fail it.
+ */
+const CLAIM_QUERY = `select organisation_id, id, registration_seq::text as registration_seq
+  from app.claim_audit_chains($1::integer, $2::bigint, $3::bigint)`;
+const HIGH_WATER_QUERY = 'select app.audit_chain_high_water()::text as n';
+/** Where paging starts: before the first registration. */
+const FIRST_CURSOR = '0';
 
 /**
  * The same independent witness the daily sweep reconciles against.
@@ -249,6 +270,7 @@ export async function scan(url: string): Promise<ScanResult> {
   let tenants = 0;
   let events = 0;
   let unregistered = 0;
+  let highWater = FIRST_CURSOR;
 
   /** One finding per subject and rule, however many tenants exhibit it. */
   const report = (finding: Finding): void => {
@@ -277,16 +299,27 @@ export async function scan(url: string): Promise<ScanResult> {
       }
     }
 
-    let after: string | null = null;
+    // Captured once, before the first page, exactly as the daily sweep does.
+    const bound = await pool.query<{ n: string }>(HIGH_WATER_QUERY);
+    const capturedHighWater = bound.rows[0]?.n;
+    if (capturedHighWater === undefined) {
+      throw new Error('audit chain high-water mark returned no row');
+    }
+    highWater = capturedHighWater;
+
+    let after = FIRST_CURSOR;
     for (;;) {
       let page: readonly ClaimedItem[] = [];
+      let cursor = after;
       const result = await withSystemWork(
         pool,
         async (client: TenantClient) => {
-          const claimed = await client.query<{ organisation_id: string; id: string }>(CLAIM_QUERY, [
-            TENANT_PAGE_SIZE,
-            after,
-          ]);
+          const claimed = await client.query<{
+            organisation_id: string;
+            id: string;
+            registration_seq: string;
+          }>(CLAIM_QUERY, [TENANT_PAGE_SIZE, after, highWater]);
+          cursor = claimed.rows.at(-1)?.registration_seq ?? cursor;
           page = claimed.rows.map((row) => ({
             organisationId: row.organisation_id,
             id: row.id,
@@ -415,9 +448,8 @@ export async function scan(url: string): Promise<ScanResult> {
       );
 
       tenants += result.claimed;
-      const last = page.at(-1);
-      if (result.claimed < TENANT_PAGE_SIZE || last === undefined) break;
-      after = last.organisationId;
+      if (result.claimed < TENANT_PAGE_SIZE) break;
+      after = cursor;
     }
 
     // Reconciliation, against the same global witness the daily sweep uses. This runs after the
@@ -439,7 +471,7 @@ export async function scan(url: string): Promise<ScanResult> {
     await pool.end();
   }
 
-  return { findings, tenants, events, unregistered };
+  return { findings, populationHighWater: highWater, tenants, events, unregistered };
 }
 
 /** `jsonb_typeof` output, which is a fixed vocabulary — but the row is data, so it is checked. */

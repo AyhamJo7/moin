@@ -538,6 +538,30 @@ describe('scanner coverage is reconciled, not assumed', () => {
     }
   }, 120_000);
 
+  it('still fails on a provisioned tenant absent from the register, which traversal cannot see', async () => {
+    // The two checks are independent and neither subsumes the other: the population snapshot
+    // bounds what traversal covers, and traversal covers only what the register knows.
+    const { db: isolated, hidden } = await withHiddenTenant('audit-arguments-both-checks', {
+      related_id: 'Outside The Register',
+    });
+    try {
+      const result = await scan(isolated.appUrl);
+      // Traversal itself is clean over the captured population.
+      expect(
+        result.findings.filter((f) => f.rule !== 'unregistered-tenant-not-scanned'),
+      ).toStrictEqual([]);
+      // And the witness still fails the run.
+      expect(result.unregistered).toBe(1);
+      expect(rulesFor([...result.findings], hidden)).toStrictEqual([
+        'unregistered-tenant-not-scanned',
+      ]);
+      const run = await runCheck(isolated.appUrl);
+      expect(run.code).not.toBe(0);
+      expect(run.out).not.toMatch(/Outside The Register/u);
+    } finally {
+      await isolated.drop();
+    }
+  }, 180_000);
   it('succeeds once every provisioned tenant is registered', async () => {
     const { db: isolated, hidden } = await withHiddenTenant('audit-arguments-hidden-fixed', {
       related_id: '33333333-3333-4333-8333-333333333333',
@@ -556,6 +580,132 @@ describe('scanner coverage is reconciled, not assumed', () => {
       await isolated.drop();
     }
   }, 120_000);
+});
+
+describe('CASE 5 — the scanner uses the same population snapshot', () => {
+  /**
+   * The reported reproduction: a full page, then a late registration whose UUID sorts lexically
+   * behind the cursor. Under UUID paging the next page came back empty and the run reported clean
+   * having skipped it. The page size here is the scanner's real `TENANT_PAGE_SIZE` of 200, so the
+   * first page is full and a second is genuinely requested.
+   */
+  it('a late registration behind the cursor is excluded by the bound, not skipped by ordering', async () => {
+    const isolated = await createTestDatabase('audit-arguments-population');
+    const owner = createPool({ connectionString: isolated.migrationUrl, max: 1 });
+    try {
+      await owner.query(
+        `insert into audit_argument_allowlist(operation, argument_key, value_kind, reason)
+         values ('test.scan', 'related_id', 'uuid', 'opaque')`,
+      );
+      // 200 tenants, all sorting after the late one below, so the cursor ends up lexically ahead.
+      await owner.query(
+        `insert into organisations(id, slug, name)
+         select ('f' || lpad(to_hex(g), 7, '0') || '-ffff-4fff-8fff-ffffffffffff')::uuid,
+                'bulk-' || g, 'Bulk ' || g
+         from generate_series(1, 200) g`,
+      );
+      const marked = await owner.query<{ n: string }>(
+        'select coalesce(max(registration_seq), 0)::text as n from audit_chain_registry',
+      );
+      expect(Number(marked.rows[0]?.n)).toBe(200);
+
+      // Every tenant gets one valid event so the scan has something to inspect.
+      const appPool = isolated.pool();
+      const ids = await owner.query<{ id: string }>(
+        'select id::text from organisations order by id',
+      );
+      for (const row of ids.rows) {
+        await withTenant(appPool, row.id, (c) =>
+          appendAuditEvent(c, {
+            source: 'api',
+            operation: 'test.scan',
+            targetKind: 'organisation',
+            result: 'succeeded',
+            argsSanitized: { related_id: randomUUID() },
+          }),
+        );
+      }
+
+      const before = await scan(isolated.appUrl);
+      expect(before.populationHighWater).toBe('200');
+      expect(before.tenants).toBe(200);
+      expect(before.findings).toStrictEqual([]);
+
+      // The late one: registered last, sorts first, and carries a leak.
+      const late = '00000000-0000-4000-8000-000000000001';
+      await owner.query(`insert into organisations(id, slug, name) values ($1, 'late', 'Late')`, [
+        late,
+      ]);
+      await forgeInto(owner, late, 'test.scan', JSON.stringify({ related_id: 'Gurlitt GmbH' }));
+
+      // Its sequence is above the previous mark, which is what makes it the *next* run's business
+      // rather than something the previous run should have caught.
+      const lateSeq = await owner.query<{ n: string }>(
+        'select registration_seq::text as n from audit_chain_registry where tenant_id = $1',
+        [late],
+      );
+      expect(Number(lateSeq.rows[0]?.n)).toBe(201);
+
+      // A fresh run captures a new mark, so it scans 201 tenants and finds the leak. Under UUID
+      // paging the leak-bearing tenant sat behind the cursor and was reported clean.
+      const after = await scan(isolated.appUrl);
+      expect(after.populationHighWater).toBe('201');
+      expect(after.tenants).toBe(201);
+      expect(after.findings.some((f) => f.rule === 'free-text-argument')).toBe(true);
+    } finally {
+      await owner.end();
+      await isolated.drop();
+    }
+  }, 240_000);
+
+  it('does not adopt a registration that lands while it is running', async () => {
+    // The scanner's own page boundary. Two members in the captured population, page size is the
+    // production 200 so one page drains it; a tenant registered after the mark is read must not
+    // make this run fail, and must be picked up by the next one.
+    const isolated = await createTestDatabase('audit-arguments-midrun');
+    const owner = createPool({ connectionString: isolated.migrationUrl, max: 1 });
+    try {
+      await owner.query(
+        `insert into audit_argument_allowlist(operation, argument_key, value_kind, reason)
+         values ('test.scan', 'related_id', 'uuid', 'opaque')`,
+      );
+      await owner.query(`insert into organisations(id, slug, name) values ($1, 'mid-one', 'One')`, [
+        ORG,
+      ]);
+      await withTenant(isolated.pool(), ORG, (c) =>
+        appendAuditEvent(c, {
+          source: 'api',
+          operation: 'test.scan',
+          targetKind: 'organisation',
+          result: 'succeeded',
+          argsSanitized: { related_id: randomUUID() },
+        }),
+      );
+
+      const first = await scan(isolated.appUrl);
+      expect(first.populationHighWater).toBe('1');
+      expect(first.tenants).toBe(1);
+      expect(first.findings).toStrictEqual([]);
+
+      // Sorts behind the first tenant's UUID, registered after it.
+      const behind = '00000000-0000-4000-8000-000000000002';
+      await owner.query(`insert into organisations(id, slug, name) values ($1, 'mid-two', 'Two')`, [
+        behind,
+      ]);
+      await forgeInto(owner, behind, 'test.scan', JSON.stringify({ related_id: 'Behind Cursor' }));
+
+      const second = await scan(isolated.appUrl);
+      expect(second.populationHighWater).toBe('2');
+      expect(second.tenants).toBe(2);
+      expect(second.findings.some((f) => f.rule === 'free-text-argument')).toBe(true);
+      // Coverage traversal and the provisioning witness are separate: this tenant *is* registered,
+      // so the witness is silent and only traversal could have caught it.
+      expect(second.unregistered).toBe(0);
+    } finally {
+      await owner.end();
+      await isolated.drop();
+    }
+  }, 180_000);
 });
 
 describe('the check as a process', () => {

@@ -14,8 +14,8 @@
     "invariant": "INV-10: a sweep that enumerated nothing has verified nothing",
     "expected": "A failure to read the register would return an empty, sound-looking report instead of rejecting.",
     "file": "packages/db/src/audit-verification.ts",
-    "find": "        const claimed = await client.query<{ organisation_id: string; id: string }>(\n          'select organisation_id, id from app.claim_audit_chains($1::integer, $2::uuid)',\n          [pageSize, after],\n        );",
-    "replace": "        let claimed;\n        try {\n          claimed = await client.query<{ organisation_id: string; id: string }>(\n            'select organisation_id, id from app.claim_audit_chains($1::integer, $2::uuid)',\n            [pageSize, after],\n          );\n        } catch {\n          return [];\n        }",
+    "find": "          [pageSize, after, highWater],\n        );\n        cursor = claimed.rows.at(-1)?.registration_seq ?? cursor;",
+    "replace": "          [pageSize, after, highWater],\n        ).catch(() => ({ rows: [] as { organisation_id: string; id: string; registration_seq: string }[] }));\n        cursor = claimed.rows.at(-1)?.registration_seq ?? cursor;",
     "test": "packages/db/src/audit-verification.integration.test.ts",
     "kills": "refuses to report a clean run when the register cannot be read"
   },
@@ -24,8 +24,8 @@
     "invariant": "INV-10: every registered tenant is walked",
     "expected": "Only the first page of tenants would ever be verified; the rest would be silently skipped.",
     "file": "packages/db/src/audit-verification.ts",
-    "find": "    if (result.claimed < pageSize || last === undefined) break;\n    after = last.organisationId;",
-    "replace": "    void last;\n    break;",
+    "find": "    if (result.claimed < pageSize) break;\n    after = cursor;",
+    "replace": "    void cursor;\n    break;",
     "test": "packages/db/src/audit-verification.integration.test.ts",
     "kills": "walks every tenant across page boundaries"
   },
@@ -124,7 +124,7 @@
     "invariant": "QG-09: every reviewed SECURITY DEFINER is pinned by signature, owner, path and grants",
     "expected": "The claim function could be downgraded to SECURITY INVOKER, or regranted, without CI noticing.",
     "file": "scripts/check-rls-catalog.ts",
-    "find": "  'app.claim_audit_chains': {\n    arguments: 'integer, uuid',\n    owners: ['moin_migrator', 'moin_owner'],\n    searchPath: 'search_path=pg_catalog, public, app, pg_temp',\n    executeGrantees: ['moin_app'],\n  },\n",
+    "find": "  'app.claim_audit_chains': {\n    arguments: 'integer, bigint, bigint',\n    owners: ['moin_migrator', 'moin_owner'],\n    searchPath: 'search_path=pg_catalog, public, app, pg_temp',\n    executeGrantees: ['moin_app'],\n  },\n",
     "replace": "",
     "test": "scripts/check-rls-catalog.integration.test.ts",
     "kills": "rejects the claim function changed to SECURITY INVOKER"
@@ -424,7 +424,7 @@
     "invariant": "INV-10: coverage is a property of the register, not of the worklist drained from it",
     "expected": "A deadline expiring between pages would report `unreached: 0` and a sound sweep, having verified one tenant out of many.",
     "file": "packages/db/src/audit-verification.ts",
-    "find": "      unreached = await remaining(pool, after);",
+    "find": "      unreached = await remaining(pool, after, highWater);",
     "replace": "      unreached = Math.max(tenants - (outcomes.size + failures.length), 0);",
     "test": "packages/db/src/audit-verification.integration.test.ts",
     "kills": "does not call a deadline-truncated sweep sound"
@@ -538,5 +538,105 @@
     "replace": "    return { valid: true, checked: '0' };",
     "test": "packages/db/src/audit-verification.integration.test.ts",
     "kills": "still detects a genuine orphan event with no head"
+  },
+  {
+    "id": "P1-high-water-bound-ignored",
+    "invariant": "INV-10: a sweep's population is bounded by the high-water mark captured at its start",
+    "expected": "The sweep would chase registrations that land while it runs, so on a busy estate it would never terminate and its verdict would cover an ever-shifting population.",
+    "file": "packages/db/migrations/0011_audit_chain_population.sql",
+    "find": "    AND r.registration_seq <= coalesce(p_high_water, 0)\n  ORDER BY r.registration_seq",
+    "replace": "  ORDER BY r.registration_seq",
+    "test": "packages/db/src/audit-chain-population.integration.test.ts",
+    "kills": "reads the high-water mark once, not once per page"
+  },
+  {
+    "id": "P2-high-water-recomputed-each-page",
+    "invariant": "INV-10: the high-water mark is read once per sweep, not once per page",
+    "expected": "The population would grow underneath the sweep meant to be bounded by it, so 'complete coverage' would mean nothing.",
+    "file": "packages/db/src/audit-verification.ts",
+    "find": "  const highWater = await populationHighWater(pool);",
+    "replace": "  let highWater = await populationHighWater(pool);",
+    "test": "packages/db/src/audit-chain-population.integration.test.ts",
+    "kills": "reads the high-water mark once, not once per page"
+  },
+  {
+    "id": "P3-uuid-cursor-instead-of-sequence",
+    "invariant": "INV-10: paging follows registration order, which UUID order does not encode",
+    "expected": "The original defect: a registration landing behind the cursor would be invisible to the sweep and to its shortfall count, and a half-covered estate would report sound.",
+    "file": "packages/db/migrations/0011_audit_chain_population.sql",
+    "find": "  SELECT r.tenant_id AS organisation_id, r.tenant_id AS id, r.registration_seq\n  FROM audit_chain_registry r\n  WHERE r.registration_seq > coalesce(p_after, 0)",
+    "replace": "  SELECT r.tenant_id AS organisation_id, r.tenant_id AS id,\n         (row_number() OVER (ORDER BY r.tenant_id))::bigint AS registration_seq\n  FROM audit_chain_registry r\n  WHERE r.registration_seq > coalesce(p_after, 0)",
+    "test": "packages/db/src/audit-chain-population.integration.test.ts",
+    "kills": "is verified before coverage is complete, whatever its UUID sorts like"
+  },
+  {
+    "id": "P4-coverage-complete-on-empty-page-without-checking-snapshot",
+    "invariant": "INV-10: a deadline shortfall is counted inside the captured population",
+    "expected": "A deadline would end the sweep and declare complete coverage, because nothing would check how much of the population was left.",
+    "file": "packages/db/src/audit-verification.ts",
+    "find": "    if (unreached > 0) coverageComplete = false;",
+    "replace": "    void unreached;",
+    "test": "packages/db/src/audit-chain-population.integration.test.ts",
+    "kills": "reports the snapshot shortfall and is not sound"
+  },
+  {
+    "id": "P5-scanner-ignores-high-water",
+    "invariant": "INV-10: the scanner scans exactly the population it captured",
+    "expected": "The scanner would re-acquire tenants as they register and could loop, and its clean verdict would not correspond to any fixed population.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "    highWater = capturedHighWater;",
+    "replace": "    highWater = '9223372036854775807';",
+    "test": "scripts/check-audit-arguments.integration.test.ts",
+    "kills": "does not adopt a registration that lands while it is running"
+  },
+  {
+    "id": "P6-scanner-skips-population-traversal",
+    "invariant": "INV-10: the scanner traverses the register population as well as reconciling it",
+    "expected": "A leaking argument under a registered tenant would go unreported, because the scan would inspect nobody while the provisioning witness stayed silent.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "      if (result.claimed < TENANT_PAGE_SIZE) break;\n      after = cursor;",
+    "replace": "      void cursor;\n      break;",
+    "test": "scripts/check-audit-arguments.integration.test.ts",
+    "kills": "a late registration behind the cursor is excluded by the bound, not skipped by ordering"
+  },
+  {
+    "id": "P7-registration-sequence-not-monotonic",
+    "invariant": "A registration's position in the population order is assigned once and strictly advances",
+    "expected": "Two registrations could share a position, so a cursor could step over one of them and the population order would stop being a total order.",
+    "file": "packages/db/migrations/0011_audit_chain_population.sql",
+    "find": "ALTER TABLE audit_chain_registry\n  ADD CONSTRAINT audit_chain_registry_registration_seq_key UNIQUE (registration_seq);",
+    "replace": "",
+    "test": "packages/db/src/audit-chain-population.integration.test.ts",
+    "kills": "refuses two registrations sharing a position"
+  },
+  {
+    "id": "P8-sequence-backfill-removed",
+    "invariant": "INV-10/INV-17: registrations that predate the sequence column join the population",
+    "expected": "Every tenant registered before this migration would be outside every sweep's population for ever: the register is append-only and the column is NOT NULL only after the backfill.",
+    "file": "packages/db/migrations/0011_audit_chain_population.sql",
+    "find": "UPDATE audit_chain_registry r\nSET registration_seq = ordered.position\nFROM ordered\nWHERE r.tenant_id = ordered.tenant_id AND r.registration_seq IS NULL;",
+    "replace": "UPDATE audit_chain_registry r\nSET registration_seq = NULL\nFROM ordered\nWHERE false;",
+    "test": "packages/db/src/audit-chain-backfill.integration.test.ts",
+    "kills": "backfills every existing row deterministically and keeps advancing afterwards"
+  },
+  {
+    "id": "P9-sequence-writable-by-runtime-role",
+    "invariant": "A registration sequence is immutable once assigned",
+    "expected": "A caller able to rewrite a sequence could move a tenant out of the current population, which is the UUID-cursor defect made deliberate.",
+    "file": "packages/db/migrations/0011_audit_chain_population.sql",
+    "find": "REVOKE ALL ON SEQUENCE audit_chain_registry_registration_seq FROM moin_app, moin_provisioner;",
+    "replace": "GRANT SELECT, UPDATE ON SEQUENCE audit_chain_registry_registration_seq TO moin_app;\nGRANT UPDATE ON audit_chain_registry TO moin_app;",
+    "test": "packages/db/src/audit-chain-population.integration.test.ts",
+    "kills": "cannot be rewritten by the application role or by the table owner"
+  },
+  {
+    "id": "P10-next-sweep-starts-from-previous-mark",
+    "invariant": "INV-10: no registration falls outside both of two consecutive sweeps",
+    "expected": "Starting a sweep's cursor at the previous mark rather than at zero would strand any registration the previous sweep had already passed.",
+    "file": "packages/db/src/audit-verification.ts",
+    "find": "  let after = FIRST_CURSOR;",
+    "replace": "  let after = await populationHighWater(pool);",
+    "test": "packages/db/src/audit-chain-population.integration.test.ts",
+    "kills": "leaves no registration outside both of two consecutive sweeps"
   }
 ]

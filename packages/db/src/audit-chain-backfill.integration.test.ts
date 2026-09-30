@@ -23,12 +23,17 @@ import { migrate } from './migrate.ts';
 const MIGRATIONS = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'migrations');
 /** The last migration before `audit_chain_registry` exists. */
 const BEFORE_REGISTER = '0007';
+/** The last migration before `registration_seq` exists — the register is populated by then. */
+const BEFORE_SEQUENCE = '0010';
 
 let admin: Pool;
 let adminBaseUrl: string;
+let migratorBaseUrl: string;
 let database: string;
 let migratorUrl: string;
 let staged: string;
+/** Every database this file created, dropped together at the end. */
+const created: string[] = [];
 
 function urlFor(base: string, name: string): string {
   const url = new URL(base);
@@ -45,6 +50,27 @@ function stageThrough(through: string): string {
   return directory;
 }
 
+/** A database with extensions and ownership set up, but no migrations applied. */
+async function createBareDatabase(label: string): Promise<string> {
+  const name = `moin_t_${label}_${process.env['VITEST_WORKER_ID'] ?? '0'}_${randomBytes(4).toString('hex')}`;
+  // eslint-disable-next-line no-restricted-syntax -- database identifier, built here from a fixed prefix and hex generated in this file.
+  await admin.query(`create database "${name}"`);
+  const bare = createPool({ connectionString: urlFor(adminBaseUrl, name), max: 1 });
+  try {
+    for (const extension of ['vector', 'pgcrypto', 'citext', 'pg_trgm']) {
+      // eslint-disable-next-line no-restricted-syntax -- extension names come from a literal array in this file.
+      await bare.query(`create extension if not exists ${extension}`);
+    }
+    await bare.query('alter schema public owner to moin_migrator');
+    // eslint-disable-next-line no-restricted-syntax -- database identifier, as above.
+    await bare.query(`grant create on database "${name}" to moin_migrator`);
+  } finally {
+    await bare.end();
+  }
+  created.push(name);
+  return name;
+}
+
 beforeAll(async () => {
   const adminBase = process.env['TEST_DATABASE_ADMIN_URL'];
   if (adminBase === undefined || adminBase.length === 0) {
@@ -59,38 +85,25 @@ beforeAll(async () => {
       'TEST_DATABASE_MIGRATOR_URL is not set; it is in the example environment file.',
     );
   }
-
   adminBaseUrl = adminBase;
-  database = `moin_t_backfill_${process.env['VITEST_WORKER_ID'] ?? '0'}_${randomBytes(4).toString('hex')}`;
+  migratorBaseUrl = migratorBase;
   admin = createPool({ connectionString: adminBase, max: 1 });
-  // eslint-disable-next-line no-restricted-syntax -- database identifier, built in this file from a fixed prefix and hex generated here.
-  await admin.query(`create database "${database}"`);
 
-  const bare = createPool({ connectionString: urlFor(adminBase, database), max: 1 });
-  try {
-    for (const extension of ['vector', 'pgcrypto', 'citext', 'pg_trgm']) {
-      // eslint-disable-next-line no-restricted-syntax -- extension names come from a literal array in this file.
-      await bare.query(`create extension if not exists ${extension}`);
-    }
-    await bare.query('alter schema public owner to moin_migrator');
-    // eslint-disable-next-line no-restricted-syntax -- database identifier, as above.
-    await bare.query(`grant create on database "${database}" to moin_migrator`);
-  } finally {
-    await bare.end();
-  }
-
+  database = await createBareDatabase('backfill');
   migratorUrl = urlFor(migratorBase, database);
   staged = stageThrough(BEFORE_REGISTER);
 }, 90_000);
 
 afterAll(async () => {
   rmSync(staged, { recursive: true, force: true });
-  await admin.query(
-    'select pg_terminate_backend(pid) from pg_stat_activity where datname = $1 and pid <> pg_backend_pid()',
-    [database],
-  );
-  // eslint-disable-next-line no-restricted-syntax -- database identifier, as above.
-  await admin.query(`drop database if exists "${database}" with (force)`);
+  for (const name of created) {
+    await admin.query(
+      'select pg_terminate_backend(pid) from pg_stat_activity where datname = $1 and pid <> pg_backend_pid()',
+      [name],
+    );
+    // eslint-disable-next-line no-restricted-syntax -- database identifier, as above.
+    await admin.query(`drop database if exists "${name}" with (force)`);
+  }
   await admin.end();
 });
 
@@ -138,4 +151,95 @@ describe('applying the register migration to a database that already has tenants
       await check.end();
     }
   }, 120_000);
+});
+
+describe('applying the registration-sequence migration to a populated register', () => {
+  it('backfills every existing row deterministically and keeps advancing afterwards', async () => {
+    // The case a shared template cannot exercise: 0011 adds `registration_seq` to a register that
+    // already has rows. If those rows were left without a sequence they would be outside every
+    // sweep's population for ever, because the register is append-only and the column is NOT NULL
+    // only after the backfill.
+    const own = await createBareDatabase('seqfill');
+    const ownMigratorUrl = urlFor(migratorBaseUrl, own);
+    const stagedThroughRegister = stageThrough(BEFORE_SEQUENCE);
+    try {
+      // Tenants must exist before the register does, so 0010 backfills the register and 0011 then
+      // finds it populated — which is the situation under test.
+      const owner0 = createPool({ connectionString: urlFor(adminBaseUrl, own), max: 1 });
+      try {
+        await migrate(ownMigratorUrl, stageThrough(BEFORE_REGISTER));
+        for (let index = 0; index < 3; index += 1) {
+          await owner0.query('insert into organisations(id, slug, name) values ($1, $2, $3)', [
+            randomUUID(),
+            `pre-seq-${String(index)}`,
+            `Pre seq ${String(index)}`,
+          ]);
+        }
+      } finally {
+        await owner0.end();
+      }
+
+      const early = await migrate(ownMigratorUrl, stagedThroughRegister);
+      expect(early.applied.some((name) => name.startsWith('0010'))).toBe(true);
+      expect(early.applied.some((name) => name.startsWith('0011'))).toBe(false);
+
+      const owner = createPool({ connectionString: urlFor(adminBaseUrl, own), max: 1 });
+      try {
+        // The register is populated, and has no sequence column yet.
+        const before = await owner.query<{ n: string }>(
+          'select count(*)::text as n from audit_chain_registry',
+        );
+        expect(Number(before.rows[0]?.n)).toBeGreaterThan(0);
+        const columns = await owner.query<{ n: string }>(
+          `select count(*)::text as n from information_schema.columns
+           where table_name = 'audit_chain_registry' and column_name = 'registration_seq'`,
+        );
+        expect(Number(columns.rows[0]?.n)).toBe(0);
+
+        const populated = Number(before.rows[0]?.n);
+
+        // Now the migration that adds and backfills it.
+        const rest = await migrate(ownMigratorUrl);
+        expect(rest.applied.some((name) => name.startsWith('0011'))).toBe(true);
+
+        const backfilled = await owner.query<{ tenant_id: string; registration_seq: string }>(
+          'select tenant_id::text, registration_seq::text from audit_chain_registry order by registration_seq',
+        );
+        // Every row has one, and they are 1..n with no gaps.
+        expect(backfilled.rows).toHaveLength(populated);
+        expect(backfilled.rows.map((row) => row.registration_seq)).toStrictEqual(
+          Array.from({ length: populated }, (_, index) => String(index + 1)),
+        );
+        // Deterministic: assignment follows `tenant_id` order, so the same register yields the
+        // same sequence numbers in every environment.
+        const byTenant = [...backfilled.rows].sort((left, right) =>
+          left.tenant_id.localeCompare(right.tenant_id),
+        );
+        expect(byTenant.map((row) => row.registration_seq)).toStrictEqual(
+          backfilled.rows.map((row) => row.registration_seq),
+        );
+
+        // And the sequence continues past the backfill rather than colliding with it.
+        const next = randomUUID();
+        await owner.query(`insert into organisations(id, slug, name) values ($1, 'post', 'Post')`, [
+          next,
+        ]);
+        const assigned = await owner.query<{ n: string }>(
+          'select registration_seq::text as n from audit_chain_registry where tenant_id = $1',
+          [next],
+        );
+        expect(Number(assigned.rows[0]?.n)).toBe(populated + 1);
+
+        // The high-water mark sees the whole register.
+        const mark = await owner.query<{ n: string }>(
+          'select app.audit_chain_high_water()::text as n',
+        );
+        expect(Number(mark.rows[0]?.n)).toBe(populated + 1);
+      } finally {
+        await owner.end();
+      }
+    } finally {
+      rmSync(stagedThroughRegister, { recursive: true, force: true });
+    }
+  }, 150_000);
 });

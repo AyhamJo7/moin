@@ -110,23 +110,43 @@ describe('the tenant register', () => {
     ).rejects.toThrow(/append-only/u);
   });
 
-  it('hands the runtime role identifiers only, capped and key-paged', async () => {
-    const page = await app.query<{ organisation_id: string; id: string }>(
-      'select organisation_id, id from app.claim_audit_chains($1::integer, $2::uuid)',
-      [2, null],
+  it('hands the runtime role identifiers only, paged by registration sequence', async () => {
+    const highWater = await app.query<{ n: string }>(
+      'select app.audit_chain_high_water()::text as n',
     );
+    const bound = highWater.rows[0]?.n ?? '0';
+
+    const page = await app.query<{
+      organisation_id: string;
+      id: string;
+      registration_seq: string;
+    }>(
+      `select organisation_id, id, registration_seq::text as registration_seq
+         from app.claim_audit_chains($1::integer, $2::bigint, $3::bigint)`,
+      [2, '0', bound],
+    );
+    // Registration order, which is the order the tenants were created in, not UUID order.
     expect(page.rows.map((row) => row.organisation_id)).toEqual([ORG_A, ORG_B]);
-    expect(Object.keys(page.rows[0] ?? {})).toEqual(['organisation_id', 'id']);
+    expect(Object.keys(page.rows[0] ?? {})).toEqual(['organisation_id', 'id', 'registration_seq']);
+
+    const cursor = page.rows.at(-1)?.registration_seq ?? '0';
     const next = await app.query<{ id: string }>(
-      'select id from app.claim_audit_chains($1::integer, $2::uuid)',
-      [2, ORG_B],
+      'select id from app.claim_audit_chains($1::integer, $2::bigint, $3::bigint)',
+      [2, cursor, bound],
     );
     expect(next.rows.map((row) => row.id)).toEqual([ORG_C, ORG_D]);
-    // Asking for more than exists returns what exists; the reviewed cap is asserted separately,
-    // because with three tenants a missing cap and a working one look identical.
+
+    // The high-water bound is the population, so asking past it returns nothing however large the
+    // page. This is what makes a mid-sweep registration the *next* sweep's business.
+    const beyond = await app.query<{ id: string }>(
+      'select id from app.claim_audit_chains($1::integer, $2::bigint, $3::bigint)',
+      [50, bound, bound],
+    );
+    expect(beyond.rows).toHaveLength(0);
+
     const all = await app.query<{ id: string }>(
-      'select id from app.claim_audit_chains($1::integer, $2::uuid)',
-      [50, null],
+      'select id from app.claim_audit_chains($1::integer, $2::bigint, $3::bigint)',
+      [50, '0', bound],
     );
     expect(all.rows).toHaveLength(4);
   });
@@ -149,17 +169,20 @@ describe('the tenant register', () => {
       );
       expect(Number(registered.rows[0]?.n)).toBe(MAX_CLAIM_PAGE + 1);
 
+      const bound = (
+        await bulkApp.query<{ n: string }>('select app.audit_chain_high_water()::text as n')
+      ).rows[0]?.n;
       const greedy = await bulkApp.query<{ id: string }>(
-        'select id from app.claim_audit_chains($1::integer, $2::uuid)',
-        [MAX_CLAIM_PAGE * 10, null],
+        'select id from app.claim_audit_chains($1::integer, $2::bigint, $3::bigint)',
+        [MAX_CLAIM_PAGE * 10, '0', bound],
       );
       expect(greedy.rows).toHaveLength(MAX_CLAIM_PAGE);
 
       // A negative or null limit yields nothing rather than everything.
       for (const limit of [-1, 0, null]) {
         const none = await bulkApp.query(
-          'select id from app.claim_audit_chains($1::integer, $2::uuid)',
-          [limit, null],
+          'select id from app.claim_audit_chains($1::integer, $2::bigint, $3::bigint)',
+          [limit, '0', bound],
         );
         expect(none.rows).toHaveLength(0);
       }
@@ -253,7 +276,9 @@ describe('the daily sweep', () => {
 
   it('treats a shortfall it could not count as incomplete, not as zero', async () => {
     // Not knowing whether coverage was complete is not the same as it being complete.
-    await privileged.query('revoke execute on function app.count_audit_chains(uuid) from moin_app');
+    await privileged.query(
+      'revoke execute on function app.count_audit_chains(bigint, bigint) from moin_app',
+    );
     let ticks = 0;
     try {
       const report = await verifyAuditChains(app, {
@@ -268,7 +293,9 @@ describe('the daily sweep', () => {
       expect(report.coverageComplete).toBe(false);
       expect(isSound(report)).toBe(false);
     } finally {
-      await privileged.query('grant execute on function app.count_audit_chains(uuid) to moin_app');
+      await privileged.query(
+        'grant execute on function app.count_audit_chains(bigint, bigint) to moin_app',
+      );
     }
   });
 
@@ -504,7 +531,7 @@ describe('what the sweep finds', () => {
 
   it('refuses to report a clean run when the register cannot be read at all', async () => {
     await privileged.query(
-      'revoke execute on function app.claim_audit_chains(integer, uuid) from moin_app',
+      'revoke execute on function app.claim_audit_chains(integer, bigint, bigint) from moin_app',
     );
     try {
       // Rejecting is the whole point: a sweep that enumerated nothing has verified nothing, and
@@ -512,7 +539,7 @@ describe('what the sweep finds', () => {
       await expect(verifyAuditChains(app)).rejects.toThrow(/permission denied/u);
     } finally {
       await privileged.query(
-        'grant execute on function app.claim_audit_chains(integer, uuid) to moin_app',
+        'grant execute on function app.claim_audit_chains(integer, bigint, bigint) to moin_app',
       );
     }
   });

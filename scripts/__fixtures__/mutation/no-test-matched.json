@@ -1,0 +1,24 @@
+{
+  "success": true,
+  "numTotalTests": 2,
+  "numFailedTests": 0,
+  "testResults": [
+    {
+      "status": "passed",
+      "message": "",
+      "name": "captured-fixture",
+      "assertionResults": [
+        {
+          "status": "skipped",
+          "fullName": "fixture fails an assertion",
+          "failureMessages": []
+        },
+        {
+          "status": "skipped",
+          "fullName": "fixture passes",
+          "failureMessages": []
+        }
+      ]
+    }
+  ]
+}

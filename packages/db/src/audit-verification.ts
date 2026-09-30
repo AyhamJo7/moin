@@ -1,6 +1,25 @@
 /**
  * The daily audit chain verifier (P06.10.05, INV-10).
  *
+ * ## What a sound report claims, precisely
+ *
+ * **Sound for the register population captured at sweep start** — not "sound right now". The sweep
+ * reads the register's high-water mark once, and its population is exactly the registrations at or
+ * below it. A tenant registered while the sweep is running belongs to the next one.
+ *
+ * That boundary is explicit because the alternative was silently wrong. Paging by `tenant_id` — a
+ * random UUID — meant a registration landing behind the cursor was invisible: measured, a register
+ * holding one tenant, a sweep whose cursor had passed it, a second tenant registered, and then
+ * "next page: 0 rows, count after cursor: 0, unregistered: 0" — a complete-coverage report over
+ * half the estate. UUID order does not encode registration order, so no cursor over it can
+ * distinguish "nothing left" from "something arrived behind me", and counting cannot either,
+ * because a late tenant ahead of the cursor gets processed and pushes the total up while an
+ * original member is still unvisited.
+ *
+ * Continuous-current soundness would need the whole sweep inside one snapshot, and a REPEATABLE
+ * READ transaction spanning every tenant's chain would pin `xmin` on the fastest-growing table in
+ * the schema for the duration. A captured population is achievable, cheap, and says what it means.
+ *
  * ## What this adds over `verifyAuditChain`
  *
  * `verifyAuditChain` answers the question for *one* tenant, inside a transaction the caller already
@@ -35,6 +54,9 @@ import { verifyAuditChain } from './audit.ts';
 import { withSystemWork, type ClaimedItem, type TenantClient } from './tenant.ts';
 import type { Pool } from './pool.ts';
 
+/** Where a sweep starts paging: before the first registration. */
+const FIRST_CURSOR = '0';
+
 /** Tenants per claim page. The SQL function caps itself at 1000; this stays well under it. */
 const CHAIN_PAGE_SIZE = 200;
 const MAX_PAGE_SIZE = 1000;
@@ -68,19 +90,27 @@ export interface AuditVerificationReport {
   /** Tenants whose chain could not be checked. */
   readonly unchecked: number;
   /**
-   * Registered tenants the deadline stopped the sweep from ever claiming.
+   * The register high-water mark this sweep's population was captured at.
    *
-   * Counted from the **register**, not from the worklist. Deriving it from the tenants that were
-   * claimed is fail-open: with one tenant per page and a deadline that expires after the first
-   * page, "one claimed, one sound" reads exactly like a complete estate.
+   * Reported so a reader can see which population the verdict covers, and so two consecutive runs
+   * can be shown to have no gap between them.
+   */
+  readonly populationHighWater: string;
+  /**
+   * Members of the captured population the sweep never claimed.
+   *
+   * Counted from the **register**, inside the captured range. Deriving it from the tenants that
+   * were claimed is fail-open twice over: every claimed tenant is also processed, so the
+   * subtraction is zero; and a registration behind a UUID cursor is invisible to it entirely.
    */
   readonly unreached: number;
   /**
-   * True only when the sweep is known to have covered every registered tenant.
+   * True only when every member of the captured population was verified or reported.
    *
-   * False when the deadline fired with tenants still ahead of the cursor, **and** when the shortfall
-   * could not be established at all — not knowing whether coverage was complete is not the same as
-   * it being complete.
+   * False when the deadline fired with members still ahead of the cursor, and false when the
+   * shortfall could not be established at all — not knowing whether coverage was complete is not
+   * the same as it being complete. It says nothing about registrations made after the snapshot,
+   * which are not this sweep's to cover.
    */
   readonly coverageComplete: boolean;
   /**
@@ -106,6 +136,16 @@ export interface VerifyAuditChainsOptions {
   readonly onUnregistered?: (organisationId: string) => void;
   /** Called once when the deadline fired with tenants still unreached. */
   readonly onIncompleteCoverage?: (unreached: number) => void;
+  /**
+   * Called after each page is processed, with the running tenant count.
+   *
+   * A progress hook for long sweeps — and the seam that makes the population boundary testable
+   * without an injectable snapshot. The snapshot must be a correctness property of the sweep, not
+   * something a caller or an operator can set, so there is deliberately no way to supply the
+   * high-water mark from outside; a test instead registers a tenant *from* this callback and
+   * asserts the running sweep does not adopt it.
+   */
+  readonly onPageComplete?: (tenants: number) => void | Promise<void>;
   /** Tenants per claim page. Defaults to 200; only tests need to shrink it. */
   readonly pageSize?: number;
   /**
@@ -156,6 +196,11 @@ export async function verifyAuditChains(
   const now = options.now ?? Date.now;
   const startedAt = now();
 
+  // Captured **once**, before the first page. Every page and every coverage calculation below uses
+  // this same value; recomputing it per page would reopen the defect from the other side, by
+  // letting the population grow underneath the sweep that is meant to be bounded by it.
+  const highWater = await populationHighWater(pool);
+
   const breaks: AuditChainBreak[] = [];
   const failures: AuditChainFailure[] = [];
   /**
@@ -169,21 +214,29 @@ export async function verifyAuditChains(
    */
   const outcomes = new Map<string, 'sound' | 'broken'>();
   let tenants = 0;
-  let after: string | null = null;
+  /** Registration sequence already covered. Sequence order, never UUID order. */
+  let after = FIRST_CURSOR;
   let deadlineReached = false;
 
   for (;;) {
     // Captured from the claim itself rather than re-queried: asking the database a second time for
-    // "the last id of that page" would race with a provisioning landing mid-sweep.
+    // "the last row of that page" would race with a registration landing mid-sweep.
     let page: readonly ClaimedItem[] = [];
+    let cursor = after;
 
     const result = await withSystemWork(
       pool,
       async (client: TenantClient) => {
-        const claimed = await client.query<{ organisation_id: string; id: string }>(
-          'select organisation_id, id from app.claim_audit_chains($1::integer, $2::uuid)',
-          [pageSize, after],
+        const claimed = await client.query<{
+          organisation_id: string;
+          id: string;
+          registration_seq: string;
+        }>(
+          `select organisation_id, id, registration_seq::text as registration_seq
+             from app.claim_audit_chains($1::integer, $2::bigint, $3::bigint)`,
+          [pageSize, after, highWater],
         );
+        cursor = claimed.rows.at(-1)?.registration_seq ?? cursor;
         page = claimed.rows.map((row) => ({
           organisationId: row.organisation_id,
           id: row.id,
@@ -217,10 +270,12 @@ export async function verifyAuditChains(
     );
 
     tenants += result.claimed;
-    const last = page.at(-1);
-    // A short page is the last page. `last === undefined` covers an empty register.
-    if (result.claimed < pageSize || last === undefined) break;
-    after = last.organisationId;
+    await options.onPageComplete?.(tenants);
+    // A short page is the last page of the captured population; an empty one means the sweep has
+    // reached the high-water mark. Either way there is nothing further *in this population*, which
+    // is a statement the sequence bound makes safe to act on.
+    if (result.claimed < pageSize) break;
+    after = cursor;
 
     // The deadline is checked here rather than at the top of the loop, so a sweep always claims at
     // least one page. A run that exits having verified nothing because its deadline had already
@@ -239,7 +294,7 @@ export async function verifyAuditChains(
   let coverageComplete = true;
   if (deadlineReached) {
     try {
-      unreached = await remaining(pool, after);
+      unreached = await remaining(pool, after, highWater);
     } catch {
       // Not knowing the shortfall is not the same as there being none. Fail closed, and let the
       // count stay 0 rather than inventing one.
@@ -265,6 +320,7 @@ export async function verifyAuditChains(
     tenants,
     sound,
     broken,
+    populationHighWater: highWater,
     // A tenant the deadline stopped us reaching is unchecked, not absent.
     unchecked: failures.length + unreached,
     unreached,
@@ -276,13 +332,33 @@ export async function verifyAuditChains(
   };
 }
 
-/** Registered tenants after the cursor — a count only, never identifiers. */
-async function remaining(pool: Pool, after: string | null): Promise<number> {
+/**
+ * The register high-water mark, read once per sweep.
+ *
+ * Rejects rather than defaulting: a sweep that does not know its own population bound cannot
+ * report on coverage at all, and a silent 0 would make every register look empty.
+ */
+async function populationHighWater(pool: Pool): Promise<string> {
   const client = await pool.connect();
   try {
     const result = await client.query<{ n: string }>(
-      'select app.count_audit_chains($1::uuid)::text as n',
-      [after],
+      'select app.audit_chain_high_water()::text as n',
+    );
+    const value = result.rows[0]?.n;
+    if (value === undefined) throw new Error('audit chain high-water mark returned no row');
+    return value;
+  } finally {
+    client.release();
+  }
+}
+
+/** Population members still unvisited — a count only, never identifiers. */
+async function remaining(pool: Pool, after: string, highWater: string): Promise<number> {
+  const client = await pool.connect();
+  try {
+    const result = await client.query<{ n: string }>(
+      'select app.count_audit_chains($1::bigint, $2::bigint)::text as n',
+      [after, highWater],
     );
     const value = result.rows[0]?.n;
     if (value === undefined) throw new Error('audit chain count returned no row');

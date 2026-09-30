@@ -280,7 +280,9 @@ describe('the scheduled verifier process', () => {
         `insert into organisations(id, slug, name)
          select gen_random_uuid(), 'opaque-' || g, 'Opaque ' || g from generate_series(1, 3) g`,
       );
-      await owner.query('revoke execute on function app.count_audit_chains(uuid) from moin_app');
+      await owner.query(
+        'revoke execute on function app.count_audit_chains(bigint, bigint) from moin_app',
+      );
 
       let code = 0;
       let stdout = '';
@@ -321,7 +323,7 @@ describe('the scheduled verifier process', () => {
 
   it('reports a failure rather than a clean run when it cannot enumerate tenants', async () => {
     await privileged.query(
-      'revoke execute on function app.claim_audit_chains(integer, uuid) from moin_app',
+      'revoke execute on function app.claim_audit_chains(integer, bigint, bigint) from moin_app',
     );
     try {
       const result = await verifyAudit();
@@ -331,7 +333,7 @@ describe('the scheduled verifier process', () => {
       expect(lineFor(result, 'audit.chain.run.completed')).toBeUndefined();
     } finally {
       await privileged.query(
-        'grant execute on function app.claim_audit_chains(integer, uuid) to moin_app',
+        'grant execute on function app.claim_audit_chains(integer, bigint, bigint) to moin_app',
       );
     }
   }, 60_000);

@@ -375,18 +375,18 @@ END $$`,
   it('rejects the claim function changed to SECURITY INVOKER', async () => {
     // As SECURITY INVOKER it returns nothing at all — FORCE RLS hides the register from the caller —
     // so the sweep would verify zero tenants and report a clean run.
-    await ddl('ALTER FUNCTION app.claim_audit_chains(integer, uuid) SECURITY INVOKER');
+    await ddl('ALTER FUNCTION app.claim_audit_chains(integer, bigint, bigint) SECURITY INVOKER');
     try {
       expect(rulesFor(await findings(), 'app.claim_audit_chains')).toStrictEqual([
         'reviewed-function-not-security-definer',
       ]);
     } finally {
-      await ddl('ALTER FUNCTION app.claim_audit_chains(integer, uuid) SECURITY DEFINER');
+      await ddl('ALTER FUNCTION app.claim_audit_chains(integer, bigint, bigint) SECURITY DEFINER');
     }
   });
 
   it('rejects a missing reviewed claim function signature', async () => {
-    await ddl('DROP FUNCTION app.claim_audit_chains(integer, uuid)');
+    await ddl('DROP FUNCTION app.claim_audit_chains(integer, bigint, bigint)');
     try {
       // Two findings, because identity and body are pinned separately and both are now absent.
       expect(rulesFor(await findings(), 'app.claim_audit_chains')).toStrictEqual([
@@ -396,19 +396,20 @@ END $$`,
     } finally {
       await ddl(
         // eslint-disable-next-line no-restricted-syntax -- function-level setting in a DDL fixture, not a pooled session.
-        `CREATE FUNCTION app.claim_audit_chains(p_limit integer, p_after uuid)
-          RETURNS TABLE (organisation_id uuid, id uuid)
+        `CREATE FUNCTION app.claim_audit_chains(p_limit integer, p_after bigint, p_high_water bigint)
+          RETURNS TABLE (organisation_id uuid, id uuid, registration_seq bigint)
           LANGUAGE sql STABLE SECURITY DEFINER
           SET search_path = pg_catalog, public, app, pg_temp
         AS $$
-  SELECT r.tenant_id AS organisation_id, r.tenant_id AS id
+  SELECT r.tenant_id AS organisation_id, r.tenant_id AS id, r.registration_seq
   FROM audit_chain_registry r
-  WHERE p_after IS NULL OR r.tenant_id > p_after
-  ORDER BY r.tenant_id
+  WHERE r.registration_seq > coalesce(p_after, 0)
+    AND r.registration_seq <= coalesce(p_high_water, 0)
+  ORDER BY r.registration_seq
   LIMIT least(greatest(coalesce(p_limit, 0), 0), 1000)
 $$;
-        REVOKE ALL ON FUNCTION app.claim_audit_chains(integer, uuid) FROM PUBLIC;
-        GRANT EXECUTE ON FUNCTION app.claim_audit_chains(integer, uuid) TO moin_app;`,
+        REVOKE ALL ON FUNCTION app.claim_audit_chains(integer, bigint, bigint) FROM PUBLIC;
+        GRANT EXECUTE ON FUNCTION app.claim_audit_chains(integer, bigint, bigint) TO moin_app;`,
       );
     }
   });
@@ -416,7 +417,7 @@ $$;
   it('rejects a mutable path and an extra runtime grant on the claim function', async () => {
     await ddl(
       // eslint-disable-next-line no-restricted-syntax -- defective function-level setting is the negative control.
-      `ALTER FUNCTION app.claim_audit_chains(integer, uuid) SET search_path = public, pg_temp`,
+      `ALTER FUNCTION app.claim_audit_chains(integer, bigint, bigint) SET search_path = public, pg_temp`,
     );
     try {
       expect(rulesFor(await findings(), 'app.claim_audit_chains')).toContain(
@@ -425,18 +426,20 @@ $$;
     } finally {
       await ddl(
         // eslint-disable-next-line no-restricted-syntax -- restore the reviewed setting.
-        `ALTER FUNCTION app.claim_audit_chains(integer, uuid) SET search_path = pg_catalog, public, app, pg_temp`,
+        `ALTER FUNCTION app.claim_audit_chains(integer, bigint, bigint) SET search_path = pg_catalog, public, app, pg_temp`,
       );
     }
 
-    await ddl('GRANT EXECUTE ON FUNCTION app.claim_audit_chains(integer, uuid) TO moin_reporting');
+    await ddl(
+      'GRANT EXECUTE ON FUNCTION app.claim_audit_chains(integer, bigint, bigint) TO moin_reporting',
+    );
     try {
       expect(rulesFor(await findings(), 'app.claim_audit_chains')).toContain(
         'security-definer-unexpected-execute-grant',
       );
     } finally {
       await ddl(
-        'REVOKE EXECUTE ON FUNCTION app.claim_audit_chains(integer, uuid) FROM moin_reporting',
+        'REVOKE EXECUTE ON FUNCTION app.claim_audit_chains(integer, bigint, bigint) FROM moin_reporting',
       );
     }
   });

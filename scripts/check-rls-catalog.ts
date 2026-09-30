@@ -113,9 +113,10 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.append_audit_event': 'e8a2fff1d6b97ee844313730cf63ef29',
   'app.audit_canonical_payload': 'ff85e1e923f72ea01658e627de79b719',
   'app.audit_provisioning_request': '9af333f9b77604a27d522f64fd020a07',
-  'app.claim_audit_chains': '27d62c364aa768d834cd5f2e3fc7643a',
+  'app.claim_audit_chains': 'd11d35da7fbd6c2a439631b363b03f79',
   'app.unregistered_audit_chains': '280c72481f5bfcdb4eab663d46840947',
-  'app.count_audit_chains': 'e3255f5c5acaa1464eb57a6df4cc5df6',
+  'app.count_audit_chains': 'e3cd033e0ea860c723977f7c9e28068a',
+  'app.audit_chain_high_water': '72780f25788c93f22aaa1efd460fc715',
   'app.provision_tenant': '187d4a4589e54a39cdadc6f3726cce26',
 };
 
@@ -145,7 +146,7 @@ const APPROVED_DEFINERS: Readonly<
     executeGrantees: ['moin_app'],
   },
   'app.claim_audit_chains': {
-    arguments: 'integer, uuid',
+    arguments: 'integer, bigint, bigint',
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
     executeGrantees: ['moin_app'],
@@ -156,8 +157,14 @@ const APPROVED_DEFINERS: Readonly<
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
     executeGrantees: ['moin_app'],
   },
+  'app.audit_chain_high_water': {
+    arguments: '',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: ['moin_app'],
+  },
   'app.count_audit_chains': {
-    arguments: 'uuid',
+    arguments: 'bigint, bigint',
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
     executeGrantees: ['moin_app'],
