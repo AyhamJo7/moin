@@ -5,8 +5,8 @@ mode: autonomous
 phase: P06
 tier: PILOT
 plan: docs/phases/P06-plan.md
-next: founder — QG-09 review of P06.04 and P06.10, and acceptance of ADR-0017 (P06.10.06)
-updated: 2026-09-30
+next: founder — independent QG-09 re-review of PR #31, then the five ADR-0017 residuals and acceptance of ADR-0017 (P06.10.06)
+updated: 2026-10-01
 ---
 
 # PROGRESS — moin
@@ -169,6 +169,7 @@ Rules
 | P06.10.05 | WAITING_FOR_EXTERNAL | 8e5bf76 | EV-P06-024 | Daily cross-tenant sweep, SEV2 alarm, runbook and exit-code split built and verified. **Counterparty:** AWS (EXT-09), founder-owned. **Requested:** 2026-09-30. **Expected:** with P05 cloud foundation. **Fallback:** run `pnpm db:verify-audit` manually and record the result, which is what the runbook says today. The daily trigger and the CloudWatch alarms are Terraform and are not provisioned |
 | P06.10.07 | READY_FOR_REVIEW | 8e5bf76 | EV-P06-025 | Tamper, privileged-mutation and argument-scanner suites; 25 injected defect variants all KILLED |
 | P06.10.07 | READY_FOR_REVIEW | 23d70ae | EV-P06-026 | QG-09 review of the diff by three independent reviewers; every High/Critical reproduced against real PostgreSQL, fixed and mutation-proven; 42 defect variants all KILLED; five residuals recorded with owners |
+| P06.10.07 | READY_FOR_REVIEW | c1bde7a | EV-P06-027 | Four HIGH defects from the independent post-fix QG-09 review, each reproduced against real PostgreSQL, fixed and mutation-proven; sweep now 54/54 KILLED with an inspectable manifest |
 | P06.10 | IN_PROGRESS | 8e5bf76 | EV-P06-021…025 | Table, chain, query API, daily verifier, argument scanner and runbook done. Open: .03 adoption by the tool guard, operator and security paths (needs P10.08, P06.11/.12), .05 scheduling (EXT-09) and .06 founder acceptance of ADR-0017 |
 
 ## External waits
@@ -321,3 +322,34 @@ secret-rule fix (#25) merged, with its full-history scan green.
   needs a writer-contract change (P07/P16); `locations` still carries unaudited DML (P07); routing
   the alarm lines through the redacting logger would edit the INV-12 allowlist, which is the
   founder's call; and `pg_temp` in definer search paths is a repository-wide convention.
+
+- 2026-10-01 — **Second independent QG-09 review of P06.10: four HIGH defects, all fail-open.** The
+  pattern is the one worth recording, because three of the four were introduced _by_ the previous
+  round's fixes rather than surviving from the original design. Each was a control that reported
+  success while proving less than it claimed:
+  the deadline counted its shortfall from the tenants it had claimed, and since every claimed tenant
+  is also processed, that arithmetic yields zero whether or not any remain — "one claimed, one sound"
+  read exactly like a complete estate; the argument scanner reconciled against nothing, so a tenant
+  provisioned but absent from the register sat outside everything it inspected, with a planted leak
+  under it, and it exited 0; a registered argument key was treated as a validated value, so a `uuid`
+  argument holding `true` produced no finding at all; and verification asked "is there a head?" and
+  "is there an event?" as two statements, which at READ COMMITTED are two snapshots, so a tenant's
+  legitimate first append landing in between produced `missing-head` for a sound chain.
+  The lesson generalises past this phase: **a fix is a new control, and a new control needs the same
+  adversarial treatment as the thing it replaced.** Coverage checks are the ones to distrust most,
+  because their failure mode is silence. Every one of these was measured before it was fixed, and
+  each measurement is now an assertion.
+  The mutation set grew 42 → 54 and moved out of a scratch script into
+  `docs/verification/audit-mutation-manifest.json` with a committed runner, because a total count
+  says nothing about which properties are proven. Four new variants initially survived — every one
+  because it removed a _redundant_ guard the named test could not isolate. They were kept and the
+  tests sharpened instead of dropped; one of those sharpenings required the deadline check to move
+  after the first page, which also fixed a real behaviour (a sweep whose deadline had already expired
+  used to exit having verified nothing).
+  `gates full` 14/14 at clean `c1bde7a98672`. ADR-0017 stays **PROPOSED**. The five residuals are
+  unchanged and now carry explicit classifications: `moin_app` enumeration is
+  `EXTERNAL_DEPENDENCY` (EXT-09); caller-supplied operation/target-kind/versions, the `locations`
+  DML capability and the alarm lines bypassing the redacting logger are each
+  `FOUNDER_DECISION_REQUIRED`; `pg_temp` last in a definer search path is acceptable for this PR
+  only and must not be read as a general conclusion. P06.10.03 and P06.10.05 remain open as
+  recorded. P06.10 as a whole is not complete.
