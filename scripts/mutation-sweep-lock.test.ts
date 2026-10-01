@@ -224,22 +224,33 @@ describe('two sweeps in one worktree', () => {
       // A owns the lock and is held at the start of its first baseline, before writing anything.
       const first = startDriver(root, control, 'A', ['M1'], ['baseline:M1', 'mutant:M1']);
       await paused(control, first, 'baseline:M1');
-      const owner = JSON.parse(readFileSync(join(sweepLockPath(root), 'owner.json'), 'utf8')) as {
-        pid: number;
-      };
-      expect(owner.pid).toBe(first.pid);
 
-      // B is the review's second sweep: M5, the same file, the same killing test.
+      // B is the review's second sweep: M5, the same file, the same killing test. Wait until it is
+      // either refused or held at its own baseline — never for its exit, which an unrefused B
+      // would not reach.
       const second = startDriver(root, control, 'B', ['M5'], ['baseline:M5', 'mutant:M5']);
+      await until(
+        () =>
+          existsSync(join(control, 'B.done.json')) ||
+          existsSync(marker(control, 'B', 'baseline:M5', 'paused')),
+        'B to be refused or to reach its baseline',
+      );
+      // B never reached its observer: no baseline, no mutant, no result.
+      expect(log(control, 'B')).toStrictEqual([]);
       expect(await second.exited).toStrictEqual({ code: SWEEP_LOCK_EXIT, signal: null });
       const refusal = done(control, 'B');
       expect(refusal.name).toBe('SweepLockError');
       expect(refusal.message).toMatch(/mutation sweep lock already held for this worktree/u);
       expect(refusal.message).toContain(`pid ${String(first.pid)}`);
-      // B never reached its observer: no baseline, no mutant, no result.
-      expect(log(control, 'B')).toStrictEqual([]);
       expect(refusal.outcomes).toBeUndefined();
       expect(readFileSync(join(root, 'src/a.ts'), 'utf8')).toBe(A);
+
+      // The lock B met is A's, by its owner record.
+      const ownerRecord = join(sweepLockPath(root), 'owner.json');
+      expect(existsSync(ownerRecord)).toBe(true);
+      expect((JSON.parse(readFileSync(ownerRecord, 'utf8')) as { pid: number }).pid).toBe(
+        first.pid,
+      );
 
       // A continues, and its test runs against exactly its own mutant.
       release(control, first, 'baseline:M1');
