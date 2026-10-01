@@ -43,6 +43,21 @@
  * `SIGINT` and `SIGTERM` restore and verify the active target before exiting. `SIGKILL` cannot be
  * handled by anything; what protects against it is that the next invocation refuses to start.
  *
+ * ## A fourth rule: one sweep per worktree
+ *
+ * Two sweeps in one worktree both passed the pristine check, then took turns writing the same file:
+ * A's test ran against B's mutant, B's baseline ran against A's, and both reported a kill. Every
+ * per-variant check passed, because each sweep restored what it had written. So a sweep takes an
+ * exclusive lock **before it reads anything** — before HEAD, the pristine check, the baseline cache
+ * or a baseline — and holds it until the last restore is verified and the report is written.
+ *
+ * The lock is a directory created with `mkdir`, which either creates it or fails with `EEXIST`:
+ * there is no check-then-create window. It lives in the worktree's own Git directory
+ * (`git rev-parse --absolute-git-dir`), so linked worktrees sweep independently. An existing lock is
+ * never removed or overwritten by a sweep, however old it looks: `SIGKILL` can leave one behind,
+ * and refusing to start is the safe reading of it. Recovery is manual — see
+ * `docs/verification/README.md`.
+ *
  * A variant that SURVIVES is not a code defect — it means the test is weaker than it looks, or the
  * guard it removes is redundant with another. Both have happened here, and both are worth knowing.
  *
@@ -54,12 +69,23 @@
  *   node scripts/mutation-sweep.ts --root <repo> --manifest <file>   # sweep another checkout
  *
  * Exit codes: 0 every variant is evidence, 1 some variant is not, 2 a usage or manifest error,
- * 3 the source tree could not be shown to be the HEAD tree — nothing was, or will be, measured.
+ * 3 the source tree could not be shown to be the HEAD tree — nothing was, or will be, measured,
+ * 4 another sweep holds this worktree's lock — nothing was read or measured.
  */
 
 import { execFile, execFileSync, type ChildProcess } from 'node:child_process';
-import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { randomUUID } from 'node:crypto';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { hostname, tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -168,6 +194,17 @@ function git(root: string, args: readonly string[], input?: Buffer): string {
     stdio: ['pipe', 'pipe', 'pipe'],
     ...(input === undefined ? {} : { input }),
   }).trim();
+}
+
+/**
+ * A restore that could not be verified. The target may still hold a mutant, so the sweep keeps its
+ * worktree lock rather than releasing it: a human looks before anything sweeps here again.
+ */
+export class RestoreFailedError extends SourceIntegrityError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RestoreFailedError';
+  }
 }
 
 /** The commit the sweep measures against. No Git, no sweep: there is nothing to compare with. */
@@ -297,18 +334,188 @@ export function restorePristine(
   try {
     write(path, pristine);
   } catch (error) {
-    throw new SourceIntegrityError(
+    throw new RestoreFailedError(
       `restoring ${file} failed (${error instanceof Error ? error.message : String(error)}); ` +
         `it may still hold a mutant. Sweep aborted; compare it with HEAD ${head} before sweeping again`,
     );
   }
   const restored = readFileSync(path);
   if (!restored.equals(pristine) || blobOf(root, file, restored) !== headBlob(root, head, file)) {
-    throw new SourceIntegrityError(
+    throw new RestoreFailedError(
       `restoring ${file} did not reproduce its pristine bytes; it may still hold a mutant. ` +
         `Sweep aborted; compare it with HEAD ${head} before sweeping again`,
     );
   }
+}
+
+/** Exit code when another sweep holds this worktree's lock. Nothing was read or measured. */
+export const SWEEP_LOCK_EXIT = 4;
+
+const LOCK_DIRECTORY = 'moin-mutation-sweep.lock';
+const LOCK_OWNER_FILE = 'owner.json';
+
+/** This worktree's sweep lock is held, or could not be taken. Nothing was read or measured. */
+export class SweepLockError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SweepLockError';
+  }
+}
+
+/**
+ * Where the sweep lock for the worktree containing `root` lives.
+ *
+ * `--absolute-git-dir` is the worktree's **own** Git directory — `.git` for the main worktree,
+ * `.git/worktrees/<name>` for a linked one — so two worktrees never share a lock, and a source file
+ * is never the lock.
+ */
+export function sweepLockPath(root: string): string {
+  let gitDirectory: string;
+  try {
+    gitDirectory = git(root, ['rev-parse', '--absolute-git-dir']);
+  } catch {
+    throw new SweepLockError(
+      `cannot resolve the Git directory of ${root}, so no worktree lock can be taken; sweep refused to run`,
+    );
+  }
+  return join(gitDirectory, LOCK_DIRECTORY);
+}
+
+/** Who holds the lock, as far as its owner record says. Informational only; never trusted. */
+function describeHolder(path: string): string {
+  let owner: unknown;
+  try {
+    owner = JSON.parse(readFileSync(join(path, LOCK_OWNER_FILE), 'utf8'));
+  } catch {
+    return 'it has no readable owner record — its holder may have died before writing one';
+  }
+  if (typeof owner !== 'object' || owner === null) return 'its owner record is malformed';
+  const field = (name: string): string => {
+    const value = (owner as Record<string, unknown>)[name];
+    return typeof value === 'string' || typeof value === 'number' ? String(value) : '?';
+  };
+  const retained = (owner as Record<string, unknown>)['retained'];
+  return (
+    `held by pid ${field('pid')} on ${field('hostname')}, started ${field('startedAt')} at HEAD ` +
+    `${field('head')}, cwd ${field('cwd')}` +
+    (typeof retained === 'string' ? `; kept after a failed restore: ${retained}` : '')
+  );
+}
+
+/** The refusal an operator reads. Recovery is spelled out, because the sweep will not do it. */
+function lockHeldMessage(path: string): string {
+  return (
+    `mutation sweep lock already held for this worktree: ${path} (${describeHolder(path)}). ` +
+    'Sweep refused to run; nothing was read or measured. If no sweep is running — check the pid, ' +
+    'on that host — restore any target that still differs from HEAD, remove the lock directory, ' +
+    'and run again.'
+  );
+}
+
+/** The holder description when this worktree's lock exists, otherwise undefined. Read only. */
+export function sweepLockHolder(root: string): string | undefined {
+  const path = sweepLockPath(root);
+  return existsSync(path) ? lockHeldMessage(path) : undefined;
+}
+
+/** Exclusive ownership of one worktree's sweep lock. */
+export interface SweepLock {
+  readonly path: string;
+  /** Write the informational owner record. Failure is a `SweepLockError`; the caller releases. */
+  record: (head: string) => void;
+  /** Keep the lock after a failed restore, so the next sweep refuses until a human has looked. */
+  retain: (reason: string) => void;
+  /** Idempotent. Removes only a lock this process created and still owns. */
+  release: () => void;
+}
+
+/** The lock this process holds, for the signal handlers. */
+let activeLock: SweepLock | undefined;
+
+/**
+ * Take this worktree's lock, or refuse.
+ *
+ * `mkdir` without `recursive` is the whole primitive: it creates the directory or fails with
+ * `EEXIST`, atomically, so two sweeps cannot both succeed. Nothing is checked first.
+ */
+export function acquireSweepLock(root: string, write: WriteFile = writeFileSync): SweepLock {
+  const path = sweepLockPath(root);
+  try {
+    mkdirSync(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      throw new SweepLockError(lockHeldMessage(path));
+    }
+    throw new SweepLockError(
+      `cannot create the sweep lock ${path} (${error instanceof Error ? error.message : String(error)}); sweep refused to run`,
+    );
+  }
+
+  const ownerPath = join(path, LOCK_OWNER_FILE);
+  const owner = {
+    pid: process.pid,
+    hostname: hostname(),
+    cwd: process.cwd(),
+    root,
+    startedAt: new Date().toISOString(),
+    token: randomUUID(),
+  };
+  let state: 'held' | 'retained' | 'released' = 'held';
+  let recorded = false;
+
+  function stillOurs(): boolean {
+    try {
+      const current = JSON.parse(readFileSync(ownerPath, 'utf8')) as { token?: unknown };
+      return current.token === owner.token;
+    } catch {
+      return false;
+    }
+  }
+
+  const lock: SweepLock = {
+    path,
+    record(head) {
+      try {
+        write(ownerPath, `${JSON.stringify({ ...owner, head }, null, 2)}\n`);
+      } catch (error) {
+        throw new SweepLockError(
+          `could not record ownership of the sweep lock ${path} (${error instanceof Error ? error.message : String(error)}); ` +
+            'the lock is released and nothing was measured',
+        );
+      }
+      recorded = true;
+    },
+    retain(reason) {
+      if (state !== 'held') return;
+      state = 'retained';
+      if (activeLock === lock) activeLock = undefined;
+      try {
+        write(ownerPath, `${JSON.stringify({ ...owner, retained: reason }, null, 2)}\n`);
+      } catch {
+        // The lock directory itself is what keeps the next sweep out; the record is diagnostics.
+      }
+    },
+    release() {
+      if (state !== 'held') return;
+      state = 'released';
+      if (activeLock === lock) activeLock = undefined;
+      // A lock removed by hand and re-taken by another sweep is not ours to remove.
+      if (recorded && !stillOurs()) {
+        console.error(`the sweep lock ${path} no longer names this process; left in place`);
+        return;
+      }
+      try {
+        rmSync(ownerPath, { force: true });
+        rmdirSync(path);
+      } catch (error) {
+        console.error(
+          `could not remove the sweep lock ${path} (${error instanceof Error ? error.message : String(error)}); remove it by hand`,
+        );
+      }
+    },
+  };
+  activeLock = lock;
+  return lock;
 }
 
 /** The one target that may currently hold a mutant, for the signal handlers. */
@@ -326,8 +533,10 @@ const SIGNAL_EXIT: Readonly<Record<'SIGINT' | 'SIGTERM', number>> = { SIGINT: 13
 
 /**
  * Best effort for the signals that can be caught: stop the test run, restore and verify the active
- * target, then exit with the conventional code. `SIGKILL` cannot be caught by anything — the
- * protection against it is the pristine check the next invocation runs before measuring anything.
+ * target, release the lock only once that has succeeded, then exit with the conventional code.
+ * Everything here is synchronous, so nothing else in this process runs between the restore and the
+ * exit. `SIGKILL` cannot be caught by anything — what protects against it is that the next
+ * invocation finds the lock and refuses, and after a human removes it, the pristine check.
  */
 export function installSignalRestoration(): void {
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
@@ -335,14 +544,21 @@ export function installSignalRestoration(): void {
       for (const child of activeChildren) child.kill('SIGTERM');
       const active = activeMutation;
       let code = SIGNAL_EXIT[signal];
+      let restoreFailure: string | undefined;
       if (active !== undefined) {
         try {
           restorePristine(active.root, active.head, active.file, active.pristine);
           console.error(`${signal}: restored ${active.file} to its HEAD bytes and verified it`);
         } catch (error) {
-          console.error(`${signal}: ${error instanceof Error ? error.message : String(error)}`);
+          restoreFailure = error instanceof Error ? error.message : String(error);
+          console.error(`${signal}: ${restoreFailure}`);
           code = SOURCE_INTEGRITY_EXIT;
         }
+      }
+      const lock = activeLock;
+      if (lock !== undefined) {
+        if (restoreFailure === undefined) lock.release();
+        else lock.retain(restoreFailure);
       }
       process.exit(code);
     });
@@ -580,13 +796,20 @@ export interface SweepDependencies {
   readonly observe: Observe;
   readonly write?: WriteFile;
   readonly onResult?: (result: Result) => void;
+  /** Called with the finished results while the lock is still held, so the report is written under it. */
+  readonly onComplete?: (results: readonly Result[], head: string) => void;
 }
 
 /**
- * Every selected variant, one at a time, against the HEAD tree.
+ * Every selected variant, one at a time, against the HEAD tree, alone in this worktree.
  *
  * `manifestVariants` is the whole manifest, so that a stale mutant in any target — not only the
- * selected ones — stops the sweep: a test of file B can observe a mutant left in file A.
+ * selected ones — stops the sweep: a test of file B can observe a mutant left in file A. The lock is
+ * worktree-wide for the same reason, even for `--only`.
+ *
+ * One ownership lifecycle: the lock is taken first, before HEAD is read, and released in one
+ * `finally`, after every restore has been verified and `onComplete` has run. The only exception is
+ * a restore that could not be verified, which keeps the lock for a human.
  */
 export async function runSweep(
   manifestVariants: readonly Variant[],
@@ -594,19 +817,29 @@ export async function runSweep(
   dependencies: SweepDependencies,
 ): Promise<Result[]> {
   const { root } = dependencies;
-  const head = resolveHead(root);
-  const targets = manifestVariants.map((variant) => variant.file);
-  assertTargetsPristine(root, head, targets, 'before the sweep started');
+  const lock = acquireSweepLock(root, dependencies.write ?? writeFileSync);
+  try {
+    const head = resolveHead(root);
+    lock.record(head);
+    const targets = manifestVariants.map((variant) => variant.file);
+    assertTargetsPristine(root, head, targets, 'before the sweep started');
 
-  const results: Result[] = [];
-  const baselines = new Map<string, Observation>();
-  for (const variant of selected) {
-    const result = await sweepOne(variant, head, baselines, dependencies);
-    assertTargetsPristine(root, head, targets, `after ${variant.id}`);
-    results.push(result);
-    dependencies.onResult?.(result);
+    const results: Result[] = [];
+    const baselines = new Map<string, Observation>();
+    for (const variant of selected) {
+      const result = await sweepOne(variant, head, baselines, dependencies);
+      assertTargetsPristine(root, head, targets, `after ${variant.id}`);
+      results.push(result);
+      dependencies.onResult?.(result);
+    }
+    dependencies.onComplete?.(results, head);
+    return results;
+  } catch (error) {
+    if (error instanceof RestoreFailedError) lock.retain(error.message);
+    throw error;
+  } finally {
+    lock.release();
   }
-  return results;
 }
 
 function distribution(results: readonly Result[]): ReadonlyMap<string, number> {
@@ -670,6 +903,10 @@ async function main(): Promise<number> {
   try {
     return await sweepCommand();
   } catch (error) {
+    if (error instanceof SweepLockError) {
+      console.error(error.message);
+      return SWEEP_LOCK_EXIT;
+    }
     if (!(error instanceof SourceIntegrityError)) throw error;
     console.error(error.message);
     return SOURCE_INTEGRITY_EXIT;
@@ -699,6 +936,14 @@ async function sweepCommand(): Promise<number> {
   }
 
   if (process.argv.includes('--validate')) {
+    // Validation writes nothing and runs no test, so it takes no lock. But while a sweep holds the
+    // lock its targets hold mutants, so a verdict now would describe that sweep's tree: refuse.
+    // Nothing a sweep does relies on this result — it repeats every check under its own lock.
+    const holder = sweepLockHolder(root);
+    if (holder !== undefined) {
+      console.error(holder);
+      return SWEEP_LOCK_EXIT;
+    }
     // The same pristine check the sweep starts with: anchors that resolve in a contaminated tree
     // say nothing about the HEAD tree the sweep will measure.
     assertTargetsPristine(
@@ -803,17 +1048,21 @@ async function sweepCommand(): Promise<number> {
     onResult: (result) => {
       console.log(`${result.outcome.padEnd(22)} ${result.variant.id}  ${result.variant.invariant}`);
     },
+    // Under the lock: the report describes the tree this sweep alone measured.
+    onComplete: (finished, head) => {
+      if (reportPath !== undefined) {
+        writeFileSync(resolve(reportPath), reportMarkdown(finished, head));
+        console.log(`report written to ${reportPath}`);
+      }
+      if (jsonPath !== undefined) {
+        writeFileSync(
+          resolve(jsonPath),
+          `${JSON.stringify({ head, results: finished }, null, 2)}\n`,
+        );
+        console.log(`machine-readable results written to ${jsonPath}`);
+      }
+    },
   });
-  const head = resolveHead(root);
-
-  if (reportPath !== undefined) {
-    writeFileSync(resolve(reportPath), reportMarkdown(results, head));
-    console.log(`report written to ${reportPath}`);
-  }
-  if (jsonPath !== undefined) {
-    writeFileSync(resolve(jsonPath), `${JSON.stringify({ head, results }, null, 2)}\n`);
-    console.log(`machine-readable results written to ${jsonPath}`);
-  }
 
   console.log('');
   for (const [outcome, count] of [...distribution(results).entries()].sort(([a], [b]) =>

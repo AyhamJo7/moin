@@ -31,6 +31,7 @@ import {
   runSweep,
   SOURCE_INTEGRITY_EXIT,
   SourceIntegrityError,
+  sweepLockPath,
   type Observe,
   type Result,
   type Variant,
@@ -305,8 +306,13 @@ describe('restoring a target after its mutant', () => {
       await expect(sweep).rejects.toBeInstanceOf(SourceIntegrityError);
       expect(calls).toStrictEqual(['baseline:M1', 'mutant:M1']);
 
-      // The file is left as it is for a human, and the next sweep refuses to start on it.
+      // The file is left as it is for a human, and the lock is kept, so the next sweep refuses
+      // before it reads anything. Once a human removes the lock, the pristine check still refuses.
       const next: string[] = [];
+      await expect(runSweep(MANIFEST, [M3], { root, observe: observer(next) })).rejects.toThrow(
+        /lock already held .*kept after a failed restore: restoring src\/a\.ts/u,
+      );
+      rmSync(sweepLockPath(root), { recursive: true });
       await expect(runSweep(MANIFEST, [M3], { root, observe: observer(next) })).rejects.toThrow(
         /not pristine/u,
       );
@@ -452,6 +458,8 @@ describe('a signal during the mutant window', () => {
       expect(code).toBe(143);
       expect(stderr).toMatch(/SIGTERM: restored src\/a\.ts to its HEAD bytes and verified it/u);
       expect(readFileSync(join(root, 'src/a.ts'), 'utf8')).toBe(A);
+      // The lock is released only after that restore was verified.
+      expect(existsSync(sweepLockPath(root))).toBe(false);
     },
     CHILD_TIMEOUT_MS,
   );
@@ -463,6 +471,8 @@ describe('a signal during the mutant window', () => {
       expect(code).toBe(130);
       expect(stderr).toMatch(/SIGINT: restored src\/a\.ts/u);
       expect(readFileSync(join(root, 'src/a.ts'), 'utf8')).toBe(A);
+      // The lock is released only after that restore was verified.
+      expect(existsSync(sweepLockPath(root))).toBe(false);
     },
     CHILD_TIMEOUT_MS,
   );
