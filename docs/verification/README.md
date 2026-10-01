@@ -30,7 +30,8 @@ node scripts/mutation-sweep.ts --json results.json        # machine-readable, fo
 ```
 
 Exit codes: `0` every variant is evidence, `1` some variant is not, `2` a usage or manifest error,
-`3` the source tree could not be shown to be the HEAD tree, so nothing was measured. Both the sweep
+`3` the source tree could not be shown to be the HEAD tree, so nothing was measured, `4` another
+sweep holds this worktree's lock, so nothing was read or measured. Both the sweep
 and `--validate` start with the same pristine check, so **commit before you sweep**: a target with
 uncommitted changes is indistinguishable from a mutant a killed sweep left behind, and is refused.
 
@@ -238,6 +239,62 @@ The working tree is now never trusted:
    `143`. **`SIGKILL` cannot be handled by anything**; what protects against it is rule 1 on the next
    invocation.
 
+### One sweep per worktree
+
+Exactly one mutant also means exactly one **sweep**. Two sweeps in one worktree both passed the
+pristine check and then took turns writing one file. An independent review reproduced it, and so did
+this repository before the fix, with M1 and M5 in the same file sharing a killing test: A's mutant
+run observed M5's bytes, B's baseline observed A's M1, B's mutant run observed the pristine file,
+both reported `KILLED_ASSERTION`, and the file ended pristine. Every per-variant check passed,
+because each sweep restored what it had written.
+
+So a sweep takes an exclusive lock first:
+
+- **Primitive.** `mkdir` without `recursive`: it creates the directory or fails with `EEXIST`,
+  atomically. Nothing is checked before it, so two sweeps cannot both succeed.
+- **Where.** `$(git rev-parse --absolute-git-dir)/moin-mutation-sweep.lock` — the worktree's **own**
+  Git directory: `.git/` for the main worktree, `.git/worktrees/<name>/` for a linked one. Linked
+  worktrees therefore sweep in parallel; two sweeps in one worktree cannot. The lock is never a
+  source file.
+- **When.** Taken before HEAD is read, before the pristine check, the baseline cache or any
+  baseline. Held through every baseline, mutant, restore and verification, and through writing the
+  report. Released in one `finally`. `--only` takes the same worktree-wide lock: a partial sweep's
+  tests can still observe any file.
+- **Owner record.** `owner.json` inside the directory — pid, hostname, cwd, HEAD, start time and a
+  random token — is written after ownership is taken. It is diagnostics: a refusal prints it. If
+  it cannot be written the sweep releases the lock and aborts. Release removes only a lock whose
+  record still carries this process's token, and is idempotent.
+- **Signals.** `SIGINT` and `SIGTERM` restore and verify the active target, then release, then exit
+  `130`/`143`. A restore that cannot be verified — on a signal or otherwise — **keeps** the lock,
+  with the reason in its record, so the next sweep refuses until a human has looked.
+- **`--validate`** writes nothing and runs no test, so it takes no lock. It does refuse with exit
+  `4` while a lock exists, because the targets then hold another sweep's mutant. No sweep relies on
+  a validation result: it repeats every check under its own lock.
+
+**A lock is never removed automatically**, however old it looks. `SIGKILL`, a crash or a lost
+machine can leave one behind, with a mutant still on disk. The next sweep refuses with exit `4`, and
+the message names the holder. To recover:
+
+1. confirm no sweep is running — `ps -p <pid>` on the host the message names;
+2. compare every mutation target with HEAD and restore any that differ (`git diff HEAD --stat`);
+3. remove the lock directory the message names (`rm -r <path>`);
+4. sweep again. If step 2 missed a leftover mutant, the pristine check refuses with exit `3`.
+
+Two independent protections, then: the stale lock, and behind it the HEAD-pristine check.
+[`mutation-sweep-lock.test.ts`](../../scripts/mutation-sweep-lock.test.ts) runs real sweeps as
+separate processes, with a held observer recording the bytes on disk when each test would run:
+
+| Case                                                                                    | Required result                                                                                                                   |
+| --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| A holds the lock at its first baseline; B (M5, same file, same killing test) starts     | B exits `4` with A's pid, never reaches its observer; A observes the HEAD bytes, then exactly M1                                  |
+| A has M1 on disk; a CLI sweep starts                                                    | exit `4`, not `3`: the lock is met before any source is read                                                                      |
+| 8 sweeps start at once                                                                  | exactly one owns the lock; seven exit `4` with no observation                                                                     |
+| `SIGINT` while held at a baseline                                                       | exit `130`, lock released                                                                                                         |
+| a linked worktree while the main one is locked                                          | separate lock paths; the linked sweep completes on its own mutant                                                                 |
+| `SIGKILL` during a mutant                                                               | lock and mutant remain; sweep and `--validate` exit `4`; after manual removal, exit `3` on the mutant; after restore, a clean run |
+| a foreign lock and a dirty tree                                                         | `SweepLockError`, not `SourceIntegrityError`, and the foreign record untouched                                                    |
+| normal run · observer throws · failed baseline · refused tree · owner record unwritable | lock released every time, target restored where one was mutated                                                                   |
+
 [`mutation-sweep-isolation.test.ts`](../../scripts/mutation-sweep-isolation.test.ts) builds a
 throwaway Git repository per case and runs the production sweep against it, with a counting fake in
 place of Vitest:
@@ -253,7 +310,7 @@ place of Vitest:
 | the restore throws                                                                                  | aborted                                                                                              |
 | an `eol=crlf` checkout of an LF blob                                                                | pristine, and restored as CRLF                                                                       |
 | untracked target, `../` path, absolute path, symlink, no HEAD                                       | refused                                                                                              |
-| a real `SIGTERM` / `SIGINT` while the mutant is on disk                                             | target restored to HEAD bytes and verified; exit `143` / `130`                                       |
+| a real `SIGTERM` / `SIGINT` while the mutant is on disk                                             | target restored to HEAD bytes and verified, then the lock released; exit `143` / `130`               |
 
 ### Applying a variant
 
@@ -336,7 +393,8 @@ the rules above and names the adversarial test that must catch it.
 Three limits are worth stating rather than hiding.
 
 - `H30`–`H33` re-export a capability or hand the probe out twice; `H34`–`H38` remove one rule of the
-  pristine-source contract each. The sweep that measures them loaded its own code before mutating,
+  pristine-source contract each; `H39`–`H42` take no lock, take it after the source check, release
+  it as soon as it is recorded, and scope it to the whole repository. The sweep that measures them loaded its own code before mutating,
   and checks its targets only before and after each variant, so mutating `mutation-sweep.ts` does not
   change the sweep doing the measuring. Some of these guards are deliberately redundant with each
   other — the per-variant check would also notice a failed restore — so each variant names the test
