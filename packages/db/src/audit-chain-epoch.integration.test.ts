@@ -265,6 +265,22 @@ describe('the old exploit, attempted against the new design', () => {
   }, 60_000);
 });
 
+describe('the allocator fails closed', () => {
+  it('refuses to register a tenant when no epoch can be allocated', async () => {
+    // If the state row were gone, a registration that carried on regardless would write a null or
+    // zero epoch, and that tenant would sit outside every sweep's population for ever. Failing the
+    // insert is the only safe answer: a tenant that cannot be registered must not be created.
+    await pool.query('delete from audit_chain_population_state');
+    await expect(register(pool, 'no-allocator')).rejects.toThrow(/population state is missing/u);
+
+    // And nothing was left half-written.
+    const registry = await pool.query('select 1 from audit_chain_registry');
+    expect(registry.rows).toHaveLength(0);
+    const organisations = await pool.query('select 1 from organisations');
+    expect(organisations.rows).toHaveLength(0);
+  }, 60_000);
+});
+
 describe('lock order and deadlock', () => {
   it('concurrent provisioning does not deadlock', async () => {
     // Every path that registers a tenant takes the same locks in the same order — organisations

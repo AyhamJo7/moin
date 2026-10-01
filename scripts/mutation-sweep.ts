@@ -61,6 +61,13 @@ interface Variant {
   readonly test: string;
   readonly kills: string;
   /**
+   * Which Vitest project the killing test belongs to. Defaults to `integration`.
+   *
+   * The harness's own controls live in the unit project — a classifier that needs a database to
+   * prove it rejects a database failure would be a poor joke — so the project is per variant.
+   */
+  readonly project?: 'unit' | 'integration';
+  /**
    * Why this variant's outcome is not `KILLED_ASSERTION`, when that is expected and correct.
    *
    * Some defects are rejected by a guard that runs *before* any test — an assertion inside a
@@ -107,7 +114,7 @@ async function observe(
         './node_modules/vitest/vitest.mjs',
         'run',
         '--project',
-        'integration',
+        variant.project ?? 'integration',
         variant.test,
         '-t',
         variant.kills,
@@ -202,7 +209,15 @@ async function sweep(
   }
 
   try {
-    writeFileSync(path, original.replace(variant.find, variant.replace));
+    // A **function** replacement, because a string one is interpreted: `String.prototype.replace`
+    // treats `$$` in the replacement as an escape for a literal `$`, and `$&`/`$1` as back
+    // references. Any variant whose replacement contained `$$` — every SQL function body — was
+    // therefore silently corrupted into `$`, and the migration failed with
+    // `syntax error at or near "$"`. The variant looked detected; nothing had been tested.
+    writeFileSync(
+      path,
+      original.replace(variant.find, () => variant.replace),
+    );
     const mutant = await observe(variant, 'mutant');
     return {
       variant,

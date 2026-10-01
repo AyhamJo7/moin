@@ -622,12 +622,12 @@
     "note": "Rejected by an assertion inside the migration itself, during the integration project's global setup, so no suite runs and no test can claim the kill. The control is stronger than a test rather than absent; the expected outcome is INFRA_FAILURE."
   },
   {
-    "id": "P9-sequence-writable-by-runtime-role",
-    "invariant": "A registration sequence is immutable once assigned",
-    "expected": "A caller able to rewrite a sequence could move a tenant out of the current population, which is the UUID-cursor defect made deliberate.",
+    "id": "P9-population-state-writable-by-runtime-role",
+    "invariant": "A registration epoch is immutable, and the allocator is not writable by the runtime role",
+    "expected": "`moin_app` could increment the population state and move a sweep's bound out from under it, or rewrite a registration's epoch \u2014 the UUID-cursor defect made deliberate.",
     "file": "packages/db/migrations/0011_audit_chain_population.sql",
-    "find": "REVOKE ALL ON SEQUENCE audit_chain_registry_registration_seq FROM moin_app, moin_provisioner;",
-    "replace": "GRANT SELECT, UPDATE ON SEQUENCE audit_chain_registry_registration_seq TO moin_app;\nGRANT UPDATE ON audit_chain_registry TO moin_app;",
+    "find": "REVOKE ALL ON audit_chain_population_state FROM moin_app, moin_provisioner;",
+    "replace": "GRANT SELECT, UPDATE ON audit_chain_population_state TO moin_app;\nGRANT UPDATE ON audit_chain_registry TO moin_app;",
     "test": "packages/db/src/audit-chain-population.integration.test.ts",
     "kills": "cannot be rewritten by the application role or by the table owner"
   },
@@ -640,5 +640,80 @@
     "replace": "  let after = await populationHighWater(pool);",
     "test": "packages/db/src/audit-chain-population.integration.test.ts",
     "kills": "leaves no registration outside both of two consecutive sweeps"
+  },
+  {
+    "id": "E1-epoch-allocated-by-sequence",
+    "invariant": "INV-10: epoch order is commit order, which a sequence does not provide",
+    "expected": "The exact rejected architecture: `nextval()` hands out distinct values without locking, so a higher epoch can commit while a lower one is still in flight and a sweep reports complete coverage of a population it half covered.",
+    "file": "packages/db/migrations/0011_audit_chain_population.sql",
+    "find": "CREATE OR REPLACE FUNCTION app.register_audit_chain() RETURNS trigger\n  LANGUAGE plpgsql SET search_path = pg_catalog, public, app, pg_temp\nAS $$\nDECLARE\n  v_epoch bigint;\nBEGIN\n  UPDATE audit_chain_population_state\n     SET last_registration_epoch = last_registration_epoch + 1\n   WHERE id\n  RETURNING last_registration_epoch INTO v_epoch;",
+    "replace": "CREATE SEQUENCE mutation_rejected_epoch_seq;\nCREATE OR REPLACE FUNCTION app.register_audit_chain() RETURNS trigger\n  LANGUAGE plpgsql SET search_path = pg_catalog, public, app, pg_temp\nAS $$\nDECLARE\n  v_epoch bigint;\nBEGIN\n  v_epoch := nextval('mutation_rejected_epoch_seq');",
+    "test": "packages/db/src/audit-chain-epoch.integration.test.ts",
+    "kills": "blocks a second registration while the first is uncommitted"
+  },
+  {
+    "id": "E3-allocator-does-not-fail-closed",
+    "invariant": "A registration with no allocatable epoch fails rather than registering nothing",
+    "expected": "If the population state row were missing, registrations would silently insert a null epoch or none at all, and those tenants would never enter any sweep's population.",
+    "file": "packages/db/migrations/0011_audit_chain_population.sql",
+    "find": "  IF v_epoch IS NULL THEN\n    RAISE EXCEPTION 'audit chain population state is missing, so no registration epoch can be allocated'\n      USING ERRCODE = 'internal_error';\n  END IF;",
+    "replace": "  v_epoch := coalesce(v_epoch, 0);",
+    "test": "packages/db/src/audit-chain-epoch.integration.test.ts",
+    "kills": "refuses to register a tenant when no epoch can be allocated"
+  },
+  {
+    "id": "C1-privacy-gate-ignores-added-columns",
+    "invariant": "QG-12: every column reaches the personal-data inventory, however it was added",
+    "expected": "A column added by `ALTER TABLE ... ADD COLUMN` would never be classified, so an erasure request would miss it silently.",
+    "file": "scripts/check-data-classification.ts",
+    "find": "  for (const match of sql.matchAll(ADD_COLUMN)) {\n    columns.push({ table: match[1] ?? '', column: match[2] ?? '' });\n  }",
+    "replace": "",
+    "test": "scripts/check-data-classification.test.ts",
+    "kills": "flags an ALTER-added column the inventory has never seen",
+    "project": "unit"
+  },
+  {
+    "id": "C2-classifier-trusts-message-text",
+    "invariant": "Only a typed assertion error is evidence; message text cannot promote a failure",
+    "expected": "An ordinary error whose text happens to contain matcher words \u2014 a connection failure, a SQL syntax error quoting a query \u2014 would be counted as proof that an invariant was enforced.",
+    "file": "scripts/mutation-outcome.ts",
+    "find": "    if (errors.length > 0 && nonAssertion.length === 0) {",
+    "replace": "    if (errors.length > 0 && errors.some((error) => /toThrow|AssertionError|expect/u.test(error.message))) {",
+    "test": "scripts/mutation-outcome.test.ts",
+    "kills": "rejects a connection failure that happens to mention toThrow",
+    "project": "unit"
+  },
+  {
+    "id": "C3-classifier-ignores-hook-failures",
+    "invariant": "A hook that threw is infrastructure, whatever else the run reports",
+    "expected": "An unreachable database failing `beforeAll` would be classified from whatever the tests reported, which is how every variant once looked killed.",
+    "file": "scripts/mutation-outcome.ts",
+    "find": "  const hookError = modules.flatMap((module) => module.hookErrors)[0];",
+    "replace": "  const hookError = undefined as undefined | { message: string; name: string; isAssertion: boolean };",
+    "test": "scripts/mutation-outcome.test.ts",
+    "kills": "a hook failure wins even when it mentions a matcher",
+    "project": "unit"
+  },
+  {
+    "id": "C4-classifier-accepts-mixed-errors",
+    "invariant": "A test that failed an assertion AND threw elsewhere is not clean evidence",
+    "expected": "An `afterEach` that blew up alongside a genuine assertion would be counted as a clean kill, so a broken teardown could mask an unreliable run.",
+    "file": "scripts/mutation-outcome.ts",
+    "find": "    const nonAssertion = errors.filter((error) => !error.isAssertion);",
+    "replace": "    const nonAssertion: typeof errors = [];",
+    "test": "scripts/mutation-outcome.test.ts",
+    "kills": "an afterEach failure alongside an assertion fails closed",
+    "project": "unit"
+  },
+  {
+    "id": "C5-reporter-types-by-name-alone",
+    "invariant": "An assertion is identified by its metadata as well as its name",
+    "expected": "An ordinary error whose `name` was reassigned to AssertionError would be read as a typed assertion, which is a one-line way to forge evidence.",
+    "file": "scripts/mutation-reporter.ts",
+    "find": "    isAssertion: name === 'AssertionError' && present.length === ASSERTION_FIELDS.length,",
+    "replace": "    isAssertion: name === 'AssertionError',",
+    "test": "scripts/mutation-reporter.test.ts",
+    "kills": "is not an assertion when the name is right but the metadata is absent",
+    "project": "unit"
   }
 ]
