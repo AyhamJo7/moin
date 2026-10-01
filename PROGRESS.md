@@ -6,7 +6,7 @@ phase: P06
 tier: PILOT
 plan: docs/phases/P06-plan.md
 next: founder — independent QG-09 re-review of PR #31, then the five ADR-0017 residuals and acceptance of ADR-0017 (P06.10.06)
-updated: 2026-10-01
+updated: 2026-10-02
 ---
 
 # PROGRESS — moin
@@ -594,3 +594,22 @@ true, ok: false }` — is serialized by Vitest with none of the `constructor`/`t
   returned.
   ADR-0017 stays **PROPOSED**; the five residuals are unchanged. P06.10.03 remains open; P06.10.05
   remains `WAITING_FOR_EXTERNAL` on EXT-09; P06.10 is not complete.
+
+- 2026-10-02 — **The two remaining QG-09 blockers, harness only (EV-P06-034).** (1) A plain `it`
+  test could import `beginEvidence` and `confirmTerminal` from `@moin/testing`, confirm a matcher
+  object it had caught, throw an unrelated error and come out `ASSERTION`. This was reproduced in a
+  child Vitest before the fix. Removing the re-exports would not have been enough, because any
+  `export` is one relative import away. So both functions, and the `intercept` wrapper that calls
+  them, are now module-scoped in `evidence-state.ts` and exported from no module. The only path to
+  them is `evidenceTest` registration, and Vitest refuses that inside a running test. The probe takes
+  its recorder and window controls once, via `installProbe`. The root exports an allow-list, and the
+  `exports` map stays root-only. A surface test pins both, plus every occurrence of the names.
+  (2) A sweep killed mid-mutant left the mutant on disk, and the next sweep read it as "original". Now
+  every manifest target is hashed as Git would store it (`hash-object --path`) and compared with its
+  HEAD blob before anything runs and after every variant. The restore writes back the proved bytes
+  and verifies them. Any mismatch aborts with exit 3 and changes nothing. The baseline cache comes
+  after the checks. SIGINT and SIGTERM restore; SIGKILL is covered by the next run refusing to start.
+  Nine new `H*` self-mutations all kill, and both fixes are mutation-checked KILLED. The sweep was
+  regenerated at `52cc10f`: `KILLED_ASSERTION: 101`, `NOT_EVIDENCE_ELIGIBLE: 2` (N8, P8, unchanged)
+  over 103 variants. `92/2 over 94` is superseded. No product, migration or app change. ADR-0017
+  stays **PROPOSED**; P06.10 is not complete.
