@@ -172,7 +172,7 @@ Rules
 | P06.10.07 | READY_FOR_REVIEW | c1bde7a | EV-P06-027 | Four HIGH defects from the independent post-fix QG-09 review, each reproduced against real PostgreSQL, fixed and mutation-proven; sweep now 54/54 KILLED with an inspectable manifest |
 | P06.10.07 | READY_FOR_REVIEW | fcc4473 | EV-P06-028 | Population-snapshot design replacing UUID-cursor paging; mutation harness rewritten so its outcomes are evidence — 62 KILLED_ASSERTION, 2 documented INFRA_FAILURE |
 | P06.10.07 | READY_FOR_REVIEW | f105882 | EV-P06-029 | Epoch allocation serialized by commit rather than by `nextval()`; assertion identity decided from typed error metadata rather than message text — 69 KILLED_ASSERTION, 2 documented INFRA_FAILURE |
-| P06.10.07 | READY_FOR_REVIEW | PENDING_SHA | EV-P06-030 | `KILLED_ASSERTION` redefined so it can only mean one thing: two in-process signals a thrown object cannot set, an exact unique `{file, fullName}` identity, and a run with no other failure — 77 KILLED_ASSERTION, 2 documented INFRA_FAILURE over 79 variants, 12 of which attack the harness itself |
+| P06.10.07 | READY_FOR_REVIEW | 986ae8b | EV-P06-030 | `KILLED_ASSERTION` redefined so it can only mean one thing: two in-process signals a thrown object cannot set, an exact unique `{file, fullName}` identity, and a run with no other failure — 77 KILLED_ASSERTION, 2 documented INFRA_FAILURE over 79 variants, 12 of which attack the harness itself |
 | P06.10 | IN_PROGRESS | 8e5bf76 | EV-P06-021…025 | Table, chain, query API, daily verifier, argument scanner and runbook done. Open: .03 adoption by the tool guard, operator and security paths (needs P10.08, P06.11/.12), .05 scheduling (EXT-09) and .06 founder acceptance of ADR-0017 |
 
 ## External waits
@@ -467,7 +467,7 @@ after retry"`. Zero matches is `NO_TEST_MATCH`, two is `AMBIGUOUS_TEST_IDENTITY`
   Twelve new `H*` variants attack the harness: each removes one conjunct of the trust rule and names
   the adversarial test that must catch it. All twelve are killed, which is what makes the other 65
   mean anything.
-  Final distribution at `PENDING_SHA`: `KILLED_ASSERTION: 77`, `INFRA_FAILURE: 2`, over 79 variants.
+  Final distribution at `986ae8b9dd4b`: `KILLED_ASSERTION: 77`, `INFRA_FAILURE: 2`, over 79 variants.
   The two are **not** rounded up, and their recorded reason was corrected after measurement: they
   are not global-setup rejections as previously claimed but the migration's own guard firing inside
   the test that applies it — `0010` raising "backfill covered 0 of 3 organisation(s)" and `0011`
