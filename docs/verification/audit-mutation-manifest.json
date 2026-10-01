@@ -1156,5 +1156,122 @@
       "fullName": "an ineligible test > is reported as such, not as infrastructure"
     },
     "project": "unit"
+  },
+  {
+    "id": "H30-state-exports-begin-evidence",
+    "invariant": "Only the trusted wrapper may open evidence eligibility",
+    "expected": "Any test could import `beginEvidence` by relative path, open eligibility for itself, and — with the confirmation capability — turn an ordinary failure into assertion evidence without being registered through `evidenceTest`.",
+    "file": "packages/testing/src/mutation/evidence-state.ts",
+    "find": "function beginEvidence(): void {",
+    "replace": "export function beginEvidence(): void {",
+    "killingTest": {
+      "file": "scripts/testing-export-surface.test.ts",
+      "fullName": "the state module itself > exports registration and the probe handover, and no capability"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H31-state-exports-confirm-terminal",
+    "invariant": "Only the trusted wrapper may confirm a terminal value",
+    "expected": "Any test could import `confirmTerminal` and vouch for a matcher object it caught, then fail with an unrelated error — the exact sequence an independent review reproduced through the package root.",
+    "file": "packages/testing/src/mutation/evidence-state.ts",
+    "find": "function confirmTerminal(terminal: unknown): void {",
+    "replace": "export function confirmTerminal(terminal: unknown): void {",
+    "killingTest": {
+      "file": "scripts/testing-export-surface.test.ts",
+      "fullName": "the state module itself > exports registration and the probe handover, and no capability"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H32-root-reexports-a-capability",
+    "invariant": "`@moin/testing` exports registration and inert contract constants only",
+    "expected": "A consumer of the package root would reach a provenance-writing capability by a supported import.",
+    "file": "packages/testing/src/index.ts",
+    "find": "export { evidenceTest, concurrentEvidenceTest } from './mutation/evidence-test.ts';",
+    "replace": "export { evidenceTest, concurrentEvidenceTest } from './mutation/evidence-test.ts';\nexport { installProbe } from './mutation/evidence-state.ts';",
+    "killingTest": {
+      "file": "scripts/testing-export-surface.test.ts",
+      "fullName": "the public root > exports exactly the allow-list"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H33-state-hands-the-probe-out-twice",
+    "invariant": "The matcher recorder and invocation window have exactly one writer",
+    "expected": "A test could take its own recorder and window controls after the probe did, and register objects of its choosing as matcher failures.",
+    "file": "packages/testing/src/mutation/evidence-state.ts",
+    "find": "  if (probeInstalled) {",
+    "replace": "  if (probeInstalled && process.pid < 0) {",
+    "killingTest": {
+      "file": "scripts/testing-export-surface.test.ts",
+      "fullName": "the state module itself > has already handed the probe its capabilities, so a test cannot take them"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H34-sweep-skips-the-startup-pristine-check",
+    "invariant": "Exactly one mutant against the HEAD tree: nothing is measured before every target is proved pristine",
+    "expected": "After a sweep killed mid-mutant, a restarted sweep would baseline and mutate a target while a stale mutant still sat in another file.",
+    "file": "scripts/mutation-sweep.ts",
+    "find": "  assertTargetsPristine(root, head, targets, 'before the sweep started');\n",
+    "replace": "",
+    "killingTest": {
+      "file": "scripts/mutation-sweep-isolation.test.ts",
+      "fullName": "a stale mutant in another file > stops a variant whose own target is pristine"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H35-sweep-checks-only-the-selected-targets",
+    "invariant": "Exactly one mutant against the HEAD tree: every manifest target, not only the selected one",
+    "expected": "`--only M2` would check only M2's file, so a stale M1 in another file would contaminate what M2's test observes.",
+    "file": "scripts/mutation-sweep.ts",
+    "find": "  assertTargetsPristine(root, head, targets, 'before the sweep started');",
+    "replace": "  assertTargetsPristine(\n    root,\n    head,\n    selected.map((variant) => variant.file),\n    'before the sweep started',\n  );",
+    "killingTest": {
+      "file": "scripts/mutation-sweep-isolation.test.ts",
+      "fullName": "a stale mutant in another file > stops a variant whose own target is pristine"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H36-sweep-trusts-the-working-tree-as-original",
+    "invariant": "\"Original\" means the HEAD blob, never whatever bytes the working tree holds",
+    "expected": "A stale mutant left by a killed sweep would be read as the pristine source, restored as such after every later variant, and baselined against.",
+    "file": "scripts/mutation-sweep.ts",
+    "find": "  if (actual !== expected) {",
+    "replace": "  if (actual !== expected && actual.length === 0) {",
+    "killingTest": {
+      "file": "scripts/mutation-sweep-isolation.test.ts",
+      "fullName": "what counts as pristine > is the HEAD blob, not whatever the working tree holds"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H37-sweep-skips-the-restore-verification",
+    "invariant": "A restore is verified byte for byte and against the HEAD blob before the sweep continues",
+    "expected": "A restore that silently left one byte changed would go unnoticed by the restore itself; only a later, unrelated check could catch it, and only if it ran.",
+    "file": "scripts/mutation-sweep.ts",
+    "find": "  if (!restored.equals(pristine) || blobOf(root, file, restored) !== headBlob(root, head, file)) {",
+    "replace": "  if (restored.length < 0) {",
+    "killingTest": {
+      "file": "scripts/mutation-sweep-isolation.test.ts",
+      "fullName": "restoring a target after its mutant > aborts the sweep when the restored file is one byte off, before the next variant"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H38-sweep-continues-after-a-failed-restore",
+    "invariant": "A failed restore ends the sweep; no variant runs on top of an unverified tree",
+    "expected": "The next variant would be baselined and mutated while the previous mutant, or a corrupted restore, was still on disk.",
+    "file": "scripts/mutation-sweep.ts",
+    "find": "    const result = await sweepOne(variant, head, baselines, dependencies);\n    assertTargetsPristine(root, head, targets, `after ${variant.id}`);",
+    "replace": "    let result: Result;\n    try {\n      result = await sweepOne(variant, head, baselines, dependencies);\n      assertTargetsPristine(root, head, targets, `after ${variant.id}`);\n    } catch {\n      continue;\n    }",
+    "killingTest": {
+      "file": "scripts/mutation-sweep-isolation.test.ts",
+      "fullName": "restoring a target after its mutant > aborts the sweep when the restored file is one byte off, before the next variant"
+    },
+    "project": "unit"
   }
 ]
