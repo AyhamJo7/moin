@@ -579,7 +579,19 @@ describe('scanner coverage is reconciled, not assumed', () => {
     });
     const owner = createPool({ connectionString: isolated.migrationUrl, max: 1 });
     try {
-      await owner.query('insert into audit_chain_registry(tenant_id) values ($1)', [hidden]);
+      // Registering a tenant after the fact goes through the one allocator, exactly as the
+      // trigger does: there is no column default, so there is no second way to get an epoch.
+      await owner.query(
+        `with allocated as (
+           update audit_chain_population_state
+              set last_registration_epoch = last_registration_epoch + 1
+            where id
+           returning last_registration_epoch
+         )
+         insert into audit_chain_registry(tenant_id, registration_seq)
+         select $1, last_registration_epoch from allocated`,
+        [hidden],
+      );
       const result = await scan(isolated.appUrl);
       expect(result.unregistered).toBe(0);
       expect(result.findings).toStrictEqual([]);

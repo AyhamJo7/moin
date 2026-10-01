@@ -14,6 +14,28 @@ describe('data classification check (QG-12)', () => {
     expect(columns.map((c) => c.column)).toContain('secret_nickname');
   });
 
+  // The gate parsed only CREATE TABLE, so a column added later was invisible to it. This is the
+  // regression the code fix lacked a fixture for.
+  it('reads columns added by ALTER TABLE, not only those declared at creation', () => {
+    const columns = schemaColumns(FIXTURES).map((c) => `${c.table}.${c.column}`);
+    expect(columns).toContain('contacts.personal_data');
+  });
+
+  it('reads the ALTER TABLE variants the parser has to handle', () => {
+    const columns = schemaColumns(FIXTURES).map((c) => `${c.table}.${c.column}`);
+    // `IF NOT EXISTS`, and a quoted identifier.
+    expect(columns).toContain('contacts.later_nickname');
+    expect(columns).toContain('contacts.quoted_secret');
+  });
+
+  it('flags an ALTER-added column the inventory has never seen', () => {
+    // Without the fix this list was empty for added columns, so the gate reported success over a
+    // column it had never looked at.
+    const missing = unclassified(FIXTURES, INVENTORY).map((c) => `${c.table}.${c.column}`);
+    expect(missing).toContain('contacts.personal_data');
+    expect(missing).toContain('contacts.quoted_secret');
+  });
+
   it('ignores constraints, which are not columns', () => {
     expect(schemaColumns(FIXTURES).map((c) => c.column)).not.toContain('PRIMARY');
   });

@@ -108,7 +108,7 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.reject_registry_mutation': '60ee49a225936633fc8512cfa1d85049',
   'app.reject_audit_head_rewrite': 'c9278e84aa3190487818218e3ca4f761',
   'app.reject_unlinked_audit_event': '7c2302af293e06986eb4fbec32b90362',
-  'app.register_audit_chain': 'cd64a971f31c226f9428d484ec111fce',
+  'app.register_audit_chain': '221bd18d0326d55150a2405786768fa8',
   // The privileged writers and readers.
   'app.append_audit_event': 'e8a2fff1d6b97ee844313730cf63ef29',
   'app.audit_canonical_payload': 'ff85e1e923f72ea01658e627de79b719',
@@ -116,7 +116,7 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.claim_audit_chains': 'd11d35da7fbd6c2a439631b363b03f79',
   'app.unregistered_audit_chains': '280c72481f5bfcdb4eab663d46840947',
   'app.count_audit_chains': 'e3cd033e0ea860c723977f7c9e28068a',
-  'app.audit_chain_high_water': '72780f25788c93f22aaa1efd460fc715',
+  'app.audit_chain_high_water': '0af3ae3c87f468ecd845b318be7efb52',
   'app.provision_tenant': '187d4a4589e54a39cdadc6f3726cce26',
 };
 

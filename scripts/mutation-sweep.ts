@@ -42,7 +42,7 @@ import {
   classifyRun,
   type Classification,
   type MutationOutcome,
-  type VitestReport,
+  type MutationReport,
 } from './mutation-outcome.ts';
 
 const run = promisify(execFile);
@@ -111,10 +111,16 @@ async function observe(
         variant.test,
         '-t',
         variant.kills,
-        '--reporter=json',
-        `--outputFile=${reportPath}`,
+        // The project's own reporter, because the built-in JSON report renders failures as text
+        // and an assertion must be identified by what the error *is*, not by what it says.
+        '--reporter=./scripts/mutation-reporter.ts',
       ],
-      { cwd: REPO, timeout: TEST_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES },
+      {
+        cwd: REPO,
+        timeout: TEST_TIMEOUT_MS,
+        maxBuffer: MAX_OUTPUT_BYTES,
+        env: { ...process.env, MOIN_MUTATION_REPORT: reportPath },
+      },
     );
     output = `${stdout}${stderr}`;
   } catch (error) {
@@ -131,9 +137,9 @@ async function observe(
     timedOut = failure.killed === true && typeof failure.code !== 'number';
   }
 
-  let report: VitestReport | undefined;
+  let report: MutationReport | undefined;
   try {
-    report = JSON.parse(readFileSync(reportPath, 'utf8')) as VitestReport;
+    report = JSON.parse(readFileSync(reportPath, 'utf8')) as MutationReport;
   } catch {
     report = undefined;
   }
