@@ -104,10 +104,35 @@ from "something arrived behind me". Counting is no better: a late tenant _ahead_
 processed and pushes the processed total up to the original count while an original member is still
 unvisited.
 
-So registration order is recorded rather than inferred. `audit_chain_registry.registration_seq` is a
-`bigint` from a sequence, immutable once assigned — the append-only guard already binds the owner, so
-nothing new was needed to keep it that way. A sweep reads `max(registration_seq)` **once**, and its
-population is exactly the registrations at or below that mark. Three properties follow:
+So registration order is recorded rather than inferred — but **not with a PostgreSQL sequence**.
+`nextval()` is deliberately outside transaction control: it does not lock, does not roll back, and
+its allocation order is not commit order. Measured against a sequence-backed first attempt:
+
+    Tx A inserts a tenant, takes epoch 1, stays open
+    Tx B inserts a tenant, takes epoch 2, commits
+    a sweep reads max(registration_seq) over committed rows -> 2
+    the population is "<= 2"; one of its two members is visible
+    Tx A commits
+    that same population now has two members, one never verified
+
+That is the original defect one layer down: a complete-coverage report over a half-covered
+population.
+
+Epochs are therefore allocated by incrementing a **single authoritative row**, in the same
+transaction as the registration:
+
+    UPDATE audit_chain_population_state SET last_registration_epoch = last_registration_epoch + 1
+     WHERE id RETURNING last_registration_epoch
+
+PostgreSQL holds that row's write lock until the transaction commits or rolls back, so a second
+registration cannot allocate until the first has resolved. Epoch order is commit order, and the
+state row's committed value is a true boundary: while epoch N is in flight, no epoch above N can be
+committed, because nobody else can allocate one. There is no sequence and no column default — a
+dormant `nextval()` would be a second allocator waiting to be used by accident.
+
+`registration_seq` is immutable once assigned: the register's append-only guard already binds the
+owner. A sweep reads the state row **once**, and its population is exactly the registrations at or
+below that value. Three properties follow:
 
 - a member at or below the mark must be verified or counted as unreached, whatever its UUID sorts
   like;
@@ -238,6 +263,9 @@ is outside P06.10's scope; none is claimed as handled.
 | Chain gap, changed event and missing tail detection                                          | `packages/db/src/audit.ts`; real-PostgreSQL tamper fixtures                                                                          |
 | Head advances by one only; an event must be linked to the head; `event-past-head` detected   | `packages/db/migrations/0008_audit_events.sql`; `packages/db/src/audit.ts`; `packages/db/src/audit-verification.integration.test.ts` |
 | Head absence and orphan events determined in one snapshot; no false `missing-head`           | `packages/db/src/audit.ts`; `packages/db/src/audit-verification.integration.test.ts`                                                 |
+| Epoch allocation serialized by a row lock; no sequence is the authority                      | `packages/db/migrations/0011_audit_chain_population.sql`; `packages/db/src/audit-chain-epoch.integration.test.ts`                    |
+| A committed epoch above an uncommitted lower one is impossible                               | `packages/db/src/audit-chain-epoch.integration.test.ts` (the old exploit, attempted)                                                 |
+| Lock order fixed; concurrent provisioning does not deadlock; the sweep holds no lock         | `packages/db/src/audit-chain-epoch.integration.test.ts`                                                                              |
 | Deadline shortfall counted from the register; `coverageComplete` required for a sound run    | `app.count_audit_chains`; `packages/db/src/audit-verification.ts`; `packages/db/src/cli.ts`                                          |
 | Scanner reconciles its own coverage and validates values against their registered kind       | `scripts/check-audit-arguments.ts`; `scripts/check-audit-arguments.integration.test.ts`                                              |
 | Every guard has a defective variant that its test provably kills                             | `docs/verification/audit-mutation-manifest.json`; `scripts/mutation-sweep.ts`                                                        |

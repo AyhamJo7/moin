@@ -96,9 +96,15 @@ Art. 33 GDPR notification. Preserve a snapshot of the affected tenant's `audit_e
 
 `audit.chain.run.completed` with `outcome: sound` means **sound for the register population captured
 at that sweep's start**, and the line carries `populationHighWater` so you can see which population
-that was. A tenant registered while the sweep was running is not in it and is covered by the next
+that was. That number is a registration _epoch_, not a row count: epochs are allocated by
+incrementing one authoritative row inside each registering transaction, so epoch order is commit
+order and the mark names exactly the registrations that had committed when the sweep began. A tenant registered while the sweep was running is not in it and is covered by the next
 run; nothing falls between two runs, because a sweep's cursor starts at the beginning of the register
 rather than where the last one stopped.
+
+A registration in flight when the sweep started is below no mark and above none: it cannot be in the
+captured population, and it cannot be lost either, because the next sweep's cursor starts at the
+beginning of the register rather than where the last one stopped.
 
 So "yesterday's sweep was clean" is not the same as "the trail is intact now". For an incident, the
 question to ask is which sweep covered the tenant and what its `populationHighWater` was.

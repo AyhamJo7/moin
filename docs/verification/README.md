@@ -51,8 +51,25 @@ test database at a closed port reported every variant killed, and a manifest ent
 that does not exist reported it survived. "54/54 killed" was a count of failures of any kind.
 
 Classification now happens in [`../../scripts/mutation-outcome.ts`](../../scripts/mutation-outcome.ts)
-over the runner's structured JSON report, and it is a pure function with its own tests against
-report fixtures captured from real runs.
+over a **typed** report written by [`../../scripts/mutation-reporter.ts`](../../scripts/mutation-reporter.ts),
+and it is a pure function with its own adversarial tests.
+
+The second generation of this decision was also wrong: it read the structured report but decided
+"was this an assertion?" by matching words in the failure message. An ordinary error reading
+`database connection refused while executing toThrow assertion` contains `toThrow`, so an
+unreachable database counted as proof that an invariant was enforced — three of four crafted
+messages were misclassified. Message text is written for humans; it quotes queries and matcher
+names, so it is attacker-shaped by accident.
+
+The reporter therefore records what each error **is**, read off the live object: its `name`, and
+whether Chai's assertion metadata (`expected`, `actual`, `showDiff`, `ok`) is present as own
+properties. Every Vitest matcher sets all four — verified across `toBe`, `toStrictEqual`,
+`toMatchObject`, `toContain`, `toBeGreaterThan`, `toThrow`, `not.toBe` and `rejects.toThrow` — and
+no thrown `Error` has any. Both halves are required: the name alone would accept an error whose
+`name` was reassigned, the fields alone would accept any object that happens to carry them.
+
+Message text is used for exactly one thing: telling a hung test apart from other non-assertion
+failures. It can never promote a failure to `KILLED_ASSERTION`.
 
 | Outcome                 | Meaning                                                                          | Evidence?                                      |
 | ----------------------- | -------------------------------------------------------------------------------- | ---------------------------------------------- |
