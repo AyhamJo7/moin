@@ -613,3 +613,19 @@ true, ok: false }` — is serialized by Vitest with none of the `constructor`/`t
   regenerated at `52cc10f`: `KILLED_ASSERTION: 101`, `NOT_EVIDENCE_ELIGIBLE: 2` (N8, P8, unchanged)
   over 103 variants. `92/2 over 94` is superseded. No product, migration or app change. ADR-0017
   stays **PROPOSED**; P06.10 is not complete.
+
+- 2026-10-02 — **One mutation sweep per worktree (EV-P06-035).** The last QG-09 blocker: two
+  sweeps in one worktree both passed the pristine check and then took turns writing one file. The
+  overlap was reproduced before the fix with the review's M1/M5 shape (same file, same killing test)
+  as real processes. A's mutant run observed M5's bytes, B's baseline observed A's M1, both reported
+  `KILLED_ASSERTION`, and every restore check passed. A sweep now takes an exclusive lock first —
+  `mkdir` of `$(git rev-parse --absolute-git-dir)/moin-mutation-sweep.lock`, atomic, per worktree —
+  before HEAD, the source or the baseline cache is read. It holds the lock until the last restore is
+  verified and the report is written, then releases it in one `finally`. A failed restore keeps the
+  lock for a human. SIGINT and SIGTERM release only after the verified restore. SIGKILL leaves the
+  lock; the next sweep and `--validate` refuse with exit 4, recovery is manual and documented, and
+  the HEAD-pristine check remains behind it. 13 process-level and lifecycle tests; four new `H*`
+  variants all kill; the fix is mutation-checked KILLED; a 20× stress run passed with zero double
+  owners. Regenerated at `1a924a0`: `KILLED_ASSERTION: 105`, `NOT_EVIDENCE_ELIGIBLE: 2` (N8, P8)
+  over 107 variants. `101/2 over 103` is superseded. No product, migration or app change. ADR-0017
+  stays **PROPOSED**; P06.10 is not complete.
