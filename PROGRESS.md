@@ -173,7 +173,7 @@ Rules
 | P06.10.07 | READY_FOR_REVIEW | fcc4473 | EV-P06-028 | Population-snapshot design replacing UUID-cursor paging; mutation harness rewritten so its outcomes are evidence — 62 KILLED_ASSERTION, 2 documented INFRA_FAILURE |
 | P06.10.07 | READY_FOR_REVIEW | f105882 | EV-P06-029 | Epoch allocation serialized by commit rather than by `nextval()`; assertion identity decided from typed error metadata rather than message text — 69 KILLED_ASSERTION, 2 documented INFRA_FAILURE |
 | P06.10.07 | READY_FOR_REVIEW | 986ae8b | EV-P06-030 | `KILLED_ASSERTION` redefined so it can only mean one thing: two in-process signals a thrown object cannot set, an exact unique `{file, fullName}` identity, and a run with no other failure — 77 KILLED_ASSERTION, 2 documented INFRA_FAILURE over 79 variants, 12 of which attack the harness itself |
-| P06.10.07 | READY_FOR_REVIEW | PENDING_SHA | EV-P06-031 | Assertion evidence moved from the serialized thrown value to the matcher boundary in-process: a plain object literal and a `toJSON` spoof both defeated the previous model. Anchor uniqueness enforced at application time. 90 KILLED_ASSERTION and 2 documented INFRA_FAILURE over 92 variants, 25 of which attack the harness |
+| P06.10.07 | READY_FOR_REVIEW | 96a5dad | EV-P06-031 | Assertion evidence moved from the serialized thrown value to the matcher boundary in-process: a plain object literal and a `toJSON` spoof both defeated the previous model. Anchor uniqueness enforced at application time. 90 KILLED_ASSERTION and 2 documented INFRA_FAILURE over 92 variants, 25 of which attack the harness |
 | P06.10 | IN_PROGRESS | 8e5bf76 | EV-P06-021…025 | Table, chain, query API, daily verifier, argument scanner and runbook done. Open: .03 adoption by the tool guard, operator and security paths (needs P10.08, P06.11/.12), .05 scheduling (EXT-09) and .06 founder acceptance of ADR-0017 |
 
 ## External waits
@@ -516,7 +516,7 @@ true, ok: false }` — is serialized by Vitest with none of the `constructor`/`t
   broad enough to stop _any_ test producing `ASSERTION` cannot be killed by an assertion, because the
   harness could not then report its own kill. Three variants were narrowed for exactly that reason,
   and the properties they would have covered are proven by the real-Vitest suite instead.
-  Final distribution at `PENDING_SHA`: `KILLED_ASSERTION: 90`, `INFRA_FAILURE: 2`, over 92
+  Final distribution at `96a5dadcfe30`: `KILLED_ASSERTION: 90`, `INFRA_FAILURE: 2`, over 92
   variants. `77/2 over 79` is superseded.
   ADR-0017 stays **PROPOSED**; the five residuals are unchanged. P06.10.03 remains open; P06.10.05
   remains `WAITING_FOR_EXTERNAL` on EXT-09; P06.10 is not complete.
