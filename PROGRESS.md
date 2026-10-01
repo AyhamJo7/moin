@@ -175,7 +175,7 @@ Rules
 | P06.10.07 | READY_FOR_REVIEW | 986ae8b | EV-P06-030 | `KILLED_ASSERTION` redefined so it can only mean one thing: two in-process signals a thrown object cannot set, an exact unique `{file, fullName}` identity, and a run with no other failure — 77 KILLED_ASSERTION, 2 documented INFRA_FAILURE over 79 variants, 12 of which attack the harness itself |
 | P06.10.07 | READY_FOR_REVIEW | 96a5dad | EV-P06-031 | Assertion evidence moved from the serialized thrown value to the matcher boundary in-process: a plain object literal and a `toJSON` spoof both defeated the previous model. Anchor uniqueness enforced at application time. 90 KILLED_ASSERTION and 2 documented INFRA_FAILURE over 92 variants, 25 of which attack the harness |
 | P06.10.07 | READY_FOR_REVIEW | 953c47c | EV-P06-032 | Assertion evidence moved from a transferable token to **object identity**: the terminal value of the test body must be, by `===`, the object a Vitest matcher threw in this invocation. 52 KILLED_ASSERTION and 42 NOT_EVIDENCE_ELIGIBLE over 94 variants |
-| P06.10.07 | READY_FOR_REVIEW | PENDING_SHA | EV-P06-033 | Eligibility gap closed: 30 killing tests under `packages/db/` moved to the trusted wrapper, registration only, and the wrapper moved into `@moin/testing` so no package reaches into `scripts/`. 92 KILLED_ASSERTION and 2 NOT_EVIDENCE_ELIGIBLE over 94 variants |
+| P06.10.07 | READY_FOR_REVIEW | bf02200 | EV-P06-033 | Eligibility gap closed: 30 killing tests under `packages/db/` moved to the trusted wrapper, registration only, and the wrapper moved into `@moin/testing` so no package reaches into `scripts/`. 92 KILLED_ASSERTION and 2 NOT_EVIDENCE_ELIGIBLE over 94 variants |
 | P06.10 | IN_PROGRESS | 8e5bf76 | EV-P06-021…025 | Table, chain, query API, daily verifier, argument scanner and runbook done. Open: .03 adoption by the tool guard, operator and security paths (needs P10.08, P06.11/.12), .05 scheduling (EXT-09) and .06 founder acceptance of ADR-0017 |
 
 ## External waits
@@ -586,7 +586,7 @@ true, ok: false }` — is serialized by Vitest with none of the `constructor`/`t
   `NOT_EVIDENCE_ELIGIBLE`, outside the numerator, with the reason in the manifest.
   The result was not forced: every one of the 40 migrated variants came back `KILLED_ASSERTION` on
   its own, because each of those tests already terminated on a genuine matcher failure. Final
-  distribution at `PENDING_SHA`: `KILLED_ASSERTION: 92`, `NOT_EVIDENCE_ELIGIBLE: 2`, over 94
+  distribution at `bf022008a1d2`: `KILLED_ASSERTION: 92`, `NOT_EVIDENCE_ELIGIBLE: 2`, over 94
   variants. `52/42` is superseded.
   Object-identity provenance is unchanged: the private `WeakMap`, the terminal `T === M` check, and
   every attack case — copied properties, copied symbols, cloned Error, async copy, swallowed matcher,
