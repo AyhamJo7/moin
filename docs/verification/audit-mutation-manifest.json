@@ -1214,7 +1214,7 @@
     "invariant": "Exactly one mutant against the HEAD tree: nothing is measured before every target is proved pristine",
     "expected": "After a sweep killed mid-mutant, a restarted sweep would baseline and mutate a target while a stale mutant still sat in another file.",
     "file": "scripts/mutation-sweep.ts",
-    "find": "  assertTargetsPristine(root, head, targets, 'before the sweep started');\n",
+    "find": "    assertTargetsPristine(root, head, targets, 'before the sweep started');\n",
     "replace": "",
     "killingTest": {
       "file": "scripts/mutation-sweep-isolation.test.ts",
@@ -1227,8 +1227,8 @@
     "invariant": "Exactly one mutant against the HEAD tree: every manifest target, not only the selected one",
     "expected": "`--only M2` would check only M2's file, so a stale M1 in another file would contaminate what M2's test observes.",
     "file": "scripts/mutation-sweep.ts",
-    "find": "  assertTargetsPristine(root, head, targets, 'before the sweep started');",
-    "replace": "  assertTargetsPristine(\n    root,\n    head,\n    selected.map((variant) => variant.file),\n    'before the sweep started',\n  );",
+    "find": "    assertTargetsPristine(root, head, targets, 'before the sweep started');",
+    "replace": "    assertTargetsPristine(\n      root,\n      head,\n      selected.map((variant) => variant.file),\n      'before the sweep started',\n    );",
     "killingTest": {
       "file": "scripts/mutation-sweep-isolation.test.ts",
       "fullName": "a stale mutant in another file > stops a variant whose own target is pristine"
@@ -1266,11 +1266,63 @@
     "invariant": "A failed restore ends the sweep; no variant runs on top of an unverified tree",
     "expected": "The next variant would be baselined and mutated while the previous mutant, or a corrupted restore, was still on disk.",
     "file": "scripts/mutation-sweep.ts",
-    "find": "    const result = await sweepOne(variant, head, baselines, dependencies);\n    assertTargetsPristine(root, head, targets, `after ${variant.id}`);",
-    "replace": "    let result: Result;\n    try {\n      result = await sweepOne(variant, head, baselines, dependencies);\n      assertTargetsPristine(root, head, targets, `after ${variant.id}`);\n    } catch {\n      continue;\n    }",
+    "find": "      const result = await sweepOne(variant, head, baselines, dependencies);\n      assertTargetsPristine(root, head, targets, `after ${variant.id}`);",
+    "replace": "      let result: Result;\n      try {\n        result = await sweepOne(variant, head, baselines, dependencies);\n        assertTargetsPristine(root, head, targets, `after ${variant.id}`);\n      } catch {\n        continue;\n      }",
     "killingTest": {
       "file": "scripts/mutation-sweep-isolation.test.ts",
       "fullName": "restoring a target after its mutant > aborts the sweep when the restored file is one byte off, before the next variant"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H39-sweep-takes-no-lock",
+    "invariant": "One sweep per worktree: a mutable sweep excludes every other in the same worktree",
+    "expected": "Two sweeps in one worktree would both pass the pristine check and take turns writing one file: one sweep's test would run against the other's mutant, and both would report a kill.",
+    "file": "scripts/mutation-sweep.ts",
+    "find": "  const lock = acquireSweepLock(root, dependencies.write ?? writeFileSync);",
+    "replace": "  const lock = {\n    path: '',\n    record: (): void => undefined,\n    retain: (): void => undefined,\n    release: (): void => undefined,\n  };",
+    "killingTest": {
+      "file": "scripts/mutation-sweep-lock.test.ts",
+      "fullName": "two sweeps in one worktree > the second is refused before any baseline, and the first observes only its own mutant"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H40-sweep-checks-the-source-before-taking-the-lock",
+    "invariant": "The lock is taken before HEAD, the pristine check, the baseline cache or any baseline",
+    "expected": "Two sweeps could both pass the pristine check before either held the lock, which is the window the lock exists to close; a refusal would also misreport another sweep's mutant as a dirty tree.",
+    "file": "scripts/mutation-sweep.ts",
+    "find": "  const lock = acquireSweepLock(root, dependencies.write ?? writeFileSync);\n  try {\n    const head = resolveHead(root);\n    lock.record(head);\n    const targets = manifestVariants.map((variant) => variant.file);\n    assertTargetsPristine(root, head, targets, 'before the sweep started');",
+    "replace": "  const head = resolveHead(root);\n  const targets = manifestVariants.map((variant) => variant.file);\n  assertTargetsPristine(root, head, targets, 'before the sweep started');\n  const lock = acquireSweepLock(root, dependencies.write ?? writeFileSync);\n  try {\n    lock.record(head);",
+    "killingTest": {
+      "file": "scripts/mutation-sweep-lock.test.ts",
+      "fullName": "one ownership lifecycle > takes the lock before HEAD or any source is read, and never overwrites one"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H41-sweep-releases-the-lock-before-its-work-is-done",
+    "invariant": "The lock is held until every restore is verified and the report is written",
+    "expected": "A second sweep could take the lock while the first was still baselining, mutating or restoring, and the two would overlap in one worktree.",
+    "file": "scripts/mutation-sweep.ts",
+    "find": "    lock.record(head);\n",
+    "replace": "    lock.record(head);\n    lock.release();\n",
+    "killingTest": {
+      "file": "scripts/mutation-sweep-lock.test.ts",
+      "fullName": "two sweeps in one worktree > the second is refused before any baseline, and the first observes only its own mutant"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H42-sweep-locks-the-whole-repository",
+    "invariant": "The lock is scoped to one worktree, so linked worktrees sweep independently",
+    "expected": "A sweep in any linked worktree would refuse every other worktree of the repository, serializing independent checkouts for no safety gain.",
+    "file": "scripts/mutation-sweep.ts",
+    "find": "['rev-parse', '--absolute-git-dir']",
+    "replace": "['rev-parse', '--path-format=absolute', '--git-common-dir']",
+    "killingTest": {
+      "file": "scripts/mutation-sweep-lock.test.ts",
+      "fullName": "the lock is per worktree > a linked worktree sweeps while the main worktree is locked"
     },
     "project": "unit"
   }
