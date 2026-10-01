@@ -173,6 +173,7 @@ Rules
 | P06.10.07 | READY_FOR_REVIEW | fcc4473 | EV-P06-028 | Population-snapshot design replacing UUID-cursor paging; mutation harness rewritten so its outcomes are evidence — 62 KILLED_ASSERTION, 2 documented INFRA_FAILURE |
 | P06.10.07 | READY_FOR_REVIEW | f105882 | EV-P06-029 | Epoch allocation serialized by commit rather than by `nextval()`; assertion identity decided from typed error metadata rather than message text — 69 KILLED_ASSERTION, 2 documented INFRA_FAILURE |
 | P06.10.07 | READY_FOR_REVIEW | 986ae8b | EV-P06-030 | `KILLED_ASSERTION` redefined so it can only mean one thing: two in-process signals a thrown object cannot set, an exact unique `{file, fullName}` identity, and a run with no other failure — 77 KILLED_ASSERTION, 2 documented INFRA_FAILURE over 79 variants, 12 of which attack the harness itself |
+| P06.10.07 | READY_FOR_REVIEW | PENDING_SHA | EV-P06-031 | Assertion evidence moved from the serialized thrown value to the matcher boundary in-process: a plain object literal and a `toJSON` spoof both defeated the previous model. Anchor uniqueness enforced at application time. 90 KILLED_ASSERTION and 2 documented INFRA_FAILURE over 92 variants, 25 of which attack the harness |
 | P06.10 | IN_PROGRESS | 8e5bf76 | EV-P06-021…025 | Table, chain, query API, daily verifier, argument scanner and runbook done. Open: .03 adoption by the tool guard, operator and security paths (needs P10.08, P06.11/.12), .05 scheduling (EXT-09) and .06 founder acceptance of ADR-0017 |
 
 ## External waits
@@ -474,5 +475,48 @@ after retry"`. Zero matches is `NO_TEST_MATCH`, two is `AMBIGUOUS_TEST_IDENTITY`
   failing `NOT NULL` — so the test fails on a thrown database error after real `expect` calls. A
   guard inside a migration is stronger than a test; it is not assertion evidence, and saying so is
   the point of the taxonomy.
+  ADR-0017 stays **PROPOSED**; the five residuals are unchanged. P06.10.03 remains open; P06.10.05
+  remains `WAITING_FOR_EXTERNAL` on EXT-09; P06.10 is not complete.
+
+- 2026-10-01 — **Fifth QG-09 review of P06.10, second harness round: the thrown value was never a
+  trust boundary.** The audit architecture was accepted; the evidence harness was not, and the one
+  remaining blocker was the important one. Both exploits were reproduced before anything was fixed.
+  A **plain object literal** — `throw { name: 'AssertionError', expected: 1, actual: 2, showDiff:
+true, ok: false }` — is serialized by Vitest with none of the `constructor`/`toString` markers the
+  previous model treated as proof of foreignness, because it is not an `Error` at all. Measured: the
+  reporter returned `ASSERTION`. An ordinary `Error` whose `toJSON()` returns that shape did the
+  same. Four generations of this decision had now been spoofed — exit code, message text, name plus
+  matcher fields, serializer markers — and the pattern is not that each list of fields was too
+  short. A thrown value is **data authored by the code under test**. No property of it can be
+  authority for what the test framework did, so there is no tighter heuristic to reach for.
+  Evidence now comes from provenance. Every function on Vitest's `Assertion.prototype` is wrapped in
+  the setup file, and only that wrapper can append a `MATCHER_FAILURE` record; `throw` does not call
+  a matcher, so no throw of any shape can create one. The `rejects`/`resolves` getters are wrapped
+  too, because Vitest raises "promise resolved instead of rejecting" from inside its own async chain
+  without running a matcher — still its assertion machinery, and a shape several real kills depend
+  on. `assertionCalls` is now diagnostic only: a successful `expect` followed by any throw reports
+  two calls and zero failures, which is exactly why the counter could never be the signal.
+  Two things about the design are worth keeping. Identity is read from `context.task`, never from
+  `expect.getState()` — measured: under `it.concurrent` the module-level state reports _another_
+  test's name — and overlapping invocation windows are detected and refused rather than attributed.
+  And the probe is the **last** writer of its own key: a fixture writes a complete, self-consistent,
+  token-stamped record naming itself into `task.meta`, and a setup file's `afterEach` overwrites it.
+  The forgery is not hidden from; it is overwritten.
+  One narrow use of the error survives and is stated as such: the wrapper stamps an invocation-scoped
+  token on the value it rethrows, and the reporter requires the failing test to carry it. That
+  answers only "did the earned failure actually propagate" — a test that catches `expect(1).toBe(2)`
+  and then throws something else has the event but not the token — and it can only ever _remove_
+  evidence, because without the event nothing reads a token.
+  Anchor uniqueness moved into `applyMutation`, which both the sweep and `--validate` now use, so an
+  operator who skips validation gets the same guarantee: zero, several, empty or no-op anchors are
+  all `INVALID_MUTANT`. The splice is positional, which retires the `$$`-interpretation bug by
+  construction rather than by remembering to pass a function.
+  Two limits are recorded rather than hidden. The sweep hands the mutated reporter to the mutated
+  run, which is sound only because every `H*` reporter variant is a relaxation; and a probe mutation
+  broad enough to stop _any_ test producing `ASSERTION` cannot be killed by an assertion, because the
+  harness could not then report its own kill. Three variants were narrowed for exactly that reason,
+  and the properties they would have covered are proven by the real-Vitest suite instead.
+  Final distribution at `PENDING_SHA`: `KILLED_ASSERTION: 90`, `INFRA_FAILURE: 2`, over 92
+  variants. `77/2 over 79` is superseded.
   ADR-0017 stays **PROPOSED**; the five residuals are unchanged. P06.10.03 remains open; P06.10.05
   remains `WAITING_FOR_EXTERNAL` on EXT-09; P06.10 is not complete.

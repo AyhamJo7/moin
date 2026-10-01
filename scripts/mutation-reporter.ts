@@ -4,39 +4,46 @@
  * ## The trust boundary
  *
  * This runs in the test-runner process and is the **only** thing that decides whether a failure was
- * an assertion. The parent sweep consumes `failureCategory` and never re-derives it, because every
- * attempt to re-derive it from the error has been spoofable:
+ * an assertion. The parent sweep consumes `failureCategory` and never re-derives it.
+ *
+ * ## Why nothing here reads the thrown value
+ *
+ * Four generations of this decision tried to recognise an assertion *from the error*, and every one
+ * was spoofed. Measured, in order:
  *
  *   - exit code alone → an unreachable database counted as a kill;
  *   - message text → `database connection refused while executing toThrow assertion` counted;
- *   - `name` plus `expected`/`actual`/`showDiff`/`ok` → an ordinary `Error` decorated with exactly
- *     those fields counted. Measured, all three.
+ *   - `name` plus `expected`/`actual`/`showDiff`/`ok` → an ordinary `Error` decorated with those
+ *     four fields counted;
+ *   - the above plus "Vitest's serializer adds `constructor`/`toString` to foreign errors" → a
+ *     **plain object literal** `{ name: 'AssertionError', expected, actual, showDiff, ok }` is
+ *     serialized with none of those markers and counted, and so did an ordinary `Error` whose
+ *     `toJSON()` returns that shape.
  *
- * An error object is whatever the test threw, so it cannot be the authority.
+ * The pattern is not that each heuristic was too loose. It is that the thrown value is **data
+ * authored by the code under test**, so no property of it can ever be authority for what the test
+ * framework did. There is no tighter list of fields that fixes this.
  *
- * ## What makes `ASSERTION` trustworthy
+ * ## What makes `ASSERTION` trustworthy now
  *
- * Two independent signals, both outside the thrown object's control, and **both** required:
+ * Provenance, not shape. `scripts/mutation-evidence-probe.ts` wraps every matcher on Vitest's
+ * `Assertion.prototype`; a `MATCHER_FAILURE` record can only be created from inside that wrapper,
+ * reached by actually invoking a matcher. `throw` does not call a matcher, so no throw of any shape
+ * can create one. This reporter requires, for `ASSERTION`:
  *
- *  1. `expectCalls > 0`, from `scripts/mutation-assertion-probe.ts`, which reads Vitest's own
- *     `assertionCalls` counter in-process. A thrown object cannot increment it. Necessary, not
- *     sufficient — a test can call `expect` successfully and then throw.
- *  2. The error carries **no foreign-object markers**. Vitest's serializer adds `constructor` and
- *     `toString` keys to errors it does not recognise as its own assertion error, and omits them
- *     for ones it does. Measured on this version:
+ *   - a probe of the exact contract version, with no `suspect` entry;
+ *   - `event === 'MATCHER_FAILURE'`;
+ *   - **exactly one** distinct matcher failure in the invocation — zero is not an assertion, and
+ *     more than one means the test swallowed the first, so which failure propagated is unknown;
+ *   - the probe's own `testFile`/`testFullName` equal to the identity this reporter recorded, so a
+ *     record from another test or another invocation cannot be read as this one's.
  *
- *       genuine `expect` failure    keys: actual diff expected message name ok operator showDiff stack stacks
- *       decorated plain Error       keys: … plus `constructor`, `toString`
- *       Node's own AssertionError   keys: … plus `constructor`, `toString`
- *       plain thrown Error          keys: constructor message name stack stacks toString
+ * `expectCalls`, `name` and `message` are carried into the report as **diagnostics**. Nothing reads
+ * them to classify. In particular `expectCalls > 0` is explicitly *not* sufficient: a test may call
+ * a matcher successfully and then throw anything at all, which is mandatory fixture case 4.
  *
- *     The markers are added by Vitest from the real object, so a test cannot remove them, and
- *     adding them by hand only makes an error look more foreign.
- *
- * Signal 2 is an observed serializer behaviour rather than a documented contract, so it is pinned by
- * `scripts/mutation-reporter.integration.test.ts`, which runs real Vitest over real fixtures —
- * genuine failure, spoofed error, hook failures, timeout, duplicate names. If a Vitest upgrade
- * changes the serializer, that test fails loudly instead of this file silently accepting spoofs.
+ * Message text is read for exactly two things, and both can only move a verdict *away* from
+ * evidence: recognising a timeout, and recognising a transform or module-resolution failure.
  *
  * Anything this file cannot classify confidently is `UNKNOWN`, which is not evidence.
  */
@@ -44,44 +51,63 @@
 import { writeFileSync } from 'node:fs';
 import { relative } from 'node:path';
 import type { Reporter } from 'vitest/node';
-import { PROBE_META_KEY, PROBE_VERSION, type AssertionProbe } from './mutation-probe-contract.ts';
+import {
+  MATCHER_FAILURE,
+  MATCHER_FAILURE_TOKEN,
+  PROBE_META_KEY,
+  PROBE_VERSION,
+  type AssertionProbe,
+} from './mutation-probe-contract.ts';
 
 /** Bumped when the emitted shape changes; the sweep refuses a report it does not understand. */
-export const REPORT_VERSION = 2;
+export const REPORT_VERSION = 3;
 
 const OUTPUT = 'MOIN_MUTATION_REPORT';
 
-/** Keys Vitest's serializer attaches to errors it does not own. */
-const FOREIGN_MARKERS = ['constructor', 'toString'] as const;
-/** Fields every Vitest matcher sets. Necessary for an assertion, never sufficient on their own. */
-const ASSERTION_FIELDS = ['expected', 'actual', 'showDiff', 'ok'] as const;
 /** A test that ran out of time rather than asserting. Vitest gives no typed flag for this. */
 const TIMEOUT_MESSAGE = /^Test timed out in \d+ms/u;
+const LOAD_MESSAGE =
+  /Transform failed|PARSE_ERROR|Failed to load|Cannot find (?:module|package)|Failed to resolve/u;
 
 /** Why a test, hook, module or run failed. Only `ASSERTION` can become evidence. */
 export type FailureCategory = 'ASSERTION' | 'ERROR' | 'TIMEOUT' | 'LOAD' | 'UNKNOWN';
 
+/**
+ * A failure as recorded for the report.
+ *
+ * `name` and `message` are **diagnostics**: they exist so a reviewer reading the report can see
+ * what went wrong. No field of this type can promote a failure to `ASSERTION`.
+ */
 export interface ReportedError {
   readonly name: string;
-  /** Markers Vitest added because it did not recognise the error as its own. */
-  readonly foreignMarkers: readonly string[];
-  readonly assertionFields: readonly string[];
   readonly category: FailureCategory;
-  /** First line, for the report's detail column. Never used to classify. */
+  /** First line only, escape sequences stripped. */
   readonly message: string;
+  /**
+   * The provenance token the matcher wrapper stamped on this value, when it carries one.
+   *
+   * Used for one check and one direction only: a matcher failure the test swallowed before failing
+   * some other way has an event but no propagated token, and is refused. A token can never promote
+   * a failure — without the event nothing reads it.
+   */
+  readonly matcherToken: string | undefined;
 }
 
-export interface ReportedTest {
-  /** Repository-relative module path — half of the canonical identity. */
+/** The canonical identity of one test, as the manifest names it. */
+export interface TestIdentity {
+  /** Repository-relative module path — half of the identity. */
   readonly file: string;
   /** Vitest's full name — the other half. Compared exactly, never as a substring. */
   readonly fullName: string;
+}
+
+export interface ReportedTest extends TestIdentity {
   readonly state: string;
   /** True when the test body actually ran. */
   readonly executed: boolean;
   /** The reporter's verdict. Undefined when the test did not fail. */
   readonly failureCategory: FailureCategory | undefined;
-  /** What the in-process probe saw, or undefined when it never ran. */
+  /** What the in-process probe recorded, or undefined when it never completed. */
   readonly probe: AssertionProbe | undefined;
   readonly errors: readonly ReportedError[];
 }
@@ -116,68 +142,75 @@ function firstLine(value: unknown): string {
   );
 }
 
-function keysOf(value: unknown): readonly string[] {
-  // `in` throws on a primitive, which a test is free to throw.
-  return typeof value === 'object' && value !== null ? Object.keys(value) : [];
-}
-
 /**
- * Classify one error. Deliberately does **not** take `expectCalls`: a module or hook error has no
- * owning test, and an error is only ever promoted to `ASSERTION` by `categoriseTest` below, which
- * has both signals.
+ * Record one error for the report.
+ *
+ * Only `TIMEOUT` and `LOAD` are decided here, both from the message, and both only ever move a
+ * verdict away from evidence. Everything else is `ERROR`: this function has no way to say
+ * `ASSERTION` and is not given one.
  */
 function reportError(error: unknown): ReportedError {
-  const keys = new Set(keysOf(error));
   const record = (typeof error === 'object' && error !== null ? error : {}) as Record<
     string,
     unknown
   >;
   const name = typeof record['name'] === 'string' ? record['name'] : 'unknown';
   const message = firstLine(record['message']);
-  const foreignMarkers = FOREIGN_MARKERS.filter((marker) => keys.has(marker));
-  const assertionFields = ASSERTION_FIELDS.filter((field) => keys.has(field));
+  const stamped = record[MATCHER_FAILURE_TOKEN];
+  const matcherToken = typeof stamped === 'string' ? stamped : undefined;
 
   let category: FailureCategory = 'ERROR';
   if (TIMEOUT_MESSAGE.test(message)) {
     category = 'TIMEOUT';
-  } else if (
-    /Transform failed|PARSE_ERROR|Failed to load|Cannot find (?:module|package)|Failed to resolve/u.test(
-      message,
-    )
-  ) {
+  } else if (LOAD_MESSAGE.test(message)) {
     category = 'LOAD';
   }
 
-  return { name, foreignMarkers, assertionFields, category, message };
+  return { name, category, message, matcherToken };
 }
 
 /**
- * The reporter's verdict for one failed test, using both signals.
+ * The reporter's verdict for one failed test, from provenance alone.
  *
- * `ASSERTION` requires: the probe ran; `expect` was actually called; and **every** recorded error
- * is one Vitest owns, with the fields a matcher sets and an `AssertionError` name. One foreign
- * error among them — an `afterEach` that threw — makes the whole run `ERROR`, because a run with a
- * broken teardown is not clean evidence of anything.
+ * `identity` is the identity this reporter resolved from Vitest's module and task. The probe
+ * recorded its own copy at the matcher boundary; they must agree, or the record is not this test's.
  */
 function categoriseTest(
   errors: readonly ReportedError[],
   probe: AssertionProbe | undefined,
+  identity: TestIdentity,
 ): FailureCategory {
   if (errors.length === 0) return 'UNKNOWN';
+  // A run that timed out or failed to load is classified from that, before anything else: both are
+  // non-evidence outcomes, and a matcher failure recorded alongside them changes nothing.
   if (errors.some((error) => error.category === 'TIMEOUT')) return 'TIMEOUT';
   if (errors.some((error) => error.category === 'LOAD')) return 'LOAD';
 
-  // Fail closed on a missing or stale probe: without it there is no in-process signal at all.
-  if (probe?.version !== PROBE_VERSION) return 'UNKNOWN';
-  if (probe.expectCalls === 0) return 'ERROR';
+  // Fail closed on a missing, stale or self-doubting probe: without it there is no provenance.
+  if (probe === undefined) return 'UNKNOWN';
+  if (probe.version !== PROBE_VERSION) return 'UNKNOWN';
+  if (probe.suspect.length > 0) return 'UNKNOWN';
+  if (probe.rejected > 0) return 'UNKNOWN';
 
-  const everyErrorIsOurs = errors.every(
-    (error) =>
-      error.foreignMarkers.length === 0 &&
-      error.assertionFields.length === ASSERTION_FIELDS.length &&
-      error.name === 'AssertionError',
+  // The record must belong to this exact test. Exact equality on both halves.
+  if (probe.testFile !== identity.file || probe.testFullName !== identity.fullName) {
+    return 'UNKNOWN';
+  }
+
+  if (probe.event !== MATCHER_FAILURE) return 'ERROR';
+  // Zero is not a matcher failure; more than one means the test continued after the first, so which
+  // assertion made it fail cannot be established.
+  if (probe.matcherFailures !== 1) return 'UNKNOWN';
+
+  // The earned failure must be the one that propagated. Measured: a test that catches
+  // `expect(1).toBe(2)` and then throws an ordinary error has the event but not the token, and
+  // "the mutation was rejected by an assertion" would be false of it.
+  const propagated = errors.some(
+    (error) => error.matcherToken !== undefined && probe.failureTokens.includes(error.matcherToken),
   );
-  return everyErrorIsOurs ? 'ASSERTION' : 'ERROR';
+  if (!propagated) return 'ERROR';
+
+  return 'ASSERTION';
 }
 
 function reportErrors(errors: unknown): readonly ReportedError[] {
@@ -199,19 +232,50 @@ interface ModuleLike {
   children?: { allTests?: () => Iterable<TaskLike>; allSuites?: () => Iterable<TaskLike> };
 }
 
+function stringsOf(value: unknown): readonly string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === 'string')
+    : [];
+}
+
+/**
+ * Read the probe's record off a task.
+ *
+ * Every field is checked: a record missing any of them is treated as absent rather than
+ * half-trusted, which is what makes a truncated or stale probe fail closed.
+ */
 function probeOf(task: TaskLike): AssertionProbe | undefined {
   const meta = task.meta?.();
   if (typeof meta !== 'object' || meta === null) return undefined;
   const candidate = (meta as Record<string, unknown>)[PROBE_META_KEY];
   if (typeof candidate !== 'object' || candidate === null) return undefined;
   const record = candidate as Record<string, unknown>;
-  if (typeof record['version'] !== 'number' || typeof record['expectCalls'] !== 'number') {
+  if (
+    typeof record['version'] !== 'number' ||
+    typeof record['event'] !== 'string' ||
+    typeof record['invocationId'] !== 'string' ||
+    typeof record['testFile'] !== 'string' ||
+    typeof record['testFullName'] !== 'string' ||
+    typeof record['matcherFailures'] !== 'number' ||
+    typeof record['expectCalls'] !== 'number' ||
+    typeof record['rejected'] !== 'number' ||
+    !Array.isArray(record['failureTokens']) ||
+    !Array.isArray(record['suspect'])
+  ) {
     return undefined;
   }
   return {
     version: record['version'],
+    event: record['event'] === MATCHER_FAILURE ? MATCHER_FAILURE : 'NONE',
+    invocationId: record['invocationId'],
+    testFile: record['testFile'],
+    testFullName: record['testFullName'],
+    matcherFailures: record['matcherFailures'],
+    matchers: stringsOf(record['matchers']),
+    failureTokens: stringsOf(record['failureTokens']),
     expectCalls: record['expectCalls'],
-    recordedErrors: typeof record['recordedErrors'] === 'number' ? record['recordedErrors'] : 0,
+    rejected: record['rejected'],
+    suspect: stringsOf(record['suspect']),
   };
 }
 
@@ -234,13 +298,12 @@ export default class MutationReporter implements Reporter {
         const state = result?.state ?? 'unknown';
         const errors = reportErrors(result?.errors);
         const probe = probeOf(task);
+        const identity: TestIdentity = { file, fullName: task.fullName ?? task.name ?? '' };
         tests.push({
-          file,
-          fullName: task.fullName ?? task.name ?? '',
+          ...identity,
           state,
-          // The probe only runs around a test that executed, so its presence is the signal.
           executed: state === 'passed' || state === 'failed',
-          failureCategory: state === 'failed' ? categoriseTest(errors, probe) : undefined,
+          failureCategory: state === 'failed' ? categoriseTest(errors, probe, identity) : undefined,
           probe,
           errors,
         });
@@ -275,5 +338,5 @@ export default class MutationReporter implements Reporter {
   }
 }
 
-/** Exported for the reporter's own tests, which pin the serializer behaviour signal 2 relies on. */
+/** Exported for the reporter's own tests, which pin the provenance rule. */
 export { categoriseTest, reportError };

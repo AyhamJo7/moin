@@ -1,16 +1,17 @@
 /**
  * The mutation classifier, checked adversarially (P06.10.07).
  *
- * The harness that produces mutation evidence is itself a control, and it has been wrong four
+ * The harness that produces mutation evidence is itself a control, and it has been wrong five
  * times, always generously: counting any non-zero exit as a kill; matching words in the failure
- * message; accepting an ordinary `Error` decorated with `name = 'AssertionError'` and four matcher
- * fields; and matching the intended test by substring with no file identity, so a same-named test
- * in another file — or two tests at once — could claim the kill.
+ * message; accepting an `Error` decorated with `name = 'AssertionError'` and four matcher fields;
+ * matching the intended test by substring with no file identity; and accepting a **plain object
+ * literal** of that shape, which Vitest serializes with none of the markers the previous model
+ * treated as proof of foreignness.
  *
  * So these are written as attacks. The classifier consumes only the trusted reporter's
  * `failureCategory` and an exact `{ file, fullName }` identity; it never inspects an error. The
- * reporter's own tests pin the signals that category rests on, and
- * `mutation-reporter.integration.test.ts` pins them against real Vitest.
+ * reporter's own tests pin the provenance rule that category rests on, and
+ * `mutation-reporter.realvitest.test.ts` pins it against real Vitest.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -22,38 +23,55 @@ import {
   type ReportedTest,
   type RunObservation,
 } from './mutation-outcome.ts';
+import {
+  MATCHER_FAILURE,
+  NO_MATCHER_FAILURE,
+  PROBE_VERSION,
+  type AssertionProbe,
+} from './mutation-probe-contract.ts';
 import { categoriseTest, REPORT_VERSION } from './mutation-reporter.ts';
 
 const FILE = 'packages/db/src/chain.integration.test.ts';
 const OTHER_FILE = 'packages/db/src/other.integration.test.ts';
 const NAME = 'the chain > rejects invalid chain';
+const TOKEN = 'pid-1:1';
 const INTENDED: KillingTest = { file: FILE, fullName: NAME };
 
-/** As the reporter emits a genuine, trusted assertion failure. */
+/** A propagated matcher failure, as the reporter emits one. */
 function assertionError(message = 'expected 1 to be 2'): ReportedError {
-  return {
-    name: 'AssertionError',
-    foreignMarkers: [],
-    assertionFields: ['expected', 'actual', 'showDiff', 'ok'],
-    category: 'ASSERTION',
-    message,
-  };
+  return { name: 'AssertionError', category: 'ERROR', message, matcherToken: TOKEN };
 }
 
 /**
- * As the reporter emits an ordinary error — including one decorated to look like an assertion.
+ * Anything the code under test threw.
  *
- * The decoration is the point: `name` and the four fields are whatever the test set, and Vitest's
- * serializer adds `constructor`/`toString` because the object is not one of its own. The reporter
- * therefore categorises it `ERROR`, and this module never second-guesses that.
+ * `decorated` dresses it as an assertion — name and all — because that is the exploit, and because
+ * nothing downstream is allowed to care.
  */
 function thrownError(message: string, decorated = false): ReportedError {
   return {
     name: decorated ? 'AssertionError' : 'Error',
-    foreignMarkers: ['constructor', 'toString'],
-    assertionFields: decorated ? ['expected', 'actual', 'showDiff', 'ok'] : [],
     category: 'ERROR',
     message,
+    matcherToken: undefined,
+  };
+}
+
+/** The probe record a genuine single propagated matcher failure produces. */
+function trustedProbe(overrides: Partial<AssertionProbe> = {}): AssertionProbe {
+  return {
+    version: PROBE_VERSION,
+    event: MATCHER_FAILURE,
+    invocationId: 'pid-1',
+    testFile: FILE,
+    testFullName: NAME,
+    matcherFailures: 1,
+    matchers: ['assert'],
+    failureTokens: [TOKEN],
+    expectCalls: 1,
+    rejected: 0,
+    suspect: [],
+    ...overrides,
   };
 }
 
@@ -63,24 +81,42 @@ function test(
   options: { file?: string; errors?: readonly ReportedError[] } = {},
 ): ReportedTest {
   const errors = options.errors ?? [];
-  // Categorised by the **reporter's own function**, not by a rule copied into this file. A
-  // fixture that re-implements the thing under test only proves the copy agrees with itself.
-  const probe = {
-    version: 1,
-    // A genuine assertion means `expect` was called; a thrown object means it was not. These are
-    // the measured shapes the reporter's own tests pin.
-    expectCalls: errors.some((error) => error.category === 'ASSERTION') ? 1 : 0,
-    recordedErrors: errors.length,
-  };
+  const file = options.file ?? FILE;
+  // A probe only exists when a matcher actually threw, which here is modelled by the presence of
+  // a token on one of the errors. Categorisation is then done by the **reporter's own function**,
+  // never by a rule copied into this file: a fixture that re-implements the thing under test only
+  // proves the copy agrees with itself.
+  const earned = errors.some((error) => error.matcherToken !== undefined);
+  const probe = earned
+    ? trustedProbe({ testFile: file, testFullName: fullName })
+    : trustedProbe({
+        testFile: file,
+        testFullName: fullName,
+        event: NO_MATCHER_FAILURE,
+        matcherFailures: 0,
+        matchers: [],
+        failureTokens: [],
+      });
   return {
-    file: options.file ?? FILE,
+    file,
     fullName,
     state,
     executed: state === 'passed' || state === 'failed',
-    failureCategory: state === 'failed' ? categoriseTest(errors, probe) : undefined,
+    failureCategory:
+      state === 'failed' ? categoriseTest(errors, probe, { file, fullName }) : undefined,
     probe,
     errors,
   };
+}
+
+/**
+ * The same test with no probe record, which is what a failing `afterEach` produces.
+ *
+ * Modelled by removing the record rather than by inventing a shape: the reporter's real-Vitest
+ * test is what established that this is the shape to expect.
+ */
+function withoutProbe(reported: ReportedTest): ReportedTest {
+  return { ...reported, probe: undefined, failureCategory: 'UNKNOWN' };
 }
 
 function report(
@@ -258,15 +294,21 @@ describe('9 — a beforeAll failure', () => {
 
 describe('10 — an afterEach failure', () => {
   it('disqualifies the kill even though the intended test asserted', () => {
-    // Measured shape: Vitest attaches both errors to the same test, so the reporter sees a foreign
-    // error among them and refuses to call the failure an assertion.
+    // The measured shape, from `mutation-reporter.realvitest.test.ts`: when a user `afterEach`
+    // throws, the probe's own `afterEach` never completes, so no record is attached at all. The
+    // reporter has no provenance and says UNKNOWN; this module turns that into non-evidence.
     const result = classify(
-      report([
-        test(NAME, 'failed', { errors: [assertionError(), thrownError('teardown blew up')] }),
-      ]),
+      report([withoutProbe(test(NAME, 'failed', { errors: [thrownError('teardown blew up')] }))]),
     );
     expect(result.outcome).not.toBe('KILLED_ASSERTION');
     expect(result.outcome).toBe('INFRA_FAILURE');
+  });
+
+  it('disqualifies it even if the assertion itself did propagate', () => {
+    const result = classify(
+      report([withoutProbe(test(NAME, 'failed', { errors: [assertionError()] }))]),
+    );
+    expect(result.outcome).not.toBe('KILLED_ASSERTION');
   });
 });
 
@@ -324,7 +366,7 @@ describe('14 — an exact, clean kill', () => {
     expect(result.outcome).toBe('KILLED_ASSERTION');
     expect(result.matched).toBe(1);
     expect(result.unrelatedFailures).toBe(0);
-    expect(result.detail).toMatch(/trusted assertion/u);
+    expect(result.detail).toMatch(/trusted matcher failure/u);
   });
 });
 

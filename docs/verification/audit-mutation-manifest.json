@@ -390,7 +390,7 @@
     "file": "packages/db/migrations/0010_audit_chain_verification.sql",
     "find": "INSERT INTO audit_chain_registry(tenant_id) SELECT id FROM organisations ON CONFLICT DO NOTHING;",
     "replace": "",
-    "note": "Detected, but not by an assertion. The killing test is the one that *applies* the migration, so the removed backfill is caught by the migration's own guard: `0010` raises \"audit chain register backfill covered 0 of 3 organisation(s)\" and rolls back, and the test fails on that thrown error. The probe recorded 2 real `expect` calls before it, and Vitest marked the error foreign, so the reporter refuses to call it an assertion — correctly. A guard inside the migration is stronger than a test, but it is not assertion evidence; the expected outcome is INFRA_FAILURE.",
+    "note": "Detected, but not by an assertion. The killing test is the one that *applies* the migration, so the removed backfill is caught by the migration's own guard: `0010` raises \"audit chain register backfill covered 0 of 3 organisation(s)\" and rolls back, and the test fails on that thrown error. No matcher ever threw — the probe records 2 real `expect` calls and zero matcher failures — so there is no trusted event and the reporter refuses to call it an assertion, correctly. A guard inside the migration is a stronger control than a test, but it is not assertion evidence; the expected outcome is INFRA_FAILURE.",
     "killingTest": {
       "file": "packages/db/src/audit-chain-backfill.integration.test.ts",
       "fullName": "applying the register migration to a database that already has tenants > registers every pre-existing organisation"
@@ -739,7 +739,7 @@
     "file": "packages/db/migrations/0011_audit_chain_population.sql",
     "find": "UPDATE audit_chain_registry r\nSET registration_seq = ordered.position\nFROM ordered\nWHERE r.tenant_id = ordered.tenant_id AND r.registration_seq IS NULL;",
     "replace": "UPDATE audit_chain_registry r\nSET registration_seq = NULL\nFROM ordered\nWHERE false;",
-    "note": "Detected, but not by an assertion, in the same shape as N8: `0011` fails on `column \"registration_seq\" of relation \"audit_chain_registry\" contains null values` and rolls back, and the test that applies it fails on that thrown error after 4 real `expect` calls. The NOT NULL constraint is the control. Not assertion evidence; the expected outcome is INFRA_FAILURE.",
+    "note": "Detected, but not by an assertion, in the same shape as N8: `0011` fails on `column \"registration_seq\" of relation \"audit_chain_registry\" contains null values` and rolls back, and the test that applies it fails on that thrown error after 4 real `expect` calls and no matcher failure. The NOT NULL constraint is the control. Not assertion evidence; the expected outcome is INFRA_FAILURE.",
     "killingTest": {
       "file": "packages/db/src/audit-chain-backfill.integration.test.ts",
       "fullName": "applying the registration-sequence migration to a populated register > backfills every existing row deterministically and keeps advancing afterwards"
@@ -807,9 +807,256 @@
     }
   },
   {
-    "id": "H1-classifier-trusts-error-name",
-    "invariant": "Blocker 1 — only the reporter's trusted category promotes a failure; an error object never does",
-    "expected": "An ordinary error decorated with `name = 'AssertionError'` would be counted as proof that an invariant was enforced — the exploit the last review demonstrated.",
+    "id": "H1-reporter-trusts-serialized-assertion-shape",
+    "invariant": "Blocker: a serialized thrown value is never assertion authority",
+    "expected": "The rejected model, restored: an assertion would be recognised from the error's own `name`, so a plain object literal `{ name: 'AssertionError', … }` would be counted as proof an invariant was enforced.",
+    "file": "scripts/mutation-reporter.ts",
+    "find": "  // Fail closed on a missing, stale or self-doubting probe: without it there is no provenance.\n  if (probe === undefined) return 'UNKNOWN';\n  if (probe.version !== PROBE_VERSION) return 'UNKNOWN';\n  if (probe.suspect.length > 0) return 'UNKNOWN';\n  if (probe.rejected > 0) return 'UNKNOWN';\n\n  // The record must belong to this exact test. Exact equality on both halves.\n  if (probe.testFile !== identity.file || probe.testFullName !== identity.fullName) {\n    return 'UNKNOWN';\n  }\n\n  if (probe.event !== MATCHER_FAILURE) return 'ERROR';\n  // Zero is not a matcher failure; more than one means the test continued after the first, so which\n  // assertion made it fail cannot be established.\n  if (probe.matcherFailures !== 1) return 'UNKNOWN';\n\n  // The earned failure must be the one that propagated. Measured: a test that catches\n  // `expect(1).toBe(2)` and then throws an ordinary error has the event but not the token, and\n  // \"the mutation was rejected by an assertion\" would be false of it.\n  const propagated = errors.some(\n    (error) => error.matcherToken !== undefined && probe.failureTokens.includes(error.matcherToken),\n  );\n  if (!propagated) return 'ERROR';\n\n  return 'ASSERTION';",
+    "replace": "  return errors.some((error) => error.name === 'AssertionError') ? 'ASSERTION' : 'ERROR';",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.realvitest.test.ts",
+      "fullName": "1 — a plain thrown assertion-shaped object > is not evidence, although Vitest serializes it with no foreign markers at all"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H2-reporter-skips-the-trusted-event",
+    "invariant": "Provenance: only a matcher-failure event can mean an assertion failed",
+    "expected": "A failure with no trusted event at all would fall through to the remaining checks instead of being refused outright.",
+    "file": "scripts/mutation-reporter.ts",
+    "find": "  if (probe.event !== MATCHER_FAILURE) return 'ERROR';",
+    "replace": "  if (probe.event === 'a value the contract never emits') return 'ERROR';",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.test.ts",
+      "fullName": "the ASSERTION verdict > refuses a failure with no event, whatever the error looks like"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H3-reporter-accepts-a-stale-probe-version",
+    "invariant": "Provenance: a record from another contract version is not readable",
+    "expected": "A probe from a different contract would be read as though its fields meant what this version expects.",
+    "file": "scripts/mutation-reporter.ts",
+    "find": "  if (probe.version !== PROBE_VERSION) return 'UNKNOWN';",
+    "replace": "  if (probe.version < 0) return 'UNKNOWN';",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.test.ts",
+      "fullName": "the ASSERTION verdict > fails closed when the probe is missing or from another contract version"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H4-reporter-ignores-probe-suspicion",
+    "invariant": "Provenance: a probe that doubts itself is not evidence",
+    "expected": "An invocation the probe refused to vouch for — overlapping windows, uninstrumented matchers — would be read as a clean one.",
+    "file": "scripts/mutation-reporter.ts",
+    "find": "  if (probe.suspect.length > 0) return 'UNKNOWN';",
+    "replace": "  if (probe.suspect.length > 99) return 'UNKNOWN';",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.test.ts",
+      "fullName": "the ASSERTION verdict > fails closed when the probe doubts itself"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H5-reporter-ignores-rejected-events",
+    "invariant": "Provenance: a window that discarded a record cannot be trusted whole",
+    "expected": "An invocation that saw a matcher failure belonging to some other window would still be counted.",
+    "file": "scripts/mutation-reporter.ts",
+    "find": "  if (probe.rejected > 0) return 'UNKNOWN';",
+    "replace": "  if (probe.rejected > 99) return 'UNKNOWN';",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.test.ts",
+      "fullName": "the ASSERTION verdict > fails closed when the probe doubts itself"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H6-reporter-weakens-the-event-identity",
+    "invariant": "Provenance: the event must belong to this exact test",
+    "expected": "A record naming a different file — or a different test in the same file — would vouch for this one, which is the stale-event case.",
+    "file": "scripts/mutation-reporter.ts",
+    "find": "  if (probe.testFile !== identity.file || probe.testFullName !== identity.fullName) {",
+    "replace": "  if (probe.testFile !== identity.file && probe.testFullName !== identity.fullName) {",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.test.ts",
+      "fullName": "the ASSERTION verdict > fails closed when the record names another test"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H7-reporter-accepts-ambiguous-events",
+    "invariant": "Provenance: exactly one matcher failure, or the kill is unattributable",
+    "expected": "A test that failed two matchers, having caught the first, would be counted although which assertion rejected the mutation is unknown.",
+    "file": "scripts/mutation-reporter.ts",
+    "find": "  if (probe.matcherFailures !== 1) return 'UNKNOWN';",
+    "replace": "  if (probe.matcherFailures < 0) return 'UNKNOWN';",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.test.ts",
+      "fullName": "the ASSERTION verdict > fails closed on anything but exactly one matcher failure"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H8-reporter-accepts-a-swallowed-assertion",
+    "invariant": "Provenance: the earned failure must be the one that propagated",
+    "expected": "A test that catches a real matcher failure and then fails some other way would be recorded as rejected-by-assertion, which is false of it.",
+    "file": "scripts/mutation-reporter.ts",
+    "find": "  const propagated = errors.some(\n    (error) => error.matcherToken !== undefined && probe.failureTokens.includes(error.matcherToken),\n  );",
+    "replace": "  const propagated = probe.failureTokens.length > 0;",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.test.ts",
+      "fullName": "the ASSERTION verdict > refuses an earned failure that the test swallowed"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H9-reporter-accepts-any-token",
+    "invariant": "Provenance: the propagated token must be this invocation's",
+    "expected": "A value stamped in an earlier invocation would satisfy the propagation check, which is the replay case.",
+    "file": "scripts/mutation-reporter.ts",
+    "find": "    (error) => error.matcherToken !== undefined && probe.failureTokens.includes(error.matcherToken),",
+    "replace": "    (error) => error.matcherToken !== undefined,",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.test.ts",
+      "fullName": "the ASSERTION verdict > refuses a token that belongs to another invocation"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H10-reporter-prefers-assertion-over-timeout",
+    "invariant": "A hung test is a detection, but it is not an assertion",
+    "expected": "A test killed by its deadline would be reported as having asserted, if a matcher had also recorded a failure.",
+    "file": "scripts/mutation-reporter.ts",
+    "find": "  if (errors.some((error) => error.category === 'TIMEOUT')) return 'TIMEOUT';",
+    "replace": "  if (errors.some((error) => error.category === 'TIMEOUT') && errors.length > 99) return 'TIMEOUT';",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.test.ts",
+      "fullName": "the ASSERTION verdict > prefers a timeout or load verdict over anything else"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H11-probe-treats-expect-calls-as-provenance",
+    "invariant": "Provenance: a matcher that passed is not a matcher that failed",
+    "expected": "`assertionCalls` would become failure provenance, so a successful `expect` followed by any throw would be a kill — the exact confusion the counter exists to avoid.",
+    "file": "scripts/mutation-evidence-probe.ts",
+    "find": "    event: mine.length > 0 ? MATCHER_FAILURE : NO_MATCHER_FAILURE,",
+    "replace": "    event:\n      assertionCalls() - invocation.expectCallsAtStart > 0 ? MATCHER_FAILURE : NO_MATCHER_FAILURE,",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.realvitest.test.ts",
+      "fullName": "4 — a successful expect, then a plain throw > is not evidence, which is why assertionCalls is diagnostic only"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H12-probe-token-is-not-invocation-scoped",
+    "invariant": "Provenance: a token belongs to one invocation, so a replayed one is detectable",
+    "expected": "Tokens would be shared across invocations, so a value stamped in an earlier test would satisfy the propagation check of a later one.",
+    "file": "scripts/mutation-evidence-probe.ts",
+    "find": "  const token = `${open?.id ?? 'no-invocation'}:${String(nextSeq)}`;",
+    "replace": "  const token = `matcher-failure:${String(nextSeq)}`;",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.realvitest.test.ts",
+      "fullName": "7 — a genuine matcher failure > is the one shape that is evidence"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H13-probe-ignores-overlapping-invocations",
+    "invariant": "Provenance: concurrent invocations are refused, not attributed",
+    "expected": "A concurrent test's matcher failure would be attributed to whichever window happened to be open, and Vitest's own assertion state is known to name the wrong test there.",
+    "file": "scripts/mutation-evidence-probe.ts",
+    "find": "    suspect.push(`another invocation (${open.id}) was still open`);\n    open.suspect.push('a later invocation opened while this one was still open');",
+    "replace": "    open.suspect.push('a later invocation opened while this one was still open');",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.realvitest.test.ts",
+      "fullName": "concurrent tests > are refused rather than attributed, because their invocation windows overlap"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H14-probe-lets-a-forged-record-stand",
+    "invariant": "Provenance: the probe is the last writer of its own key",
+    "expected": "A test could write a complete, self-consistent probe record into its own `task.meta` and have it believed — evidence authored by the code under test.",
+    "file": "scripts/mutation-evidence-probe.ts",
+    "find": "  meta[PROBE_META_KEY] = probe;",
+    "replace": "  meta[PROBE_META_KEY] ??= probe;",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.realvitest.test.ts",
+      "fullName": "10 and 11 — a forged probe record > cannot be planted, because the probe writes last"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H15-probe-window-admits-the-previous-invocation",
+    "invariant": "Provenance: an invocation reports only the failures recorded inside its own window",
+    "expected": "A matcher failure from the previous test would be counted in this one, so a clean kill would look ambiguous and a stale record could stand in for a real one.",
+    "file": "scripts/mutation-evidence-probe.ts",
+    "find": "  const mine = recorded.filter((entry) => entry.seq >= invocation.firstSeq);",
+    "replace": "  const mine = recorded.filter((entry) => entry.seq >= invocation.firstSeq - 1);",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.realvitest.test.ts",
+      "fullName": "7 — a genuine matcher failure > covers every assertion style the corpus uses"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H16-sweep-mutates-the-first-of-several-anchors",
+    "invariant": "A mutation must identify exactly one place to change",
+    "expected": "A two-place anchor would mutate whichever came first, so which guard a variant attacks would be decided by file order — one manifest entry was in that state and was correct only by luck.",
+    "file": "scripts/mutation-sweep.ts",
+    "find": "  if (occurrences > 1) {\n    return {\n      ok: false,\n      reason: `the anchor occurs ${String(occurrences)} times, so which one is mutated is arbitrary`,\n    };\n  }",
+    "replace": "  if (occurrences > 99) {\n    return { ok: false, reason: 'unreachable' };\n  }",
+    "killingTest": {
+      "file": "scripts/mutation-sweep.test.ts",
+      "fullName": "a duplicate anchor > is refused at application time, not only by --validate"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H17-sweep-accepts-a-noop-mutant",
+    "invariant": "A mutant identical to the pristine tree proves nothing",
+    "expected": "A variant whose replacement equals its anchor would run the suite against unmodified source and report the pass as a kill.",
+    "file": "scripts/mutation-sweep.ts",
+    "find": "  if (replace === find) {\n    return {\n      ok: false,\n      reason: 'the replacement is identical to the anchor, so the mutant is the pristine tree',\n    };\n  }",
+    "replace": "  if (replace === find && find.length > 1e9) {\n    return { ok: false, reason: 'unreachable' };\n  }",
+    "killingTest": {
+      "file": "scripts/mutation-sweep.test.ts",
+      "fullName": "a replacement identical to the anchor > is refused, because the mutant would be the pristine tree"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H18-sweep-accepts-a-missing-anchor",
+    "invariant": "A variant whose anchor has gone is a manifest error, not a surviving defect",
+    "expected": "A refactor that orphaned a control would silently inject nothing and the sweep would report on the pristine tree.",
+    "file": "scripts/mutation-sweep.ts",
+    "find": "  if (occurrences === 0) {\n    return { ok: false, reason: 'the anchor is not present' };\n  }",
+    "replace": "  if (occurrences < 0) {\n    return { ok: false, reason: 'the anchor is not present' };\n  }",
+    "killingTest": {
+      "file": "scripts/mutation-sweep.test.ts",
+      "fullName": "a missing anchor > is refused rather than applied as a no-op"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H19-sweep-interprets-the-replacement",
+    "invariant": "The replacement is spliced in literally, never interpreted",
+    "expected": "`$$` in a SQL function body would collapse to `$` and the migration would fail with a syntax error; the variant would look detected while nothing had been tested.",
+    "file": "scripts/mutation-sweep.ts",
+    "find": "  const index = source.indexOf(find);\n  return { ok: true, source: source.slice(0, index) + replace + source.slice(index + find.length) };",
+    "replace": "  return { ok: true, source: source.replace(find, replace) };",
+    "killingTest": {
+      "file": "scripts/mutation-sweep.test.ts",
+      "fullName": "a unique anchor > does not interpret the replacement"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H20-classifier-trusts-the-error-name",
+    "invariant": "The classifier consumes the reporter's verdict and never an error",
+    "expected": "An error decorated with `name = 'AssertionError'` would be promoted past the reporter's verdict, reopening the spoof one layer down.",
     "file": "scripts/mutation-outcome.ts",
     "find": "  if (test.failureCategory !== 'ASSERTION') {",
     "replace": "  if (test.failureCategory !== 'ASSERTION' && !test.errors.some((error) => error.name === 'AssertionError')) {",
@@ -820,8 +1067,8 @@
     "project": "unit"
   },
   {
-    "id": "H2-classifier-ignores-module-identity",
-    "invariant": "Blocker 2 — a killing test is identified by module and name together",
+    "id": "H21-classifier-ignores-module-identity",
+    "invariant": "A killing test is identified by module and name together",
     "expected": "A same-named test in another file could claim the kill, so a passing namesake would launder a defect nobody detected.",
     "file": "scripts/mutation-outcome.ts",
     "find": "  return test.file === identity.file && test.fullName === identity.fullName;",
@@ -833,8 +1080,8 @@
     "project": "unit"
   },
   {
-    "id": "H3-classifier-matches-by-substring",
-    "invariant": "Blocker 2 — the full name is compared exactly, never as a substring",
+    "id": "H22-classifier-matches-by-substring",
+    "invariant": "The full name is compared exactly, never as a substring",
     "expected": "“rejects invalid chain” would match “rejects invalid chain after retry”, so an unrelated test's failure would be recorded as the kill.",
     "file": "scripts/mutation-outcome.ts",
     "find": "  return test.file === identity.file && test.fullName === identity.fullName;",
@@ -846,8 +1093,8 @@
     "project": "unit"
   },
   {
-    "id": "H4-classifier-resolves-duplicates-arbitrarily",
-    "invariant": "Blocker 2 — exactly one test may carry the identity",
+    "id": "H23-classifier-resolves-duplicates-arbitrarily",
+    "invariant": "Exactly one test may carry the identity",
     "expected": "With two tests of the same name the classifier would take the first and report a kill, although which one failed cannot be established.",
     "file": "scripts/mutation-outcome.ts",
     "find": "  if (named.length > 1) {",
@@ -859,8 +1106,8 @@
     "project": "unit"
   },
   {
-    "id": "H5-classifier-ignores-unrelated-failures",
-    "invariant": "Blocker 3 — a kill must be attributable, so no other test may have failed",
+    "id": "H24-classifier-ignores-unrelated-failures",
+    "invariant": "A kill must be attributable, so no other test may have failed",
     "expected": "A run where the intended test asserted and an exhausted pool failed other tests would be recorded as clean evidence.",
     "file": "scripts/mutation-outcome.ts",
     "find": "  if (unrelatedFailures > 0) {",
@@ -872,8 +1119,8 @@
     "project": "unit"
   },
   {
-    "id": "H6-classifier-ignores-hook-failures",
-    "invariant": "Blocker 3 — a hook that threw is infrastructure, whatever the tests reported",
+    "id": "H25-classifier-ignores-hook-failures",
+    "invariant": "A hook that threw is infrastructure, whatever the tests reported",
     "expected": "An unreachable database failing `beforeAll` would be classified from whatever the tests reported, which is how every variant once looked killed.",
     "file": "scripts/mutation-outcome.ts",
     "find": "  const hookError = report.modules.flatMap((module) => module.hookErrors)[0];",
@@ -881,84 +1128,6 @@
     "killingTest": {
       "file": "scripts/mutation-outcome.test.ts",
       "fullName": "9 — a beforeAll failure > wins even when a test also recorded an assertion"
-    },
-    "project": "unit"
-  },
-  {
-    "id": "H7-reporter-ignores-foreign-markers",
-    "invariant": "Blocker 1 — Vitest's own serializer markers separate its assertion from a foreign object",
-    "expected": "A thrown object decorated with the four matcher fields would be typed as a genuine assertion whenever its test had also called `expect` once.",
-    "file": "scripts/mutation-reporter.ts",
-    "find": "      error.foreignMarkers.length === 0 &&",
-    "replace": "      true &&",
-    "killingTest": {
-      "file": "scripts/mutation-reporter.test.ts",
-      "fullName": "the ASSERTION verdict > refuses a decorated foreign error even when expect was called"
-    },
-    "project": "unit"
-  },
-  {
-    "id": "H8-reporter-ignores-the-probe",
-    "invariant": "Blocker 1 — `expect` must actually have been called inside the test process",
-    "expected": "A failure where no matcher ever ran would be typed as an assertion on the strength of the error object alone.",
-    "file": "scripts/mutation-reporter.ts",
-    "find": "  if (probe.expectCalls === 0) return 'ERROR';",
-    "replace": "  if (probe.expectCalls < 0) return 'ERROR';",
-    "killingTest": {
-      "file": "scripts/mutation-reporter.test.ts",
-      "fullName": "the ASSERTION verdict > refuses any failure where expect was never called"
-    },
-    "project": "unit"
-  },
-  {
-    "id": "H9-reporter-trusts-a-stale-probe",
-    "invariant": "Blocker 1 — a missing or version-mismatched probe fails closed",
-    "expected": "A probe from another contract version would be read as though its fields meant what this version expects.",
-    "file": "scripts/mutation-reporter.ts",
-    "find": "  if (probe?.version !== PROBE_VERSION) return 'UNKNOWN';",
-    "replace": "  if (probe === undefined) return 'UNKNOWN';",
-    "killingTest": {
-      "file": "scripts/mutation-reporter.test.ts",
-      "fullName": "the ASSERTION verdict > fails closed when the probe is missing or stale"
-    },
-    "project": "unit"
-  },
-  {
-    "id": "H10-reporter-accepts-mixed-errors",
-    "invariant": "Blocker 3 — every error recorded against the test must be one Vitest owns",
-    "expected": "A genuine assertion beside an `afterEach` that threw would be typed as a clean assertion, so a broken teardown could mask an unreliable run.",
-    "file": "scripts/mutation-reporter.ts",
-    "find": "  const everyErrorIsOurs = errors.every(",
-    "replace": "  const everyErrorIsOurs = errors.some(",
-    "killingTest": {
-      "file": "scripts/mutation-reporter.test.ts",
-      "fullName": "the ASSERTION verdict > refuses a mixed run: one genuine assertion and one foreign error"
-    },
-    "project": "unit"
-  },
-  {
-    "id": "H11-reporter-ignores-assertion-fields",
-    "invariant": "Blocker 1 — a matcher sets all four of expected/actual/showDiff/ok",
-    "expected": "Any error named AssertionError would type as an assertion while carrying none of the metadata a matcher produces.",
-    "file": "scripts/mutation-reporter.ts",
-    "find": "      error.assertionFields.length === ASSERTION_FIELDS.length &&",
-    "replace": "      true &&",
-    "killingTest": {
-      "file": "scripts/mutation-reporter.test.ts",
-      "fullName": "the ASSERTION verdict > needs every assertion field, not merely the name"
-    },
-    "project": "unit"
-  },
-  {
-    "id": "H12-reporter-types-by-fields-alone",
-    "invariant": "Blocker 1 — the name is part of the structural signature, not a substitute for it",
-    "expected": "An error carrying the four matcher fields under any other name would type as an assertion.",
-    "file": "scripts/mutation-reporter.ts",
-    "find": "      error.name === 'AssertionError',",
-    "replace": "      error.name !== '',",
-    "killingTest": {
-      "file": "scripts/mutation-reporter.test.ts",
-      "fullName": "the ASSERTION verdict > needs the name too, not merely the fields"
     },
     "project": "unit"
   }

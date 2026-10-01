@@ -67,6 +67,51 @@ function escapeForFilter(name: string): string {
 }
 const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
 
+/** The outcome of trying to inject one variant into a source file. */
+export type MutationApplication =
+  { readonly ok: true; readonly source: string } | { readonly ok: false; readonly reason: string };
+
+/**
+ * Inject one variant, or refuse.
+ *
+ * Two rules, both enforced **here** rather than only in `--validate`, because an operator who
+ * skips validation must not get a weaker guarantee than one who does not:
+ *
+ *  1. the anchor must occur **exactly once**. A two-place anchor used to mutate whichever occurred
+ *     first, so which guard a variant attacked was decided by file order — one manifest entry was
+ *     in that state and was only correct by luck;
+ *  2. the replacement must differ from the anchor, or the "mutant" is the pristine tree and any
+ *     kill it reports is meaningless.
+ *
+ * The splice is positional rather than `String.prototype.replace`, which interprets its
+ * replacement: `$$` means a literal `$`, so every variant whose replacement contained a SQL
+ * function body was silently corrupted into `AS $` and the migration failed with a syntax error.
+ * The variant looked detected; nothing had been tested. A positional splice interprets nothing.
+ */
+export function applyMutation(source: string, find: string, replace: string): MutationApplication {
+  if (find.length === 0) {
+    return { ok: false, reason: 'the anchor is empty, so it does not identify a place to mutate' };
+  }
+  if (replace === find) {
+    return {
+      ok: false,
+      reason: 'the replacement is identical to the anchor, so the mutant is the pristine tree',
+    };
+  }
+  const occurrences = source.split(find).length - 1;
+  if (occurrences === 0) {
+    return { ok: false, reason: 'the anchor is not present' };
+  }
+  if (occurrences > 1) {
+    return {
+      ok: false,
+      reason: `the anchor occurs ${String(occurrences)} times, so which one is mutated is arbitrary`,
+    };
+  }
+  const index = source.indexOf(find);
+  return { ok: true, source: source.slice(0, index) + replace + source.slice(index + find.length) };
+}
+
 interface Variant {
   readonly id: string;
   readonly invariant: string;
@@ -198,12 +243,15 @@ async function sweep(
 ): Promise<Result> {
   const path = join(REPO, variant.file);
   const original = readFileSync(path, 'utf8');
-  if (!original.includes(variant.find)) {
+  // Refused before the baseline runs: an unapplicable variant proves nothing, and its baseline
+  // would be a wasted integration run.
+  const applied = applyMutation(original, variant.find, variant.replace);
+  if (!applied.ok) {
     return {
       variant,
       baseline: 'BASELINE_FAILED',
       outcome: 'INVALID_MUTANT',
-      detail: `the anchor is not present in ${variant.file}, so the variant could not be applied`,
+      detail: `the variant could not be applied to ${variant.file}: ${applied.reason}`,
       matched: 0,
       unrelatedFailures: 0,
       baselineMs: 0,
@@ -243,15 +291,7 @@ async function sweep(
   }
 
   try {
-    // A **function** replacement, because a string one is interpreted: `String.prototype.replace`
-    // treats `$$` in the replacement as an escape for a literal `$`, and `$&`/`$1` as back
-    // references. Any variant whose replacement contained `$$` — every SQL function body — was
-    // therefore silently corrupted into `$`, and the migration failed with
-    // `syntax error at or near "$"`. The variant looked detected; nothing had been tested.
-    writeFileSync(
-      path,
-      original.replace(variant.find, () => variant.replace),
-    );
+    writeFileSync(path, applied.source);
     const mutant = await observe(variant, 'mutant');
     return {
       variant,
@@ -365,20 +405,15 @@ async function main(): Promise<number> {
         problems.push(`[${variant.id}] the mutated file does not exist: ${variant.file}`);
         continue;
       }
-      // The anchor must resolve to exactly one place. `String.prototype.replace` with a string
-      // pattern rewrites the *first* occurrence, so a two-place anchor silently mutates whichever
-      // one happens to come first — the same class of ambiguity as a substring test match.
-      const occurrences =
-        readFileSync(join(REPO, variant.file), 'utf8').split(variant.find).length - 1;
-      if (occurrences === 0) {
-        problems.push(`[${variant.id}] anchor not found in ${variant.file}`);
-      } else if (occurrences > 1) {
-        problems.push(
-          `[${variant.id}] the anchor occurs ${String(occurrences)} times in ${variant.file}, so which one is mutated is arbitrary`,
-        );
-      }
-      if (variant.replace === variant.find) {
-        problems.push(`[${variant.id}] replace is identical to find, so the mutant is a no-op`);
+      // The same function the sweep applies with, so validation can be neither more permissive
+      // than execution nor less.
+      const applied = applyMutation(
+        readFileSync(join(REPO, variant.file), 'utf8'),
+        variant.find,
+        variant.replace,
+      );
+      if (!applied.ok) {
+        problems.push(`[${variant.id}] ${variant.file}: ${applied.reason}`);
       }
     }
 

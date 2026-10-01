@@ -5,29 +5,37 @@
  *
  * It consumes the trusted reporter's `failureCategory` and the canonical test identity, and nothing
  * else. It does **not** inspect error names, messages or fields, because every generation of this
- * decision that did was spoofable — the last one accepted an ordinary `Error` decorated with
- * `name = 'AssertionError'` and four matcher fields.
+ * decision that did was spoofable — the last two by a plain object literal
+ * `{ name: 'AssertionError', expected, actual, showDiff, ok }` and by an ordinary `Error` whose
+ * `toJSON()` returns that shape. A thrown value is authored by the code under test; it is never
+ * authority for what the test framework did.
  *
- * ## The clean-run rule
+ * `ASSERTION` now rests on provenance: a `MATCHER_FAILURE` record that only the wrapper over
+ * Vitest's `Assertion.prototype` can create, in `scripts/mutation-evidence-probe.ts`.
  *
- * `KILLED_ASSERTION` requires all of:
+ * ## The thirteen conditions for KILLED_ASSERTION
  *
  *   1. the baseline run passed cleanly (checked by the sweep, not here);
  *   2. the report is one this version understands;
- *   3. nothing failed outside a test — no global, module or hook error;
- *   4. exactly **one** test matches the manifest's `{ file, fullName }` identity;
- *   5. that test executed;
- *   6. that test failed;
- *   7. the reporter categorised its failure as `ASSERTION`;
- *   8. **no other test failed** anywhere in the run.
+ *   3. nothing failed outside a test — no global or module error;
+ *   4. no hook failed around the tests;
+ *   5. exactly **one** test matches the manifest's `{ file, fullName }` identity;
+ *   6. that test executed;
+ *   7. that test failed;
+ *   8. the run did not time out, and the test did not fail by timing out;
+ *   9. no module failed to build or load;
+ *  10. the reporter categorised the failure `ASSERTION`, which itself requires:
+ *  11.   a trusted in-process matcher-failure event for this invocation, with no `suspect` entry
+ *        and nothing rejected,
+ *  12.   that event bound to this exact test identity and to exactly one matcher failure;
+ *  13. **no other test failed** anywhere in the run.
  *
- * Rule 8 is new and it matters: a run where the intended test asserted *and* something unrelated
+ * Condition 13 matters on its own: a run where the intended test asserted *and* something unrelated
  * blew up is not clean evidence, because the unrelated failure may be the reason the intended one
  * failed. It is reported as `UNRELATED_FAILURE` rather than folded into the kill count.
  *
  * Everything that is not `KILLED_ASSERTION` is reported as itself. Nothing else is evidence.
  */
-
 import { REPORT_VERSION, type MutationReport, type ReportedTest } from './mutation-reporter.ts';
 
 export type {
@@ -261,7 +269,7 @@ export function classifyRun(observation: RunObservation, identity: KillingTest):
 
   return {
     outcome: 'KILLED_ASSERTION',
-    detail: `the intended test ran and rejected the mutation on a trusted assertion (${String(test.probe?.expectCalls ?? 0)} expect call(s))`,
+    detail: `the intended test ran and rejected the mutation on a trusted matcher failure (${test.probe?.matchers.join(', ') ?? 'unknown matcher'})`,
     matched: 1,
     unrelatedFailures: 0,
   };

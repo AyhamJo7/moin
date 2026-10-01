@@ -13,7 +13,7 @@ export default defineConfig({
     root: process.cwd(),
     include: ['scripts/__fixtures__/reporter/*.fixture.ts'],
     // The same probe the real projects load, because the reporter's verdict depends on it.
-    setupFiles: ['./scripts/mutation-assertion-probe.ts'],
+    setupFiles: ['./scripts/mutation-evidence-probe.ts'],
     environment: 'node',
     testTimeout: 10_000,
     hookTimeout: 10_000,
