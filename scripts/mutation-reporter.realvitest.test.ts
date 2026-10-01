@@ -24,13 +24,9 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { beforeAll, describe, expect, it } from 'vitest';
-import {
-  MATCHER_IDENTITY_CONFIRMED,
-  NON_EVIDENCE,
-  PROBE_VERSION,
-} from './mutation-probe-contract.ts';
+import { MATCHER_IDENTITY_CONFIRMED, NON_EVIDENCE, PROBE_VERSION } from '@moin/testing';
 import { REPORT_VERSION, type MutationReport, type ReportedTest } from './mutation-reporter.ts';
-import { evidenceTest } from './mutation-evidence-test.ts';
+import { evidenceTest } from '@moin/testing';
 
 const run = promisify(execFile);
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');

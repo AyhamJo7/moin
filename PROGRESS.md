@@ -175,6 +175,7 @@ Rules
 | P06.10.07 | READY_FOR_REVIEW | 986ae8b | EV-P06-030 | `KILLED_ASSERTION` redefined so it can only mean one thing: two in-process signals a thrown object cannot set, an exact unique `{file, fullName}` identity, and a run with no other failure — 77 KILLED_ASSERTION, 2 documented INFRA_FAILURE over 79 variants, 12 of which attack the harness itself |
 | P06.10.07 | READY_FOR_REVIEW | 96a5dad | EV-P06-031 | Assertion evidence moved from the serialized thrown value to the matcher boundary in-process: a plain object literal and a `toJSON` spoof both defeated the previous model. Anchor uniqueness enforced at application time. 90 KILLED_ASSERTION and 2 documented INFRA_FAILURE over 92 variants, 25 of which attack the harness |
 | P06.10.07 | READY_FOR_REVIEW | 953c47c | EV-P06-032 | Assertion evidence moved from a transferable token to **object identity**: the terminal value of the test body must be, by `===`, the object a Vitest matcher threw in this invocation. 52 KILLED_ASSERTION and 42 NOT_EVIDENCE_ELIGIBLE over 94 variants |
+| P06.10.07 | READY_FOR_REVIEW | PENDING_SHA | EV-P06-033 | Eligibility gap closed: 30 killing tests under `packages/db/` moved to the trusted wrapper, registration only, and the wrapper moved into `@moin/testing` so no package reaches into `scripts/`. 92 KILLED_ASSERTION and 2 NOT_EVIDENCE_ELIGIBLE over 94 variants |
 | P06.10 | IN_PROGRESS | 8e5bf76 | EV-P06-021…025 | Table, chain, query API, daily verifier, argument scanner and runbook done. Open: .03 adoption by the tool guard, operator and security paths (needs P10.08, P06.11/.12), .05 scheduling (EXT-09) and .06 founder acceptance of ADR-0017 |
 
 ## External waits
@@ -561,5 +562,35 @@ true, ok: false }` — is serialized by Vitest with none of the `constructor`/`t
   killed by an actual cross-test replay.
   Final distribution at `953c47c73bf4`: `KILLED_ASSERTION: 52`, `NOT_EVIDENCE_ELIGIBLE: 42`, over 94
   variants. `90/2 over 92` is superseded. The number went down because the standard went up.
+  ADR-0017 stays **PROPOSED**; the five residuals are unchanged. P06.10.03 remains open; P06.10.05
+  remains `WAITING_FOR_EXTERNAL` on EXT-09; P06.10 is not complete.
+
+- 2026-10-01 — **Closing the eligibility gap, with the scope the founder opened.** The previous round
+  left 42 variants `NOT_EVIDENCE_ELIGIBLE` because their killing tests live under `packages/db/`,
+  which that round was told not to touch. Test files there are now in scope, product code still is
+  not, so the migration is **registration only**: `it(` → `evidenceTest(` on exactly the 30 distinct
+  tests the 40 eligible variants name. No test name, body, assertion, setup, database work or timeout
+  changed, and every suite's count is identical (`audit-verification` 24, `cli-verify-audit` 8,
+  `audit-chain-population` 10, `audit-chain-epoch` 8, `audit-chain-backfill` 2, `audit` 11).
+  One structural change was needed and is worth recording. The wrapper lived in `scripts/`, and a
+  relative import from `packages/db/src/` into `scripts/` is exactly the six-level path this
+  repository's own boundary test calls unacceptable. So the contract, the private state and the
+  wrapper moved to `packages/testing/src/mutation/` and are re-exported from `@moin/testing` — the
+  same door `createTestDatabase` already comes through. The mechanism is byte-for-byte the same; only
+  its address changed. `depcruise` is clean over 197 modules.
+  `N8-backfill-removed` and `P8-sequence-backfill-removed` were **deliberately not migrated**. Their
+  defects are caught by a guard inside the migration — `0010` refusing an incomplete register
+  backfill, `0011` failing `NOT NULL` — so the test fails on a thrown database error and no matcher
+  ever throws. Wrapping them would not change that, and rewriting them to catch the error and
+  `expect()` it would be manufacturing evidence rather than finding it. They stay
+  `NOT_EVIDENCE_ELIGIBLE`, outside the numerator, with the reason in the manifest.
+  The result was not forced: every one of the 40 migrated variants came back `KILLED_ASSERTION` on
+  its own, because each of those tests already terminated on a genuine matcher failure. Final
+  distribution at `PENDING_SHA`: `KILLED_ASSERTION: 92`, `NOT_EVIDENCE_ELIGIBLE: 2`, over 94
+  variants. `52/42` is superseded.
+  Object-identity provenance is unchanged: the private `WeakMap`, the terminal `T === M` check, and
+  every attack case — copied properties, copied symbols, cloned Error, async copy, swallowed matcher,
+  cross-test replay, retry replay, parameterized replay, two matcher failures, concurrency. No token
+  returned.
   ADR-0017 stays **PROPOSED**; the five residuals are unchanged. P06.10.03 remains open; P06.10.05
   remains `WAITING_FOR_EXTERNAL` on EXT-09; P06.10 is not complete.

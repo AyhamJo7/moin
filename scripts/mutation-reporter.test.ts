@@ -12,14 +12,14 @@ import {
   NON_EVIDENCE,
   PROBE_VERSION,
   type AssertionProbe,
-} from './mutation-probe-contract.ts';
+} from '@moin/testing';
 import {
   categoriseTest,
   reportError,
   type ReportedError,
   type TestIdentity,
 } from './mutation-reporter.ts';
-import { evidenceTest } from './mutation-evidence-test.ts';
+import { evidenceTest } from '@moin/testing';
 
 const IDENTITY: TestIdentity = {
   file: 'packages/db/src/chain.integration.test.ts',

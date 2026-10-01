@@ -15,7 +15,7 @@ import { createPool, type Pool } from '@moin/db/pool';
 import { appendAuditEvent, withTenant } from '@moin/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { scan, type Finding } from './check-audit-arguments.ts';
-import { evidenceTest } from './mutation-evidence-test.ts';
+import { evidenceTest } from '@moin/testing';
 
 const ORG = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 const runProcess = promisify(execFile);

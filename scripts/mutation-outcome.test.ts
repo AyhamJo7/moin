@@ -28,9 +28,9 @@ import {
   NON_EVIDENCE,
   PROBE_VERSION,
   type AssertionProbe,
-} from './mutation-probe-contract.ts';
+} from '@moin/testing';
 import { categoriseTest, REPORT_VERSION } from './mutation-reporter.ts';
-import { evidenceTest } from './mutation-evidence-test.ts';
+import { evidenceTest } from '@moin/testing';
 
 const FILE = 'packages/db/src/chain.integration.test.ts';
 const OTHER_FILE = 'packages/db/src/other.integration.test.ts';

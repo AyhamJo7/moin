@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { applyMutation } from './mutation-sweep.ts';
-import { evidenceTest } from './mutation-evidence-test.ts';
+import { evidenceTest } from '@moin/testing';
 
 const SOURCE = ['const a = 1;', 'const b = 2;', 'const a = 1;', ''].join('\n');
 

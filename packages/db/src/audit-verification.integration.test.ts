@@ -6,7 +6,7 @@
  * None of it can be established against a substitute, and an embedded Postgres runs as superuser,
  * which would silently bypass the policies these tests exist to prove.
  */
-import { createTestDatabase, type TestDatabase } from '@moin/testing';
+import { evidenceTest, createTestDatabase, type TestDatabase } from '@moin/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createPool, type Pool } from './pool.ts';
 import { appendAuditEvent } from './audit.ts';
@@ -77,38 +77,44 @@ afterAll(async () => {
 });
 
 describe('the tenant register', () => {
-  it('is filled by the trigger, not by the caller remembering', async () => {
+  evidenceTest('is filled by the trigger, not by the caller remembering', async () => {
     const rows = await privileged.query<{ tenant_id: string }>(
       'select tenant_id from audit_chain_registry order by tenant_id',
     );
     expect(rows.rows.map((row) => row.tenant_id)).toEqual([ORG_A, ORG_B, ORG_C, ORG_D]);
   });
 
-  it('cannot be enumerated unelevated — not even by the role that owns organisations', async () => {
-    // This is the measured fact the whole design rests on: with no tenant context, FORCE RLS hides
-    // every organisation from its own owner, so no role may enumerate tenants directly.
-    const asMigrator = await migrator.query<{ n: string }>(
-      'select count(*) as n from organisations',
-    );
-    expect(asMigrator.rows[0]?.n).toBe('0');
-    const asApp = await app.query<{ n: string }>('select count(*) as n from organisations');
-    expect(asApp.rows[0]?.n).toBe('0');
-    // And the register itself is not readable by the runtime role at all.
-    await expect(app.query('select * from audit_chain_registry')).rejects.toThrow(
-      /permission denied/u,
-    );
-  });
+  evidenceTest(
+    'cannot be enumerated unelevated — not even by the role that owns organisations',
+    async () => {
+      // This is the measured fact the whole design rests on: with no tenant context, FORCE RLS hides
+      // every organisation from its own owner, so no role may enumerate tenants directly.
+      const asMigrator = await migrator.query<{ n: string }>(
+        'select count(*) as n from organisations',
+      );
+      expect(asMigrator.rows[0]?.n).toBe('0');
+      const asApp = await app.query<{ n: string }>('select count(*) as n from organisations');
+      expect(asApp.rows[0]?.n).toBe('0');
+      // And the register itself is not readable by the runtime role at all.
+      await expect(app.query('select * from audit_chain_registry')).rejects.toThrow(
+        /permission denied/u,
+      );
+    },
+  );
 
-  it('rejects a privileged DELETE and UPDATE, so a chain cannot be hidden by dropping its row', async () => {
-    await expect(
-      privileged.query('delete from audit_chain_registry where tenant_id = $1', [ORG_A]),
-    ).rejects.toThrow(/append-only/u);
-    await expect(
-      privileged.query('update audit_chain_registry set tenant_id = $1 where tenant_id = $1', [
-        ORG_A,
-      ]),
-    ).rejects.toThrow(/append-only/u);
-  });
+  evidenceTest(
+    'rejects a privileged DELETE and UPDATE, so a chain cannot be hidden by dropping its row',
+    async () => {
+      await expect(
+        privileged.query('delete from audit_chain_registry where tenant_id = $1', [ORG_A]),
+      ).rejects.toThrow(/append-only/u);
+      await expect(
+        privileged.query('update audit_chain_registry set tenant_id = $1 where tenant_id = $1', [
+          ORG_A,
+        ]),
+      ).rejects.toThrow(/append-only/u);
+    },
+  );
 
   it('hands the runtime role identifiers only, paged by registration sequence', async () => {
     const highWater = await app.query<{ n: string }>(
@@ -151,46 +157,50 @@ describe('the tenant register', () => {
     expect(all.rows).toHaveLength(4);
   });
 
-  it('caps a page at the reviewed maximum however much the caller asks for', async () => {
-    // Its own database: proving the cap needs more tenants than the rest of this file assumes, and
-    // a fixture that changes another test's tenant count is how a suite starts passing in one order
-    // only.
-    const bulk = await createTestDatabase('audit-chain-cap');
-    const owner = createPool({ connectionString: bulk.migrationUrl, max: 1 });
-    const bulkApp = bulk.pool();
-    try {
-      await owner.query(
-        `insert into organisations(id, slug, name)
+  evidenceTest(
+    'caps a page at the reviewed maximum however much the caller asks for',
+    async () => {
+      // Its own database: proving the cap needs more tenants than the rest of this file assumes, and
+      // a fixture that changes another test's tenant count is how a suite starts passing in one order
+      // only.
+      const bulk = await createTestDatabase('audit-chain-cap');
+      const owner = createPool({ connectionString: bulk.migrationUrl, max: 1 });
+      const bulkApp = bulk.pool();
+      try {
+        await owner.query(
+          `insert into organisations(id, slug, name)
          select gen_random_uuid(), 'bulk-' || g, 'Bulk ' || g from generate_series(1, $1::int) g`,
-        [MAX_CLAIM_PAGE + 1],
-      );
-      const registered = await owner.query<{ n: string }>(
-        'select count(*) as n from audit_chain_registry',
-      );
-      expect(Number(registered.rows[0]?.n)).toBe(MAX_CLAIM_PAGE + 1);
-
-      const bound = (
-        await bulkApp.query<{ n: string }>('select app.audit_chain_high_water()::text as n')
-      ).rows[0]?.n;
-      const greedy = await bulkApp.query<{ id: string }>(
-        'select id from app.claim_audit_chains($1::integer, $2::bigint, $3::bigint)',
-        [MAX_CLAIM_PAGE * 10, '0', bound],
-      );
-      expect(greedy.rows).toHaveLength(MAX_CLAIM_PAGE);
-
-      // A negative or null limit yields nothing rather than everything.
-      for (const limit of [-1, 0, null]) {
-        const none = await bulkApp.query(
-          'select id from app.claim_audit_chains($1::integer, $2::bigint, $3::bigint)',
-          [limit, '0', bound],
+          [MAX_CLAIM_PAGE + 1],
         );
-        expect(none.rows).toHaveLength(0);
+        const registered = await owner.query<{ n: string }>(
+          'select count(*) as n from audit_chain_registry',
+        );
+        expect(Number(registered.rows[0]?.n)).toBe(MAX_CLAIM_PAGE + 1);
+
+        const bound = (
+          await bulkApp.query<{ n: string }>('select app.audit_chain_high_water()::text as n')
+        ).rows[0]?.n;
+        const greedy = await bulkApp.query<{ id: string }>(
+          'select id from app.claim_audit_chains($1::integer, $2::bigint, $3::bigint)',
+          [MAX_CLAIM_PAGE * 10, '0', bound],
+        );
+        expect(greedy.rows).toHaveLength(MAX_CLAIM_PAGE);
+
+        // A negative or null limit yields nothing rather than everything.
+        for (const limit of [-1, 0, null]) {
+          const none = await bulkApp.query(
+            'select id from app.claim_audit_chains($1::integer, $2::bigint, $3::bigint)',
+            [limit, '0', bound],
+          );
+          expect(none.rows).toHaveLength(0);
+        }
+      } finally {
+        await owner.end();
+        await bulk.drop();
       }
-    } finally {
-      await owner.end();
-      await bulk.drop();
-    }
-  }, 60_000);
+    },
+    60_000,
+  );
 });
 
 describe('the daily sweep', () => {
@@ -207,7 +217,7 @@ describe('the daily sweep', () => {
     expect(isSound(report)).toBe(true);
   });
 
-  it('walks every tenant across page boundaries', async () => {
+  evidenceTest('walks every tenant across page boundaries', async () => {
     // One tenant per page: the paging loop, not the page size, must decide when the sweep ends.
     const report = await verifyAuditChains(app, { pageSize: 1 });
     expect(report.tenants).toBe(4);
@@ -215,30 +225,33 @@ describe('the daily sweep', () => {
     expect(isSound(report)).toBe(true);
   });
 
-  it('does not call a deadline-truncated sweep sound, even when every tenant it reached was', async () => {
-    // The fail-open shape this guards: one tenant per page, the first tenant verifies, the deadline
-    // expires before the next claim. Deriving the shortfall from the tenants that were *claimed*
-    // gives zero — every claimed tenant was processed — so "1 claimed, 1 sound" read exactly like a
-    // complete estate while three tenants were never looked at.
-    // The clock is read once at entry and then once after each completed page. Expiring on the
-    // first of those readings ends the sweep after exactly one tenant.
-    let ticks = 0;
-    const clock = (): number => {
-      ticks += 1;
-      return ticks <= 1 ? 0 : 10_000;
-    };
+  evidenceTest(
+    'does not call a deadline-truncated sweep sound, even when every tenant it reached was',
+    async () => {
+      // The fail-open shape this guards: one tenant per page, the first tenant verifies, the deadline
+      // expires before the next claim. Deriving the shortfall from the tenants that were *claimed*
+      // gives zero — every claimed tenant was processed — so "1 claimed, 1 sound" read exactly like a
+      // complete estate while three tenants were never looked at.
+      // The clock is read once at entry and then once after each completed page. Expiring on the
+      // first of those readings ends the sweep after exactly one tenant.
+      let ticks = 0;
+      const clock = (): number => {
+        ticks += 1;
+        return ticks <= 1 ? 0 : 10_000;
+      };
 
-    const report = await verifyAuditChains(app, { pageSize: 1, deadlineMs: 1_000, now: clock });
+      const report = await verifyAuditChains(app, { pageSize: 1, deadlineMs: 1_000, now: clock });
 
-    expect(report.tenants).toBe(1);
-    expect(report.sound).toBe(1);
-    expect(report.broken).toBe(0);
-    // The three the deadline stopped us reaching, counted from the register rather than inferred.
-    expect(report.unreached).toBe(3);
-    expect(report.unchecked).toBe(3);
-    expect(report.coverageComplete).toBe(false);
-    expect(isSound(report)).toBe(false);
-  });
+      expect(report.tenants).toBe(1);
+      expect(report.sound).toBe(1);
+      expect(report.broken).toBe(0);
+      // The three the deadline stopped us reaching, counted from the register rather than inferred.
+      expect(report.unreached).toBe(3);
+      expect(report.unchecked).toBe(3);
+      expect(report.coverageComplete).toBe(false);
+      expect(isSound(report)).toBe(false);
+    },
+  );
 
   it('reports the shortfall at the exact boundary between two pages', async () => {
     // The deadline is checked at the top of the loop, so the boundary that matters is "expired
@@ -274,7 +287,7 @@ describe('the daily sweep', () => {
     expect(isSound(report)).toBe(true);
   });
 
-  it('treats a shortfall it could not count as incomplete, not as zero', async () => {
+  evidenceTest('treats a shortfall it could not count as incomplete, not as zero', async () => {
     // Not knowing whether coverage was complete is not the same as it being complete.
     await privileged.query(
       'revoke execute on function app.count_audit_chains(bigint, bigint) from moin_app',
@@ -299,10 +312,13 @@ describe('the daily sweep', () => {
     }
   });
 
-  it('rejects a page size outside the reviewed bounds instead of silently clamping', async () => {
-    await expect(verifyAuditChains(app, { pageSize: 0 })).rejects.toThrow(/page size/u);
-    await expect(verifyAuditChains(app, { pageSize: 1001 })).rejects.toThrow(/page size/u);
-  });
+  evidenceTest(
+    'rejects a page size outside the reviewed bounds instead of silently clamping',
+    async () => {
+      await expect(verifyAuditChains(app, { pageSize: 0 })).rejects.toThrow(/page size/u);
+      await expect(verifyAuditChains(app, { pageSize: 1001 })).rejects.toThrow(/page size/u);
+    },
+  );
 });
 
 describe('what the sweep finds', () => {
@@ -361,66 +377,72 @@ describe('what the sweep finds', () => {
     expect(report.breaks[0]?.reason).toBe('missing-event');
   });
 
-  it('still covers a tenant whose chain head was deleted, because it walks the register', async () => {
-    // Its own precondition: a tenant with no events has no head to delete, so without this the
-    // test passes only when an earlier test in this file has written one.
-    await event(ORG_B);
+  evidenceTest(
+    'still covers a tenant whose chain head was deleted, because it walks the register',
+    async () => {
+      // Its own precondition: a tenant with no events has no head to delete, so without this the
+      // test passes only when an earlier test in this file has written one.
+      await event(ORG_B);
 
-    // The point of enumerating the register rather than `audit_heads`: deleting the head must not
-    // remove the tenant from the worklist, or "delete the head" would hide a whole chain.
-    // Deleting a head is now refused outright, which is the guard working. A restore with triggers
-    // disabled is the path that still gets there, so that is what this reproduces.
-    await expect(
-      privileged.query('delete from audit_heads where organisation_id = $1', [ORG_B]),
-    ).rejects.toThrow(/cannot be deleted/u);
-    await privileged.query('alter table audit_heads disable trigger audit_heads_advance_only');
-    try {
-      await privileged.query('delete from audit_heads where organisation_id = $1', [ORG_B]);
-    } finally {
-      await privileged.query(
-        'alter table audit_heads enable always trigger audit_heads_advance_only',
-      );
-    }
-    const report = await verifyAuditChains(app);
-    const forB = report.breaks.find((found) => found.organisationId === ORG_B);
-    expect(forB?.reason).toBe('missing-head');
-    expect(report.tenants).toBe(4);
-  });
+      // The point of enumerating the register rather than `audit_heads`: deleting the head must not
+      // remove the tenant from the worklist, or "delete the head" would hide a whole chain.
+      // Deleting a head is now refused outright, which is the guard working. A restore with triggers
+      // disabled is the path that still gets there, so that is what this reproduces.
+      await expect(
+        privileged.query('delete from audit_heads where organisation_id = $1', [ORG_B]),
+      ).rejects.toThrow(/cannot be deleted/u);
+      await privileged.query('alter table audit_heads disable trigger audit_heads_advance_only');
+      try {
+        await privileged.query('delete from audit_heads where organisation_id = $1', [ORG_B]);
+      } finally {
+        await privileged.query(
+          'alter table audit_heads enable always trigger audit_heads_advance_only',
+        );
+      }
+      const report = await verifyAuditChains(app);
+      const forB = report.breaks.find((found) => found.organisationId === ORG_B);
+      expect(forB?.reason).toBe('missing-head');
+      expect(report.tenants).toBe(4);
+    },
+  );
 
-  it('detects a head rolled back to zero, which leaves every event in place', async () => {
-    // The verifier walks `seq <= last_seq` and then compares its running hash with `last_hash`, so
-    // an unconstrained head is the cheapest way to defeat the whole scheme: measured before the
-    // guard existed, this returned `valid: true, checked: 0` for a tenant with a full trail.
-    await event(ORG_C);
-    await event(ORG_C);
-    await expect(
-      privileged.query(
-        `update audit_heads set last_seq = 0, last_hash = decode(repeat('00', 32), 'hex')
+  evidenceTest(
+    'detects a head rolled back to zero, which leaves every event in place',
+    async () => {
+      // The verifier walks `seq <= last_seq` and then compares its running hash with `last_hash`, so
+      // an unconstrained head is the cheapest way to defeat the whole scheme: measured before the
+      // guard existed, this returned `valid: true, checked: 0` for a tenant with a full trail.
+      await event(ORG_C);
+      await event(ORG_C);
+      await expect(
+        privileged.query(
+          `update audit_heads set last_seq = 0, last_hash = decode(repeat('00', 32), 'hex')
          where organisation_id = $1`,
-        [ORG_C],
-      ),
-    ).rejects.toThrow(/advance by one/u);
+          [ORG_C],
+        ),
+      ).rejects.toThrow(/advance by one/u);
 
-    await privileged.query('alter table audit_heads disable trigger audit_heads_advance_only');
-    try {
-      await privileged.query(
-        `update audit_heads set last_seq = 0, last_hash = decode(repeat('00', 32), 'hex')
+      await privileged.query('alter table audit_heads disable trigger audit_heads_advance_only');
+      try {
+        await privileged.query(
+          `update audit_heads set last_seq = 0, last_hash = decode(repeat('00', 32), 'hex')
          where organisation_id = $1`,
-        [ORG_C],
-      );
-    } finally {
-      await privileged.query(
-        'alter table audit_heads enable always trigger audit_heads_advance_only',
-      );
-    }
+          [ORG_C],
+        );
+      } finally {
+        await privileged.query(
+          'alter table audit_heads enable always trigger audit_heads_advance_only',
+        );
+      }
 
-    const report = await verifyAuditChains(app);
-    const forC = report.breaks.find((found) => found.organisationId === ORG_C);
-    expect(forC?.reason).toBe('event-past-head');
-    expect(isSound(report)).toBe(false);
-  });
+      const report = await verifyAuditChains(app);
+      const forC = report.breaks.find((found) => found.organisationId === ORG_C);
+      expect(forC?.reason).toBe('event-past-head');
+      expect(isSound(report)).toBe(false);
+    },
+  );
 
-  it('detects a forged event written past the head', async () => {
+  evidenceTest('detects a forged event written past the head', async () => {
     // An INSERT is not an UPDATE or a DELETE, so the append-only trigger never saw it; the walk
     // stops at the head and never reads the forged row, while the query API serves it as genuine.
     await event(ORG_D);
@@ -456,7 +478,7 @@ describe('what the sweep finds', () => {
     expect(forD?.reason).toBe('event-past-head');
   });
 
-  it('refuses TRUNCATE on the register, the events and the heads', async () => {
+  evidenceTest('refuses TRUNCATE on the register, the events and the heads', async () => {
     // A row-level trigger does not see TRUNCATE, and TRUNCATE is a third row-removing verb. On the
     // register it is the whole estate leaving the worklist at once.
     for (const table of ['audit_chain_registry', 'audit_events', 'audit_heads']) {
@@ -465,7 +487,7 @@ describe('what the sweep finds', () => {
     }
   });
 
-  it('reports a provisioned tenant that never reached the register', async () => {
+  evidenceTest('reports a provisioned tenant that never reached the register', async () => {
     // The register would otherwise be its own witness: disabling the registration trigger around
     // one insert leaves nothing in the catalog to find afterwards.
     const hidden = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
@@ -507,7 +529,7 @@ describe('what the sweep finds', () => {
     expect(isSound(report)).toBe(false);
   });
 
-  it('counts a tenant it could not check as unchecked, never as sound', async () => {
+  evidenceTest('counts a tenant it could not check as unchecked, never as sound', async () => {
     // Its own precondition: verification only *fails* for a tenant that has events, and relying on
     // an earlier test in this file to have written them makes this test pass in suite order and
     // fail standalone — which the mutation sweep surfaced as an unusable baseline.
@@ -538,20 +560,23 @@ describe('what the sweep finds', () => {
     }
   });
 
-  it('refuses to report a clean run when the register cannot be read at all', async () => {
-    await privileged.query(
-      'revoke execute on function app.claim_audit_chains(integer, bigint, bigint) from moin_app',
-    );
-    try {
-      // Rejecting is the whole point: a sweep that enumerated nothing has verified nothing, and
-      // returning an empty, sound-looking report would be the worst possible answer.
-      await expect(verifyAuditChains(app)).rejects.toThrow(/permission denied/u);
-    } finally {
+  evidenceTest(
+    'refuses to report a clean run when the register cannot be read at all',
+    async () => {
       await privileged.query(
-        'grant execute on function app.claim_audit_chains(integer, bigint, bigint) to moin_app',
+        'revoke execute on function app.claim_audit_chains(integer, bigint, bigint) from moin_app',
       );
-    }
-  });
+      try {
+        // Rejecting is the whole point: a sweep that enumerated nothing has verified nothing, and
+        // returning an empty, sound-looking report would be the worst possible answer.
+        await expect(verifyAuditChains(app)).rejects.toThrow(/permission denied/u);
+      } finally {
+        await privileged.query(
+          'grant execute on function app.claim_audit_chains(integer, bigint, bigint) to moin_app',
+        );
+      }
+    },
+  );
 });
 
 describe('the head-and-orphan determination', () => {
@@ -584,26 +609,29 @@ describe('the head-and-orphan determination', () => {
     };
   }
 
-  it('does not report missing-head when a first append commits mid-verification', async () => {
-    const fresh = '2a2a2a2a-2a2a-4a2a-8a2a-2a2a2a2a2a2a';
-    await organisation(fresh, 'verify-race');
+  evidenceTest(
+    'does not report missing-head when a first append commits mid-verification',
+    async () => {
+      const fresh = '2a2a2a2a-2a2a-4a2a-8a2a-2a2a2a2a2a2a';
+      await organisation(fresh, 'verify-race');
 
-    const outcome = await withTenant(app, fresh, async (client) =>
-      verifyAuditChain(
-        injectingClient(client, 1, async () => {
-          // A legitimate first append for this tenant, committed from its own connection.
-          await event(fresh);
-        }),
-      ),
-    );
+      const outcome = await withTenant(app, fresh, async (client) =>
+        verifyAuditChain(
+          injectingClient(client, 1, async () => {
+            // A legitimate first append for this tenant, committed from its own connection.
+            await event(fresh);
+          }),
+        ),
+      );
 
-    // Sound: either the single statement saw no head and no event (an empty chain) or it saw both.
-    // What it can never see is one without the other.
-    expect(outcome.valid).toBe(true);
-    if (!outcome.valid) throw new Error(`unexpected break: ${outcome.reason}`);
-  });
+      // Sound: either the single statement saw no head and no event (an empty chain) or it saw both.
+      // What it can never see is one without the other.
+      expect(outcome.valid).toBe(true);
+      if (!outcome.valid) throw new Error(`unexpected break: ${outcome.reason}`);
+    },
+  );
 
-  it('still detects a genuine orphan event with no head', async () => {
+  evidenceTest('still detects a genuine orphan event with no head', async () => {
     // The other half: the alarm must not have been silenced to fix the false positive.
     const orphaned = '3b3b3b3b-3b3b-4b3b-8b3b-3b3b3b3b3b3b';
     await organisation(orphaned, 'verify-orphan');

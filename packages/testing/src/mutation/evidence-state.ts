@@ -25,11 +25,7 @@
  * load-bearing property remains that confirmation needs the actual object a matcher threw.
  */
 
-import {
-  MATCHER_IDENTITY_CONFIRMED,
-  NON_EVIDENCE,
-  type ProbeEvent,
-} from './mutation-probe-contract.ts';
+import { MATCHER_IDENTITY_CONFIRMED, NON_EVIDENCE, type ProbeEvent } from './probe-contract.ts';
 
 interface MatcherFailure {
   readonly invocationId: string;

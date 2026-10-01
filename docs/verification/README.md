@@ -9,8 +9,9 @@
 - **Runner:** [`../../scripts/mutation-sweep.ts`](../../scripts/mutation-sweep.ts)
 - **Classifier:** [`../../scripts/mutation-outcome.ts`](../../scripts/mutation-outcome.ts)
 - **Reporter:** [`../../scripts/mutation-reporter.ts`](../../scripts/mutation-reporter.ts)
-- **Probe:** [`../../scripts/mutation-evidence-probe.ts`](../../scripts/mutation-evidence-probe.ts) ·
-  **contract:** [`../../scripts/mutation-probe-contract.ts`](../../scripts/mutation-probe-contract.ts)
+- **Probe:** [`../../scripts/mutation-evidence-probe.ts`](../../scripts/mutation-evidence-probe.ts)
+- **Wrapper, state and contract:** [`../../packages/testing/src/mutation/`](../../packages/testing/src/mutation/),
+  re-exported from `@moin/testing`
 - **Invariants:** INV-01, INV-10, INV-12 · **Review:** QG-09
 
 A test that has never been made to fail is a hope, not a control. Every guard in the audit
@@ -130,6 +131,12 @@ runner class to extend. Inside the test callback is the only place the terminal 
 fails exactly as before; it is simply not eligible for mutation evidence, and a manifest entry
 pointing at one is reported `NOT_EVIDENCE_ELIGIBLE` rather than quietly counted or hidden among
 infrastructure failures.
+
+Every killing test in the manifest is therefore registered with `evidenceTest`, with two deliberate
+exceptions (`N8`, `P8`) whose defects are caught by a guard inside a migration rather than by an
+assertion — see below. Migration is registration only: the name, the body, the assertions, the
+setup, the database work and the timeout are untouched, so the manifest's `{ file, fullName }`
+identity still resolves and the suites' test counts are unchanged.
 
 | Guarantee                            | How                                                                                                                                                    |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -258,7 +265,11 @@ Three limits are worth stating rather than hiding.
   invariants directly instead.
 - A test registered with plain `it` cannot bear evidence, so a manifest entry naming one is reported
   `NOT_EVIDENCE_ELIGIBLE`. That is a gap in reach, not a defect, and the report says which entries
-  are in it and what would close them.
+  are in it and why. Two entries are there permanently and correctly: `N8-backfill-removed` and
+  `P8-sequence-backfill-removed` are detected by a guard inside the migration — `0010` refusing an
+  incomplete register backfill, `0011` failing `NOT NULL` — so the test fails on a thrown database
+  error and no matcher ever throws. Wrapping those tests would not change that, and rewriting them
+  to catch the error and `expect()` it would be manufacturing evidence rather than finding it.
 
 ### Reading a SURVIVED verdict
 

@@ -7,7 +7,7 @@
  * every consumer treats as not-evidence. Refusing to answer beats answering wrongly.
  */
 import { expect } from 'vitest';
-import { concurrentEvidenceTest } from '../../mutation-evidence-test.ts';
+import { concurrentEvidenceTest } from '@moin/testing';
 
 concurrentEvidenceTest('concurrent A fails a matcher', async () => {
   await new Promise((resolve) => setTimeout(resolve, 20));

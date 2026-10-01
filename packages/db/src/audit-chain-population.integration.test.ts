@@ -21,7 +21,7 @@
  * below.
  */
 import { randomUUID } from 'node:crypto';
-import { createTestDatabase, type TestDatabase } from '@moin/testing';
+import { evidenceTest, createTestDatabase, type TestDatabase } from '@moin/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createPool, type Pool } from './pool.ts';
 import { appendAuditEvent } from './audit.ts';
@@ -92,7 +92,7 @@ describe('the registration sequence', () => {
     expect(BigInt(registry[1]?.seq ?? '0')).toBeGreaterThan(BigInt(registry[0]?.seq ?? '0'));
   });
 
-  it('cannot be rewritten by the application role or by the table owner', async () => {
+  evidenceTest('cannot be rewritten by the application role or by the table owner', async () => {
     await register(EARLY_UUID, 'immutable');
     // No grant at all for the runtime role.
     await expect(
@@ -105,7 +105,7 @@ describe('the registration sequence', () => {
     ).rejects.toThrow(/append-only/u);
   });
 
-  it('refuses two registrations sharing a position', async () => {
+  evidenceTest('refuses two registrations sharing a position', async () => {
     await register(EARLY_UUID, 'one');
     await expect(
       privileged.query(
@@ -157,20 +157,23 @@ describe('CASE 1 — a registration behind the former UUID cursor', () => {
 });
 
 describe('CASE 2 — a member that existed at snapshot start', () => {
-  it('is verified before coverage is complete, whatever its UUID sorts like', async () => {
-    // Registration order is the reverse of UUID order, so a UUID cursor would have skipped one.
-    await register(LATE_UUID, 'reg-one');
-    await register(EARLY_UUID, 'reg-two');
-    await event(LATE_UUID);
-    await event(EARLY_UUID);
+  evidenceTest(
+    'is verified before coverage is complete, whatever its UUID sorts like',
+    async () => {
+      // Registration order is the reverse of UUID order, so a UUID cursor would have skipped one.
+      await register(LATE_UUID, 'reg-one');
+      await register(EARLY_UUID, 'reg-two');
+      await event(LATE_UUID);
+      await event(EARLY_UUID);
 
-    const report = await verifyAuditChains(app, { pageSize: 1 });
-    expect(report.tenants).toBe(2);
-    expect(report.sound).toBe(2);
-    expect(report.unreached).toBe(0);
-    expect(report.coverageComplete).toBe(true);
-    expect(isSound(report)).toBe(true);
-  });
+      const report = await verifyAuditChains(app, { pageSize: 1 });
+      expect(report.tenants).toBe(2);
+      expect(report.sound).toBe(2);
+      expect(report.unreached).toBe(0);
+      expect(report.coverageComplete).toBe(true);
+      expect(isSound(report)).toBe(true);
+    },
+  );
 });
 
 describe('CASE 3 — a registration between pages', () => {
@@ -210,7 +213,7 @@ describe('CASE 3 — a registration between pages', () => {
 });
 
 describe('CASE 4 — a deadline inside the captured population', () => {
-  it('reports the snapshot shortfall and is not sound', async () => {
+  evidenceTest('reports the snapshot shortfall and is not sound', async () => {
     for (const [id, slug] of [
       [LATE_UUID, 'd-one'],
       [EARLY_UUID, 'd-two'],
@@ -240,7 +243,7 @@ describe('CASE 4 — a deadline inside the captured population', () => {
 });
 
 describe('CASE 6 — the exact snapshot boundary', () => {
-  it('leaves no registration outside both of two consecutive sweeps', async () => {
+  evidenceTest('leaves no registration outside both of two consecutive sweeps', async () => {
     // The question: can a registration land between two sweeps and be covered by neither? It
     // cannot, and the reason is that a sweep's cursor starts at 0 rather than at the previous
     // sweep's mark — so every member at or below the *current* mark is in the current population,
@@ -282,7 +285,7 @@ describe('CASE 6 — the exact snapshot boundary', () => {
 });
 
 describe('the sweep does not widen its own population', () => {
-  it('reads the high-water mark once, not once per page', async () => {
+  evidenceTest('reads the high-water mark once, not once per page', async () => {
     await register(LATE_UUID, 'w-one');
     await register(THIRD_UUID, 'w-two');
     await event(LATE_UUID);

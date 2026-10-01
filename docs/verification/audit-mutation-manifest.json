@@ -9,8 +9,7 @@
     "killingTest": {
       "file": "packages/db/src/audit-verification.integration.test.ts",
       "fullName": "what the sweep finds > counts a tenant it could not check as unchecked, never as sound"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "M2-claim-error-swallowed",
@@ -22,8 +21,7 @@
     "killingTest": {
       "file": "packages/db/src/audit-verification.integration.test.ts",
       "fullName": "what the sweep finds > refuses to report a clean run when the register cannot be read at all"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "M3-paging-stops-after-first-page",
@@ -35,8 +33,7 @@
     "killingTest": {
       "file": "packages/db/src/audit-verification.integration.test.ts",
       "fullName": "the daily sweep > walks every tenant across page boundaries"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "M4-page-size-validation-removed",
@@ -48,8 +45,7 @@
     "killingTest": {
       "file": "packages/db/src/audit-verification.integration.test.ts",
       "fullName": "the daily sweep > rejects a page size outside the reviewed bounds instead of silently clamping"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "M5-isSound-ignores-unchecked",
@@ -61,8 +57,7 @@
     "killingTest": {
       "file": "packages/db/src/audit-verification.integration.test.ts",
       "fullName": "what the sweep finds > counts a tenant it could not check as unchecked, never as sound"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "M6-enumerate-heads-instead-of-register",
@@ -74,8 +69,7 @@
     "killingTest": {
       "file": "packages/db/src/audit-verification.integration.test.ts",
       "fullName": "what the sweep finds > still covers a tenant whose chain head was deleted, because it walks the register"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "M7-register-append-only-trigger-dropped",
@@ -87,8 +81,7 @@
     "killingTest": {
       "file": "packages/db/src/audit-verification.integration.test.ts",
       "fullName": "the tenant register > rejects a privileged DELETE and UPDATE, so a chain cannot be hidden by dropping its row"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "M8-claim-cap-removed",
@@ -100,8 +93,7 @@
     "killingTest": {
       "file": "packages/db/src/audit-verification.integration.test.ts",
       "fullName": "the tenant register > caps a page at the reviewed maximum however much the caller asks for"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "M9-registration-trigger-dropped",
@@ -113,8 +105,7 @@
     "killingTest": {
       "file": "packages/db/src/audit-verification.integration.test.ts",
       "fullName": "the tenant register > is filled by the trigger, not by the caller remembering"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "M10-register-readable-by-runtime-role",
@@ -126,8 +117,7 @@
     "killingTest": {
       "file": "packages/db/src/audit-verification.integration.test.ts",
       "fullName": "the tenant register > cannot be enumerated unelevated — not even by the role that owns organisations"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "M11-catalog-drops-register-from-append-only",
@@ -175,8 +165,7 @@
     "killingTest": {
       "file": "packages/db/src/cli-verify-audit.integration.test.ts",
       "fullName": "the scheduled verifier process > raises a SEV2 alarm with its runbook and a distinct exit code on a break"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "C2-break-severity-downgraded",
@@ -188,8 +177,7 @@
     "killingTest": {
       "file": "packages/db/src/cli-verify-audit.integration.test.ts",
       "fullName": "the scheduled verifier process > raises a SEV2 alarm with its runbook and a distinct exit code on a break"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "C3-enumeration-failure-reported-clean",
@@ -201,8 +189,7 @@
     "killingTest": {
       "file": "packages/db/src/cli-verify-audit.integration.test.ts",
       "fullName": "the scheduled verifier process > reports a failure rather than a clean run when it cannot enumerate tenants"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "C4-driver-message-leaked-into-log",
@@ -214,8 +201,7 @@
     "killingTest": {
       "file": "packages/db/src/cli-verify-audit.integration.test.ts",
       "fullName": "the scheduled verifier process > emits only the reviewed non-personal fields on every line kind (INV-12)"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "C5-runbook-link-dropped",
@@ -227,8 +213,7 @@
     "killingTest": {
       "file": "packages/db/src/cli-verify-audit.integration.test.ts",
       "fullName": "the scheduled verifier process > raises a SEV2 alarm with its runbook and a distinct exit code on a break"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "C6-broken-run-reported-sound",
@@ -240,8 +225,7 @@
     "killingTest": {
       "file": "packages/db/src/cli-verify-audit.integration.test.ts",
       "fullName": "the scheduled verifier process > raises a SEV2 alarm with its runbook and a distinct exit code on a break"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "S1-structural-rule-removed",
@@ -325,8 +309,7 @@
     "killingTest": {
       "file": "packages/db/src/audit-verification.integration.test.ts",
       "fullName": "what the sweep finds > detects a head rolled back to zero, which leaves every event in place"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "N2-event-past-head-undetected",
@@ -338,8 +321,7 @@
     "killingTest": {
       "file": "packages/db/src/audit-verification.integration.test.ts",
       "fullName": "what the sweep finds > detects a head rolled back to zero, which leaves every event in place"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "N3-insert-link-guard-dropped",
@@ -351,8 +333,7 @@
     "killingTest": {
       "file": "packages/db/src/audit-verification.integration.test.ts",
       "fullName": "what the sweep finds > detects a forged event written past the head"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "N4-truncate-guards-dropped",
@@ -364,8 +345,7 @@
     "killingTest": {
       "file": "packages/db/src/audit-verification.integration.test.ts",
       "fullName": "what the sweep finds > refuses TRUNCATE on the register, the events and the heads"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "N5-registry-truncate-guard-dropped",
@@ -377,8 +357,7 @@
     "killingTest": {
       "file": "packages/db/src/audit-verification.integration.test.ts",
       "fullName": "what the sweep finds > refuses TRUNCATE on the register, the events and the heads"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "N6-reconciliation-removed",
@@ -390,8 +369,7 @@
     "killingTest": {
       "file": "packages/db/src/audit-verification.integration.test.ts",
       "fullName": "what the sweep finds > reports a provisioned tenant that never reached the register"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "N7-isSound-ignores-unregistered",
@@ -403,8 +381,7 @@
     "killingTest": {
       "file": "packages/db/src/audit-verification.integration.test.ts",
       "fullName": "what the sweep finds > reports a provisioned tenant that never reached the register"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "N8-backfill-removed",
@@ -413,7 +390,7 @@
     "file": "packages/db/migrations/0010_audit_chain_verification.sql",
     "find": "INSERT INTO audit_chain_registry(tenant_id) SELECT id FROM organisations ON CONFLICT DO NOTHING;",
     "replace": "",
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`.",
+    "note": "Deliberately **not** evidence, and deliberately not migrated to `evidenceTest`. The defect is detected by a guard inside the migration itself: `0010` raises \"audit chain register backfill covered 0 of 3 organisation(s)\" and rolls back, so the test that applies it fails on a thrown database error and no matcher ever throws. That is a stronger control than a test assertion — it refuses the migration rather than reporting afterwards — but it is not assertion mutation evidence, and wrapping the test would not make it so. Classified NOT_EVIDENCE_ELIGIBLE and kept outside the KILLED_ASSERTION numerator.",
     "killingTest": {
       "file": "packages/db/src/audit-chain-backfill.integration.test.ts",
       "fullName": "applying the register migration to a database that already has tenants > registers every pre-existing organisation"
@@ -513,8 +490,7 @@
     "killingTest": {
       "file": "packages/db/src/cli-verify-audit.integration.test.ts",
       "fullName": "the scheduled verifier process > exits non-zero on a sweep of zero tenants"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "N17-sqlstate-replaced-by-error-name",
@@ -526,8 +502,7 @@
     "killingTest": {
       "file": "packages/db/src/cli-verify-audit.integration.test.ts",
       "fullName": "the scheduled verifier process > emits only the reviewed non-personal fields on every line kind (INV-12)"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "B1-1-deadline-shortfall-inferred-from-claims",
@@ -539,8 +514,7 @@
     "killingTest": {
       "file": "packages/db/src/audit-verification.integration.test.ts",
       "fullName": "the daily sweep > does not call a deadline-truncated sweep sound, even when every tenant it reached was"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "B1-2-coverage-ignored-by-isSound",
@@ -552,8 +526,7 @@
     "killingTest": {
       "file": "packages/db/src/audit-verification.integration.test.ts",
       "fullName": "the daily sweep > treats a shortfall it could not count as incomplete, not as zero"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "B1-3-uncountable-shortfall-treated-as-none",
@@ -565,8 +538,7 @@
     "killingTest": {
       "file": "packages/db/src/audit-verification.integration.test.ts",
       "fullName": "the daily sweep > treats a shortfall it could not count as incomplete, not as zero"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "B1-4-cli-ignores-incomplete-coverage",
@@ -578,8 +550,7 @@
     "killingTest": {
       "file": "packages/db/src/cli-verify-audit.integration.test.ts",
       "fullName": "the scheduled verifier process > fails when it cannot even establish whether coverage was complete"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "B2-1-scanner-skips-coverage-reconciliation",
@@ -663,8 +634,7 @@
     "killingTest": {
       "file": "packages/db/src/audit-verification.integration.test.ts",
       "fullName": "the head-and-orphan determination > does not report missing-head when a first append commits mid-verification"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "B4-2-missing-head-suppressed",
@@ -676,8 +646,7 @@
     "killingTest": {
       "file": "packages/db/src/audit-verification.integration.test.ts",
       "fullName": "the head-and-orphan determination > still detects a genuine orphan event with no head"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "P1-high-water-bound-ignored",
@@ -689,8 +658,7 @@
     "killingTest": {
       "file": "packages/db/src/audit-chain-population.integration.test.ts",
       "fullName": "the sweep does not widen its own population > reads the high-water mark once, not once per page"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "P2-high-water-recomputed-each-page",
@@ -702,8 +670,7 @@
     "killingTest": {
       "file": "packages/db/src/audit-chain-population.integration.test.ts",
       "fullName": "the sweep does not widen its own population > reads the high-water mark once, not once per page"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "P3-uuid-cursor-instead-of-sequence",
@@ -715,8 +682,7 @@
     "killingTest": {
       "file": "packages/db/src/audit-chain-population.integration.test.ts",
       "fullName": "CASE 2 — a member that existed at snapshot start > is verified before coverage is complete, whatever its UUID sorts like"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "P4-coverage-complete-on-empty-page-without-checking-snapshot",
@@ -728,8 +694,7 @@
     "killingTest": {
       "file": "packages/db/src/audit-chain-population.integration.test.ts",
       "fullName": "CASE 4 — a deadline inside the captured population > reports the snapshot shortfall and is not sound"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "P5-scanner-ignores-high-water",
@@ -765,8 +730,7 @@
     "killingTest": {
       "file": "packages/db/src/audit-chain-population.integration.test.ts",
       "fullName": "the registration sequence > refuses two registrations sharing a position"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "P8-sequence-backfill-removed",
@@ -775,7 +739,7 @@
     "file": "packages/db/migrations/0011_audit_chain_population.sql",
     "find": "UPDATE audit_chain_registry r\nSET registration_seq = ordered.position\nFROM ordered\nWHERE r.tenant_id = ordered.tenant_id AND r.registration_seq IS NULL;",
     "replace": "UPDATE audit_chain_registry r\nSET registration_seq = NULL\nFROM ordered\nWHERE false;",
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`.",
+    "note": "Deliberately **not** evidence, same shape as N8 and not migrated either. `0011` fails on `column \"registration_seq\" of relation \"audit_chain_registry\" contains null values` and rolls back: the NOT NULL constraint is the control, the test fails on a thrown database error, and no matcher throws. Detected by a migration guard, not by an assertion. Kept outside the KILLED_ASSERTION numerator.",
     "killingTest": {
       "file": "packages/db/src/audit-chain-backfill.integration.test.ts",
       "fullName": "applying the registration-sequence migration to a populated register > backfills every existing row deterministically and keeps advancing afterwards"
@@ -791,8 +755,7 @@
     "killingTest": {
       "file": "packages/db/src/audit-chain-population.integration.test.ts",
       "fullName": "the registration sequence > cannot be rewritten by the application role or by the table owner"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "P10-next-sweep-starts-from-previous-mark",
@@ -804,8 +767,7 @@
     "killingTest": {
       "file": "packages/db/src/audit-chain-population.integration.test.ts",
       "fullName": "CASE 6 — the exact snapshot boundary > leaves no registration outside both of two consecutive sweeps"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "E1-epoch-allocated-by-sequence",
@@ -817,8 +779,7 @@
     "killingTest": {
       "file": "packages/db/src/audit-chain-epoch.integration.test.ts",
       "fullName": "the allocator is a row lock, not a sequence > blocks a second registration while the first is uncommitted"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "E3-allocator-does-not-fail-closed",
@@ -830,8 +791,7 @@
     "killingTest": {
       "file": "packages/db/src/audit-chain-epoch.integration.test.ts",
       "fullName": "the allocator fails closed > refuses to register a tenant when no epoch can be allocated"
-    },
-    "note": "Not evidence-eligible. The killing test lives under `packages/db/`, which this round was instructed not to modify, so it is still registered with plain `it` rather than the trusted `evidenceTest` wrapper. The mutation **is** detected — the test fails — but its terminal value was never compared by object identity, and by the time any Vitest hook runs the live thrown object is gone (measured: `instanceof Error` is already false in `afterEach`). Making it eligible is a one-line change per test: import `evidenceTest` and use it in place of `it`. That is the founder’s call, since it edits `packages/db/`."
+    }
   },
   {
     "id": "C1-privacy-gate-ignores-added-columns",
@@ -967,7 +927,7 @@
     "id": "H10-state-skips-the-terminal-identity-check",
     "invariant": "Provenance is the terminal value's object identity, not the existence of a matcher failure",
     "expected": "The copy attack would succeed: catch a real matcher failure, `Object.assign` it onto an ordinary Error, throw that, and the invocation's own matcher record would vouch for it.",
-    "file": "scripts/mutation-evidence-state.ts",
+    "file": "packages/testing/src/mutation/evidence-state.ts",
     "find": "    const entry = matcherFailures.get(terminal);\n    if (entry === undefined) {",
     "replace": "    const entry = matcherFailures.get(terminal) ?? mine[0];\n    if (entry === undefined) {",
     "killingTest": {
@@ -980,7 +940,7 @@
     "id": "H11-state-ignores-invocation-binding",
     "invariant": "A matcher object is bound to the invocation that produced it",
     "expected": "A genuine matcher object kept from an earlier test, an earlier retry or an earlier parameterized case would be replayed as this invocation's evidence.",
-    "file": "scripts/mutation-evidence-state.ts",
+    "file": "packages/testing/src/mutation/evidence-state.ts",
     "find": "    if (entry.invocationId !== invocation.id) {",
     "replace": "    if (entry.invocationId === 'a value no invocation ever has') {",
     "killingTest": {
@@ -993,7 +953,7 @@
     "id": "H12-state-accepts-multiple-matcher-failures",
     "invariant": "Exactly one matcher failure per invocation, or nothing is attributable",
     "expected": "A test that swallowed one matcher failure and then failed another would be reported with whichever record came first.",
-    "file": "scripts/mutation-evidence-state.ts",
+    "file": "packages/testing/src/mutation/evidence-state.ts",
     "find": "    if (mine.length !== 1) {",
     "replace": "    if (mine.length < 0) {",
     "killingTest": {
@@ -1006,7 +966,7 @@
     "id": "H13-state-treats-every-test-as-eligible",
     "invariant": "Eligibility is a fact about the test's registration, not a default",
     "expected": "Every ordinary `it` test would be reported as evidence-eligible although its terminal value was never compared, so an unrelated failure in it could be read as an assertion.",
-    "file": "scripts/mutation-evidence-state.ts",
+    "file": "packages/testing/src/mutation/evidence-state.ts",
     "find": "    eligible: invocation.eligible,",
     "replace": "    eligible: true,",
     "killingTest": {
@@ -1019,7 +979,7 @@
     "id": "H14-state-window-admits-the-previous-invocation",
     "invariant": "An invocation counts only the matcher failures recorded inside its own window",
     "expected": "A matcher failure from the previous test would be counted in this one, so a clean kill would look ambiguous.",
-    "file": "scripts/mutation-evidence-state.ts",
+    "file": "packages/testing/src/mutation/evidence-state.ts",
     "find": "  if (invocation === undefined) return;\n  const mine = recorded.filter((entry) => entry.seq >= invocation.firstSeq);",
     "replace": "  if (invocation === undefined) return;\n  const mine = recorded.filter((entry) => entry.seq >= invocation.firstSeq - 1);",
     "killingTest": {
@@ -1032,7 +992,7 @@
     "id": "H15-state-ignores-overlapping-invocations",
     "invariant": "Concurrent invocations are refused, not attributed",
     "expected": "A concurrent test's matcher failure would be attributed to whichever window happened to be open, and Vitest's own assertion state is known to name the wrong test there.",
-    "file": "scripts/mutation-evidence-state.ts",
+    "file": "packages/testing/src/mutation/evidence-state.ts",
     "find": "    suspect.push(`another invocation (${open.id}) was still open`);\n    open.suspect.push('a later invocation opened while this one was still open');",
     "replace": "    open.suspect.push('a later invocation opened while this one was still open');",
     "killingTest": {

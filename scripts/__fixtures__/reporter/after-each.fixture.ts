@@ -1,6 +1,6 @@
 /** An `afterEach` that throws alongside a genuine, wrapper-confirmed matcher failure. */
 import { afterEach, describe, expect } from 'vitest';
-import { evidenceTest } from '../../mutation-evidence-test.ts';
+import { evidenceTest } from '@moin/testing';
 
 describe('teardown fixture', () => {
   afterEach(() => {

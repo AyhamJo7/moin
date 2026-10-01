@@ -1,6 +1,6 @@
 /** Async matcher failures: the matcher itself must be the thing that fails. */
 import { expect } from 'vitest';
-import { evidenceTest } from '../../mutation-evidence-test.ts';
+import { evidenceTest } from '@moin/testing';
 
 evidenceTest('a resolves matcher that itself fails', async () => {
   await expect(Promise.resolve(1)).resolves.toBe(2);

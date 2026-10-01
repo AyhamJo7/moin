@@ -14,7 +14,7 @@ import { inspect, allowlistedDefiners, type Finding } from './check-rls-catalog.
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { evidenceTest } from './mutation-evidence-test.ts';
+import { evidenceTest } from '@moin/testing';
 
 let database: TestDatabase;
 

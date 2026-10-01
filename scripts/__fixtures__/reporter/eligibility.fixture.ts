@@ -7,7 +7,7 @@
  * `onTestFailed`, so there is nothing left to compare by identity.
  */
 import { expect, it } from 'vitest';
-import { evidenceTest } from '../../mutation-evidence-test.ts';
+import { evidenceTest } from '@moin/testing';
 
 it('an unwrapped test with a genuine matcher failure', () => {
   expect(1).toBe(2);

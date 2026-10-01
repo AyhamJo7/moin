@@ -1,6 +1,6 @@
 /** The ordinary shapes: a passing test, a timeout, and a namesake of another file's test. */
 import { describe, expect, it } from 'vitest';
-import { evidenceTest } from '../../mutation-evidence-test.ts';
+import { evidenceTest } from '@moin/testing';
 
 describe('reporter fixture', () => {
   evidenceTest('genuine assertion failure', () => {

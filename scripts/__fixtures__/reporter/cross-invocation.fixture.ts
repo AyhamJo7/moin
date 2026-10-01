@@ -6,7 +6,7 @@
  * map is for.
  */
 import { expect } from 'vitest';
-import { evidenceTest } from '../../mutation-evidence-test.ts';
+import { evidenceTest } from '@moin/testing';
 
 /** Smuggled out of one invocation so a later one can try to use it. */
 let smuggled: unknown;

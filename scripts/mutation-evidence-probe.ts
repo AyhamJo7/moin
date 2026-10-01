@@ -29,12 +29,8 @@
  */
 
 import { afterEach, beforeEach, expect } from 'vitest';
-import { PROBE_META_KEY, PROBE_VERSION, type AssertionProbe } from './mutation-probe-contract.ts';
-import {
-  closeInvocation,
-  installMatcherRecorder,
-  openInvocation,
-} from './mutation-evidence-state.ts';
+import { PROBE_META_KEY, PROBE_VERSION, type AssertionProbe } from '@moin/testing';
+import { closeInvocation, installMatcherRecorder, openInvocation } from '@moin/testing';
 
 /**
  * The async assertion entry points.

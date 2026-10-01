@@ -9,7 +9,7 @@
  * Only cases 5 and 6 may be evidence.
  */
 import { expect } from 'vitest';
-import { evidenceTest } from '../../mutation-evidence-test.ts';
+import { evidenceTest } from '@moin/testing';
 
 /** A genuine matcher failure, caught so the test can try to launder it. */
 function caughtMatcherFailure(): unknown {

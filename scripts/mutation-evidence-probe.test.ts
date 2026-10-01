@@ -14,11 +14,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import {
-  MATCHER_IDENTITY_CONFIRMED,
-  NON_EVIDENCE,
-  PROBE_VERSION,
-} from './mutation-probe-contract.ts';
+import { MATCHER_IDENTITY_CONFIRMED, NON_EVIDENCE, PROBE_VERSION } from '@moin/testing';
 import { REPORT_VERSION } from './mutation-reporter.ts';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -68,10 +64,10 @@ describe('no transferable credential', () => {
     // `Object.assign(new Error('x'), caught)` copied it onto an unrelated error, which counted.
     // A token is a credential, and a credential is copyable by whoever can read it.
     const production = [
-      'scripts/mutation-probe-contract.ts',
-      'scripts/mutation-evidence-state.ts',
+      'packages/testing/src/mutation/probe-contract.ts',
+      'packages/testing/src/mutation/evidence-state.ts',
       'scripts/mutation-evidence-probe.ts',
-      'scripts/mutation-evidence-test.ts',
+      'packages/testing/src/mutation/evidence-test.ts',
       'scripts/mutation-reporter.ts',
       'scripts/mutation-outcome.ts',
       'scripts/mutation-sweep.ts',
@@ -87,7 +83,7 @@ describe('no transferable credential', () => {
   it('never writes anything onto a thrown value', () => {
     // `record` sees the thrown object and deliberately does not touch it. A mark of any kind —
     // enumerable, symbol, random or signed — would be transferable.
-    const state = read('scripts/mutation-evidence-state.ts');
+    const state = read('packages/testing/src/mutation/evidence-state.ts');
     const record = state.slice(
       state.indexOf('function record('),
       state.indexOf('/** Open an invocation'),
@@ -99,7 +95,7 @@ describe('no transferable credential', () => {
   });
 
   it('keeps the private map private', () => {
-    const state = read('scripts/mutation-evidence-state.ts');
+    const state = read('packages/testing/src/mutation/evidence-state.ts');
     expect(state).toContain('const matcherFailures = new WeakMap<object, MatcherFailure>()');
     // Not exported, and no reader is exported either: the only question answerable from outside is
     // the one `confirmTerminal` answers, about one exact object.
@@ -108,7 +104,7 @@ describe('no transferable credential', () => {
   });
 
   it('hands out the recorder once, so a test cannot register an object of its own', () => {
-    const state = read('scripts/mutation-evidence-state.ts');
+    const state = read('packages/testing/src/mutation/evidence-state.ts');
     expect(state).toContain('if (recorderInstalled)');
     expect(read('scripts/mutation-evidence-probe.ts')).toContain('installMatcherRecorder()');
   });
@@ -145,7 +141,7 @@ describe('the verdict reads no field of the thrown value', () => {
 
 describe('the trusted wrapper', () => {
   it('catches the terminal value and rethrows it unchanged', () => {
-    const wrapper = read('scripts/mutation-evidence-test.ts');
+    const wrapper = read('packages/testing/src/mutation/evidence-test.ts');
     // The interception body only: the docblock names the copy attack in prose, which is the point.
     const intercept = wrapper.slice(
       wrapper.indexOf('function intercept('),
@@ -159,7 +155,7 @@ describe('the trusted wrapper', () => {
   });
 
   it('is the only thing that marks an invocation eligible', () => {
-    expect(read('scripts/mutation-evidence-test.ts')).toContain('beginEvidence()');
+    expect(read('packages/testing/src/mutation/evidence-test.ts')).toContain('beginEvidence()');
     expect(read('scripts/mutation-evidence-probe.ts')).not.toContain('beginEvidence');
   });
 });

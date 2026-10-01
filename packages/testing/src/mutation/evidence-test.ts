@@ -23,7 +23,7 @@
  */
 
 import { it } from 'vitest';
-import { beginEvidence, confirmTerminal } from './mutation-evidence-state.ts';
+import { beginEvidence, confirmTerminal } from './evidence-state.ts';
 
 /** The subset of Vitest's test options the corpus needs. Passed through untouched. */
 export interface EvidenceTestOptions {

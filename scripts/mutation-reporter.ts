@@ -57,7 +57,7 @@ import {
   PROBE_META_KEY,
   PROBE_VERSION,
   type AssertionProbe,
-} from './mutation-probe-contract.ts';
+} from '@moin/testing';
 
 /** Bumped when the emitted shape changes; the sweep refuses a report it does not understand. */
 export const REPORT_VERSION = 4;
