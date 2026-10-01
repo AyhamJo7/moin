@@ -10,15 +10,16 @@
 - **Classifier:** [`../../scripts/mutation-outcome.ts`](../../scripts/mutation-outcome.ts)
 - **Reporter:** [`../../scripts/mutation-reporter.ts`](../../scripts/mutation-reporter.ts)
 - **Probe:** [`../../scripts/mutation-evidence-probe.ts`](../../scripts/mutation-evidence-probe.ts)
-- **Wrapper, state and contract:** [`../../packages/testing/src/mutation/`](../../packages/testing/src/mutation/),
-  re-exported from `@moin/testing`
+- **Wrapper, state and contract:** [`../../packages/testing/src/mutation/`](../../packages/testing/src/mutation/);
+  `@moin/testing` exports the registration API (`evidenceTest`, `concurrentEvidenceTest`) and the
+  inert contract constants, and nothing that writes provenance
 - **Invariants:** INV-01, INV-10, INV-12 · **Review:** QG-09
 
 A test that has never been made to fail is a hope, not a control. Every guard in the audit
 subsystem therefore has at least one **defective variant**: a named, minimal edit that would
 reintroduce the defect the guard exists to prevent. The sweep applies each one to the working tree,
-runs only the test that must catch it, classifies the run structurally, and restores the file
-byte-for-byte from memory.
+runs only the test that must catch it, classifies the run structurally, and restores the file to
+the bytes it proved were HEAD's — see [the pristine-source contract](#the-pristine-source-contract).
 
 ```
 node scripts/mutation-sweep.ts --validate     # identities and anchors resolve; runs no tests
@@ -28,6 +29,11 @@ node scripts/mutation-sweep.ts --report docs/verification/audit-mutation-report.
 node scripts/mutation-sweep.ts --json results.json        # machine-readable, for a diff
 ```
 
+Exit codes: `0` every variant is evidence, `1` some variant is not, `2` a usage or manifest error,
+`3` the source tree could not be shown to be the HEAD tree, so nothing was measured. Both the sweep
+and `--validate` start with the same pristine check, so **commit before you sweep**: a target with
+uncommitted changes is indistinguishable from a mutant a killed sweep left behind, and is refused.
+
 The report is generated, so format it before committing — the `format` gate checks it like any
 other file:
 
@@ -35,8 +41,12 @@ other file:
 pnpm exec prettier --write docs/verification/audit-mutation-report.md
 ```
 
-It needs the local stack (`pnpm dev:up`) and the environment file, like any integration run. The
-harness's own variants (`H*`) run in the `unit` project and need neither.
+It needs the local stack (`pnpm dev:up`) and the environment file, like any integration run —
+`node --env-file-if-exists=.env scripts/mutation-sweep.ts …`, or `--env-file=.env.example` against
+the stack's documented local defaults. The harness's own variants (`H*`) run in the `unit` project and
+need neither. Started without the file, every integration variant comes back `BASELINE_FAILED` ("the
+run collected no tests at all"): the harness refuses to count a kill on a tree whose baseline never
+ran, which is the point.
 
 ## What `KILLED_ASSERTION` is allowed to mean
 
@@ -86,12 +96,12 @@ the verdict reads a field of one.
 
 Four modules, each with one job:
 
-| Module                                                                   | Job                                                                                        |
-| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
-| [`mutation-probe-contract.ts`](../../scripts/mutation-probe-contract.ts) | the shape the probe emits and the reporter reads; no side effects                          |
-| [`mutation-evidence-state.ts`](../../scripts/mutation-evidence-state.ts) | the module-private `WeakMap` and every decision about it; no side effects                  |
-| [`mutation-evidence-probe.ts`](../../scripts/mutation-evidence-probe.ts) | the `setupFiles` entry: patches the matcher prototype, opens and closes invocation windows |
-| [`mutation-evidence-test.ts`](../../scripts/mutation-evidence-test.ts)   | `evidenceTest`, the trusted wrapper that catches the terminal value                        |
+| Module                                                                       | Job                                                                                                                                                                 |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`probe-contract.ts`](../../packages/testing/src/mutation/probe-contract.ts) | the shape the probe emits and the reporter reads; inert constants and types                                                                                         |
+| [`evidence-state.ts`](../../packages/testing/src/mutation/evidence-state.ts) | the module-private `WeakMap`, every decision about it, and the trusted wrapper — `beginEvidence`, `confirmTerminal` and `intercept` are exported from **no** module |
+| [`evidence-test.ts`](../../packages/testing/src/mutation/evidence-test.ts)   | the public face: re-exports `evidenceTest` and `concurrentEvidenceTest`, registration only                                                                          |
+| [`mutation-evidence-probe.ts`](../../scripts/mutation-evidence-probe.ts)     | the `setupFiles` entry: patches the matcher prototype, opens and closes invocation windows                                                                          |
 
 **The matcher boundary.** Every function on Vitest's `Assertion.prototype` — 185 own properties, the
 matchers among them writable and configurable — is replaced by a wrapper that, when the matcher
@@ -102,10 +112,37 @@ rejecting" from inside its own async chain without running a matcher, and that i
 assertion machinery failing. `not` needs no wrapper: it returns an assertion with the same
 prototype.
 
-The recorder is handed out by `installMatcherRecorder()`, which may be called **once** — the probe
-is the caller, and a second caller gets an exception. A test therefore cannot obtain a recorder and
-register an object of its own. That is a guard against the easy attack; the load-bearing property is
-that confirmation needs the actual object a matcher threw.
+The recorder and the invocation window are handed out together by `installProbe()`, which may be
+called **once** — the probe is a setup file and takes them before any test module loads, by relative
+import, and a second caller gets an exception. A test therefore cannot obtain a recorder and register
+an object of its own. Even with them, nothing can mark an invocation eligible or confirm a terminal
+value: those two capabilities never leave the state module.
+
+### Who can reach the capabilities
+
+`beginEvidence` opens eligibility and `confirmTerminal` vouches for a terminal value. A test that can
+call both can make itself evidence without being registered for it: catch a genuine matcher object
+`M`, open, confirm `M`, then fail with an unrelated error. An independent review did exactly that
+from a plain `it` test, through the package root, while it re-exported them — the reporter typed the
+failure `ASSERTION` and the classifier `KILLED_ASSERTION`.
+
+Removing the re-exports would not have been enough. An `exports` map governs the package name only,
+and any `export` in the repository is reachable by a relative import. So the line is drawn at the
+source:
+
+- `beginEvidence`, `confirmTerminal` and the `intercept` wrapper that calls them are module-scoped in
+  `evidence-state.ts` and **exported from no module**. The only path to them is `evidenceTest`, which
+  is a _registration_ call: Vitest refuses to register a test from inside a running one, so a test
+  body cannot use it to wrap itself (the fixture tries, and is refused).
+- `installProbe` is exported, because the probe lives in `scripts/` — and is one-shot and already
+  taken by the time any test runs.
+- `@moin/testing`'s `exports` map is exactly `{ ".": "./src/index.ts" }`, and the root exports an
+  allow-list: the factories, fault injection, the clock, `evidenceTest`, `concurrentEvidenceTest` and
+  the inert contract constants.
+
+[`testing-export-surface.test.ts`](../../scripts/testing-export-surface.test.ts) pins all of it:
+the `exports` map, every subpath a consumer might try, the root allow-list, the state module's
+export list, the one-shot handover, and every occurrence of a capability name in the repository.
 
 **The terminal value.** A test registered with `evidenceTest` has its body run inside:
 
@@ -174,7 +211,49 @@ Both are compared exactly. There is no `includes`, no prefix match, no name-only
 is `NO_TEST_MATCH`, more than one is `AMBIGUOUS_TEST_IDENTITY`, and the baseline and mutant runs must
 resolve the same single identity. A parameterized test must be named by one concrete generated case.
 The baseline cache key is `[git HEAD, project, file, fullName]`, so no baseline can vouch for another
-tree or another test.
+tree or another test — and it is consulted only after the pristine checks below have passed.
+
+### The pristine-source contract
+
+Exactly one mutant, against the HEAD tree. The sweep mutates in place and restores in a `finally`,
+and `SIGKILL`, a crash or a lost machine skip the `finally`. It used to read each target from the
+working tree as its "original", so after a killed sweep the next one took the leftover mutant M1 as
+pristine, and a second mutant M2 whose anchor still resolved was baselined and measured on top of
+it. An independent review reproduced that.
+
+The working tree is now never trusted:
+
+1. **Before anything runs** — baseline, cache lookup or mutation — HEAD is resolved, and **every**
+   target named anywhere in the manifest, not only the selected variants', is hashed the way Git
+   would store it (`git hash-object --path=<file> --stdin`, so the path's `eol` and clean filters
+   apply) and compared with its blob in `git ls-tree HEAD`. A target must be a tracked regular file
+   with a plain repository-relative path. Any difference aborts the whole sweep with exit `3`. It is
+   **not repaired**: whether the difference is a stale mutant or someone's work is not the sweep's to
+   guess.
+2. **Per variant**, the bytes that will be restored are the bytes that were hashed — read once, so
+   the proof is over exactly what is put back. After the mutant run the file is restored, re-read,
+   and must equal those bytes and hash to the HEAD blob; then every target is checked again and HEAD
+   must not have moved. Any failure aborts before the next variant.
+3. `SIGINT` and `SIGTERM` stop the test run, restore and verify the active target, and exit `130` or
+   `143`. **`SIGKILL` cannot be handled by anything**; what protects against it is rule 1 on the next
+   invocation.
+
+[`mutation-sweep-isolation.test.ts`](../../scripts/mutation-sweep-isolation.test.ts) builds a
+throwaway Git repository per case and runs the production sweep against it, with a counting fake in
+place of Vitest:
+
+| Case                                                                                                | Required result                                                                                      |
+| --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| M1 left in `a.ts` by a "killed" sweep; a **new process** runs `--only M2`, which still applies once | exit `3`, "not pristine at expected HEAD", no variant line, `a.ts` byte-identical to the stale state |
+| the same, in process                                                                                | zero observations: no baseline, no mutant                                                            |
+| M1 left in `a.ts`; M3 targets the untouched `b.ts`                                                  | refused, zero observations — CLI and in process                                                      |
+| a variant's run dirties another target; the next variant shares its cached baseline                 | aborted after the first variant; the second is never observed                                        |
+| HEAD moves during a variant                                                                         | aborted                                                                                              |
+| the restore leaves one byte changed                                                                 | aborted by the restore's own verification; the next variant never runs; the next sweep refuses       |
+| the restore throws                                                                                  | aborted                                                                                              |
+| an `eol=crlf` checkout of an LF blob                                                                | pristine, and restored as CRLF                                                                       |
+| untracked target, `../` path, absolute path, symlink, no HEAD                                       | refused                                                                                              |
+| a real `SIGTERM` / `SIGINT` while the mutant is on disk                                             | target restored to HEAD bytes and verified; exit `143` / `130`                                       |
 
 ### Applying a variant
 
@@ -241,6 +320,8 @@ Measured, and asserted:
 | plain thrown assertion-shaped object · `toJSON` spoof · successful `expect` then a throw · Node's `assert.AssertionError` | `ERROR`, all four, with zero matcher failures                              |
 | a forged probe record planted in `task.meta`, complete and consistent                                                     | `ERROR` — overwritten                                                      |
 | an unwrapped test with a genuine matcher failure                                                                          | `NOT_ELIGIBLE`                                                             |
+| a plain `it` replays the review's exploit through `@moin/testing` (catch `M`, open, confirm `M`, throw `E`)               | `NOT_ELIGIBLE`; no capability reachable from the root or any subpath       |
+| a plain `it` registers an `evidenceTest` from inside its own body                                                         | refused by Vitest; `NOT_ELIGIBLE`                                          |
 | genuine failures through `not`, `rejects`, `resolves`, and `rejects` on a resolving promise                               | `ASSERTION`                                                                |
 | a timeout · a `beforeAll` failure · an `afterEach` failure · the same name in two modules                                 | `TIMEOUT` · hook error, not executed · `UNKNOWN` · distinguished by `file` |
 
@@ -254,6 +335,13 @@ the rules above and names the adversarial test that must catch it.
 
 Three limits are worth stating rather than hiding.
 
+- `H30`–`H33` re-export a capability or hand the probe out twice; `H34`–`H38` remove one rule of the
+  pristine-source contract each. The sweep that measures them loaded its own code before mutating,
+  and checks its targets only before and after each variant, so mutating `mutation-sweep.ts` does not
+  change the sweep doing the measuring. Some of these guards are deliberately redundant with each
+  other — the per-variant check would also notice a failed restore — so each variant names the test
+  that isolates its own term: `H37` is killed because the failure must be reported **by the
+  restore**, and `H36` by a direct test of what counts as pristine.
 - The sweep passes the **mutated reporter** to the mutated run. That is sound because every `H*`
   reporter variant is a _relaxation_, so a genuine matcher failure still types `ASSERTION` and the
   kill stays observable; a tightening would fail closed into a non-evidence outcome rather than
