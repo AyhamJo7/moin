@@ -21,6 +21,28 @@
  *    makes that decision over Vitest's JSON report and distinguishes an assertion rejecting the
  *    mutation from a timeout, a transform error, a setup failure or an unrelated failure.
  *
+ * ## A third rule: exactly one mutant against the HEAD tree
+ *
+ * A sweep mutates files in place and restores them in a `finally`. `SIGKILL`, a crash or a lost
+ * machine skip the `finally`, and the next sweep used to read the still-mutated file as its
+ * "original" — so a stale mutant M1 and a fresh M2 whose anchor still resolved coexisted, and M2 was
+ * baselined and measured against a contaminated tree. So the working tree is never trusted:
+ *
+ *  - **before anything runs**, every mutation target named anywhere in the manifest — not only the
+ *    selected variants', since a stale mutant in file A changes what a test of file B observes — is
+ *    hashed the way Git would store it (`git hash-object --path`, so the path's line-ending and
+ *    clean filters apply) and compared with its blob at the sweep's HEAD. Any difference aborts the
+ *    whole sweep. It is not repaired: whether the difference is a stale mutant or someone's work is
+ *    not this tool's to guess;
+ *  - **per variant**, the bytes restored afterwards are the bytes that were proved equal to HEAD,
+ *    captured in the same step that proved it; after restoring, the file is re-read and must equal
+ *    them and hash to the HEAD blob, and every target is checked again. A failure aborts the sweep
+ *    and the next variant never runs;
+ *  - the baseline cache is consulted only after those checks, and is keyed on the same HEAD.
+ *
+ * `SIGINT` and `SIGTERM` restore and verify the active target before exiting. `SIGKILL` cannot be
+ * handled by anything; what protects against it is that the next invocation refuses to start.
+ *
  * A variant that SURVIVES is not a code defect — it means the test is weaker than it looks, or the
  * guard it removes is redundant with another. Both have happened here, and both are worth knowing.
  *
@@ -29,12 +51,16 @@
  *   node scripts/mutation-sweep.ts --only B4-1-…  # one variant
  *   node scripts/mutation-sweep.ts --report docs/verification/audit-mutation-report.md
  *   node scripts/mutation-sweep.ts --json out.json
+ *   node scripts/mutation-sweep.ts --root <repo> --manifest <file>   # sweep another checkout
+ *
+ * Exit codes: 0 every variant is evidence, 1 some variant is not, 2 a usage or manifest error,
+ * 3 the source tree could not be shown to be the HEAD tree — nothing was, or will be, measured.
  */
 
-import { execFile, execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFile, execFileSync, type ChildProcess } from 'node:child_process';
+import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import {
@@ -50,15 +76,6 @@ const run = promisify(execFile);
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const MANIFEST = join(REPO, 'docs', 'verification', 'audit-mutation-manifest.json');
 
-/** The tree the baselines in this process were measured against. */
-function headSha(): string {
-  try {
-    return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: REPO, encoding: 'utf8' }).trim();
-  } catch {
-    // No git, or a detached worktree: fall back to a value that shares nothing, so nothing caches.
-    return `unknown-${String(process.pid)}`;
-  }
-}
 const TEST_TIMEOUT_MS = 1_200_000;
 
 /** Turns a full test name into a literal regular expression. */
@@ -112,7 +129,227 @@ export function applyMutation(source: string, find: string, replace: string): Mu
   return { ok: true, source: source.slice(0, index) + replace + source.slice(index + find.length) };
 }
 
-interface Variant {
+/** Exit code when the tree cannot be shown to be the HEAD tree. Nothing is measured. */
+export const SOURCE_INTEGRITY_EXIT = 3;
+
+/** Git file modes a mutation target may have: an ordinary file, executable or not. */
+const REGULAR_FILE_MODES = new Set(['100644', '100755']);
+
+/**
+ * The sweep cannot prove it is measuring exactly one mutant against the HEAD tree.
+ *
+ * Never caught inside the sweep: it propagates to `main`, which reports it and exits with
+ * `SOURCE_INTEGRITY_EXIT`. A sweep that continued past one would measure an unknown tree.
+ */
+export class SourceIntegrityError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SourceIntegrityError';
+  }
+}
+
+/**
+ * The environment Git runs in: the caller's, minus every `GIT_*` variable. A sweep started from a
+ * Git hook inherits `GIT_DIR` and `GIT_INDEX_FILE`, which would silently point these checks at
+ * another repository than `root`.
+ */
+function gitEnvironment(): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_')),
+  );
+}
+
+function git(root: string, args: readonly string[], input?: Buffer): string {
+  return execFileSync('git', args, {
+    cwd: root,
+    env: gitEnvironment(),
+    encoding: 'utf8',
+    maxBuffer: MAX_OUTPUT_BYTES,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    ...(input === undefined ? {} : { input }),
+  }).trim();
+}
+
+/** The commit the sweep measures against. No Git, no sweep: there is nothing to compare with. */
+export function resolveHead(root: string): string {
+  try {
+    return git(root, ['rev-parse', '--verify', 'HEAD^{commit}']);
+  } catch {
+    throw new SourceIntegrityError(
+      `cannot resolve HEAD in ${root}, so no mutation target can be shown to be pristine; sweep refused to run`,
+    );
+  }
+}
+
+/** A manifest path, refused unless it is a plain repository-relative path. */
+function targetPath(root: string, file: string): string {
+  const normalised = normalize(file);
+  if (
+    file.length === 0 ||
+    isAbsolute(file) ||
+    file.includes('\\') ||
+    normalised !== file ||
+    normalised.split(sep).includes('..')
+  ) {
+    throw new SourceIntegrityError(
+      `mutation target ${JSON.stringify(file)} is not a plain repository-relative path; sweep refused to run`,
+    );
+  }
+  return join(root, file);
+}
+
+/** The blob id `file` has in commit `head`, or a refusal when it is not a tracked regular file. */
+function headBlob(root: string, head: string, file: string): string {
+  let listed: string;
+  try {
+    listed = git(root, ['ls-tree', '-z', '--full-tree', head, '--', file]);
+  } catch {
+    listed = '';
+  }
+  const entries = listed.split('\0').filter((entry) => entry.length > 0);
+  const [entry] = entries;
+  const match = entry === undefined ? null : /^(\d+) blob ([0-9a-f]+)\t(.*)$/su.exec(entry);
+  if (entries.length !== 1 || match?.[3] !== file) {
+    throw new SourceIntegrityError(
+      `mutation target ${file} is not a file tracked at HEAD ${head}; sweep refused to run`,
+    );
+  }
+  const [, mode = '', oid = ''] = match;
+  if (!REGULAR_FILE_MODES.has(mode)) {
+    throw new SourceIntegrityError(
+      `mutation target ${file} has mode ${mode} at HEAD ${head}, not a regular file; sweep refused to run`,
+    );
+  }
+  return oid;
+}
+
+/**
+ * The blob id Git would store for these bytes at this path.
+ *
+ * `--path` applies the path's attributes — line-ending conversion and clean filters — exactly as
+ * `git add` would, so a checkout with `eol=crlf` is pristine when its blob is, and a raw byte
+ * comparison with `git show HEAD:path` would have called it dirty.
+ */
+function blobOf(root: string, file: string, bytes: Buffer): string {
+  return git(root, ['hash-object', `--path=${file}`, '--stdin'], bytes);
+}
+
+/**
+ * The bytes of `file`, proved to be the HEAD tree's, or a refusal.
+ *
+ * Read once, and the proof is over exactly the bytes returned: there is no second read for the
+ * file to change in between. This is the only definition of "original" the sweep has.
+ */
+export function capturePristine(root: string, head: string, file: string): Buffer {
+  const path = targetPath(root, file);
+  const expected = headBlob(root, head, file);
+  let bytes: Buffer;
+  try {
+    if (!lstatSync(path).isFile()) throw new Error('not a regular file');
+    bytes = readFileSync(path);
+  } catch {
+    throw new SourceIntegrityError(
+      `mutation target ${file} is missing or not a regular file in the working tree; sweep refused to run`,
+    );
+  }
+  const actual = blobOf(root, file, bytes);
+  if (actual !== expected) {
+    throw new SourceIntegrityError(
+      `mutation target is not pristine at expected HEAD ${head}: ${file} hashes to ${actual}, HEAD has ${expected}. ` +
+        'It may be a mutant a killed sweep left behind, or uncommitted work; it was not changed. ' +
+        'Sweep refused to run.',
+    );
+  }
+  return bytes;
+}
+
+/** Every target, against HEAD, and HEAD itself against the sweep's. */
+export function assertTargetsPristine(
+  root: string,
+  head: string,
+  files: readonly string[],
+  when: string,
+): void {
+  const current = resolveHead(root);
+  if (current !== head) {
+    throw new SourceIntegrityError(
+      `HEAD moved from ${head} to ${current} ${when}, so the baselines describe another tree; sweep aborted`,
+    );
+  }
+  for (const file of new Set(files)) capturePristine(root, head, file);
+}
+
+/** How a file is written. Injected only by the harness's own tests, to simulate a failed restore. */
+export type WriteFile = (path: string, data: string | Buffer) => void;
+
+/**
+ * Put the proved bytes back, then prove it worked: the file must read back as exactly those bytes
+ * and hash to the HEAD blob. Anything else aborts the sweep.
+ */
+export function restorePristine(
+  root: string,
+  head: string,
+  file: string,
+  pristine: Buffer,
+  write: WriteFile = writeFileSync,
+): void {
+  const path = targetPath(root, file);
+  try {
+    write(path, pristine);
+  } catch (error) {
+    throw new SourceIntegrityError(
+      `restoring ${file} failed (${error instanceof Error ? error.message : String(error)}); ` +
+        `it may still hold a mutant. Sweep aborted; compare it with HEAD ${head} before sweeping again`,
+    );
+  }
+  const restored = readFileSync(path);
+  if (!restored.equals(pristine) || blobOf(root, file, restored) !== headBlob(root, head, file)) {
+    throw new SourceIntegrityError(
+      `restoring ${file} did not reproduce its pristine bytes; it may still hold a mutant. ` +
+        `Sweep aborted; compare it with HEAD ${head} before sweeping again`,
+    );
+  }
+}
+
+/** The one target that may currently hold a mutant, for the signal handlers. */
+let activeMutation:
+  | {
+      readonly root: string;
+      readonly head: string;
+      readonly file: string;
+      readonly pristine: Buffer;
+    }
+  | undefined;
+const activeChildren = new Set<ChildProcess>();
+
+const SIGNAL_EXIT: Readonly<Record<'SIGINT' | 'SIGTERM', number>> = { SIGINT: 130, SIGTERM: 143 };
+
+/**
+ * Best effort for the signals that can be caught: stop the test run, restore and verify the active
+ * target, then exit with the conventional code. `SIGKILL` cannot be caught by anything — the
+ * protection against it is the pristine check the next invocation runs before measuring anything.
+ */
+export function installSignalRestoration(): void {
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    process.once(signal, () => {
+      for (const child of activeChildren) child.kill('SIGTERM');
+      const active = activeMutation;
+      let code = SIGNAL_EXIT[signal];
+      if (active !== undefined) {
+        try {
+          restorePristine(active.root, active.head, active.file, active.pristine);
+          console.error(`${signal}: restored ${active.file} to its HEAD bytes and verified it`);
+        } catch (error) {
+          console.error(`${signal}: ${error instanceof Error ? error.message : String(error)}`);
+          code = SOURCE_INTEGRITY_EXIT;
+        }
+      }
+      process.exit(code);
+    });
+  }
+}
+
+export interface Variant {
   readonly id: string;
   readonly invariant: string;
   readonly expected: string;
@@ -147,7 +384,7 @@ interface Variant {
   readonly note?: string;
 }
 
-interface Result {
+export interface Result {
   readonly variant: Variant;
   readonly baseline: MutationOutcome | 'PASSED';
   readonly outcome: MutationOutcome;
@@ -158,17 +395,27 @@ interface Result {
   readonly mutantMs: number;
 }
 
-function manifest(): readonly Variant[] {
-  const parsed: unknown = JSON.parse(readFileSync(MANIFEST, 'utf8'));
+function manifest(path: string): readonly Variant[] {
+  const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
   if (!Array.isArray(parsed)) throw new Error('mutation manifest is not an array');
   return parsed as readonly Variant[];
 }
 
-/** Runs one filtered Vitest invocation and observes it structurally. */
+/** One observed Vitest run. */
+export interface Observation {
+  readonly classification: Classification;
+  readonly durationMs: number;
+}
+
+/** How a run is observed. The real one spawns Vitest; the harness's own tests inject a fake. */
+export type Observe = (variant: Variant, phase: 'baseline' | 'mutant') => Promise<Observation>;
+
+/** Runs one filtered Vitest invocation in `root` and observes it structurally. */
 async function observe(
+  root: string,
   variant: Variant,
   phase: 'baseline' | 'mutant',
-): Promise<{ classification: Classification; durationMs: number }> {
+): Promise<Observation> {
   const directory = mkdtempSync(join(tmpdir(), 'moin-mutation-'));
   const reportPath = join(directory, 'report.json');
   const startedAt = Date.now();
@@ -177,7 +424,7 @@ async function observe(
   let timedOut = false;
 
   try {
-    const { stdout, stderr } = await run(
+    const pending = run(
       process.execPath,
       [
         './node_modules/vitest/vitest.mjs',
@@ -194,13 +441,19 @@ async function observe(
         '--reporter=./scripts/mutation-reporter.ts',
       ],
       {
-        cwd: REPO,
+        cwd: root,
         timeout: TEST_TIMEOUT_MS,
         maxBuffer: MAX_OUTPUT_BYTES,
         env: { ...process.env, MOIN_MUTATION_REPORT: reportPath },
       },
     );
-    output = `${stdout}${stderr}`;
+    activeChildren.add(pending.child);
+    try {
+      const { stdout, stderr } = await pending;
+      output = `${stdout}${stderr}`;
+    } finally {
+      activeChildren.delete(pending.child);
+    }
   } catch (error) {
     const failure = error as {
       code?: number | string;
@@ -230,22 +483,29 @@ async function observe(
 }
 
 /**
- * Baseline, then mutant.
+ * Baseline, then mutant, for one variant whose target has just been proved pristine.
  *
- * The baseline is cached by test file plus filter: several variants legitimately share one killing
- * test, and re-running it per variant would multiply the sweep's cost for no extra assurance. The
- * cache key is exactly what determines the result, and it lives only for this process, so it cannot
- * outlive the tree it was measured against.
+ * The baseline is cached by tree plus test: several variants legitimately share one killing test,
+ * and re-running it per variant would multiply the sweep's cost for no extra assurance. The cache
+ * lives only for this process, is keyed on the sweep's HEAD, and is consulted only after the target
+ * was shown to be that HEAD's — a cached baseline never vouches for a tree it was not measured on.
  */
-async function sweep(
+async function sweepOne(
   variant: Variant,
-  baselines: Map<string, { classification: Classification; durationMs: number }>,
+  head: string,
+  baselines: Map<string, Observation>,
+  dependencies: SweepDependencies,
 ): Promise<Result> {
-  const path = join(REPO, variant.file);
-  const original = readFileSync(path, 'utf8');
+  const { root } = dependencies;
+  const path = join(root, variant.file);
+  // The only "original" there is: bytes proved equal to the HEAD blob in the same step.
+  const pristine = capturePristine(root, head, variant.file);
+  const original = pristine.toString('utf8');
   // Refused before the baseline runs: an unapplicable variant proves nothing, and its baseline
   // would be a wasted integration run.
-  const applied = applyMutation(original, variant.find, variant.replace);
+  const applied = Buffer.from(original, 'utf8').equals(pristine)
+    ? applyMutation(original, variant.find, variant.replace)
+    : ({ ok: false, reason: 'the file is not valid UTF-8, so it cannot be spliced' } as const);
   if (!applied.ok) {
     return {
       variant,
@@ -263,14 +523,14 @@ async function sweep(
   // the project, the file and the exact test name. A looser key would let one variant's baseline
   // vouch for another's.
   const key = [
-    headSha(),
+    head,
     variant.project ?? 'integration',
     variant.killingTest.file,
     variant.killingTest.fullName,
   ].join('\u0000');
   let baseline = baselines.get(key);
   if (baseline === undefined) {
-    baseline = await observe(variant, 'baseline');
+    baseline = await dependencies.observe(variant, 'baseline');
     baselines.set(key, baseline);
   }
 
@@ -290,9 +550,11 @@ async function sweep(
     };
   }
 
+  const write = dependencies.write ?? writeFileSync;
+  activeMutation = { root, head, file: variant.file, pristine };
   try {
-    writeFileSync(path, applied.source);
-    const mutant = await observe(variant, 'mutant');
+    write(path, applied.source);
+    const mutant = await dependencies.observe(variant, 'mutant');
     return {
       variant,
       baseline: 'PASSED',
@@ -304,10 +566,47 @@ async function sweep(
       mutantMs: mutant.durationMs,
     };
   } finally {
-    // Restored from memory rather than from git, so a sweep can never depend on a clean tree and
-    // can never be mistaken for a revert.
-    writeFileSync(path, original);
+    // The proved bytes, not a re-read and not `git checkout`: a sweep is never mistaken for a
+    // revert. A restore that cannot be verified throws, which overrides the return above and ends
+    // the sweep before another variant can run on top of it.
+    restorePristine(root, head, variant.file, pristine, write);
+    activeMutation = undefined;
   }
+}
+
+/** What a sweep needs from its surroundings. Only the harness's own tests replace the defaults. */
+export interface SweepDependencies {
+  readonly root: string;
+  readonly observe: Observe;
+  readonly write?: WriteFile;
+  readonly onResult?: (result: Result) => void;
+}
+
+/**
+ * Every selected variant, one at a time, against the HEAD tree.
+ *
+ * `manifestVariants` is the whole manifest, so that a stale mutant in any target — not only the
+ * selected ones — stops the sweep: a test of file B can observe a mutant left in file A.
+ */
+export async function runSweep(
+  manifestVariants: readonly Variant[],
+  selected: readonly Variant[],
+  dependencies: SweepDependencies,
+): Promise<Result[]> {
+  const { root } = dependencies;
+  const head = resolveHead(root);
+  const targets = manifestVariants.map((variant) => variant.file);
+  assertTargetsPristine(root, head, targets, 'before the sweep started');
+
+  const results: Result[] = [];
+  const baselines = new Map<string, Observation>();
+  for (const variant of selected) {
+    const result = await sweepOne(variant, head, baselines, dependencies);
+    assertTargetsPristine(root, head, targets, `after ${variant.id}`);
+    results.push(result);
+    dependencies.onResult?.(result);
+  }
+  return results;
 }
 
 function distribution(results: readonly Result[]): ReadonlyMap<string, number> {
@@ -318,7 +617,7 @@ function distribution(results: readonly Result[]): ReadonlyMap<string, number> {
   return counts;
 }
 
-function reportMarkdown(results: readonly Result[]): string {
+function reportMarkdown(results: readonly Result[], head: string): string {
   const counts = distribution(results);
   const killed = counts.get('KILLED_ASSERTION') ?? 0;
   const summary = [...counts.entries()]
@@ -350,6 +649,9 @@ function reportMarkdown(results: readonly Result[]): string {
     'against the mutated source and rejected it on an assertion. Every other outcome is reported as',
     'itself rather than folded into a kill count.',
     '',
+    `Measured against HEAD \`${head}\`, with every mutation target proved equal to its HEAD blob before`,
+    'the sweep, after every variant, and on every restore.',
+    '',
     summary,
     '',
     '| Variant | Invariant targeted | Expected failure if it shipped | Source | Killing test | Baseline | Outcome | Detail | Baseline / mutant |',
@@ -359,14 +661,27 @@ function reportMarkdown(results: readonly Result[]): string {
   ].join('\n');
 }
 
+function argument(name: string): string | undefined {
+  const index = process.argv.indexOf(name);
+  return index === -1 ? undefined : process.argv[index + 1];
+}
+
 async function main(): Promise<number> {
-  const variants = manifest();
-  const onlyIndex = process.argv.indexOf('--only');
-  const only = onlyIndex === -1 ? undefined : process.argv[onlyIndex + 1];
-  const reportIndex = process.argv.indexOf('--report');
-  const reportPath = reportIndex === -1 ? undefined : process.argv[reportIndex + 1];
-  const jsonIndex = process.argv.indexOf('--json');
-  const jsonPath = jsonIndex === -1 ? undefined : process.argv[jsonIndex + 1];
+  try {
+    return await sweepCommand();
+  } catch (error) {
+    if (!(error instanceof SourceIntegrityError)) throw error;
+    console.error(error.message);
+    return SOURCE_INTEGRITY_EXIT;
+  }
+}
+
+async function sweepCommand(): Promise<number> {
+  const root = resolve(argument('--root') ?? REPO);
+  const variants = manifest(resolve(argument('--manifest') ?? MANIFEST));
+  const only = argument('--only');
+  const reportPath = argument('--report');
+  const jsonPath = argument('--json');
   const selected = only === undefined ? variants : variants.filter((v) => v.id === only);
 
   if (selected.length === 0) {
@@ -384,6 +699,14 @@ async function main(): Promise<number> {
   }
 
   if (process.argv.includes('--validate')) {
+    // The same pristine check the sweep starts with: anchors that resolve in a contaminated tree
+    // say nothing about the HEAD tree the sweep will measure.
+    assertTargetsPristine(
+      root,
+      resolveHead(root),
+      variants.map((variant) => variant.file),
+      'before validation',
+    );
     const problems: string[] = [];
 
     for (const variant of selected) {
@@ -398,17 +721,17 @@ async function main(): Promise<number> {
         problems.push(`[${variant.id}] killingTest must name a file and an exact fullName`);
         continue;
       }
-      if (!existsSync(join(REPO, identity.file))) {
+      if (!existsSync(join(root, identity.file))) {
         problems.push(`[${variant.id}] killingTest.file does not exist: ${identity.file}`);
       }
-      if (!existsSync(join(REPO, variant.file))) {
+      if (!existsSync(join(root, variant.file))) {
         problems.push(`[${variant.id}] the mutated file does not exist: ${variant.file}`);
         continue;
       }
       // The same function the sweep applies with, so validation can be neither more permissive
       // than execution nor less.
       const applied = applyMutation(
-        readFileSync(join(REPO, variant.file), 'utf8'),
+        readFileSync(join(root, variant.file), 'utf8'),
         variant.find,
         variant.replace,
       );
@@ -436,7 +759,7 @@ async function main(): Promise<number> {
           process.execPath,
           ['./node_modules/vitest/vitest.mjs', 'list', '--project', project, file, '--json'],
           {
-            cwd: REPO,
+            cwd: root,
             encoding: 'utf8',
             maxBuffer: MAX_OUTPUT_BYTES,
             stdio: ['ignore', 'pipe', 'ignore'],
@@ -473,20 +796,22 @@ async function main(): Promise<number> {
     return 0;
   }
 
-  const results: Result[] = [];
-  const baselines = new Map<string, { classification: Classification; durationMs: number }>();
-  for (const variant of selected) {
-    const result = await sweep(variant, baselines);
-    results.push(result);
-    console.log(`${result.outcome.padEnd(22)} ${variant.id}  ${variant.invariant}`);
-  }
+  installSignalRestoration();
+  const results = await runSweep(variants, selected, {
+    root,
+    observe: (variant, phase) => observe(root, variant, phase),
+    onResult: (result) => {
+      console.log(`${result.outcome.padEnd(22)} ${result.variant.id}  ${result.variant.invariant}`);
+    },
+  });
+  const head = resolveHead(root);
 
   if (reportPath !== undefined) {
-    writeFileSync(resolve(reportPath), reportMarkdown(results));
+    writeFileSync(resolve(reportPath), reportMarkdown(results, head));
     console.log(`report written to ${reportPath}`);
   }
   if (jsonPath !== undefined) {
-    writeFileSync(resolve(jsonPath), `${JSON.stringify(results, null, 2)}\n`);
+    writeFileSync(resolve(jsonPath), `${JSON.stringify({ head, results }, null, 2)}\n`);
     console.log(`machine-readable results written to ${jsonPath}`);
   }
 
