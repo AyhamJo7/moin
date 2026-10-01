@@ -14,6 +14,7 @@ import { inspect, allowlistedDefiners, type Finding } from './check-rls-catalog.
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { evidenceTest } from './mutation-evidence-test.ts';
 
 let database: TestDatabase;
 
@@ -198,7 +199,7 @@ describe('the QG-09 audit registration', () => {
 });
 
 describe('audit append-only catalog control', () => {
-  it('rejects a disabled mutation guard', async () => {
+  evidenceTest('rejects a disabled mutation guard', async () => {
     await ddl('ALTER TABLE audit_events DISABLE TRIGGER audit_events_append_only');
     try {
       expect(rulesFor(await findings(), 'audit_events.audit_events_append_only')).toContain(
@@ -235,7 +236,7 @@ describe('audit append-only catalog control', () => {
 });
 
 describe('audit chain verification catalog controls', () => {
-  it('rejects a disabled and a dropped register guard', async () => {
+  evidenceTest('rejects a disabled and a dropped register guard', async () => {
     // A deletable registration is how a whole tenant's chain disappears from the daily sweep while
     // the sweep keeps reporting that it found nothing wrong.
     await ddl('ALTER TABLE audit_chain_registry DISABLE TRIGGER audit_chain_registry_append_only');
@@ -291,7 +292,7 @@ describe('audit chain verification catalog controls', () => {
     }
   });
 
-  it('rejects a dropped and a disabled chain-registration trigger', async () => {
+  evidenceTest('rejects a dropped and a disabled chain-registration trigger', async () => {
     // Without it a newly provisioned tenant is never registered, so the verifier silently stops
     // covering it — and silence is what a clean run looks like.
     await ddl('DROP TRIGGER organisations_register_audit_chain ON organisations');
@@ -319,7 +320,7 @@ describe('audit chain verification catalog controls', () => {
     }
   });
 
-  it('rejects a guard whose body was replaced with one that does not raise', async () => {
+  evidenceTest('rejects a guard whose body was replaced with one that does not raise', async () => {
     // The cheapest attack on a guard, and the one every identity rule misses: same OID, same name,
     // same owner, same signature, same trigger — a body that just returns.
     await ddl(
@@ -346,33 +347,36 @@ END $$`,
     expect(rulesFor(await findings(), 'app.reject_registry_mutation')).toStrictEqual([]);
   });
 
-  it('rejects a register that does not account for every provisioned tenant', async () => {
-    // The register is otherwise its own witness: disabling the registration trigger around one
-    // insert leaves nothing in the catalog to find afterwards.
-    // A literal rather than an interpolated value: the lint rule that forbids building SQL by
-    // interpolation is right, and `ddl()` takes no parameters.
-    await ddl('ALTER TABLE organisations DISABLE TRIGGER organisations_register_audit_chain');
-    await ddl('ALTER TABLE provisioning_requests DISABLE TRIGGER provisioning_request_audit');
-    try {
-      await ddl(`INSERT INTO organisations(id, slug, name)
+  evidenceTest(
+    'rejects a register that does not account for every provisioned tenant',
+    async () => {
+      // The register is otherwise its own witness: disabling the registration trigger around one
+      // insert leaves nothing in the catalog to find afterwards.
+      // A literal rather than an interpolated value: the lint rule that forbids building SQL by
+      // interpolation is right, and `ddl()` takes no parameters.
+      await ddl('ALTER TABLE organisations DISABLE TRIGGER organisations_register_audit_chain');
+      await ddl('ALTER TABLE provisioning_requests DISABLE TRIGGER provisioning_request_audit');
+      try {
+        await ddl(`INSERT INTO organisations(id, slug, name)
         VALUES ('19191919-1919-4919-8919-191919191919', 'catalog-hidden', 'Hidden')`);
-      await ddl(`INSERT INTO provisioning_requests(request_id, tenant_id)
+        await ddl(`INSERT INTO provisioning_requests(request_id, tenant_id)
         VALUES (gen_random_uuid(), '19191919-1919-4919-8919-191919191919')`);
-      expect(rulesFor(await findings(), 'audit_chain_registry')).toContain(
-        'audit-chain-registry-incomplete',
-      );
-    } finally {
-      await ddl(`DELETE FROM provisioning_requests
+        expect(rulesFor(await findings(), 'audit_chain_registry')).toContain(
+          'audit-chain-registry-incomplete',
+        );
+      } finally {
+        await ddl(`DELETE FROM provisioning_requests
         WHERE tenant_id = '19191919-1919-4919-8919-191919191919'`);
-      await ddl(`DELETE FROM organisations WHERE id = '19191919-1919-4919-8919-191919191919'`);
-      await ddl('ALTER TABLE provisioning_requests ENABLE TRIGGER provisioning_request_audit');
-      await ddl(
-        'ALTER TABLE organisations ENABLE ALWAYS TRIGGER organisations_register_audit_chain',
-      );
-    }
-  });
+        await ddl(`DELETE FROM organisations WHERE id = '19191919-1919-4919-8919-191919191919'`);
+        await ddl('ALTER TABLE provisioning_requests ENABLE TRIGGER provisioning_request_audit');
+        await ddl(
+          'ALTER TABLE organisations ENABLE ALWAYS TRIGGER organisations_register_audit_chain',
+        );
+      }
+    },
+  );
 
-  it('rejects the claim function changed to SECURITY INVOKER', async () => {
+  evidenceTest('rejects the claim function changed to SECURITY INVOKER', async () => {
     // As SECURITY INVOKER it returns nothing at all — FORCE RLS hides the register from the caller —
     // so the sweep would verify zero tenants and report a clean run.
     await ddl('ALTER FUNCTION app.claim_audit_chains(integer, bigint, bigint) SECURITY INVOKER');

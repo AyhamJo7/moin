@@ -174,6 +174,7 @@ Rules
 | P06.10.07 | READY_FOR_REVIEW | f105882 | EV-P06-029 | Epoch allocation serialized by commit rather than by `nextval()`; assertion identity decided from typed error metadata rather than message text — 69 KILLED_ASSERTION, 2 documented INFRA_FAILURE |
 | P06.10.07 | READY_FOR_REVIEW | 986ae8b | EV-P06-030 | `KILLED_ASSERTION` redefined so it can only mean one thing: two in-process signals a thrown object cannot set, an exact unique `{file, fullName}` identity, and a run with no other failure — 77 KILLED_ASSERTION, 2 documented INFRA_FAILURE over 79 variants, 12 of which attack the harness itself |
 | P06.10.07 | READY_FOR_REVIEW | 96a5dad | EV-P06-031 | Assertion evidence moved from the serialized thrown value to the matcher boundary in-process: a plain object literal and a `toJSON` spoof both defeated the previous model. Anchor uniqueness enforced at application time. 90 KILLED_ASSERTION and 2 documented INFRA_FAILURE over 92 variants, 25 of which attack the harness |
+| P06.10.07 | READY_FOR_REVIEW | PENDING_SHA | EV-P06-032 | Assertion evidence moved from a transferable token to **object identity**: the terminal value of the test body must be, by `===`, the object a Vitest matcher threw in this invocation. 52 KILLED_ASSERTION and 42 NOT_EVIDENCE_ELIGIBLE over 94 variants |
 | P06.10 | IN_PROGRESS | 8e5bf76 | EV-P06-021…025 | Table, chain, query API, daily verifier, argument scanner and runbook done. Open: .03 adoption by the tool guard, operator and security paths (needs P10.08, P06.11/.12), .05 scheduling (EXT-09) and .06 founder acceptance of ADR-0017 |
 
 ## External waits
@@ -518,5 +519,47 @@ true, ok: false }` — is serialized by Vitest with none of the `constructor`/`t
   and the properties they would have covered are proven by the real-Vitest suite instead.
   Final distribution at `96a5dadcfe30`: `KILLED_ASSERTION: 90`, `INFRA_FAILURE: 2`, over 92
   variants. `77/2 over 79` is superseded.
+  ADR-0017 stays **PROPOSED**; the five residuals are unchanged. P06.10.03 remains open; P06.10.05
+  remains `WAITING_FOR_EXTERNAL` on EXT-09; P06.10 is not complete.
+
+- 2026-10-01 — **Sixth QG-09 review of P06.10: a token is a credential, and credentials copy.** The
+  previous round stamped an invocation-scoped token on the object a matcher threw and required the
+  failing test to carry it. Reproduced in one line:
+
+      try { expect(1).toBe(2) } catch (e) { caught = e }
+      const terminal = new Error('ordinary'); Object.assign(terminal, caught); throw terminal
+
+  `Object.assign` copies the token, and the run was reported `ASSERTION`. Making the token
+  non-enumerable, a symbol, random, hashed or signed would have changed nothing: whatever a test can
+  read off one object it can write onto another. That is five generations of this decision defeated
+  — exit code, message text, name plus matcher fields, serializer markers, and now a credential —
+  and the thing they have in common is that each read _the thrown value_, which is data authored by
+  the code under test.
+  Evidence is now **object identity**, which is the one property of a value that cannot be
+  transferred: `Object.assign(terminal, caught)` gives `terminal !== caught`. A module-private
+  `WeakMap` maps each object a matcher threw to its invocation; the trusted `evidenceTest` wrapper
+  catches the value that terminated the test body and asks the map about that exact object. Nothing
+  is written onto the thrown value at all, and no field of it is read anywhere in the verdict.
+  The wrapper is necessary, not stylistic, and measurement is what settled it: by the time any
+  Vitest hook runs the live object is gone — in both `afterEach` and `onTestFailed`,
+  `task.result.errors[0]` is already a serialized plain object with `instanceof Error` false.
+  `task.fn` is not exposed to hooks, and Vitest 5 exports no base runner class to extend. Inside the
+  test callback is the only place the terminal value still exists.
+  That has a cost, and it is the honest one: **a test registered with plain `it` cannot bear
+  evidence.** The harness's own tests and the `scripts/check-*` suites were migrated to
+  `evidenceTest`; the 42 variants whose killing tests live under `packages/db/` were not, because
+  this round was told not to modify that directory. They are reported `NOT_EVIDENCE_ELIGIBLE` rather
+  than quietly counted. Forty of them would become evidence with a one-line change per test; `N8`
+  and `P8` would not, because nothing in them fails a matcher at all — their control is an assertion
+  inside the migration.
+  Two candidate self-mutants were **removed** rather than kept: deleting `confirmTerminal` or
+  `beginEvidence` stops _any_ test producing `ASSERTION`, so the harness cannot report its own kill
+  and the row would have been permanent fake non-evidence. The real-Vitest suite asserts both
+  invariants directly instead. The old `H12` was also removed on the review's finding that its
+  stated replay defect was false — dropping the invocation id from the token left the sequence
+  component unique — and replaced with a mutant that ignores the invocation binding in the WeakMap,
+  killed by an actual cross-test replay.
+  Final distribution at `PENDING_SHA`: `KILLED_ASSERTION: 52`, `NOT_EVIDENCE_ELIGIBLE: 42`, over 94
+  variants. `90/2 over 92` is superseded. The number went down because the standard went up.
   ADR-0017 stays **PROPOSED**; the five residuals are unchanged. P06.10.03 remains open; P06.10.05
   remains `WAITING_FOR_EXTERNAL` on EXT-09; P06.10 is not complete.

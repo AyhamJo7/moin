@@ -1,111 +1,58 @@
 /**
- * In-process assertion provenance for the mutation harness (QG-09, P06.10.07).
+ * In-process assertion provenance: the matcher boundary (QG-09, P06.10.07).
  *
- * Loaded as a `setupFiles` entry by every Vitest project, so the sweep measures tests exactly as
- * CI runs them. Two jobs:
+ * Loaded as a `setupFiles` entry by every Vitest project, so the sweep measures tests exactly as CI
+ * runs them. Two jobs, and no decisions — the decisions live in `mutation-evidence-state.ts`.
  *
- * 1. **Wrap the matcher boundary.** Every function on `Assertion.prototype` is replaced by a
- *    wrapper that, when the matcher throws, appends a `MATCHER_FAILURE` record. That wrapper is
- *    the *only* code that can create one. `throw { name: 'AssertionError', … }` does not call a
- *    matcher, so it creates nothing — which is the whole point, and is why no part of this file
- *    inspects a thrown value.
+ * 1. **Wrap the matcher boundary.** Every function on Vitest's `Assertion.prototype` is replaced by
+ *    a wrapper that, when the matcher throws, hands the thrown object to the recorder. That wrapper
+ *    is the only caller of the recorder, and the recorder is handed out exactly once. `throw` does
+ *    not call a matcher, so no throw of any shape can get an object into the map.
  *
  * 2. **Bound each invocation.** `beforeEach` opens a window with a fresh id and the canonical
- *    identity taken from Vitest's own task; `afterEach` closes it and emits only the records made
- *    inside it, for that identity. Anything else is counted in `rejected` and the invocation is
- *    marked `suspect`, which every consumer treats as "not evidence".
+ *    identity taken from Vitest's own task; `afterEach` closes it and emits the result.
  *
  * ## Why identity comes from the task and not from `expect.getState()`
  *
  * Measured on Vitest 5.0.2: under `it.concurrent`, the module-level `expect.getState()` reports
  * *another* test's `currentTestName` — two concurrent cases both read the one that started last.
- * Only the test context's own `expect` is correct. `context.task` is always correct, so identity
- * is read from there and never from assertion state.
+ * `context.task` is always correct, so identity is read from there.
  *
- * ## Concurrency
+ * ## Why a wrapper is needed at all
  *
- * This file does not try to attribute a matcher failure across overlapping windows. It detects the
- * overlap instead: opening a window while another is open marks both `suspect`, so a concurrent
- * test can never produce evidence rather than producing wrong evidence. The repository uses no
- * `it.concurrent` today; if that changes, the sweep stops trusting those tests and says so.
+ * Measured on Vitest 5.0.2: by the time any hook runs, the live thrown object is gone.
+ * `task.result.errors[0]` in `afterEach` and in `onTestFailed` is already a serialized plain object
+ * — `instanceof Error` is false and the constructor is undefined — so no hook can compare it by
+ * identity with what the matcher threw. `task.fn` is not exposed on the task at hook time either,
+ * and Vitest 5 exports no base runner class to extend. The only place the terminal value is still
+ * the real object is inside the test callback, which is what `mutation-evidence-test.ts` wraps.
  */
 
 import { afterEach, beforeEach, expect } from 'vitest';
+import { PROBE_META_KEY, PROBE_VERSION, type AssertionProbe } from './mutation-probe-contract.ts';
 import {
-  MATCHER_FAILURE,
-  MATCHER_FAILURE_TOKEN,
-  NO_MATCHER_FAILURE,
-  PROBE_META_KEY,
-  PROBE_VERSION,
-  type AssertionProbe,
-  type MatcherFailureRecord,
-} from './mutation-probe-contract.ts';
+  closeInvocation,
+  installMatcherRecorder,
+  openInvocation,
+} from './mutation-evidence-state.ts';
 
 /**
  * The async assertion entry points.
  *
  * `not` returns an assertion with the same prototype, so matchers reached through it are already
  * wrapped. `rejects` and `resolves` return a proxy whose matcher calls are awaited, and Vitest
- * raises "promise resolved instead of rejecting" from inside that chain *without* running a
- * matcher — which is still its own assertion machinery failing, not the code under test throwing.
- * Both are instrumented at the getter so that whole chain has provenance. If a Vitest upgrade
- * renames them, `instrumentAsyncEntryPoints` returns a short count and every invocation is marked
- * suspect rather than silently losing evidence.
+ * raises "promise resolved instead of rejecting" from inside that chain *without* running a matcher
+ * — which is still its own assertion machinery failing, not the code under test throwing. Both are
+ * instrumented at the getter so that whole chain has provenance.
  */
 const ASYNC_ENTRY_POINTS = ['rejects', 'resolves'] as const;
 
-interface Invocation {
-  readonly id: string;
-  readonly file: string;
-  readonly fullName: string;
-  /** Records made before this window opened are not ours. */
-  readonly firstSeq: number;
-  readonly expectCallsAtStart: number;
-  readonly suspect: string[];
-}
-
-/** Every matcher failure this worker has seen, oldest first. */
-const recorded: MatcherFailureRecord[] = [];
-/**
- * The error objects already recorded, so one logical failure counts once.
- *
- * A matcher may call another matcher — `toEqual` through `toStrictEqual`, the asymmetric matchers
- * through `toMatchObject` — and the same error then passes through several wrappers on its way
- * out. Keying on the thrown object's identity collapses that exactly, without inspecting it.
- */
-const seen = new WeakSet<object>();
-let nextSeq = 1;
-let nextInvocation = 1;
-let open: Invocation | undefined;
+const record = installMatcherRecorder();
 
 function assertionCalls(): number {
   const state = expect.getState() as unknown as Record<string, unknown>;
   const calls = state['assertionCalls'];
   return typeof calls === 'number' ? calls : 0;
-}
-
-function record(matcher: string, error: unknown): void {
-  // Only once per thrown object, and only for objects: a matcher may call another matcher, and the
-  // same error then passes through several wrappers on its way out.
-  const token = `${open?.id ?? 'no-invocation'}:${String(nextSeq)}`;
-  if (typeof error === 'object' && error !== null) {
-    if (seen.has(error)) return;
-    seen.add(error);
-    try {
-      // Enumerable, so Vitest's serializer carries it to the reporter. A frozen or sealed thrown
-      // value simply gets no token, and the consumer then fails closed.
-      Object.defineProperty(error, MATCHER_FAILURE_TOKEN, {
-        value: token,
-        enumerable: true,
-        configurable: true,
-        writable: true,
-      });
-    } catch {
-      // Nothing to do: an unstampable error is reported without a token and is not evidence.
-    }
-  }
-  recorded.push({ seq: nextSeq, matcher, token });
-  nextSeq += 1;
 }
 
 function isThenable(value: unknown): value is PromiseLike<unknown> {
@@ -119,9 +66,8 @@ function isThenable(value: unknown): value is PromiseLike<unknown> {
 /**
  * Replace every matcher on the assertion prototype with a recording wrapper.
  *
- * `not`, `rejects` and `resolves` are configurable getters that return an assertion with the same
- * prototype, so matchers reached through them are already wrapped and the getters are left alone.
- * Measured: 185 own properties, the matchers among them writable and configurable.
+ * Measured: 185 own properties, the matchers among them writable and configurable; `not`, `rejects`
+ * and `resolves` are configurable getters.
  */
 function instrumentMatchers(): number {
   const prototype = Object.getPrototypeOf(expect(undefined)) as Record<string, unknown>;
@@ -142,7 +88,6 @@ function instrumentMatchers(): number {
         record(name, error);
         throw error;
       }
-      // `rejects`/`resolves` matchers return a promise, and the failure arrives later.
       if (isThenable(result)) {
         return Promise.resolve(result).catch((error: unknown) => {
           record(name, error);
@@ -173,7 +118,6 @@ function instrumentAsyncEntryPoints(): number {
   for (const name of ASYNC_ENTRY_POINTS) {
     const descriptor = Object.getOwnPropertyDescriptor(prototype, name);
     if (descriptor?.get === undefined || descriptor.configurable !== true) continue;
-    // Bound through a local arrow so the getter is never separated from its receiver.
     const originalGet = (receiver: unknown): unknown => descriptor.get?.call(receiver);
 
     Object.defineProperty(prototype, name, {
@@ -220,7 +164,6 @@ interface TaskLike {
   readonly meta?: Record<string, unknown>;
   readonly file?: { readonly filepath?: string; readonly name?: string };
   readonly suite?: TaskLike;
-  readonly result?: { readonly errors?: readonly unknown[] };
 }
 
 /** Vitest's own full name: the suite names and the test name, joined as the reporter joins them. */
@@ -234,7 +177,6 @@ function fullNameOf(task: TaskLike): string {
 
 function fileOf(task: TaskLike): string {
   const path = task.file?.filepath ?? task.file?.name ?? '';
-  // Repo-relative, the same spelling the reporter and the manifest use.
   const root = `${process.cwd()}/`;
   return path.startsWith(root) ? path.slice(root.length) : path;
 }
@@ -250,55 +192,36 @@ beforeEach((context) => {
       `only ${String(wrappedAsyncEntryPoints)} of ${String(ASYNC_ENTRY_POINTS.length)} async assertion entry points could be instrumented`,
     );
   }
-  if (open !== undefined) {
-    // Overlapping windows: either concurrent tests, or an invocation whose afterEach never ran.
-    suspect.push(`another invocation (${open.id}) was still open`);
-    open.suspect.push('a later invocation opened while this one was still open');
-  }
-  open = {
-    id: `${String(process.pid)}-${String(nextInvocation)}`,
+  openInvocation({
     file: fileOf(task),
     fullName: fullNameOf(task),
-    firstSeq: nextSeq,
-    expectCallsAtStart: assertionCalls(),
+    expectCalls: assertionCalls(),
     suspect,
-  };
-  nextInvocation += 1;
+  });
 });
 
 afterEach((context) => {
-  const invocation = open;
-  open = undefined;
-  if (invocation === undefined) return;
-
   const task = context.task as unknown as TaskLike;
+  const closed = closeInvocation(fileOf(task), fullNameOf(task));
+  if (closed === undefined) return;
   const meta = task.meta;
   if (meta === undefined) return;
 
-  const mine = recorded.filter((entry) => entry.seq >= invocation.firstSeq);
-  const rejected = recorded.length - mine.length - (invocation.firstSeq - 1);
-
-  const suspect = [...invocation.suspect];
-  // The identity the probe bound at the start must still be the identity closing the window. A
-  // mismatch means the hooks were not paired, which is exactly the stale-event case.
-  const file = fileOf(task);
-  const fullName = fullNameOf(task);
-  if (file !== invocation.file || fullName !== invocation.fullName) {
-    suspect.push('the invocation closed under a different test identity than it opened under');
-  }
-
   const probe: AssertionProbe = {
     version: PROBE_VERSION,
-    event: mine.length > 0 ? MATCHER_FAILURE : NO_MATCHER_FAILURE,
-    invocationId: invocation.id,
-    testFile: invocation.file,
-    testFullName: invocation.fullName,
-    matcherFailures: mine.length,
-    matchers: mine.map((entry) => entry.matcher),
-    failureTokens: mine.map((entry) => entry.token),
-    expectCalls: Math.max(assertionCalls() - invocation.expectCallsAtStart, 0),
-    rejected: Math.max(rejected, 0),
-    suspect,
+    event: closed.event,
+    reason: closed.reason,
+    invocationId: closed.invocationId,
+    testFile: closed.file,
+    testFullName: closed.fullName,
+    evidenceEligible: closed.eligible,
+    matcherFailures: closed.matcherFailures,
+    matchers: closed.matchers,
+    expectCalls: Math.max(assertionCalls() - closed.expectCallsAtStart, 0),
+    rejected: closed.rejected,
+    suspect: closed.suspect,
   };
+  // Written last, and unconditionally: a test may reach `task.meta` and plant a flawless record of
+  // its own, and this overwrites it. The probe is the only writer whose record was earned.
   meta[PROBE_META_KEY] = probe;
 });

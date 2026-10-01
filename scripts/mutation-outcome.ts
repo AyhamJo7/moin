@@ -5,15 +5,15 @@
  *
  * It consumes the trusted reporter's `failureCategory` and the canonical test identity, and nothing
  * else. It does **not** inspect error names, messages or fields, because every generation of this
- * decision that did was spoofable — the last two by a plain object literal
- * `{ name: 'AssertionError', expected, actual, showDiff, ok }` and by an ordinary `Error` whose
- * `toJSON()` returns that shape. A thrown value is authored by the code under test; it is never
- * authority for what the test framework did.
+ * decision that did was spoofable — by a plain object literal, by an `Error` whose `toJSON()`
+ * returns an assertion shape, and finally by `Object.assign(new Error('x'), caught)`, which copies
+ * whatever credential the harness had stamped on a real matcher error. A thrown value is authored
+ * by the code under test, and anything readable off it is copyable onto something else.
  *
- * `ASSERTION` now rests on provenance: a `MATCHER_FAILURE` record that only the wrapper over
- * Vitest's `Assertion.prototype` can create, in `scripts/mutation-evidence-probe.ts`.
+ * `ASSERTION` rests on **object identity**: the value that terminated the test body is, by `===`,
+ * the object a Vitest matcher threw. See `scripts/mutation-evidence-state.ts`.
  *
- * ## The thirteen conditions for KILLED_ASSERTION
+ * ## The conditions for KILLED_ASSERTION
  *
  *   1. the baseline run passed cleanly (checked by the sweep, not here);
  *   2. the report is one this version understands;
@@ -24,10 +24,11 @@
  *   7. that test failed;
  *   8. the run did not time out, and the test did not fail by timing out;
  *   9. no module failed to build or load;
- *  10. the reporter categorised the failure `ASSERTION`, which itself requires:
- *  11.   a trusted in-process matcher-failure event for this invocation, with no `suspect` entry
- *        and nothing rejected,
- *  12.   that event bound to this exact test identity and to exactly one matcher failure;
+ *  10. the test is registered through the trusted `evidenceTest` wrapper;
+ *  11. the reporter categorised the failure `ASSERTION`, which itself requires:
+ *  12.   the value that terminated the test body to be, by `===`, an object a Vitest matcher threw
+ *        in this invocation, under this exact identity, with exactly one matcher failure, and with
+ *        nothing rejected or suspect in the probe state;
  *  13. **no other test failed** anywhere in the run.
  *
  * Condition 13 matters on its own: a run where the intended test asserted *and* something unrelated
@@ -73,7 +74,14 @@ export type MutationOutcome =
   /** The mutated source would not transform or load, so the mutation is not testable. */
   | 'INVALID_MUTANT'
   /** No report, a malformed one, or one from a version this classifier does not understand. */
-  | 'REPORTER_FAILURE';
+  | 'REPORTER_FAILURE'
+  /**
+   * The intended test failed, but it is not registered through the trusted evidence wrapper, so
+   * its terminal value was never compared and nothing about the failure can be trusted.
+   *
+   * Not a defect in the code and not a defect in the test — a gap in the manifest's reach.
+   */
+  | 'NOT_EVIDENCE_ELIGIBLE';
 
 /** The manifest's exact, unambiguous identity for the test that must catch a defect. */
 export interface KillingTest {
@@ -247,10 +255,21 @@ export function classifyRun(observation: RunObservation, identity: KillingTest):
     };
   }
 
+  if (test.failureCategory === 'NOT_ELIGIBLE') {
+    return {
+      outcome: 'NOT_EVIDENCE_ELIGIBLE',
+      detail:
+        'the intended test detected the mutation, but it is registered with plain `it` rather than ' +
+        'the trusted `evidenceTest` wrapper, so its terminal value was never compared by identity',
+      matched: 1,
+      unrelatedFailures,
+    };
+  }
+
   if (test.failureCategory !== 'ASSERTION') {
     return {
       outcome: test.failureCategory === 'LOAD' ? loadOutcome : 'INFRA_FAILURE',
-      detail: `the intended test failed, but the reporter categorised it as ${String(test.failureCategory)} rather than a trusted assertion`,
+      detail: `the intended test failed, but the reporter categorised it as ${String(test.failureCategory)} rather than a trusted assertion: ${test.probe?.reason ?? 'no probe record'}`,
       matched: 1,
       unrelatedFailures,
     };
@@ -269,7 +288,7 @@ export function classifyRun(observation: RunObservation, identity: KillingTest):
 
   return {
     outcome: 'KILLED_ASSERTION',
-    detail: `the intended test ran and rejected the mutation on a trusted matcher failure (${test.probe?.matchers.join(', ') ?? 'unknown matcher'})`,
+    detail: `the intended test ran and rejected the mutation on a trusted matcher failure (${test.probe?.reason ?? 'confirmed by object identity'})`,
     matched: 1,
     unrelatedFailures: 0,
   };

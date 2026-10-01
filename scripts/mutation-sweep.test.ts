@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { applyMutation } from './mutation-sweep.ts';
+import { evidenceTest } from './mutation-evidence-test.ts';
 
 const SOURCE = ['const a = 1;', 'const b = 2;', 'const a = 1;', ''].join('\n');
 
@@ -26,7 +27,7 @@ describe('a unique anchor', () => {
     expect(applied.source).toBe(['const a = 1;', '', 'const a = 1;', ''].join('\n'));
   });
 
-  it('does not interpret the replacement', () => {
+  evidenceTest('does not interpret the replacement', () => {
     // `String.prototype.replace` reads `$$` as an escape for `$` and `$&` as the match, which
     // silently corrupted every SQL function body (`AS $$ … $$` became `AS $ … $`) and made the
     // migration fail with a syntax error. The variant looked detected; nothing had been tested.
@@ -39,7 +40,7 @@ describe('a unique anchor', () => {
 });
 
 describe('a missing anchor', () => {
-  it('is refused rather than applied as a no-op', () => {
+  evidenceTest('is refused rather than applied as a no-op', () => {
     const applied = applyMutation(SOURCE, 'const c = 3;', 'const c = 4;');
     expect(applied.ok).toBe(false);
     if (applied.ok) return;
@@ -55,7 +56,7 @@ describe('a missing anchor', () => {
 });
 
 describe('a duplicate anchor', () => {
-  it('is refused at application time, not only by --validate', () => {
+  evidenceTest('is refused at application time, not only by --validate', () => {
     const applied = applyMutation(SOURCE, 'const a = 1;', 'const a = 2;');
     expect(applied.ok).toBe(false);
     if (applied.ok) return;
@@ -72,7 +73,7 @@ describe('a duplicate anchor', () => {
 });
 
 describe('a replacement identical to the anchor', () => {
-  it('is refused, because the mutant would be the pristine tree', () => {
+  evidenceTest('is refused, because the mutant would be the pristine tree', () => {
     const applied = applyMutation(SOURCE, 'const b = 2;', 'const b = 2;');
     expect(applied.ok).toBe(false);
     if (applied.ok) return;

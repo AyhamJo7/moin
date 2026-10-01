@@ -6,14 +6,15 @@
  * The probe detects the overlapping invocation windows instead and marks them `suspect`, which
  * every consumer treats as not-evidence. Refusing to answer beats answering wrongly.
  */
-import { expect, it } from 'vitest';
+import { expect } from 'vitest';
+import { concurrentEvidenceTest } from '../../mutation-evidence-test.ts';
 
-it.concurrent('concurrent A fails a matcher', async () => {
+concurrentEvidenceTest('concurrent A fails a matcher', async () => {
   await new Promise((resolve) => setTimeout(resolve, 20));
   expect(1).toBe(2);
 });
 
-it.concurrent('concurrent B fails a matcher', async () => {
+concurrentEvidenceTest('concurrent B fails a matcher', async () => {
   await new Promise((resolve) => setTimeout(resolve, 5));
   expect(3).toBe(4);
 });

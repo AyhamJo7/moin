@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { schemaColumns, unclassified } from './check-data-classification.ts';
+import { evidenceTest } from './mutation-evidence-test.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = resolve(HERE, '__fixtures__', 'classification');
@@ -28,7 +29,7 @@ describe('data classification check (QG-12)', () => {
     expect(columns).toContain('contacts.quoted_secret');
   });
 
-  it('flags an ALTER-added column the inventory has never seen', () => {
+  evidenceTest('flags an ALTER-added column the inventory has never seen', () => {
     // Without the fix this list was empty for added columns, so the gate reported success over a
     // column it had never looked at.
     const missing = unclassified(FIXTURES, INVENTORY).map((c) => `${c.table}.${c.column}`);

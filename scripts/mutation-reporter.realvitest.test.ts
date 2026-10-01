@@ -1,23 +1,21 @@
 /**
- * The production probe and reporter against real Vitest (P06.10.07).
+ * The production probe, wrapper and reporter against real Vitest (P06.10.07).
  *
  * Named `.realvitest.test.ts` rather than `.integration.test.ts` so it runs in the **unit** project:
  * it spawns its own Vitest child process and needs no database.
  *
  * ## Why this cannot be a unit test over hand-built JSON
  *
- * `ASSERTION` rests on a `MATCHER_FAILURE` record that only the wrapper over Vitest's
- * `Assertion.prototype` can create. Whether that wrapper really intercepts every assertion style —
- * sync, negated, `rejects`, `resolves` — and whether a thrown value really cannot reach it are
- * facts about Vitest, not about our types. A fixture built by hand only proves the fixture agrees
- * with the assumption that produced it; the previous two generations of this harness were defeated
- * exactly there.
+ * `ASSERTION` rests on JavaScript object identity: the value that terminated the test body is, by
+ * `===`, an object a Vitest matcher threw in this invocation. Whether a copy really is a different
+ * object *as Vitest reports it*, whether the matcher wrapper really intercepts every assertion
+ * style, and whether a planted record really is overwritten are facts about Vitest and about this
+ * harness together. A fixture built by hand only proves the fixture agrees with the assumption that
+ * produced it — which is exactly where the previous three designs were defeated.
  *
- * So this runs **the production probe, the production reporter and the production
- * `categoriseTest`** over real, deliberately failing fixtures in a child Vitest process, and
- * asserts the machine-readable output. Nothing is reimplemented here.
- *
- * The fixtures are `*.fixture.ts` under their own config, so `pnpm test` never collects them.
+ * So this runs **the production probe, the production wrapper, the production reporter and the
+ * production `categoriseTest`** over real, deliberately failing fixtures in a child Vitest process,
+ * and asserts the machine-readable output. Nothing is reimplemented here.
  */
 import { execFile } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -26,16 +24,21 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { MATCHER_FAILURE, NO_MATCHER_FAILURE, PROBE_VERSION } from './mutation-probe-contract.ts';
+import {
+  MATCHER_IDENTITY_CONFIRMED,
+  NON_EVIDENCE,
+  PROBE_VERSION,
+} from './mutation-probe-contract.ts';
 import { REPORT_VERSION, type MutationReport, type ReportedTest } from './mutation-reporter.ts';
+import { evidenceTest } from './mutation-evidence-test.ts';
 
 const run = promisify(execFile);
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIG = 'scripts/__fixtures__/reporter/vitest.fixtures.config.ts';
 const DIR = 'scripts/__fixtures__/reporter';
-const SPOOF = `${DIR}/spoof.fixture.ts`;
-const SWALLOWED = `${DIR}/swallowed.fixture.ts`;
-const FORGED = `${DIR}/forged.fixture.ts`;
+const IDENTITY = `${DIR}/identity.fixture.ts`;
+const CROSS = `${DIR}/cross-invocation.fixture.ts`;
+const ELIGIBILITY = `${DIR}/eligibility.fixture.ts`;
 const ASYNC = `${DIR}/async.fixture.ts`;
 const GENUINE = `${DIR}/genuine.fixture.ts`;
 const DUPLICATE = `${DIR}/duplicate-name.fixture.ts`;
@@ -56,7 +59,7 @@ function find(file: string, fullName: string): ReportedTest {
   return match;
 }
 
-/** Every shape that must not be evidence, however convincing the thrown value is. */
+/** Failed, and not evidence, however convincing the thrown value was. */
 function expectNotEvidence(test: ReportedTest): void {
   expect(test.state).toBe('failed');
   expect(test.failureCategory).not.toBe('ASSERTION');
@@ -88,84 +91,171 @@ describe('the report itself', () => {
   it('is the version this repository understands, from both halves of the contract', () => {
     expect(report.reportVersion).toBe(REPORT_VERSION);
     expect(report.probeVersion).toBe(PROBE_VERSION);
-    expect(tests().length).toBeGreaterThan(20);
+    expect(tests().length).toBeGreaterThan(25);
   });
 });
 
-describe('1 — a plain thrown assertion-shaped object', () => {
-  it('is not evidence, although Vitest serializes it with no foreign markers at all', () => {
-    // The exploit that defeated the previous model: a plain object literal, not an Error, so the
-    // serializer adds neither `constructor` nor `toString`. No matcher ran, so there is no event.
-    const test = find(SPOOF, '1 plain thrown assertion-shaped object');
+describe('1 — the token-copy attack', () => {
+  evidenceTest('fails because a copy is a different object', () => {
+    // `Object.assign(new Error('ordinary'), caught)` is what broke the previous design, when
+    // provenance was a field on the error. Identity cannot be assigned.
+    const test = find(IDENTITY, '1 token-copy equivalent: Object.assign onto an ordinary Error');
     expectNotEvidence(test);
     expect(test.failureCategory).toBe('ERROR');
-    expect(test.probe?.event).not.toBe(MATCHER_FAILURE);
-    expect(test.probe?.matcherFailures).toBe(0);
-    // The thrown value really does carry the assertion name, and it changes nothing.
-    expect(test.errors[0]?.name).toBe('AssertionError');
+    expect(test.probe?.event).toBe(NON_EVIDENCE);
+    expect(test.probe?.reason).toMatch(/not the same object/u);
+    // A matcher really did fail in this invocation. It just was not what terminated the test.
+    expect(test.probe?.matcherFailures).toBe(1);
   });
 });
 
-describe('2 — an Error whose toJSON returns an assertion shape', () => {
-  it('is not evidence', () => {
-    const test = find(SPOOF, '2 error whose toJSON returns an assertion shape');
+describe('2 — every own property and symbol copied', () => {
+  it('still fails, because nothing copyable carries provenance', () => {
+    const test = find(IDENTITY, '2 every own property and symbol copied onto another Error');
     expectNotEvidence(test);
-    expect(test.probe?.matcherFailures).toBe(0);
+    expect(test.probe?.reason).toMatch(/not the same object/u);
   });
 });
 
-describe('3 — a decorated Error', () => {
-  it('is not evidence', () => {
-    expectNotEvidence(find(SPOOF, '3 decorated error'));
-  });
-});
-
-describe('4 — a successful expect, then a plain throw', () => {
-  it('is not evidence, which is why assertionCalls is diagnostic only', () => {
-    const test = find(SPOOF, '4 successful expect then plain throw');
+describe('3 — a clone with the same prototype, name, message and stack', () => {
+  it('fails', () => {
+    const test = find(IDENTITY, '3 a clone with the same prototype, name, message and stack');
     expectNotEvidence(test);
-    // Two matchers really ran and really passed.
-    expect(test.probe?.expectCalls).toBe(2);
-    // The event is derived from matcher *failures*, never from the call counter. If those two were
-    // ever conflated this is the assertion that catches it.
-    expect(test.probe?.event).toBe(NO_MATCHER_FAILURE);
-    expect(test.probe?.matcherFailures).toBe(0);
+    expect(test.probe?.reason).toMatch(/not the same object/u);
   });
 });
 
-describe('5 — successful expects, then a toJSON Error', () => {
-  it('is not evidence', () => {
-    const test = find(SPOOF, '5 successful expects then a toJSON error');
+describe('4 — async transfer', () => {
+  it('fails, because awaiting does not launder identity', () => {
+    const test = find(IDENTITY, '4 async transfer: await, then throw a copy');
     expectNotEvidence(test);
-    expect(test.probe?.expectCalls).toBeGreaterThan(0);
-    expect(test.probe?.matcherFailures).toBe(0);
+    expect(test.probe?.reason).toMatch(/not the same object/u);
   });
 });
 
-describe("6 — Node's own assert.AssertionError", () => {
-  it('is not evidence, because another library asserting is not a Vitest matcher failing', () => {
-    const test = find(SPOOF, '6 node assert.AssertionError');
-    expectNotEvidence(test);
-    expect(test.errors[0]?.name).toBe('AssertionError');
-    expect(test.probe?.matcherFailures).toBe(0);
-  });
-});
-
-describe('7 — a genuine matcher failure', () => {
-  it('is the one shape that is evidence', () => {
-    const test = find(SPOOF, '7 genuine matcher failure');
+describe('5 — the same matcher object rethrown', () => {
+  evidenceTest('is evidence, and is the shape every real killing test has', () => {
+    const test = find(IDENTITY, '5 the same matcher object rethrown immediately');
     expect(test.failureCategory).toBe('ASSERTION');
-    expect(test.probe?.event).toBe(MATCHER_FAILURE);
+    expect(test.probe?.event).toBe(MATCHER_IDENTITY_CONFIRMED);
+    expect(test.probe?.evidenceEligible).toBe(true);
     expect(test.probe?.matcherFailures).toBe(1);
     expect(test.probe?.suspect).toStrictEqual([]);
     expect(test.probe?.rejected).toBe(0);
-    // The failure that propagated is the one the matcher raised.
-    expect(test.probe?.failureTokens).toContain(test.errors[0]?.matcherToken);
-    // And the token is scoped to this invocation, which is what lets a replayed one be spotted.
-    expect(test.probe?.failureTokens[0]).toContain(test.probe?.invocationId);
+  });
+});
+
+describe('6 — the same matcher object thrown later in the invocation', () => {
+  it('is evidence, which is the intended semantics while exactly one matcher failed', () => {
+    const test = find(IDENTITY, '6 the same matcher object thrown later in the same invocation');
+    expect(test.failureCategory).toBe('ASSERTION');
+    expect(test.probe?.matcherFailures).toBe(1);
+  });
+});
+
+describe('7 — a swallowed matcher failure then an ordinary error', () => {
+  it('is not evidence', () => {
+    const test = find(IDENTITY, '7 a swallowed matcher failure, then an ordinary error');
+    expectNotEvidence(test);
+    expect(test.probe?.matcherFailures).toBe(1);
+    expect(test.probe?.reason).toMatch(/not the same object/u);
+  });
+});
+
+describe('8 — a matcher object from another test', () => {
+  evidenceTest('is rejected by invocation identity', () => {
+    const test = find(CROSS, '8b test B throws test A matcher object');
+    expectNotEvidence(test);
+    expect(test.probe?.reason).toMatch(/belongs to invocation/u);
+  });
+});
+
+describe('9 — a matcher object from a previous attempt of the same test', () => {
+  it('is rejected, because a retry is a new invocation', () => {
+    const test = find(CROSS, '9 a retried test reuses the first attempt matcher object');
+    expectNotEvidence(test);
+    expect(test.probe?.reason).toMatch(/belongs to invocation/u);
+  });
+});
+
+describe('10 — a matcher object from another parameterized case', () => {
+  it('is rejected, while the case that earned it is evidence', () => {
+    expect(find(CROSS, '10 parameterized case a').failureCategory).toBe('ASSERTION');
+    const replayed = find(CROSS, '10 parameterized case b');
+    expectNotEvidence(replayed);
+    expect(replayed.probe?.reason).toMatch(/belongs to invocation/u);
+  });
+});
+
+describe('11 — two matcher failures in one invocation', () => {
+  evidenceTest('fails closed rather than picking one', () => {
+    const test = find(IDENTITY, '11 two matcher failures in one invocation');
+    expectNotEvidence(test);
+    expect(test.probe?.matcherFailures).toBe(2);
+    expect(test.probe?.reason).toMatch(/cannot be established/u);
+  });
+});
+
+describe('12 — concurrent invocations', () => {
+  evidenceTest('fail closed, because their windows overlap', () => {
+    // Measured: under `it.concurrent` the module-level `expect.getState()` reports another test's
+    // name, so the probe detects the overlap and declines instead of guessing.
+    for (const name of ['concurrent A fails a matcher', 'concurrent B fails a matcher']) {
+      const test = find(CONCURRENT, name);
+      expectNotEvidence(test);
+      expect(test.failureCategory, name).toBe('UNKNOWN');
+    }
+  });
+});
+
+describe('the shapes that defeated earlier designs', () => {
+  evidenceTest('are all refused, and none of them involves a matcher failing', () => {
+    for (const name of [
+      '13 plain thrown assertion-shaped object',
+      '14 an Error whose toJSON returns an assertion shape',
+      '15 a successful expect, then a plain throw',
+      "16 Node's own assert.AssertionError",
+    ]) {
+      const test = find(IDENTITY, name);
+      expectNotEvidence(test);
+      expect(test.probe?.matcherFailures, name).toBe(0);
+    }
   });
 
-  it('covers every assertion style the corpus uses', () => {
+  it('includes a successful expect, so the call counter is only ever diagnostic', () => {
+    const test = find(IDENTITY, '15 a successful expect, then a plain throw');
+    expect(test.probe?.expectCalls).toBe(2);
+    expect(test.probe?.matcherFailures).toBe(0);
+  });
+});
+
+describe('a forged probe record', () => {
+  evidenceTest('cannot be planted, because the probe writes last', () => {
+    // The fixture writes a flawless record into its own `task.meta`: right version, right event,
+    // right identity, one failure, no suspicion. A setup file's `afterEach` runs after the body.
+    const test = find(IDENTITY, '17 a forged probe record planted in task.meta');
+    expectNotEvidence(test);
+    expect(test.probe?.event).toBe(NON_EVIDENCE);
+    expect(test.probe?.invocationId).not.toBe('forged');
+    expect(test.probe?.reason).not.toBe('forged');
+  });
+});
+
+describe('the trusted wrapper', () => {
+  evidenceTest('is what makes a test eligible at all', () => {
+    const unwrapped = find(ELIGIBILITY, 'an unwrapped test with a genuine matcher failure');
+    expect(unwrapped.failureCategory).toBe('NOT_ELIGIBLE');
+    expect(unwrapped.probe?.evidenceEligible).toBe(false);
+    // The matcher genuinely failed; there was simply nothing left to compare by the time any hook
+    // ran, which is why eligibility is not a formality.
+    expect(unwrapped.probe?.matcherFailures).toBe(1);
+
+    const wrapped = find(ELIGIBILITY, 'a wrapped test with a genuine matcher failure');
+    expect(wrapped.failureCategory).toBe('ASSERTION');
+    expect(wrapped.probe?.evidenceEligible).toBe(true);
+  });
+
+  evidenceTest('covers every assertion style the corpus uses', () => {
     for (const name of [
       'a resolves matcher that itself fails',
       'a rejects matcher that itself fails',
@@ -177,76 +267,11 @@ describe('7 — a genuine matcher failure', () => {
       expect(find(ASYNC, name).failureCategory, name).toBe('ASSERTION');
     }
   });
-});
 
-describe('8 — a trusted assertion beside an unrelated failure', () => {
-  it('is reported per test, and the classifier is what disqualifies the run', () => {
-    // The reporter's job is the verdict for one test; "nothing else failed" is a property of the
-    // run, which `mutation-outcome.ts` enforces and its own tests cover.
-    expect(find(UNRELATED, 'the intended test asserts').failureCategory).toBe('ASSERTION');
-    expect(find(UNRELATED, 'an unrelated test throws').failureCategory).toBe('ERROR');
-  });
-});
-
-describe('9 — a trusted assertion plus an afterEach failure', () => {
-  it('is not evidence, because the probe never completes', () => {
-    const test = find(
-      `${DIR}/after-each.fixture.ts`,
-      'teardown fixture > asserts and then the teardown fails',
-    );
+  it('leaves an ordinary thrown error as an ordinary failure', () => {
+    const test = find(GENUINE, 'reporter fixture > ordinary thrown error');
     expectNotEvidence(test);
-    expect(test.failureCategory).toBe('UNKNOWN');
-    expect(test.probe).toBeUndefined();
-  });
-});
-
-describe('10 and 11 — a forged probe record', () => {
-  it('cannot be planted, because the probe writes last', () => {
-    // `task.meta` is reachable from the test, so the fixture writes a flawless record into it:
-    // right version, right event, right identity, one failure, no suspicion. The probe's afterEach
-    // is registered by a setup file, so it runs after the body and overwrites the key.
-    const forged = find(FORGED, 'forges a perfect probe record for itself');
-    expectNotEvidence(forged);
-    expect(forged.probe?.event).toBe('NONE');
-    expect(forged.probe?.invocationId).not.toBe('forged');
-  });
-
-  it('cannot name another test either', () => {
-    const forged = find(FORGED, 'forges a record naming another test');
-    expectNotEvidence(forged);
-    expect(forged.probe?.testFile).toBe(FORGED);
-    expect(forged.probe?.invocationId).not.toBe('forged');
-  });
-});
-
-describe('12 — more than one trusted event', () => {
-  it('fails closed rather than picking one', () => {
-    const test = find(SWALLOWED, 'fails two matchers in one test');
-    expectNotEvidence(test);
-    expect(test.failureCategory).toBe('UNKNOWN');
-    expect(test.probe?.matcherFailures).toBe(2);
-  });
-
-  it('refuses a matcher failure the test swallowed before failing another way', () => {
-    // The event is genuinely earned — a matcher did fail — but it is not what made the test fail,
-    // so "the mutation was rejected by an assertion" would be false of this run.
-    const test = find(SWALLOWED, 'swallows one matcher failure then throws');
-    expectNotEvidence(test);
-    expect(test.probe?.event).toBe(MATCHER_FAILURE);
-    expect(test.probe?.matcherFailures).toBe(1);
-    expect(test.errors.every((error) => error.matcherToken === undefined)).toBe(true);
-  });
-});
-
-describe('concurrent tests', () => {
-  it('are refused rather than attributed, because their invocation windows overlap', () => {
-    // Measured: under `it.concurrent` the module-level `expect.getState()` reports another test's
-    // name, so the probe detects the overlap and declines instead of guessing.
-    for (const name of ['concurrent A fails a matcher', 'concurrent B fails a matcher']) {
-      const test = find(CONCURRENT, name);
-      expectNotEvidence(test);
-      expect(test.failureCategory, name).toBe('UNKNOWN');
-    }
+    expect(test.probe?.matcherFailures).toBe(0);
   });
 });
 
@@ -261,9 +286,24 @@ describe('the surrounding outcomes', () => {
     expect(module?.tests[0]?.executed).toBe(false);
   });
 
+  it('refuses an assertion whose afterEach then failed, because no record is attached', () => {
+    const test = find(
+      `${DIR}/after-each.fixture.ts`,
+      'teardown fixture > asserts and then the teardown fails',
+    );
+    expectNotEvidence(test);
+    expect(test.failureCategory).toBe('UNKNOWN');
+    expect(test.probe).toBeUndefined();
+  });
+
   it('distinguishes the same full name in two modules by file', () => {
     expect(find(DUPLICATE, 'shared name > appears in two files').state).toBe('failed');
     expect(find(GENUINE, 'shared name > appears in two files').state).toBe('passed');
+  });
+
+  it('reports the intended and the unrelated failure separately', () => {
+    expect(find(UNRELATED, 'the intended test asserts').failureCategory).toBe('ASSERTION');
+    expect(find(UNRELATED, 'an unrelated test throws').failureCategory).toBe('ERROR');
   });
 
   it('leaves a passing test with no verdict at all', () => {

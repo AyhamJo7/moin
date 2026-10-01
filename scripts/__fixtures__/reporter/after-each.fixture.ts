@@ -1,12 +1,13 @@
-/** An `afterEach` that throws alongside a genuine assertion failure. */
-import { afterEach, describe, expect, it } from 'vitest';
+/** An `afterEach` that throws alongside a genuine, wrapper-confirmed matcher failure. */
+import { afterEach, describe, expect } from 'vitest';
+import { evidenceTest } from '../../mutation-evidence-test.ts';
 
 describe('teardown fixture', () => {
   afterEach(() => {
     throw new Error('teardown blew up');
   });
 
-  it('asserts and then the teardown fails', () => {
+  evidenceTest('asserts and then the teardown fails', () => {
     expect(1).toBe(2);
   });
 });

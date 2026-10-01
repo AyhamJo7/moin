@@ -24,50 +24,58 @@ import {
   type RunObservation,
 } from './mutation-outcome.ts';
 import {
-  MATCHER_FAILURE,
-  NO_MATCHER_FAILURE,
+  MATCHER_IDENTITY_CONFIRMED,
+  NON_EVIDENCE,
   PROBE_VERSION,
   type AssertionProbe,
 } from './mutation-probe-contract.ts';
 import { categoriseTest, REPORT_VERSION } from './mutation-reporter.ts';
+import { evidenceTest } from './mutation-evidence-test.ts';
 
 const FILE = 'packages/db/src/chain.integration.test.ts';
 const OTHER_FILE = 'packages/db/src/other.integration.test.ts';
 const NAME = 'the chain > rejects invalid chain';
-const TOKEN = 'pid-1:1';
 const INTENDED: KillingTest = { file: FILE, fullName: NAME };
 
-/** A propagated matcher failure, as the reporter emits one. */
+/**
+ * Errors that stand for "the wrapper confirmed this invocation's terminal value".
+ *
+ * Membership is by object identity, not by any field — the same discipline the production harness
+ * uses, and for the same reason: keying on `name === 'AssertionError'` here would have made case 1
+ * pass by accident, which is precisely the bug being tested for.
+ */
+const confirmedErrors = new WeakSet<ReportedError>();
+
+/** A failure whose terminal value the wrapper confirmed. Its shape is deliberately irrelevant. */
 function assertionError(message = 'expected 1 to be 2'): ReportedError {
-  return { name: 'AssertionError', category: 'ERROR', message, matcherToken: TOKEN };
+  const error: ReportedError = { name: 'AssertionError', category: 'ERROR', message };
+  confirmedErrors.add(error);
+  return error;
 }
 
 /**
  * Anything the code under test threw.
  *
  * `decorated` dresses it as an assertion — name and all — because that is the exploit, and because
- * nothing downstream is allowed to care.
+ * nothing downstream is allowed to care. The verdict comes from whether the probe confirmed the
+ * terminal value's identity, which this helper controls separately.
  */
 function thrownError(message: string, decorated = false): ReportedError {
-  return {
-    name: decorated ? 'AssertionError' : 'Error',
-    category: 'ERROR',
-    message,
-    matcherToken: undefined,
-  };
+  return { name: decorated ? 'AssertionError' : 'Error', category: 'ERROR', message };
 }
 
-/** The probe record a genuine single propagated matcher failure produces. */
+/** The probe record for a confirmed, single, eligible matcher failure. */
 function trustedProbe(overrides: Partial<AssertionProbe> = {}): AssertionProbe {
   return {
     version: PROBE_VERSION,
-    event: MATCHER_FAILURE,
+    event: MATCHER_IDENTITY_CONFIRMED,
+    reason: 'the terminal value is the object assert threw',
     invocationId: 'pid-1',
     testFile: FILE,
     testFullName: NAME,
+    evidenceEligible: true,
     matcherFailures: 1,
     matchers: ['assert'],
-    failureTokens: [TOKEN],
     expectCalls: 1,
     rejected: 0,
     suspect: [],
@@ -82,21 +90,23 @@ function test(
 ): ReportedTest {
   const errors = options.errors ?? [];
   const file = options.file ?? FILE;
-  // A probe only exists when a matcher actually threw, which here is modelled by the presence of
-  // a token on one of the errors. Categorisation is then done by the **reporter's own function**,
-  // never by a rule copied into this file: a fixture that re-implements the thing under test only
-  // proves the copy agrees with itself.
-  const earned = errors.some((error) => error.matcherToken !== undefined);
-  const probe = earned
-    ? trustedProbe({ testFile: file, testFullName: fullName })
-    : trustedProbe({
-        testFile: file,
-        testFullName: fullName,
-        event: NO_MATCHER_FAILURE,
-        matcherFailures: 0,
-        matchers: [],
-        failureTokens: [],
-      });
+  // A confirmed matcher failure is modelled by an `assertionError` among the errors, recognised by
+  // **identity** rather than by any field. Categorisation is then done by the reporter's own
+  // function, never by a rule copied into this file: a fixture that re-implements the thing under
+  // test only proves the copy agrees with itself.
+  const confirmed = errors.some((error) => confirmedErrors.has(error));
+  const probe = trustedProbe({
+    testFile: file,
+    testFullName: fullName,
+    ...(confirmed
+      ? {}
+      : {
+          event: NON_EVIDENCE,
+          reason: 'the terminal value is not an object a matcher threw',
+          matcherFailures: 0,
+          matchers: [],
+        }),
+  });
   return {
     file,
     fullName,
@@ -163,7 +173,7 @@ function classify(reportValue: MutationReport, identity: KillingTest = INTENDED)
 }
 
 describe('1 — a spoofed assertion object', () => {
-  it('is not evidence, however it is decorated', () => {
+  evidenceTest('is not evidence, however it is decorated', () => {
     // The latest exploit: an ordinary Error with name = AssertionError and expected/actual/
     // showDiff/ok. The reporter categorises it ERROR because `expect` was never called and Vitest
     // marked it foreign; this module takes that verdict and does not look at the fields.
@@ -176,7 +186,7 @@ describe('1 — a spoofed assertion object', () => {
 });
 
 describe('2 — the same test name in another file', () => {
-  it('cannot claim the kill', () => {
+  evidenceTest('cannot claim the kill', () => {
     const result = classify(
       report([test(NAME, 'failed', { file: OTHER_FILE, errors: [assertionError()] })]),
     );
@@ -199,7 +209,7 @@ describe('2 — the same test name in another file', () => {
 });
 
 describe('3 — duplicate identity', () => {
-  it('is rejected rather than resolved arbitrarily', () => {
+  evidenceTest('is rejected rather than resolved arbitrarily', () => {
     const result = classify(
       report([test(NAME, 'passed'), test(NAME, 'failed', { errors: [assertionError()] })]),
     );
@@ -209,7 +219,7 @@ describe('3 — duplicate identity', () => {
 });
 
 describe('4 — a substring collision', () => {
-  it('does not match a longer name that contains the intended one', () => {
+  evidenceTest('does not match a longer name that contains the intended one', () => {
     const result = classify(
       report([test(`${NAME} after retry`, 'failed', { errors: [assertionError()] })]),
     );
@@ -225,7 +235,7 @@ describe('4 — a substring collision', () => {
 });
 
 describe('5 — the intended test asserts, something unrelated throws', () => {
-  it('is not a clean kill', () => {
+  evidenceTest('is not a clean kill', () => {
     const result = classify(
       report([
         test(NAME, 'failed', { errors: [assertionError()] }),
@@ -282,7 +292,7 @@ describe('9 — a beforeAll failure', () => {
     expect(result.outcome).toBe('HOOK_FAILURE');
   });
 
-  it('wins even when a test also recorded an assertion', () => {
+  evidenceTest('wins even when a test also recorded an assertion', () => {
     const result = classify(
       report([test(NAME, 'failed', { errors: [assertionError()] })], {
         hookErrors: [thrownError('teardown failed')],
@@ -309,6 +319,20 @@ describe('10 — an afterEach failure', () => {
       report([withoutProbe(test(NAME, 'failed', { errors: [assertionError()] }))]),
     );
     expect(result.outcome).not.toBe('KILLED_ASSERTION');
+  });
+});
+
+describe('an ineligible test', () => {
+  evidenceTest('is reported as such, not as infrastructure', () => {
+    // A test registered with plain `it` detected the mutation, but its terminal value was never
+    // compared by identity, so the failure cannot be called an assertion. That is a gap in the
+    // manifest's reach, not a defect in the code or in the test, and it is named separately.
+    const ineligible = test(NAME, 'failed', { errors: [thrownError('expected 1 to be 2', true)] });
+    const result = classify(report([{ ...ineligible, failureCategory: 'NOT_ELIGIBLE' }]));
+    expect(result.outcome).toBe('NOT_EVIDENCE_ELIGIBLE');
+    expect(result.outcome).not.toBe('KILLED_ASSERTION');
+    expect(result.detail).toMatch(/evidenceTest/u);
+    expect(result.matched).toBe(1);
   });
 });
 

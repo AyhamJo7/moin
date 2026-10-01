@@ -8,59 +8,59 @@
  *
  * ## Why nothing here reads the thrown value
  *
- * Four generations of this decision tried to recognise an assertion *from the error*, and every one
+ * Five generations of this decision tried to recognise an assertion *from the error*, and every one
  * was spoofed. Measured, in order:
  *
- *   - exit code alone → an unreachable database counted as a kill;
- *   - message text → `database connection refused while executing toThrow assertion` counted;
- *   - `name` plus `expected`/`actual`/`showDiff`/`ok` → an ordinary `Error` decorated with those
+ *   - exit code alone — an unreachable database counted as a kill;
+ *   - message text — `database connection refused while executing toThrow assertion` counted;
+ *   - `name` plus `expected`/`actual`/`showDiff`/`ok` — an ordinary `Error` decorated with those
  *     four fields counted;
- *   - the above plus "Vitest's serializer adds `constructor`/`toString` to foreign errors" → a
- *     **plain object literal** `{ name: 'AssertionError', expected, actual, showDiff, ok }` is
- *     serialized with none of those markers and counted, and so did an ordinary `Error` whose
- *     `toJSON()` returns that shape.
+ *   - the above plus "Vitest's serializer adds `constructor`/`toString` to foreign errors" — a
+ *     plain object literal of that shape has neither key, and counted;
+ *   - an enumerable token the matcher wrapper stamped on the error —
+ *     `Object.assign(new Error('x'), caught)` copies the token, and counted.
  *
- * The pattern is not that each heuristic was too loose. It is that the thrown value is **data
- * authored by the code under test**, so no property of it can ever be authority for what the test
- * framework did. There is no tighter list of fields that fixes this.
+ * The last is the instructive one. A token is a **transferable credential**: whatever a test can
+ * read off one object it can write onto another, and a symbol, a random value or a signature only
+ * raises the price of copying. So there is no token, and no field of the thrown value is consulted.
  *
  * ## What makes `ASSERTION` trustworthy now
  *
- * Provenance, not shape. `scripts/mutation-evidence-probe.ts` wraps every matcher on Vitest's
- * `Assertion.prototype`; a `MATCHER_FAILURE` record can only be created from inside that wrapper,
- * reached by actually invoking a matcher. `throw` does not call a matcher, so no throw of any shape
- * can create one. This reporter requires, for `ASSERTION`:
+ * **Object identity.** The trusted wrapper in `mutation-evidence-test.ts` catches the value that
+ * terminated the test body — before Vitest serializes it — and `mutation-evidence-state.ts`
+ * answers one question about it: is this, by `===`, an object a Vitest matcher threw in this
+ * invocation? `Object.assign` cannot forge that, because a copy is a different object.
  *
- *   - a probe of the exact contract version, with no `suspect` entry;
- *   - `event === 'MATCHER_FAILURE'`;
- *   - **exactly one** distinct matcher failure in the invocation — zero is not an assertion, and
- *     more than one means the test swallowed the first, so which failure propagated is unknown;
- *   - the probe's own `testFile`/`testFullName` equal to the identity this reporter recorded, so a
- *     record from another test or another invocation cannot be read as this one's.
+ * This reporter requires, for `ASSERTION`:
+ *
+ *   - a probe of the exact contract version, with nothing rejected and no `suspect` entry;
+ *   - the probe's own identity equal to the identity this reporter recorded;
+ *   - the test registered through the trusted wrapper (`evidenceEligible`);
+ *   - `event === MATCHER_IDENTITY_CONFIRMED`;
+ *   - exactly one matcher failure in the invocation.
  *
  * `expectCalls`, `name` and `message` are carried into the report as **diagnostics**. Nothing reads
- * them to classify. In particular `expectCalls > 0` is explicitly *not* sufficient: a test may call
- * a matcher successfully and then throw anything at all, which is mandatory fixture case 4.
+ * them to classify. `expectCalls > 0` is explicitly not sufficient: a test may call a matcher
+ * successfully and then throw anything at all.
  *
  * Message text is read for exactly two things, and both can only move a verdict *away* from
  * evidence: recognising a timeout, and recognising a transform or module-resolution failure.
  *
  * Anything this file cannot classify confidently is `UNKNOWN`, which is not evidence.
  */
-
 import { writeFileSync } from 'node:fs';
 import { relative } from 'node:path';
 import type { Reporter } from 'vitest/node';
 import {
-  MATCHER_FAILURE,
-  MATCHER_FAILURE_TOKEN,
+  MATCHER_IDENTITY_CONFIRMED,
+  NON_EVIDENCE,
   PROBE_META_KEY,
   PROBE_VERSION,
   type AssertionProbe,
 } from './mutation-probe-contract.ts';
 
 /** Bumped when the emitted shape changes; the sweep refuses a report it does not understand. */
-export const REPORT_VERSION = 3;
+export const REPORT_VERSION = 4;
 
 const OUTPUT = 'MOIN_MUTATION_REPORT';
 
@@ -70,7 +70,14 @@ const LOAD_MESSAGE =
   /Transform failed|PARSE_ERROR|Failed to load|Cannot find (?:module|package)|Failed to resolve/u;
 
 /** Why a test, hook, module or run failed. Only `ASSERTION` can become evidence. */
-export type FailureCategory = 'ASSERTION' | 'ERROR' | 'TIMEOUT' | 'LOAD' | 'UNKNOWN';
+export type FailureCategory =
+  | 'ASSERTION'
+  | 'ERROR'
+  | 'TIMEOUT'
+  | 'LOAD'
+  /** The test was not registered through the trusted wrapper, so its terminal value was never seen. */
+  | 'NOT_ELIGIBLE'
+  | 'UNKNOWN';
 
 /**
  * A failure as recorded for the report.
@@ -83,14 +90,6 @@ export interface ReportedError {
   readonly category: FailureCategory;
   /** First line only, escape sequences stripped. */
   readonly message: string;
-  /**
-   * The provenance token the matcher wrapper stamped on this value, when it carries one.
-   *
-   * Used for one check and one direction only: a matcher failure the test swallowed before failing
-   * some other way has an event but no propagated token, and is refused. A token can never promote
-   * a failure — without the event nothing reads it.
-   */
-  readonly matcherToken: string | undefined;
 }
 
 /** The canonical identity of one test, as the manifest names it. */
@@ -156,8 +155,6 @@ function reportError(error: unknown): ReportedError {
   >;
   const name = typeof record['name'] === 'string' ? record['name'] : 'unknown';
   const message = firstLine(record['message']);
-  const stamped = record[MATCHER_FAILURE_TOKEN];
-  const matcherToken = typeof stamped === 'string' ? stamped : undefined;
 
   let category: FailureCategory = 'ERROR';
   if (TIMEOUT_MESSAGE.test(message)) {
@@ -166,7 +163,7 @@ function reportError(error: unknown): ReportedError {
     category = 'LOAD';
   }
 
-  return { name, category, message, matcherToken };
+  return { name, category, message };
 }
 
 /**
@@ -197,18 +194,16 @@ function categoriseTest(
     return 'UNKNOWN';
   }
 
-  if (probe.event !== MATCHER_FAILURE) return 'ERROR';
-  // Zero is not a matcher failure; more than one means the test continued after the first, so which
-  // assertion made it fail cannot be established.
-  if (probe.matcherFailures !== 1) return 'UNKNOWN';
+  // An unwrapped test never had its terminal value compared, so there is nothing to trust. Reported
+  // as its own category rather than as an error, because the test is fine and the manifest is not.
+  if (!probe.evidenceEligible) return 'NOT_ELIGIBLE';
 
-  // The earned failure must be the one that propagated. Measured: a test that catches
-  // `expect(1).toBe(2)` and then throws an ordinary error has the event but not the token, and
-  // "the mutation was rejected by an assertion" would be false of it.
-  const propagated = errors.some(
-    (error) => error.matcherToken !== undefined && probe.failureTokens.includes(error.matcherToken),
-  );
-  if (!propagated) return 'ERROR';
+  // The terminal value was, by object identity, what a matcher threw in this invocation.
+  if (probe.event !== MATCHER_IDENTITY_CONFIRMED) return 'ERROR';
+  // Zero is not a matcher failure; more than one means the test continued after the first, so which
+  // assertion made it fail cannot be established. `confirmTerminal` checks this too; so does this,
+  // because a consumer must not depend on one side of the contract alone.
+  if (probe.matcherFailures !== 1) return 'UNKNOWN';
 
   return 'ASSERTION';
 }
@@ -250,29 +245,34 @@ function probeOf(task: TaskLike): AssertionProbe | undefined {
   const candidate = (meta as Record<string, unknown>)[PROBE_META_KEY];
   if (typeof candidate !== 'object' || candidate === null) return undefined;
   const record = candidate as Record<string, unknown>;
+  // Every field is checked: a record missing any of them is treated as absent rather than
+  // half-trusted, which is what makes a truncated or planted record fail closed.
   if (
     typeof record['version'] !== 'number' ||
     typeof record['event'] !== 'string' ||
+    typeof record['reason'] !== 'string' ||
     typeof record['invocationId'] !== 'string' ||
     typeof record['testFile'] !== 'string' ||
     typeof record['testFullName'] !== 'string' ||
+    typeof record['evidenceEligible'] !== 'boolean' ||
     typeof record['matcherFailures'] !== 'number' ||
     typeof record['expectCalls'] !== 'number' ||
     typeof record['rejected'] !== 'number' ||
-    !Array.isArray(record['failureTokens']) ||
     !Array.isArray(record['suspect'])
   ) {
     return undefined;
   }
   return {
     version: record['version'],
-    event: record['event'] === MATCHER_FAILURE ? MATCHER_FAILURE : 'NONE',
+    event:
+      record['event'] === MATCHER_IDENTITY_CONFIRMED ? MATCHER_IDENTITY_CONFIRMED : NON_EVIDENCE,
+    reason: record['reason'],
     invocationId: record['invocationId'],
     testFile: record['testFile'],
     testFullName: record['testFullName'],
+    evidenceEligible: record['evidenceEligible'],
     matcherFailures: record['matcherFailures'],
     matchers: stringsOf(record['matchers']),
-    failureTokens: stringsOf(record['failureTokens']),
     expectCalls: record['expectCalls'],
     rejected: record['rejected'],
     suspect: stringsOf(record['suspect']),

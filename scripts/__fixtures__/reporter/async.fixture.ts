@@ -1,19 +1,21 @@
 /** Async matcher failures: the matcher itself must be the thing that fails. */
-import { expect, it } from 'vitest';
+import { expect } from 'vitest';
+import { evidenceTest } from '../../mutation-evidence-test.ts';
 
-it('a resolves matcher that itself fails', async () => {
+evidenceTest('a resolves matcher that itself fails', async () => {
   await expect(Promise.resolve(1)).resolves.toBe(2);
 });
 
-it('a rejects matcher that itself fails', async () => {
+evidenceTest('a rejects matcher that itself fails', async () => {
   await expect(Promise.reject(new Error('actual'))).rejects.toThrow('expected');
 });
 
-it('a rejects matcher on a promise that resolves', async () => {
-  // Vitest rejects this before any matcher runs, so there is no matcher failure to record.
+evidenceTest('a rejects matcher on a promise that resolves', async () => {
+  // Vitest raises this from inside its own async chain without running a matcher. Instrumenting the
+  // `rejects`/`resolves` getters keeps it inside the trusted path.
   await expect(Promise.resolve(1)).rejects.toThrow('anything');
 });
 
-it('a negated matcher that fails', () => {
+evidenceTest('a negated matcher that fails', () => {
   expect(1).not.toBe(1);
 });

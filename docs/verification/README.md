@@ -22,7 +22,7 @@ byte-for-byte from memory.
 ```
 node scripts/mutation-sweep.ts --validate     # identities and anchors resolve; runs no tests
 node scripts/mutation-sweep.ts                # the full sweep
-node scripts/mutation-sweep.ts --only H1-reporter-trusts-serialized-assertion-shape
+node scripts/mutation-sweep.ts --only H10-state-skips-the-terminal-identity-check
 node scripts/mutation-sweep.ts --report docs/verification/audit-mutation-report.md
 node scripts/mutation-sweep.ts --json results.json        # machine-readable, for a diff
 ```
@@ -49,82 +49,108 @@ defined so that it can only mean **all** of the following:
 4. no hook failed around the tests;
 5. **exactly one** test in the run carries the manifest's canonical identity
    `killingTest: { file, fullName }`, both compared with `===`;
-6. that test executed;
-7. that test failed;
-8. the run did not time out, and the test did not fail by timing out;
-9. no module failed to build or load;
-10. the reporter typed the failure `ASSERTION`, which requires:
-11. a trusted in-process **matcher-failure event** for this invocation, with nothing rejected and
-    no `suspect` entry,
-12. that event bound to this exact test identity, carrying exactly one matcher failure, and the
-    value that propagated carrying that failure's token;
+6. that test executed, and failed;
+7. the run did not time out, and the test did not fail by timing out;
+8. no module failed to build or load;
+9. the test is registered through the trusted `evidenceTest` wrapper;
+10. the value that **terminated the test body** is, by `===`, an object a Vitest matcher threw;
+11. that object was recorded in **this** invocation, under **this** test identity;
+12. exactly one matcher failure occurred in the invocation, with nothing rejected or suspect;
 13. **no other test failed** anywhere in the run.
 
 Anything that cannot be established falls into a named non-evidence outcome.
 
-### Why the thrown value is not part of the proof
+### Why no property of the thrown value is part of the proof
 
-Four generations of this harness tried to recognise an assertion _from the error_. Each was
-measured, and each was spoofed:
+Five generations of this decision read the thrown value. Each was measured, and each was defeated:
 
-| Generation | Authority                                                                             | How it fell                                                                                                                           |
-| ---------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| 1          | exit code                                                                             | an unreachable database reported every variant killed                                                                                 |
-| 2          | message text                                                                          | `database connection refused while executing toThrow assertion` counted                                                               |
-| 3          | `name` + `expected`/`actual`/`showDiff`/`ok`                                          | an ordinary `Error` decorated with those four fields counted                                                                          |
-| 4          | the above, plus "Vitest's serializer adds `constructor`/`toString` to foreign errors" | a **plain object literal** of that shape is serialized with neither marker and counted; so did an `Error` whose `toJSON()` returns it |
+| Generation | Authority                                                                                    | How it fell                                                                                                          |
+| ---------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| 1          | exit code                                                                                    | an unreachable database reported every variant killed                                                                |
+| 2          | message text                                                                                 | `database connection refused while executing toThrow assertion` counted                                              |
+| 3          | `name` + `expected`/`actual`/`showDiff`/`ok`                                                 | an `Error` decorated with those four fields counted                                                                  |
+| 4          | the above, plus the `constructor`/`toString` keys Vitest's serializer adds to foreign errors | a **plain object literal** of that shape has neither key, and counted; so did an `Error` whose `toJSON()` returns it |
+| 5          | an enumerable, invocation-scoped token the matcher wrapper stamped on the error              | `Object.assign(new Error('ordinary'), caught)` copies the token, and counted                                         |
 
-The lesson is not that each list of fields was too short. A thrown value is **data authored by the
-code under test**, so no property of it can ever be authority for what the test framework did. There
-is no tighter heuristic that fixes this, and none is used any more. The `name` and `message` survive
-in the report as diagnostics, and `assertionCalls` with them; nothing reads them to classify.
+Generation 5 is the instructive one, because it looked like provenance. It was a **transferable
+credential**: whatever a test can read off one object it can write onto another. Making it a symbol,
+non-enumerable, random, hashed or signed changes nothing about that — it only raises the price of
+copying. So there is no token, no mark of any kind is written onto a thrown value, and nothing in
+the verdict reads a field of one.
 
-### Assertion provenance
+**Object identity is the one property of a value that cannot be transferred.**
+`Object.assign(terminal, caught)` yields `terminal !== caught`, and that is the whole mechanism.
 
-[`mutation-evidence-probe.ts`](../../scripts/mutation-evidence-probe.ts) is loaded as a `setupFiles`
-entry by **both** Vitest projects, so the sweep measures tests exactly as CI runs them. It does two
-things.
+### The architecture
 
-**It wraps the matcher boundary.** Every function on Vitest's `Assertion.prototype` — 185 own
-properties, the matchers among them writable and configurable — is replaced by a wrapper that
-appends a `MATCHER_FAILURE` record when that matcher throws. The `rejects` and `resolves` getters
-are wrapped too, because Vitest raises "promise resolved instead of rejecting" from inside its own
-async chain without running a matcher, and that is still its assertion machinery failing rather than
-the code under test throwing. `not` needs no wrapper: it returns an assertion with the same
+Four modules, each with one job:
+
+| Module                                                                   | Job                                                                                        |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
+| [`mutation-probe-contract.ts`](../../scripts/mutation-probe-contract.ts) | the shape the probe emits and the reporter reads; no side effects                          |
+| [`mutation-evidence-state.ts`](../../scripts/mutation-evidence-state.ts) | the module-private `WeakMap` and every decision about it; no side effects                  |
+| [`mutation-evidence-probe.ts`](../../scripts/mutation-evidence-probe.ts) | the `setupFiles` entry: patches the matcher prototype, opens and closes invocation windows |
+| [`mutation-evidence-test.ts`](../../scripts/mutation-evidence-test.ts)   | `evidenceTest`, the trusted wrapper that catches the terminal value                        |
+
+**The matcher boundary.** Every function on Vitest's `Assertion.prototype` — 185 own properties, the
+matchers among them writable and configurable — is replaced by a wrapper that, when the matcher
+throws, hands the thrown object to the recorder. The recorder puts it in the private `WeakMap`
+against `{ invocationId, file, fullName, matcher, seq }` and **does not touch the object**. The
+`rejects` and `resolves` getters are wrapped too, because Vitest raises "promise resolved instead of
+rejecting" from inside its own async chain without running a matcher, and that is still its
+assertion machinery failing. `not` needs no wrapper: it returns an assertion with the same
 prototype.
 
-That wrapper is the **only** code that can create a record. `throw` does not call a matcher, so no
-throw of any shape creates one. This is the whole of the security property, and it is architectural:
-reaching the record requires going through the machinery, not resembling its output.
+The recorder is handed out by `installMatcherRecorder()`, which may be called **once** — the probe
+is the caller, and a second caller gets an exception. A test therefore cannot obtain a recorder and
+register an object of its own. That is a guard against the easy attack; the load-bearing property is
+that confirmation needs the actual object a matcher threw.
 
-**It bounds each invocation.** `beforeEach` opens a window with a fresh id and the canonical
-identity read from Vitest's own task; `afterEach` closes it and emits only the records made inside
-it, for that identity. One matcher failure counts once however many wrappers the thrown value passes
-through on its way out, because records are deduplicated by the object's identity.
+**The terminal value.** A test registered with `evidenceTest` has its body run inside:
 
-| Guarantee                            | How                                                                                                                                               |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| produced inside the test process     | a setup file, in the worker                                                                                                                       |
-| tied to canonical identity           | read from `context.task`, never from `expect.getState()` — measured: under `it.concurrent` the module-level state reports _another_ test's name   |
-| tied to this invocation              | a fresh id per `beforeEach`, including per retry                                                                                                  |
-| cannot be made by throwing           | the record has one writer, and it is a matcher wrapper                                                                                            |
-| reset per test                       | the window's first sequence number excludes everything earlier                                                                                    |
-| stale records rejected               | counted in `rejected`, which makes the invocation non-evidence                                                                                    |
-| hook failures cannot fabricate it    | a failing `afterEach` stops the probe completing, so no record is attached at all; and a hook error outranks every test verdict in the classifier |
-| parameterized cases stay distinct    | identity is the full generated name                                                                                                               |
-| concurrency cannot cross-contaminate | overlapping windows are **detected** and both marked `suspect`; the probe declines to attribute rather than guessing                              |
+```ts
+try {
+  await body(context);
+} catch (terminal) {
+  confirmTerminal(terminal);
+  throw terminal;
+}
+```
+
+`confirmTerminal` asks the private map about that exact object, and nothing else. The error is
+rethrown unchanged, so a wrapped test fails, reports and reads exactly as it would have.
+
+**Why a wrapper, rather than a hook.** Measured on Vitest 5.0.2: by the time any hook runs the live
+object is gone. In `afterEach` and in `onTestFailed`, `task.result.errors[0]` is already a serialized
+plain object — `instanceof Error` is false and the constructor is undefined — so no hook can compare
+it by identity. `task.fn` is not exposed on the task at hook time, and Vitest 5 exports no base
+runner class to extend. Inside the test callback is the only place the terminal value still exists.
+
+**Eligibility follows from that.** A test registered with plain `it` runs exactly as before and
+fails exactly as before; it is simply not eligible for mutation evidence, and a manifest entry
+pointing at one is reported `NOT_EVIDENCE_ELIGIBLE` rather than quietly counted or hidden among
+infrastructure failures.
+
+| Guarantee                            | How                                                                                                                                                    |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| produced inside the test process     | a setup file, in the worker                                                                                                                            |
+| tied to canonical identity           | read from `context.task`, never from `expect.getState()` — measured: under `it.concurrent` the module-level state reports _another_ test's name        |
+| tied to this invocation              | a fresh id per `beforeEach`, including per retry                                                                                                       |
+| cannot be made by throwing           | the record has one writer, and it is a matcher wrapper                                                                                                 |
+| cannot be transferred                | the check is `===` against a `WeakMap`; nothing is written on the value                                                                                |
+| reset per test                       | the window's first sequence number excludes everything earlier                                                                                         |
+| stale records rejected               | a record from another invocation is refused by name, and anything outside the window is counted in `rejected`, which makes the invocation non-evidence |
+| hook failures cannot fabricate it    | a failing `afterEach` stops the probe completing, so no record is attached; a hook error also outranks every test verdict in the classifier            |
+| parameterized cases stay distinct    | each generated case is its own invocation, and a sibling's object is refused                                                                           |
+| concurrency cannot cross-contaminate | overlapping windows are **detected** and both marked `suspect`; the probe declines to attribute rather than guessing                                   |
 
 The probe is also the **last** writer of its key. A test can reach `task.meta` and write a complete,
-self-consistent record naming itself — the fixtures do exactly that, token and all — and the probe's
-`afterEach` overwrites it, because a setup file's hooks run after the body.
+self-consistent record naming itself — the fixtures do exactly that — and the probe's `afterEach`
+overwrites it, because a setup file's hooks run after the body.
 
-**One narrow use of the error object.** The wrapper stamps an enumerable token on the value it is
-about to rethrow, and the reporter requires the failing test to carry one of the invocation's
-tokens. This answers one question — did the failure the invocation _earned_ actually propagate, or
-did the test catch it and fail some other way — and it can only ever **remove** evidence: without
-the event nothing reads the token, so no token can create a verdict. The token is scoped to one
-invocation, which is how a replayed one is spotted. It is a correlation mechanism, not a secret, and
-is not described as cryptographic.
+`expect.getState().assertionCalls` survives as a **diagnostic**. A successful matcher followed by any
+throw reports a non-zero count and zero failures, which is precisely why a counter could never be
+the signal.
 
 ### How the killing test is identified
 
@@ -132,8 +158,8 @@ A variant names its killing test as a canonical pair:
 
 ```json
 "killingTest": {
-  "file": "packages/db/src/audit-verification.integration.test.ts",
-  "fullName": "the sweep > refuses to report a partial run as sound"
+  "file": "scripts/check-audit-arguments.integration.test.ts",
+  "fullName": "the scanner > refuses a scan that inspected nothing"
 }
 ```
 
@@ -145,21 +171,16 @@ tree or another test.
 
 ### Applying a variant
 
-`applyMutation` in [`mutation-sweep.ts`](../../scripts/mutation-sweep.ts) is the one place a variant
-is injected, used by both the sweep and `--validate`, so validation can be neither more permissive
-than execution nor less. It refuses an anchor that occurs zero times, an anchor that occurs more than
-once, an empty anchor, and a replacement identical to its anchor. Each refusal is `INVALID_MUTANT`.
+`applyMutation` is the one place a variant is injected, used by both the sweep and `--validate`, so
+validation can be neither more permissive than execution nor less. It refuses an anchor that occurs
+zero times, an anchor that occurs more than once, an empty anchor, and a replacement identical to its
+anchor. Each refusal is `INVALID_MUTANT`, and nothing is written.
 
 Uniqueness is enforced **at application time** and not only in `--validate`, because an operator who
 skips validation must not get a weaker guarantee. The splice is positional rather than
 `String.prototype.replace`, which interprets its replacement: `$$` means a literal `$`, so every
 variant whose replacement contained a SQL function body was once silently corrupted into `AS $` and
 the migration failed with a syntax error. The variant looked detected; nothing had been tested.
-
-`--validate` additionally checks the manifest before any test runs: duplicate ids, a missing or
-malformed identity, files that do not exist, and names `vitest list` does not collect exactly once.
-Table-driven names are built at run time, so the collector reports the literal template; those are
-listed as `deferred` and the baseline gate enforces uniqueness for real.
 
 ### The outcomes, and why only one of them is evidence
 
@@ -170,6 +191,7 @@ listed as `deferred` and the baseline gate enforces uniqueness for real.
 | `BASELINE_FAILED`         | the intended test did not pass cleanly on the pristine tree                    | no                                             |
 | `NO_TEST_MATCH`           | tests were collected, none carries the identity — a manifest error             | no                                             |
 | `AMBIGUOUS_TEST_IDENTITY` | more than one test carries it, so which failed cannot be established           | no                                             |
+| `NOT_EVIDENCE_ELIGIBLE`   | the test detected the mutation but is not registered through `evidenceTest`    | no: a gap in the corpus's reach, not a defect  |
 | `UNRELATED_FAILURE`       | the intended test asserted, but something else failed too                      | no: the kill is not attributable               |
 | `HOOK_FAILURE`            | a `beforeAll`/`afterEach` threw around the tests                               | no                                             |
 | `INFRA_FAILURE`           | unreachable database, revoked grant, global setup, or no tests collected       | no                                             |
@@ -184,35 +206,36 @@ reads an error's name, message or fields.
 
 ### Pinned against real Vitest
 
-Matcher wrapping and the serializer's behaviour are facts about Vitest, not about our types, and a
-fixture built by hand only proves the fixture agrees with the assumption that produced it — which is
-precisely where generations 3 and 4 were defeated. So
+Whether a copy really is a different object as Vitest reports it, whether the matcher wrapper really
+intercepts every assertion style, and whether a planted record really is overwritten are facts about
+Vitest and this harness together. A fixture built by hand only proves the fixture agrees with the
+assumption that produced it, which is where generations 3, 4 and 5 were defeated. So
 [`mutation-reporter.realvitest.test.ts`](../../scripts/mutation-reporter.realvitest.test.ts) spawns a
-child Vitest with **the production probe, the production reporter and the production
-`categoriseTest`** over real failing fixtures in [`scripts/__fixtures__/reporter/`](../../scripts/__fixtures__/reporter/),
-and asserts the machine-readable output. Nothing is reimplemented there.
+child Vitest with **the production probe, the production wrapper, the production reporter and the
+production `categoriseTest`** over real failing fixtures in
+[`scripts/__fixtures__/reporter/`](../../scripts/__fixtures__/reporter/), and asserts the output.
 
 Measured, and asserted:
 
-| Fixture                                                                                     | Verdict                                   |
-| ------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| plain thrown `{ name: 'AssertionError', expected, actual, showDiff, ok }`                   | `ERROR`                                   |
-| `Error` whose `toJSON()` returns that shape                                                 | `ERROR`                                   |
-| `Error` decorated with those fields                                                         | `ERROR`                                   |
-| a successful `expect`, then that plain throw (`expectCalls: 2`)                             | `ERROR`                                   |
-| successful expects, then the `toJSON` error                                                 | `ERROR`                                   |
-| Node's own `assert.AssertionError`                                                          | `ERROR`                                   |
-| a genuine matcher failure                                                                   | `ASSERTION`                               |
-| genuine failures through `not`, `rejects`, `resolves`, and `rejects` on a resolving promise | `ASSERTION`                               |
-| a matcher failure the test swallowed before throwing                                        | `ERROR`                                   |
-| two matcher failures in one test                                                            | `UNKNOWN`                                 |
-| a forged probe record, complete and token-stamped                                           | `ERROR` — overwritten                     |
-| a forged record naming another test                                                         | `ERROR` — overwritten                     |
-| concurrent tests failing matchers                                                           | `UNKNOWN` — refused                       |
-| an `afterEach` failure beside an assertion                                                  | `UNKNOWN` — no record attached            |
-| a timeout                                                                                   | `TIMEOUT`                                 |
-| a `beforeAll` failure                                                                       | suite hook error, the test never executed |
-| the same full name in two modules                                                           | distinguished by `file`                   |
+| Fixture                                                                                                                   | Verdict                                                                    |
+| ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| catch a matcher failure, `Object.assign` it onto an ordinary `Error`, throw that                                          | `ERROR` — a copy is a different object                                     |
+| every own property **and symbol** copied onto another `Error`                                                             | `ERROR`                                                                    |
+| a clone with the same prototype, name, message and stack                                                                  | `ERROR`                                                                    |
+| catch, `await`, then throw a copy                                                                                         | `ERROR`                                                                    |
+| the same matcher object rethrown immediately                                                                              | `ASSERTION`                                                                |
+| the same matcher object thrown later in the same invocation                                                               | `ASSERTION` — the intended semantics while exactly one matcher failed      |
+| a swallowed matcher failure, then an ordinary error                                                                       | `ERROR`                                                                    |
+| a matcher object from **another test**                                                                                    | `ERROR` — rejected by invocation id                                        |
+| a matcher object from the **previous retry** of the same test                                                             | `ERROR` — a retry is a new invocation                                      |
+| a matcher object from **another parameterized case**                                                                      | `ERROR`, while the case that earned it is `ASSERTION`                      |
+| two matcher failures in one invocation                                                                                    | `ERROR` — fails closed                                                     |
+| concurrent tests failing matchers                                                                                         | `UNKNOWN` — overlap detected                                               |
+| plain thrown assertion-shaped object · `toJSON` spoof · successful `expect` then a throw · Node's `assert.AssertionError` | `ERROR`, all four, with zero matcher failures                              |
+| a forged probe record planted in `task.meta`, complete and consistent                                                     | `ERROR` — overwritten                                                      |
+| an unwrapped test with a genuine matcher failure                                                                          | `NOT_ELIGIBLE`                                                             |
+| genuine failures through `not`, `rejects`, `resolves`, and `rejects` on a resolving promise                               | `ASSERTION`                                                                |
+| a timeout · a `beforeAll` failure · an `afterEach` failure · the same name in two modules                                 | `TIMEOUT` · hook error, not executed · `UNKNOWN` · distinguished by `file` |
 
 A Vitest upgrade that moves the matcher boundary fails loudly there instead of quietly turning the
 corpus into non-evidence.
@@ -220,17 +243,22 @@ corpus into non-evidence.
 ### The harness's own variants
 
 The `H*` variants attack the harness rather than the audit subsystem: each removes one conjunct of
-the rules above and names the adversarial test that must catch it. They are what makes the rest of
-the report mean anything, so they are part of the same corpus.
+the rules above and names the adversarial test that must catch it.
 
-Two limits are worth stating rather than hiding. First, the sweep passes the mutated reporter to the
-mutated run; that is sound because every `H*` reporter variant is a **relaxation**, so a genuine
-matcher failure still types `ASSERTION` and the kill stays observable, while a tightening would fail
-closed into a non-evidence outcome rather than report a false kill. Second, a probe mutation broad
-enough to stop _any_ test producing `ASSERTION` cannot be killed by an assertion — the harness would
-be unable to report its own kill. Those properties are proven by the real-Vitest suite instead, and
-the probe variants in the manifest are deliberately narrow enough that the parent run's own record
-stays valid.
+Three limits are worth stating rather than hiding.
+
+- The sweep passes the **mutated reporter** to the mutated run. That is sound because every `H*`
+  reporter variant is a _relaxation_, so a genuine matcher failure still types `ASSERTION` and the
+  kill stays observable; a tightening would fail closed into a non-evidence outcome rather than
+  report a false kill.
+- A mutation that stops **any** test producing `ASSERTION` cannot be killed by an assertion, because
+  the harness could not then report its own kill. Two candidate variants were exactly that — removing
+  `confirmTerminal` from the wrapper, and removing `beginEvidence` — and both were **removed from the
+  manifest** rather than kept as permanent non-evidence rows. The real-Vitest suite asserts those two
+  invariants directly instead.
+- A test registered with plain `it` cannot bear evidence, so a manifest entry naming one is reported
+  `NOT_EVIDENCE_ELIGIBLE`. That is a gap in reach, not a defect, and the report says which entries
+  are in it and what would close them.
 
 ### Reading a SURVIVED verdict
 

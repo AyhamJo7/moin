@@ -15,6 +15,7 @@ import { createPool, type Pool } from '@moin/db/pool';
 import { appendAuditEvent, withTenant } from '@moin/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { scan, type Finding } from './check-audit-arguments.ts';
+import { evidenceTest } from './mutation-evidence-test.ts';
 
 const ORG = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 const runProcess = promisify(execFile);
@@ -152,7 +153,7 @@ describe('the scanner on a trail the writer produced', () => {
 });
 
 describe('what the scanner catches', () => {
-  it('a name, which no pattern would predict, by the structural rule', async () => {
+  evidenceTest('a name, which no pattern would predict, by the structural rule', async () => {
     await forge('test.scan', { related_id: 'Gurlitt Sanitär GmbH' });
     const list = await findings();
     expect(rulesFor(list, 'test.scan.related_id')).toStrictEqual(['free-text-argument']);
@@ -161,7 +162,7 @@ describe('what the scanner catches', () => {
     expect(reported).not.toMatch(/Gurlitt|Sanitär/u);
   });
 
-  it('a contact detail, named as such', async () => {
+  evidenceTest('a contact detail, named as such', async () => {
     await forge('test.scan', { related_id: 'kundin@example.test' });
     await forge('test.scan', { related_id: '+49 170 1234567' });
     const list = await findings();
@@ -172,14 +173,14 @@ describe('what the scanner catches', () => {
     expect(detail).not.toMatch(/kundin@example\.test|1234567/u);
   });
 
-  it('a key that never passed the writer at all', async () => {
+  evidenceTest('a key that never passed the writer at all', async () => {
     await forge('test.scan', { caller_number: randomUUID() });
     expect(rulesFor(await findings(), 'test.scan.caller_number')).toStrictEqual([
       'unregistered-argument-key',
     ]);
   });
 
-  it('a value kind the registry was widened to accept', async () => {
+  evidenceTest('a value kind the registry was widened to accept', async () => {
     // Its own precondition: `findings()` refuses a scan that inspected nothing, so this test needs
     // at least one event of its own rather than borrowing one from an earlier test in the file.
     // Relying on file order made it pass in the suite and fail standalone, which the mutation
@@ -213,7 +214,7 @@ describe('what the scanner catches', () => {
     }
   });
 
-  it('a validation entry carrying something other than a bounded scalar', async () => {
+  evidenceTest('a validation entry carrying something other than a bounded scalar', async () => {
     await privileged.query('alter table audit_events disable trigger audit_events_linked_only');
     await privileged.query(
       `insert into audit_events(
@@ -233,62 +234,70 @@ describe('what the scanner catches', () => {
     ]);
   });
 
-  it('a forged argument key that is itself personal data, without printing it', async () => {
-    // `args_sanitized` has no key-level CHECK, so a row that bypassed the writer can carry a key
-    // that *is* the leak. Printing the subject verbatim would make this check the disclosure.
-    await forge('test.scan', { 'hans.mueller@example.test': true });
-    const list = await findings();
-    const reported = list.map((f) => `${f.subject} ${f.detail}`).join(' ');
-    expect(reported).toMatch(/unprintable key/u);
-    expect(reported).not.toMatch(/hans\.mueller@example\.test/u);
-  });
+  evidenceTest(
+    'a forged argument key that is itself personal data, without printing it',
+    async () => {
+      // `args_sanitized` has no key-level CHECK, so a row that bypassed the writer can carry a key
+      // that *is* the leak. Printing the subject verbatim would make this check the disclosure.
+      await forge('test.scan', { 'hans.mueller@example.test': true });
+      const list = await findings();
+      const reported = list.map((f) => `${f.subject} ${f.detail}`).join(' ');
+      expect(reported).toMatch(/unprintable key/u);
+      expect(reported).not.toMatch(/hans\.mueller@example\.test/u);
+    },
+  );
 
-  it('an operation or target kind that only a dropped CHECK could have allowed', async () => {
-    // The column CHECKs block these values while they exist — verified: the insert below fails
-    // with `audit_events_operation_check` until the constraints are dropped. So this rule guards
-    // the case where a migration weakens or removes them, which is the same one-line change that
-    // the value-kind test covers for the argument registry.
-    await privileged.query('alter table audit_events disable trigger audit_events_linked_only');
-    await privileged.query('alter table audit_events drop constraint audit_events_operation_check');
-    await privileged.query(
-      'alter table audit_events drop constraint audit_events_target_kind_check',
-    );
-    try {
+  evidenceTest(
+    'an operation or target kind that only a dropped CHECK could have allowed',
+    async () => {
+      // The column CHECKs block these values while they exist — verified: the insert below fails
+      // with `audit_events_operation_check` until the constraints are dropped. So this rule guards
+      // the case where a migration weakens or removes them, which is the same one-line change that
+      // the value-kind test covers for the argument registry.
+      await privileged.query('alter table audit_events disable trigger audit_events_linked_only');
       await privileged.query(
-        `insert into audit_events(
+        'alter table audit_events drop constraint audit_events_operation_check',
+      );
+      await privileged.query(
+        'alter table audit_events drop constraint audit_events_target_kind_check',
+      );
+      try {
+        await privileged.query(
+          `insert into audit_events(
            organisation_id, id, seq, prev_hash, hash, source, operation, target_kind,
            result, created_at, canonical_payload)
          values ($1, $2, (select coalesce(max(seq), 0) + 1 from audit_events where organisation_id = $1),
            decode(repeat('00', 32), 'hex'), decode(repeat('11', 32), 'hex'),
            'api', 'Hans Müller', 'Kundenkartei', 'succeeded', now(), 'forged')`,
-        [ORG, randomUUID()],
-      );
-      const list = await findings();
-      expect(
-        list.filter((f) => f.rule === 'malformed-operation-or-target-kind').length,
-      ).toBeGreaterThan(0);
-      const reported = list.map((f) => `${f.subject} ${f.detail}`).join(' ');
-      expect(reported).not.toMatch(/Hans Müller|Kundenkartei/u);
-    } finally {
-      // The append-only guard refuses this too, which is the guard doing its job.
-      await privileged.query('alter table audit_events disable trigger audit_events_append_only');
-      await privileged.query(`delete from audit_events where operation = 'Hans Müller'`);
-      await privileged.query(
-        'alter table audit_events enable always trigger audit_events_append_only',
-      );
-      await privileged.query(
-        `alter table audit_events add constraint audit_events_operation_check
+          [ORG, randomUUID()],
+        );
+        const list = await findings();
+        expect(
+          list.filter((f) => f.rule === 'malformed-operation-or-target-kind').length,
+        ).toBeGreaterThan(0);
+        const reported = list.map((f) => `${f.subject} ${f.detail}`).join(' ');
+        expect(reported).not.toMatch(/Hans Müller|Kundenkartei/u);
+      } finally {
+        // The append-only guard refuses this too, which is the guard doing its job.
+        await privileged.query('alter table audit_events disable trigger audit_events_append_only');
+        await privileged.query(`delete from audit_events where operation = 'Hans Müller'`);
+        await privileged.query(
+          'alter table audit_events enable always trigger audit_events_append_only',
+        );
+        await privileged.query(
+          `alter table audit_events add constraint audit_events_operation_check
            check (operation ~ '^[a-z][a-z0-9_.-]{0,127}$')`,
-      );
-      await privileged.query(
-        `alter table audit_events add constraint audit_events_target_kind_check
+        );
+        await privileged.query(
+          `alter table audit_events add constraint audit_events_target_kind_check
            check (target_kind ~ '^[a-z][a-z0-9_]{0,63}$')`,
-      );
-      await privileged.query(
-        'alter table audit_events enable always trigger audit_events_linked_only',
-      );
-    }
-  });
+        );
+        await privileged.query(
+          'alter table audit_events enable always trigger audit_events_linked_only',
+        );
+      }
+    },
+  );
 });
 
 describe('values are validated against their registered kind', () => {
@@ -353,64 +362,73 @@ describe('values are validated against their registered kind', () => {
   ];
 
   for (const testCase of cases) {
-    it(`catches ${testCase.label}`, async () => {
-      const isolated = await createTestDatabase('audit-arguments-kind');
-      const owner = createPool({ connectionString: isolated.migrationUrl, max: 1 });
-      try {
-        await owner.query(`insert into organisations(id, slug, name) values ($1, 'kind', 'Kind')`, [
-          ORG,
-        ]);
-        await owner.query(
-          `insert into audit_argument_allowlist(operation, argument_key, value_kind, reason)
+    evidenceTest(
+      `catches ${testCase.label}`,
+      async () => {
+        const isolated = await createTestDatabase('audit-arguments-kind');
+        const owner = createPool({ connectionString: isolated.migrationUrl, max: 1 });
+        try {
+          await owner.query(
+            `insert into organisations(id, slug, name) values ($1, 'kind', 'Kind')`,
+            [ORG],
+          );
+          await owner.query(
+            `insert into audit_argument_allowlist(operation, argument_key, value_kind, reason)
            values ('test.scan', 'related_id', 'uuid', 'opaque'),
                   ('test.scan', 'was_confirmed', 'boolean', 'flag'),
                   ('test.scan', 'item_count', 'count', 'bounded')`,
+          );
+          await forgeInto(owner, ORG, 'test.scan', JSON.stringify(testCase.args));
+
+          const result = await scan(isolated.appUrl);
+          expect(result.events).toBeGreaterThan(0);
+          expect(rulesFor([...result.findings], testCase.subject)).toContain(testCase.rule);
+          // The value is never printed, whatever its type.
+          const reported = result.findings.map((f) => `${f.subject} ${f.detail}`).join(' ');
+          for (const value of Object.values(testCase.args)) {
+            expect(reported).not.toContain(String(value));
+          }
+        } finally {
+          await owner.end();
+          await isolated.drop();
+        }
+      },
+      90_000,
+    );
+  }
+
+  evidenceTest(
+    'fails closed on a registered kind it has no validator for',
+    async () => {
+      // The `CHECK` has to be dropped first, which is the point: widening the kinds is a one-line
+      // migration, and a kind nobody wrote a validator for cannot be said to have been checked.
+      const isolated = await createTestDatabase('audit-arguments-unknown-kind');
+      const owner = createPool({ connectionString: isolated.migrationUrl, max: 1 });
+      try {
+        await owner.query(`insert into organisations(id, slug, name) values ($1, 'unk', 'Unk')`, [
+          ORG,
+        ]);
+        await owner.query(
+          `alter table audit_argument_allowlist drop constraint audit_argument_allowlist_value_kind_check`,
         );
-        await forgeInto(owner, ORG, 'test.scan', JSON.stringify(testCase.args));
+        await owner.query(
+          `insert into audit_argument_allowlist(operation, argument_key, value_kind, reason)
+         values ('test.scan', 'note', 'text', 'free text, which is the thing we do not allow')`,
+        );
+        await forgeInto(owner, ORG, 'test.scan', JSON.stringify({ note: 'anything at all' }));
 
         const result = await scan(isolated.appUrl);
-        expect(result.events).toBeGreaterThan(0);
-        expect(rulesFor([...result.findings], testCase.subject)).toContain(testCase.rule);
-        // The value is never printed, whatever its type.
-        const reported = result.findings.map((f) => `${f.subject} ${f.detail}`).join(' ');
-        for (const value of Object.values(testCase.args)) {
-          expect(reported).not.toContain(String(value));
-        }
+        const rules = rulesFor([...result.findings], 'test.scan.note');
+        expect(rules).toContain('unvalidatable-argument-kind');
+        // And the registry row itself is still reported.
+        expect(result.findings.some((f) => f.rule === 'unreviewed-value-kind')).toBe(true);
       } finally {
         await owner.end();
         await isolated.drop();
       }
-    }, 90_000);
-  }
-
-  it('fails closed on a registered kind it has no validator for', async () => {
-    // The `CHECK` has to be dropped first, which is the point: widening the kinds is a one-line
-    // migration, and a kind nobody wrote a validator for cannot be said to have been checked.
-    const isolated = await createTestDatabase('audit-arguments-unknown-kind');
-    const owner = createPool({ connectionString: isolated.migrationUrl, max: 1 });
-    try {
-      await owner.query(`insert into organisations(id, slug, name) values ($1, 'unk', 'Unk')`, [
-        ORG,
-      ]);
-      await owner.query(
-        `alter table audit_argument_allowlist drop constraint audit_argument_allowlist_value_kind_check`,
-      );
-      await owner.query(
-        `insert into audit_argument_allowlist(operation, argument_key, value_kind, reason)
-         values ('test.scan', 'note', 'text', 'free text, which is the thing we do not allow')`,
-      );
-      await forgeInto(owner, ORG, 'test.scan', JSON.stringify({ note: 'anything at all' }));
-
-      const result = await scan(isolated.appUrl);
-      const rules = rulesFor([...result.findings], 'test.scan.note');
-      expect(rules).toContain('unvalidatable-argument-kind');
-      // And the registry row itself is still reported.
-      expect(result.findings.some((f) => f.rule === 'unreviewed-value-kind')).toBe(true);
-    } finally {
-      await owner.end();
-      await isolated.drop();
-    }
-  }, 90_000);
+    },
+    90_000,
+  );
 
   it('accepts every registered kind when the stored value actually conforms', async () => {
     // The other half of the property: a validator that rejects valid values is noise.
@@ -510,26 +528,30 @@ describe('scanner coverage is reconciled, not assumed', () => {
     return { db: isolated, hidden };
   }
 
-  it('fails when a provisioned tenant hides a leaking argument outside the register', async () => {
-    // The exact fail-open shape: the scanner walked the register, found tenant A clean, and never
-    // learned that tenant B existed at all — so the planted leak went unreported and it exited 0.
-    const { db: isolated, hidden } = await withHiddenTenant('audit-arguments-hidden-leak', {
-      related_id: 'Gurlitt Sanitär GmbH',
-    });
-    try {
-      const result = await scan(isolated.appUrl);
-      expect(result.unregistered).toBe(1);
-      expect(rulesFor([...result.findings], hidden)).toContain('unregistered-tenant-not-scanned');
+  evidenceTest(
+    'fails when a provisioned tenant hides a leaking argument outside the register',
+    async () => {
+      // The exact fail-open shape: the scanner walked the register, found tenant A clean, and never
+      // learned that tenant B existed at all — so the planted leak went unreported and it exited 0.
+      const { db: isolated, hidden } = await withHiddenTenant('audit-arguments-hidden-leak', {
+        related_id: 'Gurlitt Sanitär GmbH',
+      });
+      try {
+        const result = await scan(isolated.appUrl);
+        expect(result.unregistered).toBe(1);
+        expect(rulesFor([...result.findings], hidden)).toContain('unregistered-tenant-not-scanned');
 
-      const run = await runCheck(isolated.appUrl);
-      expect(run.code).not.toBe(0);
-      expect(run.out).toMatch(/could not reach 1 provisioned tenant/u);
-      // Names the coverage gap without leaking what is inside it.
-      expect(run.out).not.toMatch(/Gurlitt|Sanitär/u);
-    } finally {
-      await isolated.drop();
-    }
-  }, 120_000);
+        const run = await runCheck(isolated.appUrl);
+        expect(run.code).not.toBe(0);
+        expect(run.out).toMatch(/could not reach 1 provisioned tenant/u);
+        // Names the coverage gap without leaking what is inside it.
+        expect(run.out).not.toMatch(/Gurlitt|Sanitär/u);
+      } finally {
+        await isolated.drop();
+      }
+    },
+    120_000,
+  );
 
   it('fails on an unregistered tenant even when its arguments are perfectly valid', async () => {
     // Coverage is the property, not cleanliness of what happened to be visible.
@@ -612,33 +634,97 @@ describe('CASE 5 — the scanner uses the same population snapshot', () => {
    * having skipped it. The page size here is the scanner's real `TENANT_PAGE_SIZE` of 200, so the
    * first page is full and a second is genuinely requested.
    */
-  it('a late registration behind the cursor is excluded by the bound, not skipped by ordering', async () => {
-    const isolated = await createTestDatabase('audit-arguments-population');
-    const owner = createPool({ connectionString: isolated.migrationUrl, max: 1 });
-    try {
-      await owner.query(
-        `insert into audit_argument_allowlist(operation, argument_key, value_kind, reason)
+  evidenceTest(
+    'a late registration behind the cursor is excluded by the bound, not skipped by ordering',
+    async () => {
+      const isolated = await createTestDatabase('audit-arguments-population');
+      const owner = createPool({ connectionString: isolated.migrationUrl, max: 1 });
+      try {
+        await owner.query(
+          `insert into audit_argument_allowlist(operation, argument_key, value_kind, reason)
          values ('test.scan', 'related_id', 'uuid', 'opaque')`,
-      );
-      // 200 tenants, all sorting after the late one below, so the cursor ends up lexically ahead.
-      await owner.query(
-        `insert into organisations(id, slug, name)
+        );
+        // 200 tenants, all sorting after the late one below, so the cursor ends up lexically ahead.
+        await owner.query(
+          `insert into organisations(id, slug, name)
          select ('f' || lpad(to_hex(g), 7, '0') || '-ffff-4fff-8fff-ffffffffffff')::uuid,
                 'bulk-' || g, 'Bulk ' || g
          from generate_series(1, 200) g`,
-      );
-      const marked = await owner.query<{ n: string }>(
-        'select coalesce(max(registration_seq), 0)::text as n from audit_chain_registry',
-      );
-      expect(Number(marked.rows[0]?.n)).toBe(200);
+        );
+        const marked = await owner.query<{ n: string }>(
+          'select coalesce(max(registration_seq), 0)::text as n from audit_chain_registry',
+        );
+        expect(Number(marked.rows[0]?.n)).toBe(200);
 
-      // Every tenant gets one valid event so the scan has something to inspect.
-      const appPool = isolated.pool();
-      const ids = await owner.query<{ id: string }>(
-        'select id::text from organisations order by id',
-      );
-      for (const row of ids.rows) {
-        await withTenant(appPool, row.id, (c) =>
+        // Every tenant gets one valid event so the scan has something to inspect.
+        const appPool = isolated.pool();
+        const ids = await owner.query<{ id: string }>(
+          'select id::text from organisations order by id',
+        );
+        for (const row of ids.rows) {
+          await withTenant(appPool, row.id, (c) =>
+            appendAuditEvent(c, {
+              source: 'api',
+              operation: 'test.scan',
+              targetKind: 'organisation',
+              result: 'succeeded',
+              argsSanitized: { related_id: randomUUID() },
+            }),
+          );
+        }
+
+        const before = await scan(isolated.appUrl);
+        expect(before.populationHighWater).toBe('200');
+        expect(before.tenants).toBe(200);
+        expect(before.findings).toStrictEqual([]);
+
+        // The late one: registered last, sorts first, and carries a leak.
+        const late = '00000000-0000-4000-8000-000000000001';
+        await owner.query(`insert into organisations(id, slug, name) values ($1, 'late', 'Late')`, [
+          late,
+        ]);
+        await forgeInto(owner, late, 'test.scan', JSON.stringify({ related_id: 'Gurlitt GmbH' }));
+
+        // Its sequence is above the previous mark, which is what makes it the *next* run's business
+        // rather than something the previous run should have caught.
+        const lateSeq = await owner.query<{ n: string }>(
+          'select registration_seq::text as n from audit_chain_registry where tenant_id = $1',
+          [late],
+        );
+        expect(Number(lateSeq.rows[0]?.n)).toBe(201);
+
+        // A fresh run captures a new mark, so it scans 201 tenants and finds the leak. Under UUID
+        // paging the leak-bearing tenant sat behind the cursor and was reported clean.
+        const after = await scan(isolated.appUrl);
+        expect(after.populationHighWater).toBe('201');
+        expect(after.tenants).toBe(201);
+        expect(after.findings.some((f) => f.rule === 'free-text-argument')).toBe(true);
+      } finally {
+        await owner.end();
+        await isolated.drop();
+      }
+    },
+    240_000,
+  );
+
+  evidenceTest(
+    'does not adopt a registration that lands while it is running',
+    async () => {
+      // The scanner's own page boundary. Two members in the captured population, page size is the
+      // production 200 so one page drains it; a tenant registered after the mark is read must not
+      // make this run fail, and must be picked up by the next one.
+      const isolated = await createTestDatabase('audit-arguments-midrun');
+      const owner = createPool({ connectionString: isolated.migrationUrl, max: 1 });
+      try {
+        await owner.query(
+          `insert into audit_argument_allowlist(operation, argument_key, value_kind, reason)
+         values ('test.scan', 'related_id', 'uuid', 'opaque')`,
+        );
+        await owner.query(
+          `insert into organisations(id, slug, name) values ($1, 'mid-one', 'One')`,
+          [ORG],
+        );
+        await withTenant(isolated.pool(), ORG, (c) =>
           appendAuditEvent(c, {
             source: 'api',
             operation: 'test.scan',
@@ -647,88 +733,39 @@ describe('CASE 5 — the scanner uses the same population snapshot', () => {
             argsSanitized: { related_id: randomUUID() },
           }),
         );
+
+        const first = await scan(isolated.appUrl);
+        expect(first.populationHighWater).toBe('1');
+        expect(first.tenants).toBe(1);
+        expect(first.findings).toStrictEqual([]);
+
+        // Sorts behind the first tenant's UUID, registered after it.
+        const behind = '00000000-0000-4000-8000-000000000002';
+        await owner.query(
+          `insert into organisations(id, slug, name) values ($1, 'mid-two', 'Two')`,
+          [behind],
+        );
+        await forgeInto(
+          owner,
+          behind,
+          'test.scan',
+          JSON.stringify({ related_id: 'Behind Cursor' }),
+        );
+
+        const second = await scan(isolated.appUrl);
+        expect(second.populationHighWater).toBe('2');
+        expect(second.tenants).toBe(2);
+        expect(second.findings.some((f) => f.rule === 'free-text-argument')).toBe(true);
+        // Coverage traversal and the provisioning witness are separate: this tenant *is* registered,
+        // so the witness is silent and only traversal could have caught it.
+        expect(second.unregistered).toBe(0);
+      } finally {
+        await owner.end();
+        await isolated.drop();
       }
-
-      const before = await scan(isolated.appUrl);
-      expect(before.populationHighWater).toBe('200');
-      expect(before.tenants).toBe(200);
-      expect(before.findings).toStrictEqual([]);
-
-      // The late one: registered last, sorts first, and carries a leak.
-      const late = '00000000-0000-4000-8000-000000000001';
-      await owner.query(`insert into organisations(id, slug, name) values ($1, 'late', 'Late')`, [
-        late,
-      ]);
-      await forgeInto(owner, late, 'test.scan', JSON.stringify({ related_id: 'Gurlitt GmbH' }));
-
-      // Its sequence is above the previous mark, which is what makes it the *next* run's business
-      // rather than something the previous run should have caught.
-      const lateSeq = await owner.query<{ n: string }>(
-        'select registration_seq::text as n from audit_chain_registry where tenant_id = $1',
-        [late],
-      );
-      expect(Number(lateSeq.rows[0]?.n)).toBe(201);
-
-      // A fresh run captures a new mark, so it scans 201 tenants and finds the leak. Under UUID
-      // paging the leak-bearing tenant sat behind the cursor and was reported clean.
-      const after = await scan(isolated.appUrl);
-      expect(after.populationHighWater).toBe('201');
-      expect(after.tenants).toBe(201);
-      expect(after.findings.some((f) => f.rule === 'free-text-argument')).toBe(true);
-    } finally {
-      await owner.end();
-      await isolated.drop();
-    }
-  }, 240_000);
-
-  it('does not adopt a registration that lands while it is running', async () => {
-    // The scanner's own page boundary. Two members in the captured population, page size is the
-    // production 200 so one page drains it; a tenant registered after the mark is read must not
-    // make this run fail, and must be picked up by the next one.
-    const isolated = await createTestDatabase('audit-arguments-midrun');
-    const owner = createPool({ connectionString: isolated.migrationUrl, max: 1 });
-    try {
-      await owner.query(
-        `insert into audit_argument_allowlist(operation, argument_key, value_kind, reason)
-         values ('test.scan', 'related_id', 'uuid', 'opaque')`,
-      );
-      await owner.query(`insert into organisations(id, slug, name) values ($1, 'mid-one', 'One')`, [
-        ORG,
-      ]);
-      await withTenant(isolated.pool(), ORG, (c) =>
-        appendAuditEvent(c, {
-          source: 'api',
-          operation: 'test.scan',
-          targetKind: 'organisation',
-          result: 'succeeded',
-          argsSanitized: { related_id: randomUUID() },
-        }),
-      );
-
-      const first = await scan(isolated.appUrl);
-      expect(first.populationHighWater).toBe('1');
-      expect(first.tenants).toBe(1);
-      expect(first.findings).toStrictEqual([]);
-
-      // Sorts behind the first tenant's UUID, registered after it.
-      const behind = '00000000-0000-4000-8000-000000000002';
-      await owner.query(`insert into organisations(id, slug, name) values ($1, 'mid-two', 'Two')`, [
-        behind,
-      ]);
-      await forgeInto(owner, behind, 'test.scan', JSON.stringify({ related_id: 'Behind Cursor' }));
-
-      const second = await scan(isolated.appUrl);
-      expect(second.populationHighWater).toBe('2');
-      expect(second.tenants).toBe(2);
-      expect(second.findings.some((f) => f.rule === 'free-text-argument')).toBe(true);
-      // Coverage traversal and the provisioning witness are separate: this tenant *is* registered,
-      // so the witness is silent and only traversal could have caught it.
-      expect(second.unregistered).toBe(0);
-    } finally {
-      await owner.end();
-      await isolated.drop();
-    }
-  }, 180_000);
+    },
+    180_000,
+  );
 });
 
 describe('the check as a process', () => {
@@ -770,22 +807,26 @@ describe('the check as a process', () => {
     }
   }, 90_000);
 
-  it('refuses to pass when tenants exist but it inspected no events', async () => {
-    // This is the exact shape of the original defect: the queries returned nothing and the check
-    // printed a reassuring sentence. Here the emptiness is real rather than a privilege artefact,
-    // but the branch that must refuse it is the same one.
-    const silent = await createTestDatabase('audit-arguments-silent');
-    const owner = createPool({ connectionString: silent.migrationUrl, max: 1 });
-    try {
-      await owner.query(
-        `insert into organisations(id, slug, name) values (gen_random_uuid(), 'silent', 'Silent')`,
-      );
-      const result = await runCheck(silent.appUrl);
-      expect(result.code).not.toBe(0);
-      expect(result.out).toMatch(/inspected 0 events/u);
-    } finally {
-      await owner.end();
-      await silent.drop();
-    }
-  }, 90_000);
+  evidenceTest(
+    'refuses to pass when tenants exist but it inspected no events',
+    async () => {
+      // This is the exact shape of the original defect: the queries returned nothing and the check
+      // printed a reassuring sentence. Here the emptiness is real rather than a privilege artefact,
+      // but the branch that must refuse it is the same one.
+      const silent = await createTestDatabase('audit-arguments-silent');
+      const owner = createPool({ connectionString: silent.migrationUrl, max: 1 });
+      try {
+        await owner.query(
+          `insert into organisations(id, slug, name) values (gen_random_uuid(), 'silent', 'Silent')`,
+        );
+        const result = await runCheck(silent.appUrl);
+        expect(result.code).not.toBe(0);
+        expect(result.out).toMatch(/inspected 0 events/u);
+      } finally {
+        await owner.end();
+        await silent.drop();
+      }
+    },
+    90_000,
+  );
 });
