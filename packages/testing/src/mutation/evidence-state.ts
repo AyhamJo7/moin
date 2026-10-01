@@ -1,8 +1,6 @@
 /**
- * The private state behind assertion provenance (QG-09, P06.10.07).
- *
- * Side-effect free, so the trusted wrapper can import it from a test file without pulling in the
- * probe's hook registrations or its prototype patch.
+ * The private state behind assertion provenance, and the only code that may write it (QG-09,
+ * P06.10.07).
  *
  * ## The one fact this module keeps
  *
@@ -17,14 +15,28 @@
  * symbol or string, random or signed — is copyable by the code that can see it. Object identity is
  * the one property of a value that cannot be transferred.
  *
+ * ## Why the trusted wrapper lives here, and why nothing it uses is exported
+ *
+ * `beginEvidence` opens eligibility and `confirmTerminal` vouches for a terminal value. Whoever can
+ * call both can turn a plain test into evidence: catch a genuine matcher object `M`, open, confirm
+ * `M`, then fail with anything at all — an independent review did exactly that while the package
+ * root re-exported them. Not re-exporting them is not enough: an `export` in this file is reachable
+ * by a relative import from any test in the repository, and an `exports` map only governs the
+ * package name. So they are **not exported from any module**. They are module-scoped functions, and
+ * the only code that calls them is `intercept`, which is equally private and is reachable only
+ * through `evidenceTest` — a *registration* call. Vitest refuses to register a test from inside a
+ * running one, so a test body cannot use it to wrap itself.
+ *
  * ## Who may write
  *
- * `installMatcherRecorder` hands out the record function **once**. The probe takes it when it loads;
- * a second caller gets an exception. So a test cannot obtain a recorder and register an arbitrary
- * object as a matcher failure. This is a guard against accident and against the easy attack; the
- * load-bearing property remains that confirmation needs the actual object a matcher threw.
+ * The probe needs three things: a recorder for its matcher wrappers, and the window
+ * open/close around each test. `installProbe` hands all three out **once**. The probe is a Vitest
+ * setup file, so it takes them before any test module loads, and a later caller gets an exception.
+ * Even with them, nothing here can mark an invocation eligible or confirm a terminal value; those
+ * two stay inside `intercept`.
  */
 
+import { it } from 'vitest';
 import { MATCHER_IDENTITY_CONFIRMED, NON_EVIDENCE, type ProbeEvent } from './probe-contract.ts';
 
 interface MatcherFailure {
@@ -57,7 +69,7 @@ const recorded: MatcherFailure[] = [];
 let nextSeq = 1;
 let nextInvocation = 1;
 let open: Invocation | undefined;
-let recorderInstalled = false;
+let probeInstalled = false;
 
 export interface OpenOptions {
   readonly file: string;
@@ -81,13 +93,20 @@ export interface ClosedInvocation {
   readonly suspect: readonly string[];
 }
 
-/** Hand out the record function. Callable once; the probe is the caller. */
-export function installMatcherRecorder(): (matcher: string, error: unknown) => void {
-  if (recorderInstalled) {
-    throw new Error('the matcher recorder is already installed; there is exactly one writer');
+/** What the probe is handed: the recorder and the invocation window, and nothing else. */
+export interface ProbeCapabilities {
+  readonly record: (matcher: string, error: unknown) => void;
+  readonly openInvocation: (options: OpenOptions) => readonly string[];
+  readonly closeInvocation: (file: string, fullName: string) => ClosedInvocation | undefined;
+}
+
+/** Hand the probe its capabilities. Callable once; the probe's setup file is the caller. */
+export function installProbe(): ProbeCapabilities {
+  if (probeInstalled) {
+    throw new Error('the evidence probe is already installed; there is exactly one writer');
   }
-  recorderInstalled = true;
-  return record;
+  probeInstalled = true;
+  return { record, openInvocation, closeInvocation };
 }
 
 function record(matcher: string, error: unknown): void {
@@ -120,7 +139,7 @@ function record(matcher: string, error: unknown): void {
 }
 
 /** Open an invocation window. Returns the reasons it is already suspect. */
-export function openInvocation(options: OpenOptions): readonly string[] {
+function openInvocation(options: OpenOptions): readonly string[] {
   const suspect = [...options.suspect];
   if (open !== undefined) {
     // Overlapping windows: either concurrent tests, or an invocation whose close never ran.
@@ -141,7 +160,7 @@ export function openInvocation(options: OpenOptions): readonly string[] {
 }
 
 /** The trusted wrapper declares that this invocation may bear evidence. */
-export function beginEvidence(): void {
+function beginEvidence(): void {
   if (open === undefined) return;
   open.eligible = true;
 }
@@ -151,7 +170,7 @@ export function beginEvidence(): void {
  *
  * Everything here is `===` against the private map. No field of `terminal` is read.
  */
-export function confirmTerminal(terminal: unknown): void {
+function confirmTerminal(terminal: unknown): void {
   const invocation = open;
   if (invocation === undefined) return;
   const mine = recorded.filter((entry) => entry.seq >= invocation.firstSeq);
@@ -202,7 +221,7 @@ export function confirmTerminal(terminal: unknown): void {
 }
 
 /** Close the window and report it. The caller re-reads identity so a mismatch can be detected. */
-export function closeInvocation(file: string, fullName: string): ClosedInvocation | undefined {
+function closeInvocation(file: string, fullName: string): ClosedInvocation | undefined {
   const invocation = open;
   open = undefined;
   if (invocation === undefined) return undefined;
@@ -236,7 +255,67 @@ export function closeInvocation(file: string, fullName: string): ClosedInvocatio
   };
 }
 
-/** Diagnostics for the probe's own tests: how many windows this worker has opened. */
-export function invocationsOpened(): number {
-  return nextInvocation - 1;
+/** The subset of Vitest's test options the corpus needs. Passed through untouched. */
+export interface EvidenceTestOptions {
+  readonly retry?: number;
+  readonly timeout?: number;
+  readonly repeats?: number;
+}
+
+type EvidenceBody = (context: never) => unknown;
+
+/** `it` also accepts a bare timeout as its third argument; both forms are normalised here. */
+function normalise(options: number | EvidenceTestOptions): EvidenceTestOptions {
+  return typeof options === 'number' ? { timeout: options } : options;
+}
+
+/** The only caller of `beginEvidence` and `confirmTerminal`. Private, like both of them. */
+function intercept(body: EvidenceBody): (context: never) => Promise<void> {
+  return async function evidenceBody(context: never): Promise<void> {
+    beginEvidence();
+    try {
+      await body(context);
+    } catch (terminal) {
+      // Before Vitest serializes it, and before anything else can touch it.
+      confirmTerminal(terminal);
+      throw terminal;
+    }
+  };
+}
+
+/**
+ * Register a test whose failure may count as mutation evidence.
+ *
+ * Drop-in for `it`, including a bare timeout as the third argument. Options are forwarded in
+ * second position, as Vitest 5 requires: the three-argument `test(name, fn, { … })` form was
+ * removed in Vitest 4 and throws at collection time.
+ */
+export function evidenceTest(
+  name: string,
+  body: EvidenceBody,
+  options?: number | EvidenceTestOptions,
+): void {
+  if (options === undefined) {
+    it(name, intercept(body));
+    return;
+  }
+  it(name, normalise(options), intercept(body));
+}
+
+/**
+ * The concurrent form, so that the refusal to attribute concurrent failures can be demonstrated.
+ *
+ * With overlapping invocation windows the probe marks both suspect and declines. Nothing in the
+ * corpus uses this for evidence.
+ */
+export function concurrentEvidenceTest(
+  name: string,
+  body: EvidenceBody,
+  options?: number | EvidenceTestOptions,
+): void {
+  if (options === undefined) {
+    it.concurrent(name, intercept(body));
+    return;
+  }
+  it.concurrent(name, normalise(options), intercept(body));
 }

@@ -30,7 +30,9 @@
 
 import { afterEach, beforeEach, expect } from 'vitest';
 import { PROBE_META_KEY, PROBE_VERSION, type AssertionProbe } from '@moin/testing';
-import { closeInvocation, installMatcherRecorder, openInvocation } from '@moin/testing';
+// By relative path, deliberately: `@moin/testing` does not export the probe's capabilities, and its
+// `exports` map admits no subpath that would. Same file, so the same module instance as the wrapper.
+import { installProbe } from '../packages/testing/src/mutation/evidence-state.ts';
 
 /**
  * The async assertion entry points.
@@ -43,7 +45,7 @@ import { closeInvocation, installMatcherRecorder, openInvocation } from '@moin/t
  */
 const ASYNC_ENTRY_POINTS = ['rejects', 'resolves'] as const;
 
-const record = installMatcherRecorder();
+const { record, openInvocation, closeInvocation } = installProbe();
 
 function assertionCalls(): number {
   const state = expect.getState() as unknown as Record<string, unknown>;

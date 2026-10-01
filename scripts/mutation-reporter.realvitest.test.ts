@@ -40,6 +40,7 @@ const GENUINE = `${DIR}/genuine.fixture.ts`;
 const DUPLICATE = `${DIR}/duplicate-name.fixture.ts`;
 const UNRELATED = `${DIR}/unrelated.fixture.ts`;
 const CONCURRENT = `${DIR}/concurrent.fixture.ts`;
+const PUBLIC_CAPABILITY = `${DIR}/public-capability.fixture.ts`;
 
 let report: MutationReport;
 
@@ -268,6 +269,49 @@ describe('the trusted wrapper', () => {
     const test = find(GENUINE, 'reporter fixture > ordinary thrown error');
     expectNotEvidence(test);
     expect(test.probe?.matcherFailures).toBe(0);
+  });
+});
+
+describe('a plain test with only the public API', () => {
+  evidenceTest('cannot open eligibility or confirm a matcher object it caught', () => {
+    // The sequence an independent review reproduced while the package root exported the wrapper's
+    // capabilities: catch a genuine matcher object M, open eligibility, confirm M, throw E.
+    const test = find(
+      PUBLIC_CAPABILITY,
+      'a plain test replays the capability exploit through the public API',
+    );
+    expectNotEvidence(test);
+    expect(test.failureCategory).toBe('NOT_ELIGIBLE');
+    expect(test.probe?.event).toBe(NON_EVIDENCE);
+    expect(test.probe?.evidenceEligible).toBe(false);
+    // A matcher really did fail, so the refusal is about reach, not about a missing failure.
+    expect(test.probe?.matcherFailures).toBe(1);
+    // Neither the package root nor any subpath a consumer might try yields a capability.
+    expect(test.errors[0]?.message).toMatch(/capabilities reached: none$/u);
+  });
+
+  it('is not evidence when it catches M and throws an unrelated error', () => {
+    const test = find(
+      PUBLIC_CAPABILITY,
+      'a plain test catches a genuine matcher object and throws something else',
+    );
+    expectNotEvidence(test);
+    expect(test.failureCategory).toBe('NOT_ELIGIBLE');
+    expect(test.probe?.matcherFailures).toBe(1);
+  });
+
+  it('cannot register an evidence test from inside its own body', () => {
+    // `evidenceTest` is registration, and Vitest refuses to register a test from a running one, so
+    // the public wrapper cannot be used as a function that wraps the caller.
+    const test = find(
+      PUBLIC_CAPABILITY,
+      'a plain test tries to wrap itself by registering an evidence test inside its body',
+    );
+    expect(test.failureCategory).toBe('NOT_ELIGIBLE');
+    expect(test.errors[0]?.message).toMatch(/nested registration refused: yes$/u);
+    expect(
+      tests().filter((entry) => entry.fullName.includes('a nested evidence test')),
+    ).toStrictEqual([]);
   });
 });
 

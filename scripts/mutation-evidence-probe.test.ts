@@ -105,8 +105,8 @@ describe('no transferable credential', () => {
 
   it('hands out the recorder once, so a test cannot register an object of its own', () => {
     const state = read('packages/testing/src/mutation/evidence-state.ts');
-    expect(state).toContain('if (recorderInstalled)');
-    expect(read('scripts/mutation-evidence-probe.ts')).toContain('installMatcherRecorder()');
+    expect(state).toContain('if (probeInstalled)');
+    expect(read('scripts/mutation-evidence-probe.ts')).toContain('= installProbe();');
   });
 });
 
@@ -141,7 +141,7 @@ describe('the verdict reads no field of the thrown value', () => {
 
 describe('the trusted wrapper', () => {
   it('catches the terminal value and rethrows it unchanged', () => {
-    const wrapper = read('packages/testing/src/mutation/evidence-test.ts');
+    const wrapper = read('packages/testing/src/mutation/evidence-state.ts');
     // The interception body only: the docblock names the copy attack in prose, which is the point.
     const intercept = wrapper.slice(
       wrapper.indexOf('function intercept('),
@@ -155,7 +155,13 @@ describe('the trusted wrapper', () => {
   });
 
   it('is the only thing that marks an invocation eligible', () => {
-    expect(read('packages/testing/src/mutation/evidence-test.ts')).toContain('beginEvidence()');
+    const state = read('packages/testing/src/mutation/evidence-state.ts');
+    // Exactly one call site each, inside `intercept`; the rest of the repository is checked by
+    // `testing-export-surface.test.ts`.
+    expect(state.split('beginEvidence();')).toHaveLength(2);
+    expect(state.split('confirmTerminal(terminal);')).toHaveLength(2);
+    const intercept = state.slice(state.indexOf('function intercept('));
+    expect(intercept).toContain('beginEvidence();');
     expect(read('scripts/mutation-evidence-probe.ts')).not.toContain('beginEvidence');
   });
 });
