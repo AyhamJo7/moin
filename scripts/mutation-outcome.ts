@@ -1,73 +1,85 @@
 /**
- * Classifying a mutation run (QG-09 negative controls, P06.10.07).
+ * Deciding what one mutation run established (QG-09 negative controls, P06.10.07).
  *
- * ## Why this is its own module, and pure
+ * ## What this module may and may not look at
  *
- * Two generations of this decision were wrong, in the same direction both times: generous.
+ * It consumes the trusted reporter's `failureCategory` and the canonical test identity, and nothing
+ * else. It does **not** inspect error names, messages or fields, because every generation of this
+ * decision that did was spoofable — the last one accepted an ordinary `Error` decorated with
+ * `name = 'AssertionError'` and four matcher fields.
  *
- * The first treated **any** non-zero exit as a kill. Measured: pointing `TEST_DATABASE_ADMIN_URL`
- * at a closed port reported every variant killed, and a manifest entry naming a nonexistent test
- * reported it survived.
+ * ## The clean-run rule
  *
- * The second read Vitest's JSON report but decided "was this an assertion?" by matching words in
- * the failure message. Also measured — three of these four were classified `KILLED_ASSERTION`:
+ * `KILLED_ASSERTION` requires all of:
  *
- *   Error: database connection refused while executing toThrow assertion
- *   Error: wrapper caught AssertionError from pool
- *   error: syntax error at or near "toStrictEqual"
+ *   1. the baseline run passed cleanly (checked by the sweep, not here);
+ *   2. the report is one this version understands;
+ *   3. nothing failed outside a test — no global, module or hook error;
+ *   4. exactly **one** test matches the manifest's `{ file, fullName }` identity;
+ *   5. that test executed;
+ *   6. that test failed;
+ *   7. the reporter categorised its failure as `ASSERTION`;
+ *   8. **no other test failed** anywhere in the run.
  *
- * An unreachable database became proof that an invariant was enforced. Message text cannot
- * establish the category, because the text is attacker-shaped by accident: it quotes queries, it
- * quotes matcher names, and it is written for humans.
+ * Rule 8 is new and it matters: a run where the intended test asserted *and* something unrelated
+ * blew up is not clean evidence, because the unrelated failure may be the reason the intended one
+ * failed. It is reported as `UNRELATED_FAILURE` rather than folded into the kill count.
  *
- * ## What decides it now
- *
- * `scripts/mutation-reporter.ts` reads the live error objects and records what they **are**: the
- * `name`, and whether assertion metadata (`expected`, `actual`, `showDiff`, `ok`) is present as own
- * properties. Every Vitest matcher sets all four; no thrown `Error` has any. This module consumes
- * that and nothing else for the assertion decision.
- *
- * Message text is used for exactly one thing: telling a *timeout* apart from other non-assertion
- * failures, which refines a category that is already not evidence. It can never promote a failure
- * to `KILLED_ASSERTION`.
+ * Everything that is not `KILLED_ASSERTION` is reported as itself. Nothing else is evidence.
  */
 
-import type { MutationReport, ReportedTest, TypedError } from './mutation-reporter.ts';
+import { REPORT_VERSION, type MutationReport, type ReportedTest } from './mutation-reporter.ts';
 
 export type {
+  FailureCategory,
   MutationReport,
+  ReportedError,
   ReportedModule,
   ReportedTest,
-  TypedError,
 } from './mutation-reporter.ts';
 
-/** What a single mutation run establishes. Only one of these counts as evidence. */
+/** What a single mutation run establishes. Only `KILLED_ASSERTION` counts as evidence. */
 export type MutationOutcome =
-  /** The named test ran and failed with a typed assertion error, and nothing else failed. */
+  /** The intended test, uniquely identified, failed on a trusted assertion, and nothing else failed. */
   | 'KILLED_ASSERTION'
-  /** The named test ran and passed: the defect is not detected by the test that should catch it. */
+  /** The intended test ran and passed: the defect is not detected by the test that should catch it. */
   | 'SURVIVED'
-  /** The named test did not pass cleanly on the pristine tree, so the mutant proves nothing. */
+  /** The intended test did not pass cleanly on the pristine tree, so the mutant proves nothing. */
   | 'BASELINE_FAILED'
-  /** The environment failed — unreachable database, revoked grant, hook or global-setup failure. */
-  | 'INFRA_FAILURE'
-  /** The run exceeded its deadline and was killed. */
-  | 'TIMEOUT'
-  /** The named test ran and failed by hanging. A real detection, but not an assertion. */
-  | 'KILLED_BY_TIMEOUT'
-  /** Tests were collected but none matched the filter, which is a manifest error. */
+  /** No test in the run has the manifest's exact identity. */
   | 'NO_TEST_MATCH'
-  /** A module could not be transformed or loaded on the pristine tree. */
+  /** More than one test has it, so which one failed cannot be established. */
+  | 'AMBIGUOUS_TEST_IDENTITY'
+  /** The intended test asserted, but something unrelated also failed. */
+  | 'UNRELATED_FAILURE'
+  /** A hook — `beforeAll`, `afterEach` — failed. */
+  | 'HOOK_FAILURE'
+  /** The environment failed: unreachable database, revoked grant, global setup. */
+  | 'INFRA_FAILURE'
+  /** The whole run exceeded its deadline and was killed. */
+  | 'TIMEOUT'
+  /** The intended test failed by hanging. A real detection, but not an assertion. */
+  | 'KILLED_BY_TIMEOUT'
+  /** A module would not transform or load on the pristine tree. */
   | 'BUILD_OR_LOAD_FAILURE'
-  /** The mutated source could not be transformed or loaded, so the mutation is not testable. */
-  | 'INVALID_MUTANT';
+  /** The mutated source would not transform or load, so the mutation is not testable. */
+  | 'INVALID_MUTANT'
+  /** No report, a malformed one, or one from a version this classifier does not understand. */
+  | 'REPORTER_FAILURE';
+
+/** The manifest's exact, unambiguous identity for the test that must catch a defect. */
+export interface KillingTest {
+  /** Repository-relative module path, compared exactly. */
+  readonly file: string;
+  /** Vitest's full name, compared exactly — never as a substring. */
+  readonly fullName: string;
+}
 
 export interface RunObservation {
-  /** The typed report, or undefined when none was produced or it could not be parsed. */
   readonly report: MutationReport | undefined;
   readonly timedOut: boolean;
   readonly exitCode: number | null;
-  /** Combined stdout and stderr, used only when there is no report at all. */
+  /** Combined stdout and stderr, used only to describe a run that produced no report. */
   readonly output: string;
   /** Which phase this run belongs to: it changes how a load failure is classified. */
   readonly phase: 'baseline' | 'mutant';
@@ -77,48 +89,32 @@ export interface Classification {
   readonly outcome: MutationOutcome;
   /** One line, safe to print. */
   readonly detail: string;
-  /** Tests whose full name contained the expected test name. */
+  /** Tests carrying the manifest's exact identity. Exactly one is required. */
   readonly matched: number;
-  /** Failed tests that were **not** the expected test. */
+  /** Failed tests that are not the intended one. Any at all disqualifies a kill. */
   readonly unrelatedFailures: number;
 }
 
-/**
- * A transform, resolve or load problem.
- *
- * This is matched on text, and that is sound here: it classifies a *module* failure, where there is
- * no error object to inspect, and every branch it reaches is already not evidence. It cannot
- * produce `KILLED_ASSERTION`.
- */
-const LOAD_FAILURE =
-  /Transform failed|PARSE_ERROR|Failed to load|Cannot find module|Cannot find package|Failed to resolve|SyntaxError|error TS\d+/u;
-
-/**
- * A test that ran out of time rather than asserting.
- *
- * Also text, and also sound for the same reason: it only distinguishes between two outcomes that
- * are both outside the evidence count.
- */
-const TEST_TIMEOUT = /^Test timed out in \d+ms/u;
-
-function firstLine(text: string): string {
-  const line = text.split('\n').find((candidate) => candidate.trim().length > 0) ?? '';
-  // eslint-disable-next-line no-control-regex -- matching the escape sequences in order to remove them.
-  return line.replace(/\u001B\[[0-9;]*m/gu, '').slice(0, 200);
+/** A report this classifier understands. Anything else is not evidence. */
+function isUsableReport(report: MutationReport | undefined): report is MutationReport {
+  if (report === undefined) return false;
+  return (
+    report.reportVersion === REPORT_VERSION &&
+    Array.isArray(report.modules) &&
+    Array.isArray(report.unhandledErrors)
+  );
 }
 
-function describeError(error: TypedError | undefined): string {
-  if (error === undefined) return 'no error was recorded';
-  return `${error.name}${error.isAssertion ? ' (typed assertion)' : ''}: ${error.message}`;
+function describe(category: string, message: string): string {
+  return `${category}${message.length > 0 ? `: ${message}` : ''}`;
 }
 
-/**
- * Decide what one run established about one mutation.
- *
- * `expectedTest` is the manifest's `kills` filter; a test counts as the expected one when its full
- * name contains that string, which is exactly how Vitest's `-t` selects it.
- */
-export function classifyRun(observation: RunObservation, expectedTest: string): Classification {
+/** Exact identity. No `includes`, no prefix, no regex. */
+function hasIdentity(test: ReportedTest, identity: KillingTest): boolean {
+  return test.file === identity.file && test.fullName === identity.fullName;
+}
+
+export function classifyRun(observation: RunObservation, identity: KillingTest): Classification {
   const empty = { matched: 0, unrelatedFailures: 0 } as const;
   const loadOutcome = observation.phase === 'mutant' ? 'INVALID_MUTANT' : 'BUILD_OR_LOAD_FAILURE';
 
@@ -130,58 +126,57 @@ export function classifyRun(observation: RunObservation, expectedTest: string): 
     };
   }
 
-  if (observation.report === undefined) {
-    const load = LOAD_FAILURE.test(observation.output);
-    return {
-      outcome: load ? loadOutcome : 'INFRA_FAILURE',
-      detail: load
-        ? `no report; a module did not load: ${firstLine(observation.output)}`
-        : `no report was produced (exit ${String(observation.exitCode)}): ${firstLine(observation.output)}`,
-      ...empty,
-    };
+  if (!isUsableReport(observation.report)) {
+    // Narrowed by hand: the guard proves it is not a usable report, which TypeScript reduces to
+    // `never` for the happy shape, so the version is read off the raw value.
+    const raw = observation.report as { reportVersion?: unknown } | undefined;
+    const described =
+      raw === undefined
+        ? `no report was produced (exit ${String(observation.exitCode)})`
+        : `the report is malformed, or from report version ${String(raw.reportVersion)} rather than ${String(REPORT_VERSION)}`;
+    return { outcome: 'REPORTER_FAILURE', detail: described, ...empty };
   }
 
-  // Global setup and unhandled rejections first: they happen before any test could have run, so
-  // nothing a test did or did not do is meaningful.
-  const unhandled = observation.report.unhandledErrors[0];
+  const report = observation.report;
+
+  // Nothing outside a test may have failed. Each of these happens before or around the tests, so
+  // whatever the tests did or did not do says nothing about the mutation.
+  const unhandled = report.unhandledErrors[0];
   if (unhandled !== undefined) {
-    const load = LOAD_FAILURE.test(unhandled.message);
     return {
-      outcome: load ? loadOutcome : 'INFRA_FAILURE',
-      detail: `the run failed outside any test: ${describeError(unhandled)}`,
+      outcome: unhandled.category === 'LOAD' ? loadOutcome : 'INFRA_FAILURE',
+      detail: `the run failed outside any test — ${describe(unhandled.category, unhandled.message)}`,
       ...empty,
     };
   }
 
-  const modules = observation.report.modules;
-
-  const moduleError = modules.flatMap((module) => module.errors)[0];
+  const moduleError = report.modules.flatMap((module) => module.errors)[0];
   if (moduleError !== undefined) {
     return {
-      outcome: LOAD_FAILURE.test(moduleError.message) ? loadOutcome : 'INFRA_FAILURE',
-      detail: `a module failed to load or run: ${describeError(moduleError)}`,
+      outcome: moduleError.category === 'LOAD' ? loadOutcome : 'INFRA_FAILURE',
+      detail: `a module failed to load or run — ${describe(moduleError.category, moduleError.message)}`,
       ...empty,
     };
   }
 
-  // A hook that threw is infrastructure, whatever it says. This is the case that used to be counted
-  // as a kill: an unreachable database fails `beforeAll`, every test is skipped, the process exits
-  // non-zero.
-  const hookError = modules.flatMap((module) => module.hookErrors)[0];
+  const hookError = report.modules.flatMap((module) => module.hookErrors)[0];
   if (hookError !== undefined) {
     return {
-      outcome: LOAD_FAILURE.test(hookError.message) ? loadOutcome : 'INFRA_FAILURE',
-      detail: `a suite hook failed before or around its tests: ${describeError(hookError)}`,
+      outcome: hookError.category === 'LOAD' ? loadOutcome : 'HOOK_FAILURE',
+      detail: `a suite hook failed around its tests — ${describe(hookError.category, hookError.message)}`,
       ...empty,
     };
   }
 
-  const tests: readonly ReportedTest[] = modules.flatMap((module) => module.tests);
-  const named = tests.filter((test) => test.fullName.includes(expectedTest));
+  const tests = report.modules.flatMap((module) => module.tests);
+  const named = tests.filter((test) => hasIdentity(test, identity));
+  const unrelatedFailures = tests.filter(
+    (test) => test.state === 'failed' && !hasIdentity(test, identity),
+  ).length;
 
   if (named.length === 0) {
-    // "The filter matched nothing" and "no tests were collected" are different failures, and
-    // conflating them hid suites that never loaded.
+    // A run that collected nothing never reached the filter, which is a different failure from a
+    // manifest that names a test nobody has.
     if (tests.length === 0) {
       return {
         outcome: 'INFRA_FAILURE',
@@ -193,78 +188,95 @@ export function classifyRun(observation: RunObservation, expectedTest: string): 
     }
     return {
       outcome: 'NO_TEST_MATCH',
-      detail: `no test's name contained "${expectedTest}", so the manifest names a test that does not exist`,
+      detail: `no test in ${identity.file} is named exactly "${identity.fullName}"`,
       matched: 0,
-      unrelatedFailures: tests.filter((test) => test.state === 'failed').length,
+      unrelatedFailures,
     };
   }
 
-  const unrelatedFailures = tests.filter(
-    (test) => test.state === 'failed' && !test.fullName.includes(expectedTest),
-  ).length;
-
-  const failedNamed = named.filter((test) => test.state === 'failed');
-  if (failedNamed.length > 0) {
-    const errors = failedNamed.flatMap((test) => test.errors);
-
-    // Fail closed when a test carries a non-assertion error alongside an assertion one — an
-    // `afterEach` that threw, for instance. The assertion may be genuine, but the run is not clean
-    // evidence and saying so is cheap.
-    const nonAssertion = errors.filter((error) => !error.isAssertion);
-    if (errors.length > 0 && nonAssertion.length === 0) {
-      return {
-        outcome: 'KILLED_ASSERTION',
-        detail: `the named test ran and rejected the mutation — ${describeError(errors[0])}`,
-        matched: named.length,
-        unrelatedFailures,
-      };
-    }
-
-    const timedOut = nonAssertion.find((error) => TEST_TIMEOUT.test(error.message));
-    if (timedOut !== undefined) {
-      // A real detection, and weaker evidence than an assertion: the mutation made the code hang,
-      // so the test never rejected anything. Reported as itself.
-      return {
-        outcome: 'KILLED_BY_TIMEOUT',
-        detail: `the mutation made the code hang: ${describeError(timedOut)}`,
-        matched: named.length,
-        unrelatedFailures,
-      };
-    }
-
-    const mixed = errors.length > nonAssertion.length;
+  if (named.length > 1) {
     return {
-      outcome: 'INFRA_FAILURE',
-      detail: mixed
-        ? `the named test failed with an assertion AND a non-assertion error, so the run is not clean evidence — ${describeError(nonAssertion[0])}`
-        : `the named test ran but failed with no typed assertion — ${describeError(nonAssertion[0] ?? errors[0])}`,
+      outcome: 'AMBIGUOUS_TEST_IDENTITY',
+      detail: `${String(named.length)} tests share the identity ${identity.file} :: "${identity.fullName}", so which one failed cannot be established`,
       matched: named.length,
       unrelatedFailures,
     };
   }
 
-  // The named test did not fail. If it never ran either, the run says nothing about it.
-  if (!named.some((test) => test.state === 'passed')) {
+  const test = named[0];
+  if (test === undefined) {
+    return { outcome: 'REPORTER_FAILURE', detail: 'the matched test is missing', ...empty };
+  }
+
+  if (!test.executed) {
     return {
       outcome: 'INFRA_FAILURE',
-      detail: `the named test neither passed nor failed (state: ${named[0]?.state ?? 'unknown'}), so it did not run`,
-      matched: named.length,
+      detail: `the intended test did not run (state: ${test.state})`,
+      matched: 1,
+      unrelatedFailures,
+    };
+  }
+
+  if (test.state !== 'failed') {
+    return {
+      outcome: 'SURVIVED',
+      detail:
+        unrelatedFailures > 0
+          ? `the intended test passed under the mutation; ${String(unrelatedFailures)} unrelated test(s) failed, which is not evidence either way`
+          : 'the intended test passed under the mutation, so it does not detect this defect',
+      matched: 1,
+      unrelatedFailures,
+    };
+  }
+
+  if (test.failureCategory === 'TIMEOUT') {
+    return {
+      outcome: 'KILLED_BY_TIMEOUT',
+      detail:
+        'the mutation made the code hang, so the intended test timed out rather than asserting',
+      matched: 1,
+      unrelatedFailures,
+    };
+  }
+
+  if (test.failureCategory !== 'ASSERTION') {
+    return {
+      outcome: test.failureCategory === 'LOAD' ? loadOutcome : 'INFRA_FAILURE',
+      detail: `the intended test failed, but the reporter categorised it as ${String(test.failureCategory)} rather than a trusted assertion`,
+      matched: 1,
+      unrelatedFailures,
+    };
+  }
+
+  // A trusted assertion, but the run must also be clean. An unrelated failure may be the reason
+  // the intended test failed, and a kill that cannot be attributed is not a kill.
+  if (unrelatedFailures > 0) {
+    return {
+      outcome: 'UNRELATED_FAILURE',
+      detail: `the intended test asserted, but ${String(unrelatedFailures)} unrelated test(s) also failed, so the kill cannot be attributed`,
+      matched: 1,
       unrelatedFailures,
     };
   }
 
   return {
-    outcome: 'SURVIVED',
-    detail:
-      unrelatedFailures > 0
-        ? `the named test passed under the mutation; ${String(unrelatedFailures)} unrelated test(s) failed, which is not evidence`
-        : 'the named test passed under the mutation, so it does not detect this defect',
-    matched: named.length,
-    unrelatedFailures,
+    outcome: 'KILLED_ASSERTION',
+    detail: `the intended test ran and rejected the mutation on a trusted assertion (${String(test.probe?.expectCalls ?? 0)} expect call(s))`,
+    matched: 1,
+    unrelatedFailures: 0,
   };
 }
 
-/** A baseline is usable only when the named test actually ran and passed, and nothing else failed. */
+/**
+ * A baseline is usable only when the intended test ran, passed, and nothing else failed.
+ *
+ * Without the last clause a variant could be "killed" by a test that was already red, or in a run
+ * whose unrelated failures make every verdict unattributable.
+ */
 export function baselineIsUsable(classification: Classification): boolean {
-  return classification.outcome === 'SURVIVED' && classification.unrelatedFailures === 0;
+  return (
+    classification.outcome === 'SURVIVED' &&
+    classification.matched === 1 &&
+    classification.unrelatedFailures === 0
+  );
 }

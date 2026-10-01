@@ -172,6 +172,7 @@ Rules
 | P06.10.07 | READY_FOR_REVIEW | c1bde7a | EV-P06-027 | Four HIGH defects from the independent post-fix QG-09 review, each reproduced against real PostgreSQL, fixed and mutation-proven; sweep now 54/54 KILLED with an inspectable manifest |
 | P06.10.07 | READY_FOR_REVIEW | fcc4473 | EV-P06-028 | Population-snapshot design replacing UUID-cursor paging; mutation harness rewritten so its outcomes are evidence — 62 KILLED_ASSERTION, 2 documented INFRA_FAILURE |
 | P06.10.07 | READY_FOR_REVIEW | f105882 | EV-P06-029 | Epoch allocation serialized by commit rather than by `nextval()`; assertion identity decided from typed error metadata rather than message text — 69 KILLED_ASSERTION, 2 documented INFRA_FAILURE |
+| P06.10.07 | READY_FOR_REVIEW | PENDING_SHA | EV-P06-030 | `KILLED_ASSERTION` redefined so it can only mean one thing: two in-process signals a thrown object cannot set, an exact unique `{file, fullName}` identity, and a run with no other failure — 77 KILLED_ASSERTION, 2 documented INFRA_FAILURE over 79 variants, 12 of which attack the harness itself |
 | P06.10 | IN_PROGRESS | 8e5bf76 | EV-P06-021…025 | Table, chain, query API, daily verifier, argument scanner and runbook done. Open: .03 adoption by the tool guard, operator and security paths (needs P10.08, P06.11/.12), .05 scheduling (EXT-09) and .06 founder acceptance of ADR-0017 |
 
 ## External waits
@@ -429,5 +430,49 @@ secret-rule fix (#25) merged, with its full-history scan green.
   variants. One variant was deleted rather than left looking proven: with allocation serialized,
   `max(registration_seq)` and the state row cannot diverge, so the high-water source and the
   allocator are one invariant and not two.
+  ADR-0017 stays **PROPOSED**; the five residuals are unchanged. P06.10.03 remains open; P06.10.05
+  remains `WAITING_FOR_EXTERNAL` on EXT-09; P06.10 is not complete.
+
+- 2026-10-01 — **Fifth QG-09 review of P06.10: the audit architecture was accepted; the evidence
+  harness was not.** No new database or security blocker. The three blockers were all one thing —
+  `KILLED_ASSERTION` meant less than it claimed — and all three were reproduced before being fixed.
+  **Assertion identity cannot come from the error object.** Vitest serializes errors before a
+  reporter sees them, so there is no live `Error` and no prototype left to test — `instanceof` is
+  unavailable even inside `onTestFailed`. Everything that survives is a mutable own property, which
+  is why decorating an ordinary `Error` with `name = 'AssertionError'` and the four matcher fields
+  was accepted as proof an invariant was enforced. Identity now needs two signals the thrown object
+  cannot touch, both required: `expect.getState().assertionCalls` read in `beforeEach`/`afterEach`
+  by a setup-file probe inside the test process, and the `constructor`/`toString` markers Vitest's
+  own serializer adds to every error it does **not** own. Measured, not assumed: a genuine
+  `AssertionError` serializes with exactly `actual, diff, expected, message, name, ok, operator,
+showDiff, stack, stacks` and neither marker; a plain `Error`, a decorated `Error` and Node's own
+  `assert.AssertionError` all gain both.
+  The second signal is undocumented behaviour, so it is pinned by a test that spawns a real Vitest
+  run over real fixture suites rather than by fixture JSON that re-encodes the assumption. That run
+  is what settled the hardest case: passing expectations followed by a decorated throw gives
+  `expectCalls: 2`, so the probe alone would have accepted it and only the foreign markers reject
+  it. The two signals are not redundant.
+  **A killing test is a module and a name, both exact.** `fullName.includes(expectedTest)` was
+  unsound three ways at once: a same-named test in another file could claim the kill, two tests
+  could match and the first was taken, and `"rejects invalid chain"` matched `"rejects invalid chain
+after retry"`. Zero matches is `NO_TEST_MATCH`, two is `AMBIGUOUS_TEST_IDENTITY`, and `--validate`
+  now refuses the manifest before any test runs.
+  **A kill must be attributable.** The previous classifier returned `KILLED_ASSERTION` while
+  recording `unrelatedFailures > 0` in the same object. An unrelated failure may be the reason the
+  intended test failed, so the run is `UNRELATED_FAILURE` and not evidence.
+  Tightening `--validate` immediately found a latent defect of its own: one existing anchor resolved
+  to **two** places in `cli.ts`, and `String.prototype.replace` rewrites the first — so which guard
+  that variant had been attacking was down to file order. It happened to be the intended one. The
+  anchor is now unique and the check refuses a non-unique one.
+  Twelve new `H*` variants attack the harness: each removes one conjunct of the trust rule and names
+  the adversarial test that must catch it. All twelve are killed, which is what makes the other 65
+  mean anything.
+  Final distribution at `PENDING_SHA`: `KILLED_ASSERTION: 77`, `INFRA_FAILURE: 2`, over 79 variants.
+  The two are **not** rounded up, and their recorded reason was corrected after measurement: they
+  are not global-setup rejections as previously claimed but the migration's own guard firing inside
+  the test that applies it — `0010` raising "backfill covered 0 of 3 organisation(s)" and `0011`
+  failing `NOT NULL` — so the test fails on a thrown database error after real `expect` calls. A
+  guard inside a migration is stronger than a test; it is not assertion evidence, and saying so is
+  the point of the taxonomy.
   ADR-0017 stays **PROPOSED**; the five residuals are unchanged. P06.10.03 remains open; P06.10.05
   remains `WAITING_FOR_EXTERNAL` on EXT-09; P06.10 is not complete.

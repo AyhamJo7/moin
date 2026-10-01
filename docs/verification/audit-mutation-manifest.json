@@ -6,8 +6,10 @@
     "file": "packages/db/src/audit-verification.ts",
     "find": "        outcomes.delete(item.organisationId);\n        const failure: AuditChainFailure = { organisationId: item.organisationId, error };",
     "replace": "        outcomes.set(item.organisationId, 'sound');\n        const failure: AuditChainFailure = { organisationId: item.organisationId, error };",
-    "test": "packages/db/src/audit-verification.integration.test.ts",
-    "kills": "counts a tenant it could not check as unchecked"
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "what the sweep finds > counts a tenant it could not check as unchecked, never as sound"
+    }
   },
   {
     "id": "M2-claim-error-swallowed",
@@ -16,8 +18,10 @@
     "file": "packages/db/src/audit-verification.ts",
     "find": "          [pageSize, after, highWater],\n        );\n        cursor = claimed.rows.at(-1)?.registration_seq ?? cursor;",
     "replace": "          [pageSize, after, highWater],\n        ).catch(() => ({ rows: [] as { organisation_id: string; id: string; registration_seq: string }[] }));\n        cursor = claimed.rows.at(-1)?.registration_seq ?? cursor;",
-    "test": "packages/db/src/audit-verification.integration.test.ts",
-    "kills": "refuses to report a clean run when the register cannot be read"
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "what the sweep finds > refuses to report a clean run when the register cannot be read at all"
+    }
   },
   {
     "id": "M3-paging-stops-after-first-page",
@@ -26,8 +30,10 @@
     "file": "packages/db/src/audit-verification.ts",
     "find": "    if (result.claimed < pageSize) break;\n    after = cursor;",
     "replace": "    void cursor;\n    break;",
-    "test": "packages/db/src/audit-verification.integration.test.ts",
-    "kills": "walks every tenant across page boundaries"
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "the daily sweep > walks every tenant across page boundaries"
+    }
   },
   {
     "id": "M4-page-size-validation-removed",
@@ -36,8 +42,10 @@
     "file": "packages/db/src/audit-verification.ts",
     "find": "  if (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > MAX_PAGE_SIZE) {\n    throw new Error('invalid audit verification page size');\n  }",
     "replace": "  void MAX_PAGE_SIZE;",
-    "test": "packages/db/src/audit-verification.integration.test.ts",
-    "kills": "rejects a page size outside the reviewed bounds"
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "the daily sweep > rejects a page size outside the reviewed bounds instead of silently clamping"
+    }
   },
   {
     "id": "M5-isSound-ignores-unchecked",
@@ -46,8 +54,10 @@
     "file": "packages/db/src/audit-verification.ts",
     "find": "    report.unchecked === 0 &&\n",
     "replace": "",
-    "test": "packages/db/src/audit-verification.integration.test.ts",
-    "kills": "counts a tenant it could not check as unchecked"
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "what the sweep finds > counts a tenant it could not check as unchecked, never as sound"
+    }
   },
   {
     "id": "M6-enumerate-heads-instead-of-register",
@@ -56,8 +66,10 @@
     "file": "packages/db/migrations/0011_audit_chain_population.sql",
     "find": "  WHERE r.registration_seq > coalesce(p_after, 0)\n    AND r.registration_seq <= coalesce(p_high_water, 0)\n  ORDER BY r.registration_seq\n  LIMIT least(greatest(coalesce(p_limit, 0), 0), 1000)",
     "replace": "  WHERE r.registration_seq > coalesce(p_after, 0)\n    AND r.registration_seq <= coalesce(p_high_water, 0)\n    AND EXISTS (SELECT 1 FROM audit_heads h WHERE h.organisation_id = r.tenant_id)\n  ORDER BY r.registration_seq\n  LIMIT least(greatest(coalesce(p_limit, 0), 0), 1000)",
-    "test": "packages/db/src/audit-verification.integration.test.ts",
-    "kills": "still covers a tenant whose chain head was deleted"
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "what the sweep finds > still covers a tenant whose chain head was deleted, because it walks the register"
+    }
   },
   {
     "id": "M7-register-append-only-trigger-dropped",
@@ -66,8 +78,10 @@
     "file": "packages/db/migrations/0011_audit_chain_population.sql",
     "find": "ALTER TABLE audit_chain_registry ENABLE ALWAYS TRIGGER audit_chain_registry_append_only;",
     "replace": "ALTER TABLE audit_chain_registry DISABLE TRIGGER audit_chain_registry_append_only;",
-    "test": "packages/db/src/audit-verification.integration.test.ts",
-    "kills": "rejects a privileged DELETE and UPDATE"
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "the tenant register > rejects a privileged DELETE and UPDATE, so a chain cannot be hidden by dropping its row"
+    }
   },
   {
     "id": "M8-claim-cap-removed",
@@ -76,8 +90,10 @@
     "file": "packages/db/migrations/0011_audit_chain_population.sql",
     "find": "  ORDER BY r.registration_seq\n  LIMIT least(greatest(coalesce(p_limit, 0), 0), 1000)",
     "replace": "  ORDER BY r.registration_seq\n  LIMIT greatest(coalesce(p_limit, 0), 0)",
-    "test": "packages/db/src/audit-verification.integration.test.ts",
-    "kills": "caps a page at the reviewed maximum"
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "the tenant register > caps a page at the reviewed maximum however much the caller asks for"
+    }
   },
   {
     "id": "M9-registration-trigger-dropped",
@@ -86,8 +102,10 @@
     "file": "packages/db/migrations/0010_audit_chain_verification.sql",
     "find": "CREATE TRIGGER organisations_register_audit_chain AFTER INSERT ON organisations\n  FOR EACH ROW EXECUTE FUNCTION app.register_audit_chain();\nALTER TABLE organisations ENABLE ALWAYS TRIGGER organisations_register_audit_chain;",
     "replace": "CREATE TRIGGER organisations_register_audit_chain AFTER INSERT ON organisations\n  FOR EACH ROW EXECUTE FUNCTION app.register_audit_chain();\nALTER TABLE organisations DISABLE TRIGGER organisations_register_audit_chain;",
-    "test": "packages/db/src/audit-verification.integration.test.ts",
-    "kills": "is filled by the trigger, not by the caller remembering"
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "the tenant register > is filled by the trigger, not by the caller remembering"
+    }
   },
   {
     "id": "M10-register-readable-by-runtime-role",
@@ -96,8 +114,10 @@
     "file": "packages/db/migrations/0010_audit_chain_verification.sql",
     "find": "REVOKE ALL ON audit_chain_registry FROM moin_app, moin_provisioner;",
     "replace": "REVOKE ALL ON audit_chain_registry FROM moin_app, moin_provisioner;\nGRANT SELECT ON audit_chain_registry TO moin_app;",
-    "test": "packages/db/src/audit-verification.integration.test.ts",
-    "kills": "cannot be enumerated unelevated"
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "the tenant register > cannot be enumerated unelevated — not even by the role that owns organisations"
+    }
   },
   {
     "id": "M11-catalog-drops-register-from-append-only",
@@ -106,8 +126,10 @@
     "file": "scripts/check-rls-catalog.ts",
     "find": "  {\n    table: 'audit_chain_registry',\n    trigger: 'audit_chain_registry_append_only',\n    fn: 'app.reject_registry_mutation()',\n    triggerType: AUDIT_TRIGGER_TYPE,\n  },\n",
     "replace": "",
-    "test": "scripts/check-rls-catalog.integration.test.ts",
-    "kills": "rejects a disabled and a dropped register guard"
+    "killingTest": {
+      "file": "scripts/check-rls-catalog.integration.test.ts",
+      "fullName": "audit chain verification catalog controls > rejects a disabled and a dropped register guard"
+    }
   },
   {
     "id": "M12-catalog-drops-registration-trigger-check",
@@ -116,8 +138,10 @@
     "file": "scripts/check-rls-catalog.ts",
     "find": "      if (guard?.enabled !== TRIGGER_ALWAYS || !guard.correct_function) {",
     "replace": "      if (false) {",
-    "test": "scripts/check-rls-catalog.integration.test.ts",
-    "kills": "rejects a dropped and a disabled chain-registration trigger"
+    "killingTest": {
+      "file": "scripts/check-rls-catalog.integration.test.ts",
+      "fullName": "audit chain verification catalog controls > rejects a dropped and a disabled chain-registration trigger"
+    }
   },
   {
     "id": "M13-catalog-drops-claim-fn-registration",
@@ -126,8 +150,10 @@
     "file": "scripts/check-rls-catalog.ts",
     "find": "  'app.claim_audit_chains': {\n    arguments: 'integer, bigint, bigint',\n    owners: ['moin_migrator', 'moin_owner'],\n    searchPath: 'search_path=pg_catalog, public, app, pg_temp',\n    executeGrantees: ['moin_app'],\n  },\n",
     "replace": "",
-    "test": "scripts/check-rls-catalog.integration.test.ts",
-    "kills": "rejects the claim function changed to SECURITY INVOKER"
+    "killingTest": {
+      "file": "scripts/check-rls-catalog.integration.test.ts",
+      "fullName": "audit chain verification catalog controls > rejects the claim function changed to SECURITY INVOKER"
+    }
   },
   {
     "id": "C1-exit-codes-collapsed",
@@ -136,8 +162,10 @@
     "file": "packages/db/src/cli.ts",
     "find": "const EXIT_CHAIN_BROKEN = 3;",
     "replace": "const EXIT_CHAIN_BROKEN = 1;",
-    "test": "packages/db/src/cli-verify-audit.integration.test.ts",
-    "kills": "raises a SEV2 alarm with its runbook and a distinct exit code"
+    "killingTest": {
+      "file": "packages/db/src/cli-verify-audit.integration.test.ts",
+      "fullName": "the scheduled verifier process > raises a SEV2 alarm with its runbook and a distinct exit code on a break"
+    }
   },
   {
     "id": "C2-break-severity-downgraded",
@@ -146,28 +174,34 @@
     "file": "packages/db/src/cli.ts",
     "find": "          event: 'audit.chain.broken',\n          severity: 'SEV2',",
     "replace": "          event: 'audit.chain.broken',\n          severity: 'SEV3',",
-    "test": "packages/db/src/cli-verify-audit.integration.test.ts",
-    "kills": "raises a SEV2 alarm with its runbook and a distinct exit code"
+    "killingTest": {
+      "file": "packages/db/src/cli-verify-audit.integration.test.ts",
+      "fullName": "the scheduled verifier process > raises a SEV2 alarm with its runbook and a distinct exit code on a break"
+    }
   },
   {
     "id": "C3-enumeration-failure-reported-clean",
     "invariant": "INV-10: a sweep that could not run exits non-zero",
     "expected": "A sweep that never enumerated a tenant would exit 0.",
     "file": "packages/db/src/cli.ts",
-    "find": "      runbook: 'docs/runbooks/audit-chain-break.md',\n    });\n    return EXIT_FAILED;",
-    "replace": "      runbook: 'docs/runbooks/audit-chain-break.md',\n    });\n    return EXIT_OK;",
-    "test": "packages/db/src/cli-verify-audit.integration.test.ts",
-    "kills": "reports a failure rather than a clean run when it cannot enumerate tenants"
+    "find": "      reason: sqlState(error),\n      runbook: 'docs/runbooks/audit-chain-break.md',\n    });\n    return EXIT_FAILED;",
+    "replace": "      reason: sqlState(error),\n      runbook: 'docs/runbooks/audit-chain-break.md',\n    });\n    return EXIT_OK;",
+    "killingTest": {
+      "file": "packages/db/src/cli-verify-audit.integration.test.ts",
+      "fullName": "the scheduled verifier process > reports a failure rather than a clean run when it cannot enumerate tenants"
+    }
   },
   {
     "id": "C4-driver-message-leaked-into-log",
     "invariant": "INV-12: no personal data or driver text on the log stream",
-    "expected": "A database error message \u2014 which routinely quotes its input \u2014 would be written to the alarm line.",
+    "expected": "A database error message — which routinely quotes its input — would be written to the alarm line.",
     "file": "packages/db/src/cli.ts",
     "find": "          reason: sqlState(failure.error),",
     "replace": "          reason: String(failure.error),",
-    "test": "packages/db/src/cli-verify-audit.integration.test.ts",
-    "kills": "emits only the reviewed non-personal fields on every line kind"
+    "killingTest": {
+      "file": "packages/db/src/cli-verify-audit.integration.test.ts",
+      "fullName": "the scheduled verifier process > emits only the reviewed non-personal fields on every line kind (INV-12)"
+    }
   },
   {
     "id": "C5-runbook-link-dropped",
@@ -176,8 +210,10 @@
     "file": "packages/db/src/cli.ts",
     "find": "          seq: found.seq,\n          checked: found.checked,\n          runbook: 'docs/runbooks/audit-chain-break.md',",
     "replace": "          seq: found.seq,\n          checked: found.checked,",
-    "test": "packages/db/src/cli-verify-audit.integration.test.ts",
-    "kills": "raises a SEV2 alarm with its runbook and a distinct exit code"
+    "killingTest": {
+      "file": "packages/db/src/cli-verify-audit.integration.test.ts",
+      "fullName": "the scheduled verifier process > raises a SEV2 alarm with its runbook and a distinct exit code on a break"
+    }
   },
   {
     "id": "C6-broken-run-reported-sound",
@@ -186,8 +222,10 @@
     "file": "packages/db/src/cli.ts",
     "find": "  if (report.broken > 0) return EXIT_CHAIN_BROKEN;",
     "replace": "",
-    "test": "packages/db/src/cli-verify-audit.integration.test.ts",
-    "kills": "raises a SEV2 alarm with its runbook and a distinct exit code"
+    "killingTest": {
+      "file": "packages/db/src/cli-verify-audit.integration.test.ts",
+      "fullName": "the scheduled verifier process > raises a SEV2 alarm with its runbook and a distinct exit code on a break"
+    }
   },
   {
     "id": "S1-structural-rule-removed",
@@ -196,18 +234,22 @@
     "file": "scripts/check-audit-arguments.ts",
     "find": "  uuid: { jsonType: 'string', check: (value) => UUID.test(value) },",
     "replace": "  uuid: { jsonType: 'string', check: () => true },",
-    "test": "scripts/check-audit-arguments.integration.test.ts",
-    "kills": "a name, which no pattern would predict"
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "what the scanner catches > a name, which no pattern would predict, by the structural rule"
+    }
   },
   {
     "id": "S2-unregistered-key-ignored",
     "invariant": "INV-10: every stored argument key is on the reviewed allowlist",
-    "expected": "A key that never passed the writer \u2014 a restore, a bulk import \u2014 would pass unreported.",
+    "expected": "A key that never passed the writer — a restore, a bulk import — would pass unreported.",
     "file": "scripts/check-audit-arguments.ts",
     "find": "            if (kind === undefined) {",
     "replace": "            if (false && kind === undefined) {",
-    "test": "scripts/check-audit-arguments.integration.test.ts",
-    "kills": "a key that never passed the writer at all"
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "what the scanner catches > a key that never passed the writer at all"
+    }
   },
   {
     "id": "S3-value-kind-widening-ignored",
@@ -216,8 +258,10 @@
     "file": "scripts/check-audit-arguments.ts",
     "find": "      if (!reviewedKinds.has(row.value_kind)) {",
     "replace": "      if (false && !reviewedKinds.has(row.value_kind)) {",
-    "test": "scripts/check-audit-arguments.integration.test.ts",
-    "kills": "a value kind the registry was widened to accept"
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "what the scanner catches > a value kind the registry was widened to accept"
+    }
   },
   {
     "id": "S4-validation-rule-removed",
@@ -226,8 +270,10 @@
     "file": "scripts/check-audit-arguments.ts",
     "find": "          for (const row of (await client.query<ValidationRow>(VALIDATION_QUERY)).rows) {",
     "replace": "          for (const row of ([] as ValidationRow[])) {",
-    "test": "scripts/check-audit-arguments.integration.test.ts",
-    "kills": "a validation entry carrying something other than a bounded scalar"
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "what the scanner catches > a validation entry carrying something other than a bounded scalar"
+    }
   },
   {
     "id": "S5-contact-classification-lost",
@@ -236,8 +282,10 @@
     "file": "scripts/check-audit-arguments.ts",
     "find": "          rule: contact === undefined ? 'free-text-argument' : 'personal-data-in-argument',",
     "replace": "          rule: 'free-text-argument',",
-    "test": "scripts/check-audit-arguments.integration.test.ts",
-    "kills": "a contact detail, named as such"
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "what the scanner catches > a contact detail, named as such"
+    }
   },
   {
     "id": "S6-finding-quotes-the-value",
@@ -246,8 +294,10 @@
     "file": "scripts/check-audit-arguments.ts",
     "find": "                      'printing it would be the leak.'",
     "replace": "                      'printing it would be the leak: ' + row.value",
-    "test": "scripts/check-audit-arguments.integration.test.ts",
-    "kills": "a name, which no pattern would predict"
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "what the scanner catches > a name, which no pattern would predict, by the structural rule"
+    }
   },
   {
     "id": "N1-head-rollback-allowed",
@@ -256,8 +306,10 @@
     "file": "packages/db/migrations/0008_audit_events.sql",
     "find": "    OR NEW.last_seq < OLD.last_seq\n    OR NEW.last_seq > OLD.last_seq + 1",
     "replace": "    OR false",
-    "test": "packages/db/src/audit-verification.integration.test.ts",
-    "kills": "detects a head rolled back to zero"
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "what the sweep finds > detects a head rolled back to zero, which leaves every event in place"
+    }
   },
   {
     "id": "N2-event-past-head-undetected",
@@ -266,8 +318,10 @@
     "file": "packages/db/src/audit.ts",
     "find": "  if (head.max_seq !== null && BigInt(head.max_seq) > finalSeq) {",
     "replace": "  if (false && head.max_seq !== null && BigInt(head.max_seq) > finalSeq) {",
-    "test": "packages/db/src/audit-verification.integration.test.ts",
-    "kills": "detects a head rolled back to zero"
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "what the sweep finds > detects a head rolled back to zero, which leaves every event in place"
+    }
   },
   {
     "id": "N3-insert-link-guard-dropped",
@@ -276,8 +330,10 @@
     "file": "packages/db/migrations/0008_audit_events.sql",
     "find": "CREATE TRIGGER audit_events_linked_only BEFORE INSERT ON audit_events\n  FOR EACH ROW EXECUTE FUNCTION app.reject_unlinked_audit_event();\nALTER TABLE audit_events ENABLE ALWAYS TRIGGER audit_events_linked_only;",
     "replace": "CREATE TRIGGER audit_events_linked_only BEFORE INSERT ON audit_events\n  FOR EACH ROW EXECUTE FUNCTION app.reject_unlinked_audit_event();\nALTER TABLE audit_events DISABLE TRIGGER audit_events_linked_only;",
-    "test": "packages/db/src/audit-verification.integration.test.ts",
-    "kills": "detects a forged event written past the head"
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "what the sweep finds > detects a forged event written past the head"
+    }
   },
   {
     "id": "N4-truncate-guards-dropped",
@@ -286,8 +342,10 @@
     "file": "packages/db/migrations/0008_audit_events.sql",
     "find": "CREATE TRIGGER audit_events_no_truncate BEFORE TRUNCATE ON audit_events\n  FOR EACH STATEMENT EXECUTE FUNCTION app.reject_audit_mutation();\nALTER TABLE audit_events ENABLE ALWAYS TRIGGER audit_events_no_truncate;",
     "replace": "CREATE TRIGGER audit_events_no_truncate BEFORE TRUNCATE ON audit_events\n  FOR EACH STATEMENT EXECUTE FUNCTION app.reject_audit_mutation();\nALTER TABLE audit_events DISABLE TRIGGER audit_events_no_truncate;",
-    "test": "packages/db/src/audit-verification.integration.test.ts",
-    "kills": "refuses TRUNCATE on the register"
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "what the sweep finds > refuses TRUNCATE on the register, the events and the heads"
+    }
   },
   {
     "id": "N5-registry-truncate-guard-dropped",
@@ -296,8 +354,10 @@
     "file": "packages/db/migrations/0010_audit_chain_verification.sql",
     "find": "CREATE TRIGGER audit_chain_registry_no_truncate BEFORE TRUNCATE ON audit_chain_registry\n  FOR EACH STATEMENT EXECUTE FUNCTION app.reject_registry_mutation();\nALTER TABLE audit_chain_registry ENABLE ALWAYS TRIGGER audit_chain_registry_no_truncate;",
     "replace": "CREATE TRIGGER audit_chain_registry_no_truncate BEFORE TRUNCATE ON audit_chain_registry\n  FOR EACH STATEMENT EXECUTE FUNCTION app.reject_registry_mutation();\nALTER TABLE audit_chain_registry DISABLE TRIGGER audit_chain_registry_no_truncate;",
-    "test": "packages/db/src/audit-verification.integration.test.ts",
-    "kills": "refuses TRUNCATE on the register"
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "what the sweep finds > refuses TRUNCATE on the register, the events and the heads"
+    }
   },
   {
     "id": "N6-reconciliation-removed",
@@ -306,8 +366,10 @@
     "file": "packages/db/src/audit-verification.ts",
     "find": "  const unregisteredTenants = await unregistered(pool);",
     "replace": "  const unregisteredTenants: readonly string[] = [];\n  void unregistered;",
-    "test": "packages/db/src/audit-verification.integration.test.ts",
-    "kills": "reports a provisioned tenant that never reached the register"
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "what the sweep finds > reports a provisioned tenant that never reached the register"
+    }
   },
   {
     "id": "N7-isSound-ignores-unregistered",
@@ -316,8 +378,10 @@
     "file": "packages/db/src/audit-verification.ts",
     "find": "    report.unregistered === 0 &&\n",
     "replace": "",
-    "test": "packages/db/src/audit-verification.integration.test.ts",
-    "kills": "reports a provisioned tenant that never reached the register"
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "what the sweep finds > reports a provisioned tenant that never reached the register"
+    }
   },
   {
     "id": "N8-backfill-removed",
@@ -326,9 +390,11 @@
     "file": "packages/db/migrations/0010_audit_chain_verification.sql",
     "find": "INSERT INTO audit_chain_registry(tenant_id) SELECT id FROM organisations ON CONFLICT DO NOTHING;",
     "replace": "",
-    "test": "packages/db/src/audit-chain-backfill.integration.test.ts",
-    "kills": "registers every pre-existing organisation",
-    "note": "Rejected by an assertion inside the migration itself, during the integration project's global setup, so no suite runs and no test can claim the kill. The control is stronger than a test rather than absent; the expected outcome is INFRA_FAILURE."
+    "note": "Detected, but not by an assertion. The killing test is the one that *applies* the migration, so the removed backfill is caught by the migration's own guard: `0010` raises \"audit chain register backfill covered 0 of 3 organisation(s)\" and rolls back, and the test fails on that thrown error. The probe recorded 2 real `expect` calls before it, and Vitest marked the error foreign, so the reporter refuses to call it an assertion — correctly. A guard inside the migration is stronger than a test, but it is not assertion evidence; the expected outcome is INFRA_FAILURE.",
+    "killingTest": {
+      "file": "packages/db/src/audit-chain-backfill.integration.test.ts",
+      "fullName": "applying the register migration to a database that already has tenants > registers every pre-existing organisation"
+    }
   },
   {
     "id": "N9-catalog-accepts-origin-only-trigger",
@@ -337,8 +403,10 @@
     "file": "scripts/check-rls-catalog.ts",
     "find": "const TRIGGER_ALWAYS = 'A';",
     "replace": "const TRIGGER_ALWAYS = 'O';",
-    "test": "scripts/check-rls-catalog.integration.test.ts",
-    "kills": "rejects a disabled mutation guard"
+    "killingTest": {
+      "file": "scripts/check-rls-catalog.integration.test.ts",
+      "fullName": "audit append-only catalog control > rejects a disabled mutation guard"
+    }
   },
   {
     "id": "N10-catalog-body-pinning-removed",
@@ -347,8 +415,10 @@
     "file": "scripts/check-rls-catalog.ts",
     "find": "      if (fn.body_digest !== expected) {",
     "replace": "      if (false && fn.body_digest !== expected) {",
-    "test": "scripts/check-rls-catalog.integration.test.ts",
-    "kills": "rejects a guard whose body was replaced"
+    "killingTest": {
+      "file": "scripts/check-rls-catalog.integration.test.ts",
+      "fullName": "audit chain verification catalog controls > rejects a guard whose body was replaced with one that does not raise"
+    }
   },
   {
     "id": "N11-registry-reconciliation-catalog-removed",
@@ -357,8 +427,10 @@
     "file": "scripts/check-rls-catalog.ts",
     "find": "      if (missing > 0) {",
     "replace": "      if (false && missing > 0) {",
-    "test": "scripts/check-rls-catalog.integration.test.ts",
-    "kills": "rejects a register that does not account for every provisioned tenant"
+    "killingTest": {
+      "file": "scripts/check-rls-catalog.integration.test.ts",
+      "fullName": "audit chain verification catalog controls > rejects a register that does not account for every provisioned tenant"
+    }
   },
   {
     "id": "N12-scanner-reads-without-tenant-scope",
@@ -367,8 +439,10 @@
     "file": "scripts/check-audit-arguments.ts",
     "find": "          const counted = await client.query<{ n: string }>(EVENT_COUNT_QUERY);",
     "replace": "          const counted = await pool.query<{ n: string }>(EVENT_COUNT_QUERY);",
-    "test": "scripts/check-audit-arguments.integration.test.ts",
-    "kills": "a name, which no pattern would predict"
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "what the scanner catches > a name, which no pattern would predict, by the structural rule"
+    }
   },
   {
     "id": "N13-scanner-vacuous-pass-refused-by-main",
@@ -377,8 +451,10 @@
     "file": "scripts/check-audit-arguments.ts",
     "find": "  if (result.events === 0) {",
     "replace": "  if (false && result.events === 0) {",
-    "test": "scripts/check-audit-arguments.integration.test.ts",
-    "kills": "refuses to pass when tenants exist but it inspected no events"
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "the check as a process > refuses to pass when tenants exist but it inspected no events"
+    }
   },
   {
     "id": "N14-scanner-prints-forged-key",
@@ -387,8 +463,10 @@
     "file": "scripts/check-audit-arguments.ts",
     "find": "  const safeKey = SAFE_KEY.test(key) ? key : '<unprintable key>';",
     "replace": "  const safeKey = key;",
-    "test": "scripts/check-audit-arguments.integration.test.ts",
-    "kills": "a forged argument key that is itself personal data"
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "what the scanner catches > a forged argument key that is itself personal data, without printing it"
+    }
   },
   {
     "id": "N15-scanner-shape-rule-removed",
@@ -397,8 +475,10 @@
     "file": "scripts/check-audit-arguments.ts",
     "find": "            if (!SAFE_OPERATION.test(row.operation) || !SAFE_TARGET_KIND.test(row.target_kind)) {",
     "replace": "            if (false) {",
-    "test": "scripts/check-audit-arguments.integration.test.ts",
-    "kills": "an operation or target kind that only a dropped CHECK could have allowed"
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "what the scanner catches > an operation or target kind that only a dropped CHECK could have allowed"
+    }
   },
   {
     "id": "N16-empty-register-reported-clean",
@@ -407,8 +487,10 @@
     "file": "packages/db/src/cli.ts",
     "find": "  if (report.tenants === 0) {",
     "replace": "  if (false && report.tenants === 0) {",
-    "test": "packages/db/src/cli-verify-audit.integration.test.ts",
-    "kills": "exits non-zero on a sweep of zero tenants"
+    "killingTest": {
+      "file": "packages/db/src/cli-verify-audit.integration.test.ts",
+      "fullName": "the scheduled verifier process > exits non-zero on a sweep of zero tenants"
+    }
   },
   {
     "id": "N17-sqlstate-replaced-by-error-name",
@@ -417,8 +499,10 @@
     "file": "packages/db/src/cli.ts",
     "find": "  const code = (error as { code?: unknown } | null)?.code;\n  if (typeof code === 'string' && /^[0-9A-Z]{5}$/u.test(code)) return code;",
     "replace": "",
-    "test": "packages/db/src/cli-verify-audit.integration.test.ts",
-    "kills": "emits only the reviewed non-personal fields on every line kind"
+    "killingTest": {
+      "file": "packages/db/src/cli-verify-audit.integration.test.ts",
+      "fullName": "the scheduled verifier process > emits only the reviewed non-personal fields on every line kind (INV-12)"
+    }
   },
   {
     "id": "B1-1-deadline-shortfall-inferred-from-claims",
@@ -427,8 +511,10 @@
     "file": "packages/db/src/audit-verification.ts",
     "find": "      unreached = await remaining(pool, after, highWater);",
     "replace": "      unreached = Math.max(tenants - (outcomes.size + failures.length), 0);",
-    "test": "packages/db/src/audit-verification.integration.test.ts",
-    "kills": "does not call a deadline-truncated sweep sound"
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "the daily sweep > does not call a deadline-truncated sweep sound, even when every tenant it reached was"
+    }
   },
   {
     "id": "B1-2-coverage-ignored-by-isSound",
@@ -437,8 +523,10 @@
     "file": "packages/db/src/audit-verification.ts",
     "find": "    report.unregistered === 0 &&\n    report.coverageComplete\n  );",
     "replace": "    report.unregistered === 0\n  );",
-    "test": "packages/db/src/audit-verification.integration.test.ts",
-    "kills": "treats a shortfall it could not count as incomplete"
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "the daily sweep > treats a shortfall it could not count as incomplete, not as zero"
+    }
   },
   {
     "id": "B1-3-uncountable-shortfall-treated-as-none",
@@ -447,8 +535,10 @@
     "file": "packages/db/src/audit-verification.ts",
     "find": "    } catch {\n      // Not knowing the shortfall is not the same as there being none. Fail closed, and let the\n      // count stay 0 rather than inventing one.\n      coverageComplete = false;\n    }",
     "replace": "    } catch {\n      unreached = 0;\n    }",
-    "test": "packages/db/src/audit-verification.integration.test.ts",
-    "kills": "treats a shortfall it could not count as incomplete"
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "the daily sweep > treats a shortfall it could not count as incomplete, not as zero"
+    }
   },
   {
     "id": "B1-4-cli-ignores-incomplete-coverage",
@@ -457,8 +547,10 @@
     "file": "packages/db/src/cli.ts",
     "find": "  if (report.unchecked > 0 || report.unregistered > 0 || !report.coverageComplete) {",
     "replace": "  if (false && (report.unchecked > 0 || report.unregistered > 0 || !report.coverageComplete)) {",
-    "test": "packages/db/src/cli-verify-audit.integration.test.ts",
-    "kills": "fails when it cannot even establish whether coverage was complete"
+    "killingTest": {
+      "file": "packages/db/src/cli-verify-audit.integration.test.ts",
+      "fullName": "the scheduled verifier process > fails when it cannot even establish whether coverage was complete"
+    }
   },
   {
     "id": "B2-1-scanner-skips-coverage-reconciliation",
@@ -467,18 +559,22 @@
     "file": "scripts/check-audit-arguments.ts",
     "find": "    const missing = await pool.query<{ id: string }>(UNREGISTERED_QUERY, [UNREGISTERED_SAMPLE]);",
     "replace": "    const missing = { rows: [] as { id: string }[] };",
-    "test": "scripts/check-audit-arguments.integration.test.ts",
-    "kills": "fails when a provisioned tenant hides a leaking argument outside the register"
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "scanner coverage is reconciled, not assumed > fails when a provisioned tenant hides a leaking argument outside the register"
+    }
   },
   {
     "id": "B2-2-coverage-gap-not-explained",
     "invariant": "Operability: the scanner names the coverage gap, not just a finding count",
     "expected": "An operator would see a list of findings with no statement that whole tenants were never reached.",
     "file": "scripts/check-audit-arguments.ts",
-    "find": "    console.error(\n      `audit argument scan could not reach ${String(result.unregistered)} provisioned tenant(s): ` +\n        'they have no audit chain register row. Nothing is proven about the arguments stored under ' +\n        'them \u2014 see docs/runbooks/audit-chain-break.md.',\n    );",
+    "find": "    console.error(\n      `audit argument scan could not reach ${String(result.unregistered)} provisioned tenant(s): ` +\n        'they have no audit chain register row. Nothing is proven about the arguments stored under ' +\n        'them — see docs/runbooks/audit-chain-break.md.',\n    );",
     "replace": "",
-    "test": "scripts/check-audit-arguments.integration.test.ts",
-    "kills": "fails when a provisioned tenant hides a leaking argument outside the register"
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "scanner coverage is reconciled, not assumed > fails when a provisioned tenant hides a leaking argument outside the register"
+    }
   },
   {
     "id": "B3-1-nonstring-values-skipped",
@@ -487,8 +583,10 @@
     "file": "scripts/check-audit-arguments.ts",
     "find": "            if (row.kind !== rule.jsonType) {",
     "replace": "            if (false && row.kind !== rule.jsonType) {",
-    "test": "scripts/check-audit-arguments.integration.test.ts",
-    "kills": "catches a uuid kind holding a boolean"
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "values are validated against their registered kind > catches a uuid kind holding a boolean"
+    }
   },
   {
     "id": "B3-2-registered-is-treated-as-sufficient",
@@ -497,8 +595,10 @@
     "file": "scripts/check-audit-arguments.ts",
     "find": "            if (rule.check(row.value)) continue;",
     "replace": "            continue;",
-    "test": "scripts/check-audit-arguments.integration.test.ts",
-    "kills": "a name, which no pattern would predict"
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "what the scanner catches > a name, which no pattern would predict, by the structural rule"
+    }
   },
   {
     "id": "B3-3-count-bounds-not-enforced",
@@ -507,8 +607,10 @@
     "file": "scripts/check-audit-arguments.ts",
     "find": "    check: (value) => /^(0|[1-9][0-9]{0,8})$/u.test(value) && Number(value) <= COUNT_MAX,",
     "replace": "    check: () => true,",
-    "test": "scripts/check-audit-arguments.integration.test.ts",
-    "kills": "catches a count kind holding a negative number"
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "values are validated against their registered kind > catches a count kind holding a negative number"
+    }
   },
   {
     "id": "B3-4-unknown-kind-fails-open",
@@ -517,18 +619,22 @@
     "file": "scripts/check-audit-arguments.ts",
     "find": "            if (rule === undefined) {",
     "replace": "            if (false && rule === undefined) {",
-    "test": "scripts/check-audit-arguments.integration.test.ts",
-    "kills": "fails closed on a registered kind it has no validator for"
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "values are validated against their registered kind > fails closed on a registered kind it has no validator for"
+    }
   },
   {
     "id": "B4-1-head-and-orphan-read-in-two-statements",
     "invariant": "INV-10: 'head absent' and 'event exists' come from one snapshot",
-    "expected": "A legitimate first append committing mid-verification would be reported as `missing-head` \u2014 a false integrity alarm on a sound chain.",
+    "expected": "A legitimate first append committing mid-verification would be reported as `missing-head` — a false integrity alarm on a sound chain.",
     "file": "packages/db/src/audit.ts",
-    "find": "  if (head.last_seq === null || head.last_hash === null) {\n    // No head. In the same snapshot, either there are no events \u2014 an empty chain, which is sound \u2014\n    // or events exist without a head, which is a genuine break and still detected.\n    return head.max_seq === null\n      ? { valid: true, checked: '0' }\n      : { valid: false, checked: '0', reason: 'missing-head', seq: head.max_seq };\n  }",
+    "find": "  if (head.last_seq === null || head.last_hash === null) {\n    // No head. In the same snapshot, either there are no events — an empty chain, which is sound —\n    // or events exist without a head, which is a genuine break and still detected.\n    return head.max_seq === null\n      ? { valid: true, checked: '0' }\n      : { valid: false, checked: '0', reason: 'missing-head', seq: head.max_seq };\n  }",
     "replace": "  if (head.last_seq === null || head.last_hash === null) {\n    const orphan = await client.query<{ n: string }>('select max(seq)::text as n from audit_events');\n    const n = orphan.rows[0]?.n ?? null;\n    return n === null\n      ? { valid: true, checked: '0' }\n      : { valid: false, checked: '0', reason: 'missing-head', seq: n };\n  }",
-    "test": "packages/db/src/audit-verification.integration.test.ts",
-    "kills": "does not report missing-head when a first append commits mid-verification"
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "the head-and-orphan determination > does not report missing-head when a first append commits mid-verification"
+    }
   },
   {
     "id": "B4-2-missing-head-suppressed",
@@ -537,8 +643,10 @@
     "file": "packages/db/src/audit.ts",
     "find": "    return head.max_seq === null\n      ? { valid: true, checked: '0' }\n      : { valid: false, checked: '0', reason: 'missing-head', seq: head.max_seq };",
     "replace": "    return { valid: true, checked: '0' };",
-    "test": "packages/db/src/audit-verification.integration.test.ts",
-    "kills": "still detects a genuine orphan event with no head"
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "the head-and-orphan determination > still detects a genuine orphan event with no head"
+    }
   },
   {
     "id": "P1-high-water-bound-ignored",
@@ -547,8 +655,10 @@
     "file": "packages/db/migrations/0011_audit_chain_population.sql",
     "find": "    AND r.registration_seq <= coalesce(p_high_water, 0)\n  ORDER BY r.registration_seq",
     "replace": "  ORDER BY r.registration_seq",
-    "test": "packages/db/src/audit-chain-population.integration.test.ts",
-    "kills": "reads the high-water mark once, not once per page"
+    "killingTest": {
+      "file": "packages/db/src/audit-chain-population.integration.test.ts",
+      "fullName": "the sweep does not widen its own population > reads the high-water mark once, not once per page"
+    }
   },
   {
     "id": "P2-high-water-recomputed-each-page",
@@ -557,8 +667,10 @@
     "file": "packages/db/src/audit-verification.ts",
     "find": "          [pageSize, after, highWater],",
     "replace": "          [pageSize, after, await populationHighWater(pool)],",
-    "test": "packages/db/src/audit-chain-population.integration.test.ts",
-    "kills": "reads the high-water mark once, not once per page"
+    "killingTest": {
+      "file": "packages/db/src/audit-chain-population.integration.test.ts",
+      "fullName": "the sweep does not widen its own population > reads the high-water mark once, not once per page"
+    }
   },
   {
     "id": "P3-uuid-cursor-instead-of-sequence",
@@ -567,8 +679,10 @@
     "file": "packages/db/migrations/0011_audit_chain_population.sql",
     "find": "  SELECT r.tenant_id AS organisation_id, r.tenant_id AS id, r.registration_seq\n  FROM audit_chain_registry r\n  WHERE r.registration_seq > coalesce(p_after, 0)",
     "replace": "  SELECT r.tenant_id AS organisation_id, r.tenant_id AS id,\n         (row_number() OVER (ORDER BY r.tenant_id))::bigint AS registration_seq\n  FROM audit_chain_registry r\n  WHERE r.registration_seq > coalesce(p_after, 0)",
-    "test": "packages/db/src/audit-chain-population.integration.test.ts",
-    "kills": "is verified before coverage is complete, whatever its UUID sorts like"
+    "killingTest": {
+      "file": "packages/db/src/audit-chain-population.integration.test.ts",
+      "fullName": "CASE 2 — a member that existed at snapshot start > is verified before coverage is complete, whatever its UUID sorts like"
+    }
   },
   {
     "id": "P4-coverage-complete-on-empty-page-without-checking-snapshot",
@@ -577,8 +691,10 @@
     "file": "packages/db/src/audit-verification.ts",
     "find": "    if (unreached > 0) coverageComplete = false;",
     "replace": "    void unreached;",
-    "test": "packages/db/src/audit-chain-population.integration.test.ts",
-    "kills": "reports the snapshot shortfall and is not sound"
+    "killingTest": {
+      "file": "packages/db/src/audit-chain-population.integration.test.ts",
+      "fullName": "CASE 4 — a deadline inside the captured population > reports the snapshot shortfall and is not sound"
+    }
   },
   {
     "id": "P5-scanner-ignores-high-water",
@@ -587,8 +703,10 @@
     "file": "scripts/check-audit-arguments.ts",
     "find": "    highWater = capturedHighWater;",
     "replace": "    highWater = '9223372036854775807';",
-    "test": "scripts/check-audit-arguments.integration.test.ts",
-    "kills": "does not adopt a registration that lands while it is running"
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "CASE 5 — the scanner uses the same population snapshot > does not adopt a registration that lands while it is running"
+    }
   },
   {
     "id": "P6-scanner-skips-population-traversal",
@@ -597,8 +715,10 @@
     "file": "scripts/check-audit-arguments.ts",
     "find": "      if (result.claimed < TENANT_PAGE_SIZE) break;\n      after = cursor;",
     "replace": "      void cursor;\n      break;",
-    "test": "scripts/check-audit-arguments.integration.test.ts",
-    "kills": "a late registration behind the cursor is excluded by the bound, not skipped by ordering"
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "CASE 5 — the scanner uses the same population snapshot > a late registration behind the cursor is excluded by the bound, not skipped by ordering"
+    }
   },
   {
     "id": "P7-registration-sequence-not-monotonic",
@@ -607,8 +727,10 @@
     "file": "packages/db/migrations/0011_audit_chain_population.sql",
     "find": "ALTER TABLE audit_chain_registry\n  ADD CONSTRAINT audit_chain_registry_registration_seq_key UNIQUE (registration_seq);",
     "replace": "",
-    "test": "packages/db/src/audit-chain-population.integration.test.ts",
-    "kills": "refuses two registrations sharing a position"
+    "killingTest": {
+      "file": "packages/db/src/audit-chain-population.integration.test.ts",
+      "fullName": "the registration sequence > refuses two registrations sharing a position"
+    }
   },
   {
     "id": "P8-sequence-backfill-removed",
@@ -617,19 +739,23 @@
     "file": "packages/db/migrations/0011_audit_chain_population.sql",
     "find": "UPDATE audit_chain_registry r\nSET registration_seq = ordered.position\nFROM ordered\nWHERE r.tenant_id = ordered.tenant_id AND r.registration_seq IS NULL;",
     "replace": "UPDATE audit_chain_registry r\nSET registration_seq = NULL\nFROM ordered\nWHERE false;",
-    "test": "packages/db/src/audit-chain-backfill.integration.test.ts",
-    "kills": "backfills every existing row deterministically and keeps advancing afterwards",
-    "note": "Rejected by an assertion inside the migration itself, during the integration project's global setup, so no suite runs and no test can claim the kill. The control is stronger than a test rather than absent; the expected outcome is INFRA_FAILURE."
+    "note": "Detected, but not by an assertion, in the same shape as N8: `0011` fails on `column \"registration_seq\" of relation \"audit_chain_registry\" contains null values` and rolls back, and the test that applies it fails on that thrown error after 4 real `expect` calls. The NOT NULL constraint is the control. Not assertion evidence; the expected outcome is INFRA_FAILURE.",
+    "killingTest": {
+      "file": "packages/db/src/audit-chain-backfill.integration.test.ts",
+      "fullName": "applying the registration-sequence migration to a populated register > backfills every existing row deterministically and keeps advancing afterwards"
+    }
   },
   {
     "id": "P9-population-state-writable-by-runtime-role",
     "invariant": "A registration epoch is immutable, and the allocator is not writable by the runtime role",
-    "expected": "`moin_app` could increment the population state and move a sweep's bound out from under it, or rewrite a registration's epoch \u2014 the UUID-cursor defect made deliberate.",
+    "expected": "`moin_app` could increment the population state and move a sweep's bound out from under it, or rewrite a registration's epoch — the UUID-cursor defect made deliberate.",
     "file": "packages/db/migrations/0011_audit_chain_population.sql",
     "find": "REVOKE ALL ON audit_chain_population_state FROM moin_app, moin_provisioner;",
     "replace": "GRANT SELECT, UPDATE ON audit_chain_population_state TO moin_app;\nGRANT UPDATE ON audit_chain_registry TO moin_app;",
-    "test": "packages/db/src/audit-chain-population.integration.test.ts",
-    "kills": "cannot be rewritten by the application role or by the table owner"
+    "killingTest": {
+      "file": "packages/db/src/audit-chain-population.integration.test.ts",
+      "fullName": "the registration sequence > cannot be rewritten by the application role or by the table owner"
+    }
   },
   {
     "id": "P10-next-sweep-starts-from-previous-mark",
@@ -638,8 +764,10 @@
     "file": "packages/db/src/audit-verification.ts",
     "find": "  let after = FIRST_CURSOR;",
     "replace": "  let after = await populationHighWater(pool);",
-    "test": "packages/db/src/audit-chain-population.integration.test.ts",
-    "kills": "leaves no registration outside both of two consecutive sweeps"
+    "killingTest": {
+      "file": "packages/db/src/audit-chain-population.integration.test.ts",
+      "fullName": "CASE 6 — the exact snapshot boundary > leaves no registration outside both of two consecutive sweeps"
+    }
   },
   {
     "id": "E1-epoch-allocated-by-sequence",
@@ -648,8 +776,10 @@
     "file": "packages/db/migrations/0011_audit_chain_population.sql",
     "find": "CREATE OR REPLACE FUNCTION app.register_audit_chain() RETURNS trigger\n  LANGUAGE plpgsql SET search_path = pg_catalog, public, app, pg_temp\nAS $$\nDECLARE\n  v_epoch bigint;\nBEGIN\n  UPDATE audit_chain_population_state\n     SET last_registration_epoch = last_registration_epoch + 1\n   WHERE id\n  RETURNING last_registration_epoch INTO v_epoch;",
     "replace": "CREATE SEQUENCE mutation_rejected_epoch_seq;\nCREATE OR REPLACE FUNCTION app.register_audit_chain() RETURNS trigger\n  LANGUAGE plpgsql SET search_path = pg_catalog, public, app, pg_temp\nAS $$\nDECLARE\n  v_epoch bigint;\nBEGIN\n  v_epoch := nextval('mutation_rejected_epoch_seq');",
-    "test": "packages/db/src/audit-chain-epoch.integration.test.ts",
-    "kills": "blocks a second registration while the first is uncommitted"
+    "killingTest": {
+      "file": "packages/db/src/audit-chain-epoch.integration.test.ts",
+      "fullName": "the allocator is a row lock, not a sequence > blocks a second registration while the first is uncommitted"
+    }
   },
   {
     "id": "E3-allocator-does-not-fail-closed",
@@ -658,8 +788,10 @@
     "file": "packages/db/migrations/0011_audit_chain_population.sql",
     "find": "  IF v_epoch IS NULL THEN\n    RAISE EXCEPTION 'audit chain population state is missing, so no registration epoch can be allocated'\n      USING ERRCODE = 'internal_error';\n  END IF;",
     "replace": "  v_epoch := coalesce(v_epoch, 0);",
-    "test": "packages/db/src/audit-chain-epoch.integration.test.ts",
-    "kills": "refuses to register a tenant when no epoch can be allocated"
+    "killingTest": {
+      "file": "packages/db/src/audit-chain-epoch.integration.test.ts",
+      "fullName": "the allocator fails closed > refuses to register a tenant when no epoch can be allocated"
+    }
   },
   {
     "id": "C1-privacy-gate-ignores-added-columns",
@@ -668,52 +800,166 @@
     "file": "scripts/check-data-classification.ts",
     "find": "  for (const match of sql.matchAll(ADD_COLUMN)) {\n    columns.push({ table: match[1] ?? '', column: match[2] ?? '' });\n  }",
     "replace": "",
-    "test": "scripts/check-data-classification.test.ts",
-    "kills": "flags an ALTER-added column the inventory has never seen",
-    "project": "unit"
+    "project": "unit",
+    "killingTest": {
+      "file": "scripts/check-data-classification.test.ts",
+      "fullName": "data classification check (QG-12) > flags an ALTER-added column the inventory has never seen"
+    }
   },
   {
-    "id": "C2-classifier-trusts-message-text",
-    "invariant": "Only a typed assertion error is evidence; message text cannot promote a failure",
-    "expected": "An ordinary error whose text happens to contain matcher words \u2014 a connection failure, a SQL syntax error quoting a query \u2014 would be counted as proof that an invariant was enforced.",
+    "id": "H1-classifier-trusts-error-name",
+    "invariant": "Blocker 1 — only the reporter's trusted category promotes a failure; an error object never does",
+    "expected": "An ordinary error decorated with `name = 'AssertionError'` would be counted as proof that an invariant was enforced — the exploit the last review demonstrated.",
     "file": "scripts/mutation-outcome.ts",
-    "find": "    if (errors.length > 0 && nonAssertion.length === 0) {",
-    "replace": "    if (errors.length > 0 && errors.some((error) => /toThrow|AssertionError|expect/u.test(error.message))) {",
-    "test": "scripts/mutation-outcome.test.ts",
-    "kills": "rejects a connection failure that happens to mention toThrow",
+    "find": "  if (test.failureCategory !== 'ASSERTION') {",
+    "replace": "  if (test.failureCategory !== 'ASSERTION' && !test.errors.some((error) => error.name === 'AssertionError')) {",
+    "killingTest": {
+      "file": "scripts/mutation-outcome.test.ts",
+      "fullName": "1 — a spoofed assertion object > is not evidence, however it is decorated"
+    },
     "project": "unit"
   },
   {
-    "id": "C3-classifier-ignores-hook-failures",
-    "invariant": "A hook that threw is infrastructure, whatever else the run reports",
+    "id": "H2-classifier-ignores-module-identity",
+    "invariant": "Blocker 2 — a killing test is identified by module and name together",
+    "expected": "A same-named test in another file could claim the kill, so a passing namesake would launder a defect nobody detected.",
+    "file": "scripts/mutation-outcome.ts",
+    "find": "  return test.file === identity.file && test.fullName === identity.fullName;",
+    "replace": "  return test.fullName === identity.fullName;",
+    "killingTest": {
+      "file": "scripts/mutation-outcome.test.ts",
+      "fullName": "2 — the same test name in another file > cannot claim the kill"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H3-classifier-matches-by-substring",
+    "invariant": "Blocker 2 — the full name is compared exactly, never as a substring",
+    "expected": "“rejects invalid chain” would match “rejects invalid chain after retry”, so an unrelated test's failure would be recorded as the kill.",
+    "file": "scripts/mutation-outcome.ts",
+    "find": "  return test.file === identity.file && test.fullName === identity.fullName;",
+    "replace": "  return test.file === identity.file && test.fullName.includes(identity.fullName);",
+    "killingTest": {
+      "file": "scripts/mutation-outcome.test.ts",
+      "fullName": "4 — a substring collision > does not match a longer name that contains the intended one"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H4-classifier-resolves-duplicates-arbitrarily",
+    "invariant": "Blocker 2 — exactly one test may carry the identity",
+    "expected": "With two tests of the same name the classifier would take the first and report a kill, although which one failed cannot be established.",
+    "file": "scripts/mutation-outcome.ts",
+    "find": "  if (named.length > 1) {",
+    "replace": "  if (named.length > 2) {",
+    "killingTest": {
+      "file": "scripts/mutation-outcome.test.ts",
+      "fullName": "3 — duplicate identity > is rejected rather than resolved arbitrarily"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H5-classifier-ignores-unrelated-failures",
+    "invariant": "Blocker 3 — a kill must be attributable, so no other test may have failed",
+    "expected": "A run where the intended test asserted and an exhausted pool failed other tests would be recorded as clean evidence.",
+    "file": "scripts/mutation-outcome.ts",
+    "find": "  if (unrelatedFailures > 0) {",
+    "replace": "  if (unrelatedFailures > 999) {",
+    "killingTest": {
+      "file": "scripts/mutation-outcome.test.ts",
+      "fullName": "5 — the intended test asserts, something unrelated throws > is not a clean kill"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H6-classifier-ignores-hook-failures",
+    "invariant": "Blocker 3 — a hook that threw is infrastructure, whatever the tests reported",
     "expected": "An unreachable database failing `beforeAll` would be classified from whatever the tests reported, which is how every variant once looked killed.",
     "file": "scripts/mutation-outcome.ts",
-    "find": "  const hookError = modules.flatMap((module) => module.hookErrors)[0];",
-    "replace": "  const hookError = undefined as undefined | { message: string; name: string; isAssertion: boolean };",
-    "test": "scripts/mutation-outcome.test.ts",
-    "kills": "a hook failure wins even when it mentions a matcher",
+    "find": "  const hookError = report.modules.flatMap((module) => module.hookErrors)[0];",
+    "replace": "  const hookError = report.modules.flatMap((module) => module.hookErrors).find(() => false);",
+    "killingTest": {
+      "file": "scripts/mutation-outcome.test.ts",
+      "fullName": "9 — a beforeAll failure > wins even when a test also recorded an assertion"
+    },
     "project": "unit"
   },
   {
-    "id": "C4-classifier-accepts-mixed-errors",
-    "invariant": "A test that failed an assertion AND threw elsewhere is not clean evidence",
-    "expected": "An `afterEach` that blew up alongside a genuine assertion would be counted as a clean kill, so a broken teardown could mask an unreliable run.",
-    "file": "scripts/mutation-outcome.ts",
-    "find": "    const nonAssertion = errors.filter((error) => !error.isAssertion);",
-    "replace": "    const nonAssertion: typeof errors = [];",
-    "test": "scripts/mutation-outcome.test.ts",
-    "kills": "an afterEach failure alongside an assertion fails closed",
-    "project": "unit"
-  },
-  {
-    "id": "C5-reporter-types-by-name-alone",
-    "invariant": "An assertion is identified by its metadata as well as its name",
-    "expected": "An ordinary error whose `name` was reassigned to AssertionError would be read as a typed assertion, which is a one-line way to forge evidence.",
+    "id": "H7-reporter-ignores-foreign-markers",
+    "invariant": "Blocker 1 — Vitest's own serializer markers separate its assertion from a foreign object",
+    "expected": "A thrown object decorated with the four matcher fields would be typed as a genuine assertion whenever its test had also called `expect` once.",
     "file": "scripts/mutation-reporter.ts",
-    "find": "    isAssertion: name === 'AssertionError' && present.length === ASSERTION_FIELDS.length,",
-    "replace": "    isAssertion: name === 'AssertionError',",
-    "test": "scripts/mutation-reporter.test.ts",
-    "kills": "is not an assertion when the name is right but the metadata is absent",
+    "find": "      error.foreignMarkers.length === 0 &&",
+    "replace": "      true &&",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.test.ts",
+      "fullName": "the ASSERTION verdict > refuses a decorated foreign error even when expect was called"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H8-reporter-ignores-the-probe",
+    "invariant": "Blocker 1 — `expect` must actually have been called inside the test process",
+    "expected": "A failure where no matcher ever ran would be typed as an assertion on the strength of the error object alone.",
+    "file": "scripts/mutation-reporter.ts",
+    "find": "  if (probe.expectCalls === 0) return 'ERROR';",
+    "replace": "  if (probe.expectCalls < 0) return 'ERROR';",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.test.ts",
+      "fullName": "the ASSERTION verdict > refuses any failure where expect was never called"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H9-reporter-trusts-a-stale-probe",
+    "invariant": "Blocker 1 — a missing or version-mismatched probe fails closed",
+    "expected": "A probe from another contract version would be read as though its fields meant what this version expects.",
+    "file": "scripts/mutation-reporter.ts",
+    "find": "  if (probe?.version !== PROBE_VERSION) return 'UNKNOWN';",
+    "replace": "  if (probe === undefined) return 'UNKNOWN';",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.test.ts",
+      "fullName": "the ASSERTION verdict > fails closed when the probe is missing or stale"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H10-reporter-accepts-mixed-errors",
+    "invariant": "Blocker 3 — every error recorded against the test must be one Vitest owns",
+    "expected": "A genuine assertion beside an `afterEach` that threw would be typed as a clean assertion, so a broken teardown could mask an unreliable run.",
+    "file": "scripts/mutation-reporter.ts",
+    "find": "  const everyErrorIsOurs = errors.every(",
+    "replace": "  const everyErrorIsOurs = errors.some(",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.test.ts",
+      "fullName": "the ASSERTION verdict > refuses a mixed run: one genuine assertion and one foreign error"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H11-reporter-ignores-assertion-fields",
+    "invariant": "Blocker 1 — a matcher sets all four of expected/actual/showDiff/ok",
+    "expected": "Any error named AssertionError would type as an assertion while carrying none of the metadata a matcher produces.",
+    "file": "scripts/mutation-reporter.ts",
+    "find": "      error.assertionFields.length === ASSERTION_FIELDS.length &&",
+    "replace": "      true &&",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.test.ts",
+      "fullName": "the ASSERTION verdict > needs every assertion field, not merely the name"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H12-reporter-types-by-fields-alone",
+    "invariant": "Blocker 1 — the name is part of the structural signature, not a substitute for it",
+    "expected": "An error carrying the four matcher fields under any other name would type as an assertion.",
+    "file": "scripts/mutation-reporter.ts",
+    "find": "      error.name === 'AssertionError',",
+    "replace": "      error.name !== '',",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.test.ts",
+      "fullName": "the ASSERTION verdict > needs the name too, not merely the fields"
+    },
     "project": "unit"
   }
 ]

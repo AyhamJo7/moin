@@ -31,8 +31,8 @@
  *   node scripts/mutation-sweep.ts --json out.json
  */
 
-import { execFile } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFile, execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -41,6 +41,7 @@ import {
   baselineIsUsable,
   classifyRun,
   type Classification,
+  type KillingTest,
   type MutationOutcome,
   type MutationReport,
 } from './mutation-outcome.ts';
@@ -48,22 +49,45 @@ import {
 const run = promisify(execFile);
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const MANIFEST = join(REPO, 'docs', 'verification', 'audit-mutation-manifest.json');
+
+/** The tree the baselines in this process were measured against. */
+function headSha(): string {
+  try {
+    return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: REPO, encoding: 'utf8' }).trim();
+  } catch {
+    // No git, or a detached worktree: fall back to a value that shares nothing, so nothing caches.
+    return `unknown-${String(process.pid)}`;
+  }
+}
 const TEST_TIMEOUT_MS = 1_200_000;
+
+/** Turns a full test name into a literal regular expression. */
+function escapeForFilter(name: string): string {
+  return name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+}
 const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
 
 interface Variant {
   readonly id: string;
   readonly invariant: string;
   readonly expected: string;
+  /** File the defect is injected into, relative to the repository root. */
   readonly file: string;
+  /** Exact text to replace. The sweep fails loudly if it is absent. */
   readonly find: string;
   readonly replace: string;
-  readonly test: string;
-  readonly kills: string;
+  /**
+   * The one test that must catch this defect, named exactly.
+   *
+   * A file **and** a full name, both compared exactly. Matching by substring was unsound in three
+   * separate ways: a same-named test in another file could claim the kill, two tests could match at
+   * once, and `"rejects invalid chain"` matched `"rejects invalid chain after retry"`.
+   */
+  readonly killingTest: KillingTest;
   /**
    * Which Vitest project the killing test belongs to. Defaults to `integration`.
    *
-   * The harness's own controls live in the unit project — a classifier that needs a database to
+   * The harness's own controls live in the unit project — a classifier that needed a database to
    * prove it rejects a database failure would be a poor joke — so the project is per variant.
    */
   readonly project?: 'unit' | 'integration';
@@ -115,9 +139,11 @@ async function observe(
         'run',
         '--project',
         variant.project ?? 'integration',
-        variant.test,
+        variant.killingTest.file,
         '-t',
-        variant.kills,
+        // Anchored and escaped, so the filter selects the intended test and not a longer name that
+        // contains it. Vitest treats `-t` as a regular expression against the full name.
+        `^${escapeForFilter(variant.killingTest.fullName)}$`,
         // The project's own reporter, because the built-in JSON report renders failures as text
         // and an assertion must be identified by what the error *is*, not by what it says.
         '--reporter=./scripts/mutation-reporter.ts',
@@ -153,7 +179,7 @@ async function observe(
   rmSync(directory, { recursive: true, force: true });
 
   return {
-    classification: classifyRun({ report, timedOut, exitCode, output, phase }, variant.kills),
+    classification: classifyRun({ report, timedOut, exitCode, output, phase }, variant.killingTest),
     durationMs: Date.now() - startedAt,
   };
 }
@@ -185,7 +211,15 @@ async function sweep(
     };
   }
 
-  const key = `${variant.test}\u0000${variant.kills}`;
+  // The cache key is everything that determines the baseline: the tree it was measured against,
+  // the project, the file and the exact test name. A looser key would let one variant's baseline
+  // vouch for another's.
+  const key = [
+    headSha(),
+    variant.project ?? 'integration',
+    variant.killingTest.file,
+    variant.killingTest.fullName,
+  ].join('\u0000');
   let baseline = baselines.get(key);
   if (baseline === undefined) {
     baseline = await observe(variant, 'baseline');
@@ -260,7 +294,7 @@ function reportMarkdown(results: readonly Result[]): string {
           result.variant.invariant,
           result.variant.expected,
           `\`${result.variant.file}\``,
-          `\`${result.variant.test}\` — “${result.variant.kills}”`,
+          `\`${result.variant.killingTest.file}\` — “${result.variant.killingTest.fullName}”`,
           result.baseline === 'PASSED' ? 'passed' : `**${result.baseline}**`,
           `**${result.outcome}**`,
           `${result.detail.replace(/\|/gu, '\\|')}${result.variant.note === undefined ? '' : ` — *${result.variant.note.replace(/\|/gu, '\\|')}*`}`,
@@ -310,14 +344,97 @@ async function main(): Promise<number> {
   }
 
   if (process.argv.includes('--validate')) {
-    const missing = selected.filter(
-      (variant) => !readFileSync(join(REPO, variant.file), 'utf8').includes(variant.find),
-    );
-    for (const variant of missing) {
-      console.error(`[${variant.id}] anchor not found in ${variant.file}`);
+    const problems: string[] = [];
+
+    for (const variant of selected) {
+      const identity = variant.killingTest as KillingTest | undefined;
+      if (
+        identity === undefined ||
+        typeof identity.file !== 'string' ||
+        identity.file.length === 0 ||
+        typeof identity.fullName !== 'string' ||
+        identity.fullName.length === 0
+      ) {
+        problems.push(`[${variant.id}] killingTest must name a file and an exact fullName`);
+        continue;
+      }
+      if (!existsSync(join(REPO, identity.file))) {
+        problems.push(`[${variant.id}] killingTest.file does not exist: ${identity.file}`);
+      }
+      if (!existsSync(join(REPO, variant.file))) {
+        problems.push(`[${variant.id}] the mutated file does not exist: ${variant.file}`);
+        continue;
+      }
+      // The anchor must resolve to exactly one place. `String.prototype.replace` with a string
+      // pattern rewrites the *first* occurrence, so a two-place anchor silently mutates whichever
+      // one happens to come first — the same class of ambiguity as a substring test match.
+      const occurrences =
+        readFileSync(join(REPO, variant.file), 'utf8').split(variant.find).length - 1;
+      if (occurrences === 0) {
+        problems.push(`[${variant.id}] anchor not found in ${variant.file}`);
+      } else if (occurrences > 1) {
+        problems.push(
+          `[${variant.id}] the anchor occurs ${String(occurrences)} times in ${variant.file}, so which one is mutated is arbitrary`,
+        );
+      }
+      if (variant.replace === variant.find) {
+        problems.push(`[${variant.id}] replace is identical to find, so the mutant is a no-op`);
+      }
     }
-    if (missing.length > 0) return 1;
-    console.log(`mutation manifest: ${String(selected.length)} variant(s), every anchor resolves.`);
+
+    // Static name resolution. `vitest list` collects without running, which is cheap and exact —
+    // except for table-driven tests, whose names are built at run time, so the collector reports
+    // the literal template. Those are reported as deferred rather than failed, and the baseline
+    // gate enforces uniqueness for real: it requires exactly one match or it refuses the variant.
+    const deferred: string[] = [];
+    const filesToCheck = new Map<string, Set<string>>();
+    for (const variant of selected) {
+      const project = variant.project ?? 'integration';
+      const key = `${project}\u0000${variant.killingTest.file}`;
+      filesToCheck.set(key, (filesToCheck.get(key) ?? new Set()).add(variant.killingTest.fullName));
+    }
+    for (const [key, wanted] of filesToCheck) {
+      const [project = 'integration', file = ''] = key.split('\u0000');
+      let collected: string[];
+      try {
+        const listed = execFileSync(
+          process.execPath,
+          ['./node_modules/vitest/vitest.mjs', 'list', '--project', project, file, '--json'],
+          {
+            cwd: REPO,
+            encoding: 'utf8',
+            maxBuffer: MAX_OUTPUT_BYTES,
+            stdio: ['ignore', 'pipe', 'ignore'],
+          },
+        );
+        collected = (JSON.parse(listed) as { name?: string }[]).map((entry) => entry.name ?? '');
+      } catch {
+        problems.push(`[${file}] could not be collected by \`vitest list\` in project ${project}`);
+        continue;
+      }
+      const dynamic = collected.some((name) => name.includes('${'));
+      for (const name of wanted) {
+        const matches = collected.filter((candidate) => candidate === name).length;
+        if (matches === 1) continue;
+        if (matches > 1) {
+          problems.push(
+            `[${file}] defines "${name}" ${String(matches)} times, so no variant can name it`,
+          );
+        } else if (dynamic) {
+          deferred.push(`${file} :: "${name}" (built at run time; confirmed by the baseline)`);
+        } else {
+          problems.push(`[${file}] has no test named exactly "${name}"`);
+        }
+      }
+    }
+
+    for (const problem of problems) console.error(problem);
+    if (problems.length > 0) return 1;
+    for (const entry of deferred) console.log(`deferred: ${entry}`);
+    console.log(
+      `mutation manifest: ${String(selected.length)} variant(s); every anchor resolves and every ` +
+        `killing test is named exactly${deferred.length > 0 ? `, ${String(deferred.length)} confirmed at baseline` : ''}.`,
+    );
     return 0;
   }
 
