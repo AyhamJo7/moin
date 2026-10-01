@@ -171,6 +171,7 @@ Rules
 | P06.10.07 | READY_FOR_REVIEW | 23d70ae | EV-P06-026 | QG-09 review of the diff by three independent reviewers; every High/Critical reproduced against real PostgreSQL, fixed and mutation-proven; 42 defect variants all KILLED; five residuals recorded with owners |
 | P06.10.07 | READY_FOR_REVIEW | c1bde7a | EV-P06-027 | Four HIGH defects from the independent post-fix QG-09 review, each reproduced against real PostgreSQL, fixed and mutation-proven; sweep now 54/54 KILLED with an inspectable manifest |
 | P06.10.07 | READY_FOR_REVIEW | fcc4473 | EV-P06-028 | Population-snapshot design replacing UUID-cursor paging; mutation harness rewritten so its outcomes are evidence — 62 KILLED_ASSERTION, 2 documented INFRA_FAILURE |
+| P06.10.07 | READY_FOR_REVIEW | f105882 | EV-P06-029 | Epoch allocation serialized by commit rather than by `nextval()`; assertion identity decided from typed error metadata rather than message text — 69 KILLED_ASSERTION, 2 documented INFRA_FAILURE |
 | P06.10 | IN_PROGRESS | 8e5bf76 | EV-P06-021…025 | Table, chain, query API, daily verifier, argument scanner and runbook done. Open: .03 adoption by the tool guard, operator and security paths (needs P10.08, P06.11/.12), .05 scheduling (EXT-09) and .06 founder acceptance of ADR-0017 |
 
 ## External waits
@@ -393,3 +394,40 @@ secret-rule fix (#25) merged, with its full-history scan green.
   redacting logger each `FOUNDER_DECISION_REQUIRED`; `pg_temp` last acceptable for this PR only.
   P06.10.03 remains open; P06.10.05 remains `WAITING_FOR_EXTERNAL` on EXT-09; P06.10 is not
   complete.
+
+- 2026-10-01 — **Fourth QG-09 review of P06.10: a sequence that is not transactional, and an
+  assertion decided by reading words.** Both reproduced before being fixed, and both are the same
+  failure of imagination: trusting a mechanism to mean what its name suggests.
+  `nextval()` is not transactional. It does not lock and does not roll back, so allocation order is
+  not commit order — which makes it useless as a population authority however monotonic it looks.
+  Measured: Tx A takes epoch 1 and stays open, Tx B takes 2 and commits, a sweep reads
+  `max(registration_seq)` = 2 and sees one of that population's two members, then A commits and the
+  same population has two. A complete-coverage report over a half-covered population: the previous
+  round's defect reintroduced one layer down by the fix for it.
+  Epochs are now allocated by incrementing one authoritative row inside the registering
+  transaction, so PostgreSQL's row lock does the serialization and epoch order is commit order.
+  While epoch N is in flight, no epoch above N can be committed, because nobody else can allocate
+  one. There is no sequence and no column default — a dormant allocator is a second allocator. The
+  guarantee is a counter serialized by a row lock, and it is no longer described as a snapshot,
+  which it never was.
+  The mutation classifier decided "was this an assertion?" from the words in the failure message.
+  `database connection refused while executing toThrow assertion` contains `toThrow`, so an
+  unreachable database counted as proof an invariant was enforced — three of four crafted messages
+  were misclassified. A custom reporter now reads the live error objects and records what they are:
+  the name, plus whether Chai's `expected`/`actual`/`showDiff`/`ok` are present. Both halves are
+  required, because a name can be reassigned in one line. Message text survives for exactly one job
+  — telling a hung test from other non-assertion failures — where it cannot promote anything.
+  And a third defect found while regenerating, which is the one worth remembering: the sweep applied
+  mutations with `String.prototype.replace` and a **string** replacement, so `$$` in any SQL
+  function body became `$` and the migration failed with a syntax error. The variant looked
+  detected; nothing had been tested. It resisted diagnosis because the mutated migration applied
+  cleanly by hand and failed only through the harness.
+  Three rounds running, the thing that was wrong was the _verification_, not the subject. A tool
+  that reports on correctness is itself a control, and this one has now been wrong in four distinct
+  ways — exit codes, message text, string escaping, and variants that broke rather than mutated.
+  Final distribution at `f10588228b2a`: `KILLED_ASSERTION: 69`, `INFRA_FAILURE: 2`, over 71
+  variants. One variant was deleted rather than left looking proven: with allocation serialized,
+  `max(registration_seq)` and the state row cannot diverge, so the high-water source and the
+  allocator are one invariant and not two.
+  ADR-0017 stays **PROPOSED**; the five residuals are unchanged. P06.10.03 remains open; P06.10.05
+  remains `WAITING_FOR_EXTERNAL` on EXT-09; P06.10 is not complete.
