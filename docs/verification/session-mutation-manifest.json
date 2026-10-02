@@ -147,8 +147,8 @@
     "invariant": "P06.06.02: login rotates — the session the browser held does not survive as a parallel login",
     "expected": "Signing in again would leave the previous session valid and unnoticed.",
     "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "    SET revoked_at = v_now, revocation_reason = 'superseded',\n        provider_tokens_sealed = NULL, provider_tokens_key_id = NULL\n",
-    "replace": "    SET last_seen_at = s.last_seen_at\n",
+    "find": "      SET revoked_at = v_now, revocation_reason = 'superseded',\n          provider_tokens_sealed = NULL, provider_tokens_key_id = NULL\n",
+    "replace": "      SET last_seen_at = s.last_seen_at\n",
     "killingTest": {
       "file": "apps/server/src/modules/identity-access/sign-in.integration.test.ts",
       "fullName": "session fixation > signing in again revokes the session the browser held"
@@ -381,12 +381,90 @@
     "invariant": "ADR-0003 amendment: the catalog check asserts moin_identity's whole ACL",
     "expected": "A grant to moin_identity on a session or tenant table would pass the release-blocking catalog check.",
     "file": "scripts/check-rls-catalog.ts",
-    "find": "    findings.push(...(await inspectIdentityRole(pool)));\n",
-    "replace": "",
+    "find": "    findings.push(...(await inspectIdentityRole(pool)), ...(await inspectSessionBoundary(pool)));\n",
+    "replace": "    findings.push(...(await inspectSessionBoundary(pool)));\n",
     "killingTest": {
       "file": "scripts/check-rls-catalog.integration.test.ts",
       "fullName": "the identity role boundary (P06.06, ADR-0003) > rejects moin_identity holding a table privilege, session or tenant"
     },
     "project": "integration"
+  },
+  {
+    "id": "G10-sign-in-supersedes-only-presented-token",
+    "invariant": "P06.06.02 (QG-09 review): a sign-in leaves no live session of the family it supersedes",
+    "expected": "A rotation racing the sign-in would leave its successor alive beside the new session.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "      WHERE s.family_id = v_family AND s.revoked_at IS NULL;\n",
+    "replace": "      WHERE s.token_hash = p_replaced_hash AND s.revoked_at IS NULL;\n",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "two callers holding the same row > a sign-in waiting behind a rotation of the session it supersedes revokes the successor too"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "G11-identity-membership-tolerance-too-broad",
+    "invariant": "ADR-0003 amendment: only the creator's ADMIN-only grant is tolerated",
+    "expected": "A member that inherits moin_identity or can SET ROLE to it would share its EXECUTE on the session functions, unflagged.",
+    "file": "scripts/check-rls-catalog.ts",
+    "find": "          WHERE m.roleid = r.oid AND (m.inherit_option OR m.set_option OR NOT m.admin_option))::int\n",
+    "replace": "          WHERE m.roleid = r.oid AND false)::int\n",
+    "killingTest": {
+      "file": "scripts/check-rls-catalog.integration.test.ts",
+      "fullName": "the identity role boundary (P06.06, ADR-0003) > tolerates only an ADMIN-only grant to the role that created it (RDS, PostgreSQL 16+)"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "G12-temporary-left-on-public",
+    "invariant": "ADR-0003 amendment: moin_identity can create nothing",
+    "expected": "Every database would again grant TEMPORARY to PUBLIC, so the session role could create temporary tables and functions.",
+    "file": "packages/testing/src/pg/template.ts",
+    "find": "    await adminPool.query(`revoke temporary on database \"${name}\" from public`);\n",
+    "replace": "",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "moin_identity — the api-only session role > is unprivileged, a member of nothing, and owns nothing"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "G13-catalog-ignores-session-boundary",
+    "invariant": "ADR-0003 amendment / QG-09 review: no other runtime role reaches the session functions or tables",
+    "expected": "A later GRANT INSERT ON sessions TO moin_app would re-open I1 and pass the release-blocking catalog check.",
+    "file": "scripts/check-rls-catalog.ts",
+    "find": "    findings.push(...(await inspectIdentityRole(pool)), ...(await inspectSessionBoundary(pool)));\n",
+    "replace": "    findings.push(...(await inspectIdentityRole(pool)));\n",
+    "killingTest": {
+      "file": "scripts/check-rls-catalog.integration.test.ts",
+      "fullName": "the identity role boundary (P06.06, ADR-0003) > rejects any other runtime role holding a privilege on a session table"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "G14-readiness-ignores-identity-assertion",
+    "invariant": "ADR-0003 amendment: /readyz fails unless the identity pool is moin_identity and moin_app is shut out",
+    "expected": "A wrong or rotated credential, or a moin_app grant, would pass readiness and fail every sign-in after rollout.",
+    "file": "packages/db/src/readiness.ts",
+    "find": "        if (result.rows[0]?.ok !== true) {\n",
+    "replace": "        if (result.rows.length < 0) {\n",
+    "killingTest": {
+      "file": "packages/db/src/readiness-identity.integration.test.ts",
+      "fullName": "the identity pool readiness probe > is not ready when the credential names another role"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "G15-identity-url-any-role",
+    "invariant": "ADR-0003 amendment: IDENTITY_DATABASE_URL names moin_identity",
+    "expected": "The api's identity pool could be pointed at the owner or migrator and run sign-in with every privilege.",
+    "file": "apps/server/src/config/env.ts",
+    "find": "    new URL(value.IDENTITY_DATABASE_URL).username !== 'moin_identity'\n",
+    "replace": "    new URL(value.IDENTITY_DATABASE_URL).username === 'never'\n",
+    "killingTest": {
+      "file": "apps/server/src/config/env.test.ts",
+      "fullName": "the identity database credential (P06.06, ADR-0003) > must connect as moin_identity, never moin_app, the owner or the migrator"
+    },
+    "project": "unit"
   }
 ]
