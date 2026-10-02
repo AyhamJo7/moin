@@ -58,3 +58,20 @@ skipping session revocation, and deleting evidence before review. Every match is
 | Both files exist | `docs/runbooks/mfa-reset.md`, `docs/runbooks/compromised-account.md` |
 | Gates at `b4ac244` | `gates.py full` 14/14 PASS, 0 changed files |
 | Status | P06.09.03 `READY_FOR_REVIEW`; P06.09.01, .02 and .04 open; P06.09 incomplete |
+
+## Remediation after independent review
+
+The independent review of `ddbaedc658ac1183c1fd1f1293b0d7a0db5e8096` returned `BLOCK_MERGE` with one
+HIGH finding in `docs/runbooks/compromised-account.md`: containment revoked existing sessions but
+did not stop the compromised identity signing in again and getting a fresh session, and it said that
+provider sign-out stops the provider issuing and refreshing tokens.
+
+The containment section now separates three controls: revoke existing KlarDesk sessions (A), deny
+new KlarDesk access (B), and provider-side sign-out or token revocation (C, supplementary). It makes
+A and B mandatory, and requires two verifications: old session rejected, fresh sign-in yields no
+usable access. The deny-new-access state persists until recovery is authorised, unchanged for the
+only owner and applied to operator accounts. If B cannot be applied or verified, the account is
+recorded as not contained and the incident stays open. The founder's containment policy is recorded
+as the intended P06.09.02 behaviour. The enforcing mechanism is **not decided** and is marked
+pending in P06.09.02; nothing was implemented, executed or verified. P06.09.03 stays
+`READY_FOR_REVIEW`.
