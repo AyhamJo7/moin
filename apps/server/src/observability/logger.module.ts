@@ -6,6 +6,23 @@ import type { Config } from '../config/env.ts';
 
 export const LOGGER = Symbol('LOGGER');
 
+/** The application logger for `config`. Also used by `bootstrap` while the module graph is built. */
+export function buildLogger(config: Config): Logger {
+  return createLogger({
+    level: config.LOG_LEVEL,
+    service: config.SERVICE_NAME,
+    role: config.SERVER_ROLE,
+    env: config.NODE_ENV,
+    ...(config.APP_VERSION === undefined ? {} : { version: config.APP_VERSION }),
+    pretty: config.LOG_PRETTY,
+    // Every line inside a tenant transaction carries which tenant it was for (P06.03.06).
+    // An organisation id names a business rather than a person, which is why the redaction
+    // allowlist permits it; outside a transaction this returns nothing rather than throwing,
+    // because the paths with no tenant are exactly the ones that must keep logging.
+    context: tenantLogFields,
+  });
+}
+
 /**
  * The application's single logger, available to every module.
  *
@@ -20,20 +37,7 @@ export const LOGGER = Symbol('LOGGER');
     {
       provide: LOGGER,
       inject: [CONFIG],
-      useFactory: (config: Config): Logger =>
-        createLogger({
-          level: config.LOG_LEVEL,
-          service: config.SERVICE_NAME,
-          role: config.SERVER_ROLE,
-          env: config.NODE_ENV,
-          ...(config.APP_VERSION === undefined ? {} : { version: config.APP_VERSION }),
-          pretty: config.LOG_PRETTY,
-          // Every line inside a tenant transaction carries which tenant it was for (P06.03.06).
-          // An organisation id names a business rather than a person, which is why the redaction
-          // allowlist permits it; outside a transaction this returns nothing rather than throwing,
-          // because the paths with no tenant are exactly the ones that must keep logging.
-          context: tenantLogFields,
-        }),
+      useFactory: buildLogger,
     },
   ],
   exports: [LOGGER],

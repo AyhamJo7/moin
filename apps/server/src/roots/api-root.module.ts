@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '../config/config.module.ts';
 import { LoggerModule } from '../observability/logger.module.ts';
 import { HealthModule } from '../health/health.module.ts';
+import { IdentityAccessModule } from '../modules/identity-access/identity-access.module.ts';
 
 /**
  * The owner-facing HTTP API.
@@ -11,7 +12,9 @@ import { HealthModule } from '../health/health.module.ts';
  * whole API surface, and the worker must not open an HTTP listener it never serves.
  *
  * The business modules (identity-access, tenancy, audit, contacts, conversations, work, …) are
- * added by the phases that build them, P06 onward.
+ * added by the phases that build them, P06 onward. Identity and access (P06.06) is the first.
  */
-@Module({ imports: [ConfigModule.forFeature(), LoggerModule, HealthModule] })
+@Module({
+  imports: [ConfigModule.forFeature(), LoggerModule, HealthModule, IdentityAccessModule],
+})
 export class ApiRootModule {}

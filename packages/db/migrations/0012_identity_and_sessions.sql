@@ -1,0 +1,516 @@
+-- 0012 — users, sign-in transactions and server-side sessions (P06.06.01, P06.06.02, ADR-0005).
+-- migration-check: allow create-index-blocking because every index here is on a table created earlier in this same migration, so it is new and empty.
+--
+-- ## Identity, not tenancy
+--
+-- A session says *who* is signed in. It does not say which organisation they act for or what they
+-- may do there: memberships, roles and permissions are tenant data in our own tables (ADR-0005,
+-- INV-02), and the per-request membership check is P06.06.03. So none of these tables has an
+-- `organisation_id`, none is under a tenant policy, and each is on the global register with that
+-- reason. A token claim never reaches any column here except the provider subject, which the
+-- reviewed identity-claims parser (P06.05.04) has already reduced to `sub`.
+--
+-- ## No runtime table grant
+--
+-- `moin_app` serves the sign-in routes, and it holds **no privilege on any of these tables**. The
+-- default privileges from 0003 would have given it DML, so they are revoked explicitly below. Every
+-- read and write goes through one of six `SECURITY DEFINER` functions, each of which does one thing
+-- and returns the minimum (PLAN Data Architecture: "reachable only through … `SECURITY DEFINER`
+-- functions that return the minimum"). That is what makes the security properties below properties
+-- of the database rather than promises of the caller:
+--
+--   * a sign-in transaction is consumed exactly once, whatever the caller does;
+--   * the absolute lifetime of a session cannot be extended, by any caller, ever;
+--   * a revoked session cannot be revived;
+--   * a session is issued only to an existing, active user — never created from a token alone.
+--
+-- ## Secrets are hashes or ciphertext
+--
+-- No column holds a value that would let a reader act. The session token, `state`, nonce and the
+-- browser binding are stored as SHA-256 digests of 256-bit random values; the PKCE verifier and the
+-- provider tokens are AES-256-GCM ciphertext whose key is never in the database. The application
+-- supplies both; this file only enforces their shape.
+--
+-- ## Time comes from the caller, within the database's own clock
+--
+-- Every function takes `p_now`, the application's injectable clock (ADR-0036), and refuses it unless
+-- it agrees with `clock_timestamp()` within `session_clock_policy.max_skew`. The lifetimes are not
+-- parameters: they are fixed here and enforced again by CHECK constraints, so a caller can neither
+-- choose how long a session lives nor move "now" to revive or stretch one.
+
+-- ---------------------------------------------------------------------------------------------
+-- users: the link between a provider subject and a person in our model.
+-- ---------------------------------------------------------------------------------------------
+--
+-- Rows are created by invitation acceptance (P06.08.02), not by sign-in: an authenticated subject
+-- with no row here is refused, never provisioned. The subject pattern is the parser's: visible ASCII
+-- only, at most 255 characters, so no whitespace or control character can make two subjects equal.
+CREATE TABLE users (
+  id          uuid        NOT NULL PRIMARY KEY,
+  cognito_sub text        NOT NULL UNIQUE CHECK (cognito_sub ~ '^[!-~]{1,255}$'),
+  email       citext      NOT NULL CHECK (length(email) BETWEEN 3 AND 254),
+  status      text        NOT NULL CHECK (status IN ('active', 'disabled')),
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE users IS
+  'A person, linked to the identity provider by subject. Global: one person may belong to several organisations. Created by invitation acceptance (P06.08.02); sign-in never creates a row.';
+
+-- ---------------------------------------------------------------------------------------------
+-- auth_transactions: one pending Authorization Code + PKCE sign-in.
+-- ---------------------------------------------------------------------------------------------
+--
+-- Server-side so that it survives a restart and works across replicas; single-use by DELETE, so two
+-- callbacks racing on one `state` cannot both find it. `binding_hash` ties the transaction to the
+-- browser that started it (a `__Host-` cookie), so a callback URL carried to another browser — the
+-- login-CSRF case — fails even with a valid `state`.
+CREATE TABLE auth_transactions (
+  state_hash      bytea       NOT NULL PRIMARY KEY CHECK (octet_length(state_hash) = 32),
+  binding_hash    bytea       NOT NULL CHECK (octet_length(binding_hash) = 32),
+  nonce_hash      bytea       NOT NULL CHECK (octet_length(nonce_hash) = 32),
+  verifier_sealed bytea       NOT NULL CHECK (octet_length(verifier_sealed) BETWEEN 29 AND 512),
+  key_id          text        NOT NULL CHECK (key_id ~ '^[A-Za-z0-9._-]{1,64}$'),
+  return_to       text        NOT NULL CHECK (left(return_to, 1) = '/' AND length(return_to) <= 512),
+  created_at      timestamptz NOT NULL,
+  expires_at      timestamptz NOT NULL,
+  CONSTRAINT auth_transactions_lifetime
+    CHECK (expires_at > created_at AND expires_at <= created_at + interval '10 minutes')
+);
+
+CREATE INDEX auth_transactions_expires_idx ON auth_transactions (expires_at);
+
+COMMENT ON TABLE auth_transactions IS
+  'Pending sign-ins: hashed state, nonce and browser binding, sealed PKCE verifier. Consumed once, by DELETE (P06.06.01).';
+
+-- ---------------------------------------------------------------------------------------------
+-- sessions: keyed by the SHA-256 of a 256-bit random token (PLAN Data Architecture).
+-- ---------------------------------------------------------------------------------------------
+--
+-- `token_hash` is the key the cookie resolves to; `id` is an opaque identifier that is safe to log
+-- and to reference. A rotation writes a new row and revokes its predecessor in the same statement;
+-- `rotated_from` is UNIQUE, so a session can have at most one successor even if two rotations race.
+-- `family_id` is the first session of a sign-in and is carried through every rotation, which keeps
+-- the forensic lineage and is the associated data the provider-token ciphertext is bound to.
+CREATE TABLE sessions (
+  token_hash             bytea       NOT NULL PRIMARY KEY CHECK (octet_length(token_hash) = 32),
+  id                     uuid        NOT NULL UNIQUE,
+  family_id              uuid        NOT NULL,
+  user_id                uuid        NOT NULL REFERENCES users (id),
+  rotation_reason        text        NOT NULL
+                                     CHECK (rotation_reason IN ('login', 'step_up', 'privilege_change')),
+  rotated_from           uuid        UNIQUE REFERENCES sessions (id),
+  created_at             timestamptz NOT NULL,
+  last_seen_at           timestamptz NOT NULL,
+  idle_expires_at        timestamptz NOT NULL,
+  absolute_expires_at    timestamptz NOT NULL,
+  revoked_at             timestamptz,
+  revocation_reason      text        CHECK (revocation_reason IN ('rotated', 'superseded', 'signed_out')),
+  -- Wiped when the session is revoked: a refresh token has no business outliving the session it
+  -- belongs to, and on rotation it moves to the successor rather than being copied.
+  provider_tokens_sealed bytea       CHECK (octet_length(provider_tokens_sealed) BETWEEN 29 AND 65536),
+  provider_tokens_key_id text        CHECK (provider_tokens_key_id ~ '^[A-Za-z0-9._-]{1,64}$'),
+  CONSTRAINT sessions_revocation_complete CHECK ((revoked_at IS NULL) = (revocation_reason IS NULL)),
+  CONSTRAINT sessions_provider_tokens_complete
+    CHECK ((provider_tokens_sealed IS NULL) = (provider_tokens_key_id IS NULL)),
+  CONSTRAINT sessions_live_session_holds_tokens
+    CHECK (revoked_at IS NOT NULL OR provider_tokens_sealed IS NOT NULL),
+  CONSTRAINT sessions_lineage CHECK (
+    (rotation_reason = 'login') = (rotated_from IS NULL)
+    AND (rotation_reason <> 'login' OR family_id = id)
+  ),
+  -- The ceilings T-15 sets. The functions compute the same values; these make a wrong one fail.
+  CONSTRAINT sessions_seen_after_created CHECK (last_seen_at >= created_at),
+  CONSTRAINT sessions_idle_ceiling CHECK (idle_expires_at <= last_seen_at + interval '12 hours'),
+  CONSTRAINT sessions_idle_within_absolute CHECK (idle_expires_at <= absolute_expires_at),
+  CONSTRAINT sessions_absolute_ceiling CHECK (absolute_expires_at <= created_at + interval '7 days')
+);
+
+CREATE INDEX sessions_user_idx ON sessions (user_id);
+CREATE INDEX sessions_family_idx ON sessions (family_id);
+
+COMMENT ON TABLE sessions IS
+  'Server-side sessions (ADR-0005). Keyed by SHA-256 of the cookie token; provider tokens sealed with a key that is not in the database, and wiped at revocation. Identity only: no tenant, no role.';
+
+-- ---------------------------------------------------------------------------------------------
+-- The clock the functions accept.
+-- ---------------------------------------------------------------------------------------------
+--
+-- Every function takes `p_now` from the application's injectable clock (ADR-0036), so lifetimes
+-- are testable at the millisecond. Unbounded, that would let any holder of the runtime role — not
+-- only `api`: PLAN gives `moin_app` to voice and worker too — revive an expired session by passing
+-- an earlier time, or issue one whose 7 days start a year from now. So the time a caller supplies
+-- must agree with the database's own clock within `max_skew`, and a disagreement raises.
+--
+-- One row, changed only by a reviewed migration; no runtime role can read or write it. A test
+-- database that exercises exact lifetime boundaries widens it through the admin connection, which
+-- no deployed process holds.
+CREATE TABLE session_clock_policy (
+  id       boolean  NOT NULL PRIMARY KEY DEFAULT true CHECK (id),
+  max_skew interval NOT NULL CHECK (max_skew > interval '0'),
+  reason   text     NOT NULL CHECK (length(btrim(reason)) > 0)
+);
+
+INSERT INTO session_clock_policy (max_skew, reason)
+VALUES (interval '5 minutes',
+        'P06.06.02: application time may differ from the database clock by NTP-scale skew only.');
+
+COMMENT ON TABLE session_clock_policy IS
+  'How far a caller-supplied p_now may be from the database clock. One row, migration-controlled, no runtime grant.';
+
+-- `p_now`, if it is a time the database agrees with; otherwise an exception. Runs inside the
+-- SECURITY DEFINER functions below, as their owner; nothing else may call it.
+CREATE FUNCTION app.session_clock(p_now timestamptz) RETURNS timestamptz
+  LANGUAGE plpgsql
+  STABLE
+  SET search_path = pg_catalog, public, app, pg_temp
+AS $$
+DECLARE
+  v_skew interval;
+BEGIN
+  IF p_now IS NULL THEN
+    RAISE EXCEPTION 'p_now is required' USING ERRCODE = 'null_value_not_allowed';
+  END IF;
+  SELECT c.max_skew INTO STRICT v_skew FROM public.session_clock_policy c;
+  IF p_now > clock_timestamp() + v_skew OR p_now < clock_timestamp() - v_skew THEN
+    RAISE EXCEPTION 'p_now disagrees with the database clock'
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  RETURN p_now;
+END
+$$;
+
+REVOKE ALL ON FUNCTION app.session_clock(timestamptz) FROM PUBLIC;
+
+-- ---------------------------------------------------------------------------------------------
+-- Grants: none. 0003's default privileges would have given moin_app DML on all of these.
+-- ---------------------------------------------------------------------------------------------
+REVOKE ALL ON TABLE users, auth_transactions, sessions, session_clock_policy
+  FROM PUBLIC, moin_app, moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting;
+
+-- ---------------------------------------------------------------------------------------------
+-- A session's identity and lifetime are fixed at creation; revocation is final.
+-- ---------------------------------------------------------------------------------------------
+--
+-- The functions below only ever move `last_seen_at`, `idle_expires_at`, the revocation columns,
+-- and wipe the provider tokens at revocation. This makes the properties that matter most hold for
+-- the table's owner as well: the absolute expiry never moves, a revoked session never becomes valid
+-- again, and sealed provider tokens can be erased but never replaced.
+CREATE FUNCTION app.reject_session_rewrite() RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = pg_catalog, public, app, pg_temp
+AS $$
+BEGIN
+  IF NEW.token_hash IS DISTINCT FROM OLD.token_hash
+     OR NEW.id IS DISTINCT FROM OLD.id
+     OR NEW.family_id IS DISTINCT FROM OLD.family_id
+     OR NEW.user_id IS DISTINCT FROM OLD.user_id
+     OR NEW.rotation_reason IS DISTINCT FROM OLD.rotation_reason
+     OR NEW.rotated_from IS DISTINCT FROM OLD.rotated_from
+     OR NEW.created_at IS DISTINCT FROM OLD.created_at
+     OR NEW.absolute_expires_at IS DISTINCT FROM OLD.absolute_expires_at THEN
+    RAISE EXCEPTION 'a session''s identity and absolute lifetime are fixed at creation'
+      USING ERRCODE = 'integrity_constraint_violation';
+  END IF;
+  IF (NEW.provider_tokens_sealed IS DISTINCT FROM OLD.provider_tokens_sealed
+      OR NEW.provider_tokens_key_id IS DISTINCT FROM OLD.provider_tokens_key_id)
+     AND (NEW.provider_tokens_sealed IS NOT NULL OR NEW.revoked_at IS NULL) THEN
+    RAISE EXCEPTION 'sealed provider tokens may only be wiped, and only from a revoked session'
+      USING ERRCODE = 'integrity_constraint_violation';
+  END IF;
+  IF OLD.revoked_at IS NOT NULL
+     AND (NEW.revoked_at IS DISTINCT FROM OLD.revoked_at
+          OR NEW.revocation_reason IS DISTINCT FROM OLD.revocation_reason) THEN
+    RAISE EXCEPTION 'a revoked session cannot be revived or re-revoked'
+      USING ERRCODE = 'integrity_constraint_violation';
+  END IF;
+  RETURN NEW;
+END
+$$;
+
+REVOKE ALL ON FUNCTION app.reject_session_rewrite() FROM PUBLIC;
+
+CREATE TRIGGER sessions_fixed_lifetime
+  BEFORE UPDATE ON sessions
+  FOR EACH ROW EXECUTE FUNCTION app.reject_session_rewrite();
+-- Fires in replica mode too, so a session setting cannot switch it off.
+ALTER TABLE sessions ENABLE ALWAYS TRIGGER sessions_fixed_lifetime;
+
+-- ---------------------------------------------------------------------------------------------
+-- 1. Start a sign-in.
+-- ---------------------------------------------------------------------------------------------
+--
+-- A bounded batch of expired transactions is removed on the way in, skipping rows another sign-in
+-- is already removing, so a flood of abandoned sign-ins never turns one start into a long delete.
+-- Stale rows are harmless whether or not they have been removed yet: `consume_sign_in`
+-- refuses an expired row either way.
+CREATE FUNCTION app.begin_sign_in(
+  p_state_hash bytea,
+  p_binding_hash bytea,
+  p_nonce_hash bytea,
+  p_verifier_sealed bytea,
+  p_key_id text,
+  p_return_to text,
+  p_now timestamptz
+) RETURNS void
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path = pg_catalog, public, app, pg_temp
+AS $$
+DECLARE
+  v_now timestamptz := app.session_clock(p_now);
+BEGIN
+  DELETE FROM public.auth_transactions
+  WHERE ctid IN (
+    SELECT t.ctid FROM public.auth_transactions t
+    WHERE t.expires_at <= v_now
+    LIMIT 100
+    FOR UPDATE SKIP LOCKED
+  );
+  INSERT INTO public.auth_transactions
+    (state_hash, binding_hash, nonce_hash, verifier_sealed, key_id, return_to, created_at, expires_at)
+  VALUES
+    (p_state_hash, p_binding_hash, p_nonce_hash, p_verifier_sealed, p_key_id, p_return_to,
+     v_now, v_now + interval '10 minutes');
+END
+$$;
+
+-- ---------------------------------------------------------------------------------------------
+-- 2. Consume it, exactly once.
+-- ---------------------------------------------------------------------------------------------
+--
+-- The row is deleted on **any** presentation of its `state`, and only then are the binding and the
+-- expiry compared. So a replay finds nothing, a wrong browser burns the transaction instead of
+-- probing it, and an expired one is gone. A concurrent duplicate blocks on the row lock and, once
+-- the first commits, deletes nothing. Retry after a failed exchange means a fresh sign-in, which is
+-- the trade PLAN prefers over a replay window.
+CREATE FUNCTION app.consume_sign_in(
+  p_state_hash bytea,
+  p_binding_hash bytea,
+  p_now timestamptz
+) RETURNS TABLE (nonce_hash bytea, verifier_sealed bytea, key_id text, return_to text)
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path = pg_catalog, public, app, pg_temp
+AS $$
+DECLARE
+  v_now timestamptz := app.session_clock(p_now);
+BEGIN
+  RETURN QUERY
+  WITH claimed AS (
+    DELETE FROM public.auth_transactions t
+    WHERE t.state_hash = p_state_hash
+    RETURNING t.binding_hash, t.nonce_hash, t.verifier_sealed, t.key_id, t.return_to, t.expires_at
+  )
+  SELECT c.nonce_hash, c.verifier_sealed, c.key_id, c.return_to
+  FROM claimed c
+  WHERE c.binding_hash = p_binding_hash
+    AND c.expires_at > v_now;
+END
+$$;
+
+-- ---------------------------------------------------------------------------------------------
+-- 3. Issue a session after a verified sign-in.
+-- ---------------------------------------------------------------------------------------------
+--
+-- Returns no row when the subject has no active user: sign-in never provisions. A session the
+-- browser already presented (`p_replaced_hash`) is revoked in the same transaction, so signing in
+-- again leaves no second, unnoticed session behind. A value the browser presented that is not a
+-- session — an attacker-planted cookie — matches nothing and changes nothing: the new token is
+-- always generated by the caller, never taken from the request.
+CREATE FUNCTION app.begin_session(
+  p_subject text,
+  p_token_hash bytea,
+  p_session_id uuid,
+  p_provider_tokens_sealed bytea,
+  p_key_id text,
+  p_replaced_hash bytea,
+  p_now timestamptz
+) RETURNS TABLE (session_id uuid, user_id uuid, absolute_expires_at timestamptz)
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path = pg_catalog, public, app, pg_temp
+AS $$
+DECLARE
+  v_now timestamptz := app.session_clock(p_now);
+  v_user uuid;
+BEGIN
+  SELECT u.id INTO v_user
+  FROM public.users u
+  WHERE u.cognito_sub = p_subject AND u.status = 'active';
+  IF v_user IS NULL THEN
+    RETURN;
+  END IF;
+
+  IF p_replaced_hash IS NOT NULL THEN
+    UPDATE public.sessions s
+    SET revoked_at = v_now, revocation_reason = 'superseded',
+        provider_tokens_sealed = NULL, provider_tokens_key_id = NULL
+    WHERE s.token_hash = p_replaced_hash AND s.revoked_at IS NULL;
+  END IF;
+
+  RETURN QUERY
+  INSERT INTO public.sessions AS s
+    (token_hash, id, family_id, user_id, rotation_reason, rotated_from, created_at, last_seen_at,
+     idle_expires_at, absolute_expires_at, provider_tokens_sealed, provider_tokens_key_id)
+  VALUES
+    (p_token_hash, p_session_id, p_session_id, v_user, 'login', NULL, v_now, v_now,
+     v_now + interval '12 hours', v_now + interval '7 days', p_provider_tokens_sealed, p_key_id)
+  RETURNING s.id, s.user_id, s.absolute_expires_at;
+END
+$$;
+
+-- ---------------------------------------------------------------------------------------------
+-- 4. Rotate: a new token for the same sign-in, after step-up or a privilege change.
+-- ---------------------------------------------------------------------------------------------
+--
+-- One statement: the predecessor is locked, revoked and stripped of its provider tokens, and the
+-- successor inserted holding them, or none of it happens. The predecessor must be valid *now*; a
+-- revoked or expired session cannot be rotated back to life. The successor inherits the absolute
+-- expiry, so rotation can never extend a sign-in past 7 days, and its idle expiry is capped by it.
+-- Two rotations racing on one token: the second waits on the row lock, re-reads `revoked_at IS
+-- NULL` as false, and inserts nothing; `rotated_from` UNIQUE is the backstop. The successor's
+-- timestamps never precede the predecessor's, so a replica whose clock is slightly behind gets a
+-- successor rather than a CHECK violation. Login has its own path (`begin_session`).
+CREATE FUNCTION app.rotate_session(
+  p_token_hash bytea,
+  p_new_token_hash bytea,
+  p_new_session_id uuid,
+  p_reason text,
+  p_now timestamptz
+) RETURNS TABLE (session_id uuid, user_id uuid, absolute_expires_at timestamptz)
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path = pg_catalog, public, app, pg_temp
+AS $$
+DECLARE
+  v_now timestamptz := app.session_clock(p_now);
+BEGIN
+  IF p_reason IS NULL OR p_reason NOT IN ('step_up', 'privilege_change') THEN
+    RAISE EXCEPTION 'rotation reason must be step_up or privilege_change'
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+
+  RETURN QUERY
+  WITH predecessor AS (
+    SELECT s.token_hash, s.id, s.family_id, s.user_id, s.created_at, s.absolute_expires_at,
+           s.provider_tokens_sealed, s.provider_tokens_key_id
+    FROM public.sessions s
+    JOIN public.users u ON u.id = s.user_id
+    WHERE s.token_hash = p_token_hash
+      AND s.revoked_at IS NULL
+      AND s.idle_expires_at > v_now
+      AND s.absolute_expires_at > v_now
+      AND u.status = 'active'
+    FOR UPDATE OF s
+  ), retired AS (
+    UPDATE public.sessions s
+    SET revoked_at = v_now, revocation_reason = 'rotated',
+        provider_tokens_sealed = NULL, provider_tokens_key_id = NULL
+    FROM predecessor p
+    WHERE s.token_hash = p.token_hash
+    RETURNING s.id
+  )
+  INSERT INTO public.sessions AS n
+    (token_hash, id, family_id, user_id, rotation_reason, rotated_from, created_at, last_seen_at,
+     idle_expires_at, absolute_expires_at, provider_tokens_sealed, provider_tokens_key_id)
+  SELECT p_new_token_hash, p_new_session_id, p.family_id, p.user_id, p_reason, p.id,
+         GREATEST(v_now, p.created_at), GREATEST(v_now, p.created_at),
+         LEAST(GREATEST(v_now, p.created_at) + interval '12 hours', p.absolute_expires_at),
+         p.absolute_expires_at, p.provider_tokens_sealed, p.provider_tokens_key_id
+  FROM predecessor p
+  JOIN retired r ON r.id = p.id
+  RETURNING n.id, n.user_id, n.absolute_expires_at;
+END
+$$;
+
+-- ---------------------------------------------------------------------------------------------
+-- 5. Resolve a presented token, and record the activity.
+-- ---------------------------------------------------------------------------------------------
+--
+-- Valid means: not revoked, idle and absolute expiry both in the future, user active. Activity
+-- moves the idle expiry to `now + 12 h`, capped by the absolute expiry, which never moves.
+--
+-- The write is skipped when it would advance the idle expiry by less than a minute, so a burst of
+-- requests is one write rather than one per request. That only ever makes the stored idle expiry
+-- *earlier* than the ideal, by under a minute — never later — so the 12-hour guarantee holds
+-- exactly, with no unaccounted grace.
+CREATE FUNCTION app.resolve_session(
+  p_token_hash bytea,
+  p_now timestamptz
+) RETURNS TABLE (session_id uuid, user_id uuid, idle_expires_at timestamptz,
+                 absolute_expires_at timestamptz)
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path = pg_catalog, public, app, pg_temp
+AS $$
+DECLARE
+  v_now timestamptz := app.session_clock(p_now);
+BEGIN
+  RETURN QUERY
+  UPDATE public.sessions s
+  SET last_seen_at = GREATEST(s.last_seen_at, v_now),
+      idle_expires_at = LEAST(v_now + interval '12 hours', s.absolute_expires_at)
+  FROM public.users u
+  WHERE s.token_hash = p_token_hash
+    AND s.revoked_at IS NULL
+    AND s.idle_expires_at > v_now
+    AND s.absolute_expires_at > v_now
+    AND u.id = s.user_id
+    AND u.status = 'active'
+    AND LEAST(v_now + interval '12 hours', s.absolute_expires_at) - s.idle_expires_at
+        >= interval '60 seconds'
+  RETURNING s.id, s.user_id, s.idle_expires_at, s.absolute_expires_at;
+  IF FOUND THEN
+    RETURN;
+  END IF;
+
+  RETURN QUERY
+  SELECT s.id, s.user_id, s.idle_expires_at, s.absolute_expires_at
+  FROM public.sessions s
+  JOIN public.users u ON u.id = s.user_id
+  WHERE s.token_hash = p_token_hash
+    AND s.revoked_at IS NULL
+    AND s.idle_expires_at > v_now
+    AND s.absolute_expires_at > v_now
+    AND u.status = 'active';
+END
+$$;
+
+-- ---------------------------------------------------------------------------------------------
+-- 6. Sign out: revoke the presented session and erase its provider tokens.
+-- ---------------------------------------------------------------------------------------------
+CREATE FUNCTION app.revoke_session(
+  p_token_hash bytea,
+  p_now timestamptz
+) RETURNS boolean
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path = pg_catalog, public, app, pg_temp
+AS $$
+DECLARE
+  v_now timestamptz := app.session_clock(p_now);
+BEGIN
+  UPDATE public.sessions s
+  SET revoked_at = v_now, revocation_reason = 'signed_out',
+      provider_tokens_sealed = NULL, provider_tokens_key_id = NULL
+  WHERE s.token_hash = p_token_hash AND s.revoked_at IS NULL;
+  RETURN FOUND;
+END
+$$;
+
+-- ---------------------------------------------------------------------------------------------
+-- Execution: moin_app only, each by exact signature.
+-- ---------------------------------------------------------------------------------------------
+REVOKE ALL ON FUNCTION app.begin_sign_in(bytea, bytea, bytea, bytea, text, text, timestamptz) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app.consume_sign_in(bytea, bytea, timestamptz) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea, timestamptz) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app.rotate_session(bytea, bytea, uuid, text, timestamptz) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app.resolve_session(bytea, timestamptz) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app.revoke_session(bytea, timestamptz) FROM PUBLIC;
+
+GRANT EXECUTE ON FUNCTION app.begin_sign_in(bytea, bytea, bytea, bytea, text, text, timestamptz) TO moin_app;
+GRANT EXECUTE ON FUNCTION app.consume_sign_in(bytea, bytea, timestamptz) TO moin_app;
+GRANT EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea, timestamptz) TO moin_app;
+GRANT EXECUTE ON FUNCTION app.rotate_session(bytea, bytea, uuid, text, timestamptz) TO moin_app;
+GRANT EXECUTE ON FUNCTION app.resolve_session(bytea, timestamptz) TO moin_app;
+GRANT EXECUTE ON FUNCTION app.revoke_session(bytea, timestamptz) TO moin_app;

@@ -91,6 +91,21 @@ const baseSchema = z.object({
   OIDC_REDIRECT_URI: z.url({ protocol: /^https?$/ }).optional(),
 
   /**
+   * Development and test only: `<key id>:<seed>`, from which the local provider-token key is
+   * derived (P06.06.01). Deployed environments seal provider tokens with a KMS data key (ADR-0033,
+   * P05.08.01), never a key in the environment (ADR-0020 records why), so the refinement below
+   * refuses it outside development and test, and sign-in refuses to start there until the KMS
+   * source exists.
+   */
+  AUTH_LOCAL_TOKEN_KEY: secret(
+    'AUTH_LOCAL_TOKEN_KEY',
+    z
+      .string()
+      .regex(/^[A-Za-z0-9._-]{1,64}:\S{16,}$/, 'must be <key id>:<seed of at least 16 characters>')
+      .optional(),
+  ),
+
+  /**
    * Twilio account auth token, used to validate `X-Twilio-Signature` (P04.04.03). Optional in the
    * schema and required for the voice role below: the API and worker roles must not carry it, so
    * that a compromise of either cannot forge a call webhook (INV-04, INV-15).
@@ -233,6 +248,20 @@ const schema = baseSchema.superRefine((value, ctx) => {
       }
     }
   }
+  if (
+    value.AUTH_LOCAL_TOKEN_KEY !== undefined &&
+    value.NODE_ENV !== 'development' &&
+    value.NODE_ENV !== 'test'
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['AUTH_LOCAL_TOKEN_KEY'],
+      message:
+        'is development-only: deployed environments seal provider tokens with a KMS data key ' +
+        '(ADR-0033), never a key carried in the environment',
+    });
+  }
+
   // The voice role answers the telephone. Starting it without the three values that make signature
   // validation possible would produce a service that either rejects every call or, worse, is
   // written later to skip validation "because the token is not set in this environment".

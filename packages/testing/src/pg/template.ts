@@ -47,6 +47,12 @@ export interface TestDatabase {
   readonly name: string;
   /** A pool as the application role. Closed by `drop()`. */
   pool(): Pool;
+  /**
+   * A pool on `migrationUrl`, for fixtures and for reading rows back. It is the admin connection
+   * and bypasses row-level security, so it must never drive the behaviour under test — only set
+   * the stage and inspect the result. Closed by `drop()`.
+   */
+  fixturePool(): Pool;
   drop(): Promise<void>;
 }
 
@@ -86,19 +92,29 @@ export async function createTestDatabase(label = 'test'): Promise<TestDatabase> 
     );
   }
   const appUrl = urlForDatabase(appBase, name);
+  const migrationUrl = urlForDatabase(admin, name);
+  let fixtures: Pool | undefined;
 
   return {
     name,
     appUrl,
-    migrationUrl: urlForDatabase(admin, name),
+    migrationUrl,
     pool(): Pool {
       appPool ??= createPool({ connectionString: appUrl, max: 4 });
       return appPool;
+    },
+    fixturePool(): Pool {
+      fixtures ??= createPool({ connectionString: migrationUrl, max: 2 });
+      return fixtures;
     },
     async drop(): Promise<void> {
       if (appPool !== undefined) {
         await appPool.end();
         appPool = undefined;
+      }
+      if (fixtures !== undefined) {
+        await fixtures.end();
+        fixtures = undefined;
       }
       const cleanup = createPool({ connectionString: admin, max: 1 });
       try {

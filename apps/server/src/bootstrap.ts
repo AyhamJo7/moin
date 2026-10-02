@@ -26,11 +26,11 @@
 
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
-import type { Type } from '@nestjs/common';
+import type { LoggerService, Type } from '@nestjs/common';
 import type { Logger } from '@moin/observability';
 import { loadConfig, describeConfig, ConfigurationError, type Config } from './config/env.ts';
 import { ConfigModule } from './config/config.module.ts';
-import { LOGGER } from './observability/logger.module.ts';
+import { LOGGER, buildLogger } from './observability/logger.module.ts';
 import { NestLoggerAdapter } from './observability/nest-logger.adapter.ts';
 import { SHUTDOWN_STATE } from './health/health.tokens.ts';
 import { registerCorrelation } from './observability/correlation.ts';
@@ -61,11 +61,7 @@ export async function bootstrapHttpRole(options: BootstrapOptions): Promise<void
   // Resolved once here; the root modules reuse it via ConfigModule.forFeature().
   ConfigModule.forRoot(config);
 
-  const app = await NestFactory.create<NestFastifyApplication>(
-    options.rootModule,
-    new FastifyAdapter(),
-    { bufferLogs: true },
-  );
+  const app = await createOrExit(options.rootModule, new NestLoggerAdapter(buildLogger(config)));
 
   const logger = app.get<Logger>(LOGGER);
   // Replace Nest's logger rather than disabling it: with `{ logger: false }` an unhandled 500
@@ -82,6 +78,34 @@ export async function bootstrapHttpRole(options: BootstrapOptions): Promise<void
   await app.listen({ port: config.PORT, host: '0.0.0.0' });
   logger.info({ outcome: 'listening', route: '/healthz' }, 'server listening');
   logger.debug({ outcome: 'configuration resolved', ...describeConfig(config) }, 'configuration');
+}
+
+/**
+ * A module may refuse to build because the environment cannot run it safely — sign-in without
+ * provider-token custody is the first (P06.06.01). That refusal is a `ConfigurationError` and must
+ * leave the process the way `loadConfigOrExit` does: one line naming the problem, no value, exit 1.
+ * Nest's default on a failed graph is to print the raw error and `abort()`, which bypasses both the
+ * redacting logger and a clean exit code, so it is given the redacting logger and told to throw
+ * instead, and the refusal is caught here. Anything that is not a configuration refusal still propagates as a crash.
+ */
+export async function createOrExit(
+  rootModule: Type<unknown>,
+  logger: LoggerService,
+): Promise<NestFastifyApplication> {
+  try {
+    // The redacting logger from the first line: a failure while the graph is built is reported
+    // through it, never as Nest's raw text and stack.
+    return await NestFactory.create<NestFastifyApplication>(rootModule, new FastifyAdapter(), {
+      logger,
+      abortOnError: false,
+    });
+  } catch (error) {
+    if (error instanceof ConfigurationError) {
+      process.stderr.write(`${error.message}\n`);
+      process.exit(1);
+    }
+    throw error;
+  }
 }
 
 function loadConfigOrExit(): Config {

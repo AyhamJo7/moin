@@ -31,3 +31,13 @@ export type {
   AuditVerificationReport,
   VerifyAuditChainsOptions,
 } from './audit-verification.ts';
+export { createIdentityStore } from './identity-store.ts';
+export type {
+  IdentityStore,
+  NewAuthTransaction,
+  ConsumedAuthTransaction,
+  NewSession,
+  SessionGrant,
+  ResolvedSession,
+  RotationReason,
+} from './identity-store.ts';

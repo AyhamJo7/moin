@@ -118,6 +118,17 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.count_audit_chains': 'e3cd033e0ea860c723977f7c9e28068a',
   'app.audit_chain_high_water': '0af3ae3c87f468ecd845b318be7efb52',
   'app.provision_tenant': '187d4a4589e54a39cdadc6f3726cce26',
+  // Sign-in and sessions (P06.06.01/.02): the guard that fixes a session's lifetime, and the six
+  // functions that are the runtime role's only access to users, auth_transactions and sessions.
+  // Refuses a caller-supplied time the database clock disagrees with; runs inside the six.
+  'app.session_clock': '26b267351ef1bb3e00fd7c0ae043ba50',
+  'app.reject_session_rewrite': '1b7209a5119fd835537b390fcbd558e0',
+  'app.begin_sign_in': 'ddc3ba3aced18e126eb001e675c2ad01',
+  'app.consume_sign_in': '4af36f18e683d4433ca1e8e83f900d2b',
+  'app.begin_session': '7fc46d4e22324ce57af5df630c0bf2c9',
+  'app.rotate_session': 'd09cade4d4b7d5581b25a8c77ac03edc',
+  'app.resolve_session': 'c665a04b6d2f71832ebaab1d6c3e42e4',
+  'app.revoke_session': '86553908119587e022c2f1fe8825eb11',
 };
 
 /** Reviewed QG-09 contract. Documentation registration alone cannot change privileges. */
@@ -165,6 +176,42 @@ const APPROVED_DEFINERS: Readonly<
   },
   'app.count_audit_chains': {
     arguments: 'bigint, bigint',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: ['moin_app'],
+  },
+  'app.begin_sign_in': {
+    arguments: 'bytea, bytea, bytea, bytea, text, text, timestamp with time zone',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: ['moin_app'],
+  },
+  'app.consume_sign_in': {
+    arguments: 'bytea, bytea, timestamp with time zone',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: ['moin_app'],
+  },
+  'app.begin_session': {
+    arguments: 'text, bytea, uuid, bytea, text, bytea, timestamp with time zone',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: ['moin_app'],
+  },
+  'app.rotate_session': {
+    arguments: 'bytea, bytea, uuid, text, timestamp with time zone',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: ['moin_app'],
+  },
+  'app.resolve_session': {
+    arguments: 'bytea, timestamp with time zone',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: ['moin_app'],
+  },
+  'app.revoke_session': {
+    arguments: 'bytea, timestamp with time zone',
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
     executeGrantees: ['moin_app'],
