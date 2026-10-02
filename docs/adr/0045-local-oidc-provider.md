@@ -32,6 +32,8 @@ Chosen because our auth boundary genuinely depends on each:
 
 - Authorization-code flow with **PKCE required** (`S256`), matching the production client. A local
   provider that accepted a code without a verifier would let a broken client pass every local test.
+- The browser client disables direct password grants and the implicit flow. The separate test
+  client may use direct grants to create local fixtures; application sign-in never uses it.
 - Issuer validation, audience/client validation, and a confidential client with a secret.
 - JWKS discovery at the standard `.well-known` endpoint, and key rotation.
 - Access-token and ID-token validation, expiry (`accessTokenLifespan` 300 s), refresh-token
@@ -75,10 +77,10 @@ evidence.
 
 ## Verification
 
-| Enforcement                                                 | Where                                                                                                               |
-| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| The provider is pinned by digest and its realm is committed | `docker-compose.yml` + `docker/keycloak/realm-moin-local.json`, imported on boot                                    |
-| PKCE is required, matching production                       | Realm attribute `pkce.code.challenge.method: S256`; a code without a verifier is rejected                           |
-| The negative cases are exercised                            | P06 auth suite: invalid issuer, invalid audience, expired token, unknown signing key, malformed token               |
-| No Keycloak-specific concept reaches production code        | The auth boundary depends on standard OIDC only; no admin-API call and no Keycloak claim outside the local fixtures |
-| Cognito-specific behaviour is verified against Cognito      | P06 records each such item as a staging verification; a local pass is a precondition, not evidence                  |
+| Enforcement                                                 | Where                                                                                                                                            |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| The provider is pinned by digest and its realm is committed | `docker-compose.yml` + `docker/keycloak/realm-moin-local.json`, imported on boot                                                                 |
+| PKCE is required, matching production                       | Realm attribute `pkce.code.challenge.method: S256`; `oidc-realm.test.ts` checks the browser client cannot use implicit or direct password grants |
+| The negative cases are exercised                            | P06 auth suite: invalid issuer, invalid audience, expired token, unknown signing key, malformed token                                            |
+| No Keycloak-specific concept reaches production code        | The auth boundary depends on standard OIDC only; no admin-API call and no Keycloak claim outside the local fixtures                              |
+| Cognito-specific behaviour is verified against Cognito      | P06 records each such item as a staging verification; a local pass is a precondition, not evidence                                               |
