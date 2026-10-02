@@ -75,3 +75,15 @@ recorded as not contained and the incident stays open. The founder's containment
 as the intended P06.09.02 behaviour. The enforcing mechanism is **not decided** and is marked
 pending in P06.09.02; nothing was implemented, executed or verified. P06.09.03 stays
 `READY_FOR_REVIEW`.
+
+## Second remediation: MFA re-enrolment before access
+
+Self-review at `bf4282529fdad6ec9d0a0140c1900bcba7b7226c` found that `docs/runbooks/mfa-reset.md`
+still said "the next sign-in must enrol a new TOTP app or passkey", which left a window in which an
+ordinary session could exist before a new factor. The execution section now fixes the order: revoke
+sessions, deny ordinary access, remove the lost factor, enrol a new factor in a recovery-only
+authentication, verify the enrolment, finalise and audit, and only then restore ordinary access. A
+stop condition forbids the reset while the system cannot guarantee that order; today it cannot
+(P06.09.02, P06.06.01, P06.06.03, P06.05.02, P06.05.05). A lost device alone is not an incident and
+does not rotate the password. This is documentation only: no recovery-only state, session gating or
+enrolment enforcement exists or was tested.

@@ -34,11 +34,16 @@ request is recorded and escalated to the founder; it is not worked around.
 - A customer user (owner, admin or staff) cannot complete MFA because the authenticator — a TOTP
   app or a passkey — is lost or replaced, and asks for the factor to be reset.
 
+An ordinary lost device with no sign of compromise is a support request, not an incident, and the
+password is not changed because of it. Either way, the recovery below never restores ordinary access
+before a new factor is enrolled.
+
 It does **not** apply to:
 
 - a forgotten password: that is Cognito's self-service email reset (P06.09.01), not a support action;
 - suspected compromise ("someone else signed in", an MFA change the user did not make): start with
-  [compromised account](compromised-account.md), which calls this runbook only for the recovery step;
+  [compromised account](compromised-account.md), which applies its containment first and calls this
+  runbook only for the recovery step;
 - an operator account: operators use a separate WebAuthn-only pool (P06.11.01). Escalate to the
   founder.
 
@@ -108,37 +113,73 @@ are compromise signals: switch to [compromised account](compromised-account.md).
 
 ## Execute — one controlled recovery
 
-Each step is a REQUIRED CONTROL with implementation pending. None may be done by hand against a
-database or the provider console in the meantime.
+**No ordinary KlarDesk access while recovery is pending.** Once a reset is authorised, the account
+regains ordinary application access only after a fresh MFA authenticator has been enrolled, the
+enrolment has been verified, and the recovery has been finalised and audited. There is no window in
+which the old factor is gone, the user signs in, and an ordinary session exists before the new
+factor. This is the same invariant as the containment in
+[compromised account](compromised-account.md#2-contain), and it applies to the only owner without
+exception.
 
-1. **Revoke every server-side session of the subject**, and confirm that the next request with an
-   old session fails (P06.06.05, tested by P06.06.07). If that cannot be confirmed, stop here: the
-   user stays signed out and the ticket is escalated.
-2. **Sign the subject out at the provider and remove the lost factor**, keeping the pool's MFA
-   required, so the next sign-in must enrol a new TOTP app or passkey. Provider-side revocation does
-   not end our sessions — a token the provider issued can stay valid until it expires, which is why
-   step 1 comes first and is the immediate control
+**Stop condition.** If the system cannot guarantee that no ordinary application session is issued
+before fresh MFA enrolment completes, **do not perform the reset.** Record the missing control as
+pending and keep the ticket open. Today the guarantee does not exist: it is a REQUIRED CONTROL —
+implementation pending in P06.09.02 (recovery procedure), P06.06.01 and P06.06.03 (session issuance
+and the per-request check), and P06.05.02 and P06.05.05 (MFA required, and enrolment forced and
+verified in staging).
+
+Each step below is a REQUIRED CONTROL with implementation pending. None may be done by hand against
+a database or the provider console in the meantime.
+
+1. **Revoke every KlarDesk session of the subject**, and confirm that the next request with an old
+   session fails (P06.06.05, tested by P06.06.07). If that cannot be confirmed, stop.
+2. **Deny ordinary access** for the duration of the recovery: the identity is held in a
+   recovery-only state in which no sign-in produces an ordinary KlarDesk session or any business
+   access. The mechanism is not decided (P06.09.02); for a suspected compromise it is the
+   deny-new-access control of [compromised account](compromised-account.md#2-contain).
+3. **Remove the lost factor at the provider**, keeping the pool's MFA required (P06.05.02), and sign
+   the subject out there where the provider supports it. Provider-side revocation does not end our
+   sessions and does not stop anyone authenticating again; a token the provider issued can stay
+   valid until it expires
    ([Cognito token revocation](https://docs.aws.amazon.com/cognito/latest/developerguide/token-revocation.html)).
-   The exact provider operations and the restricted operator role are defined and verified against
-   the provisioned pool in P06.09.02 (pool: P06.05.01); this runbook names no command until then.
-3. **Audit each action** — verification outcome, session revocation, provider revocation, factor
-   removal — as tenant-scoped audit events with the operator as actor, opaque IDs, a reason code and
-   the incident reference, each with its result (`succeeded`, `failed`, `rejected`). The operation
-   name and argument keys are registered in the audit allowlist when the procedure is built
-   (P06.09.02, P06.10.03, P06.11.04, P06.12.02); they are not invented ad hoc. If an audit write
-   fails, the recovery is incomplete: escalate, do not report success.
-4. **Notify** the owner, and the affected user if that is someone else, through the email of record
+   That is why steps 1 and 2 come first. The exact provider operations and the restricted operator
+   role are defined and verified against the provisioned pool in P06.09.02 (pool: P06.05.01); this
+   runbook names no command until then.
+4. **The user enrols a new factor in a recovery-only authentication.** The user authenticates at the
+   provider only as far as enrolment needs, and enrols a new TOTP app or passkey; SMS is not offered
+   (P06.05.02). If the provider performs enrolment as part of a later sign-in, that sign-in **is** the
+   recovery-only authentication: authenticating at the provider to enrol a factor is not the same as
+   being issued KlarDesk access, and it must not produce an ordinary session or any business access.
+   The password is replaced only when compromise is suspected
+   ([compromised account](compromised-account.md), section 7) or the approved recovery policy
+   requires it.
+5. **Verify the enrolment** for this subject: a new permitted factor exists and was used to satisfy
+   MFA in that authentication. If it cannot be verified, the recovery stays open and ordinary access
+   stays denied.
+6. **Finalise and audit** each action — verification outcome, session revocation, provider
+   revocation, factor removal, enrolment, finalisation — as tenant-scoped audit events with the
+   operator as actor, opaque IDs, a reason code and the incident reference, each with its result
+   (`succeeded`, `failed`, `rejected`). The operation name and argument keys are registered in the
+   audit allowlist when the procedure is built (P06.09.02, P06.10.03, P06.11.04, P06.12.02); they
+   are not invented ad hoc. If an audit write fails, the recovery is not finalised: escalate, do not
+   report success, and ordinary access stays denied.
+7. **Only then restore ordinary access** deliberately: lift the recovery-only state, so that the next
+   sign-in with the new factor yields an ordinary session. Sensitive actions afterwards need a fresh
+   step-up (P06.06.04).
+8. **Notify** the owner, and the affected user if that is someone else, through the email of record
    (P06.12.02). The message contains no secret and no link to a newly supplied address.
-5. **Re-enrolment:** the user signs in and is forced to enrol a new TOTP app or passkey; SMS is not
-   offered (P06.05.02). Sensitive actions afterwards need a fresh step-up (P06.06.04).
+
+Ordinary access is not restored because the old factor was removed, the provider sign-out completed,
+the user signed in, an operator believes the user, or someone approves it manually, including the
+founder.
 
 ## Abort and rollback
 
 - Before step 1, abort at any doubt; nothing has changed.
-- Session revocation is never rolled back. Being signed out is the safe state, and signing in again
-  is the recovery.
-- If step 2, 3 or 4 fails after step 1 succeeded, the user stays signed out, nothing is retried
-  ad hoc, and the ticket is escalated with what did and did not complete.
+- Session revocation is never rolled back. Being without access is the safe state; access returns
+  only through step 7.
+- If any step after step 1 fails, the user stays without ordinary access, nothing is retried ad hoc,
+  and the ticket is escalated with what did and did not complete.
 - If anything during the procedure suggests compromise, stop and switch to
   [compromised account](compromised-account.md).
 
