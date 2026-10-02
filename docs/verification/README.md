@@ -66,6 +66,11 @@ node --env-file=.env.example scripts/mutation-sweep.ts \
   --report docs/verification/identity-mutation-report.md
 ```
 
+The live test also rejects harmless standard claims outside the contract (`name`,
+`preferred_username`, …). The canonical identity never contains them, so if Keycloak starts emitting
+such a claim, assess that drift separately from the canonical-identity invariant (founder note,
+EV-P06-038).
+
 ## What `KILLED_ASSERTION` is allowed to mean
 
 The harness is itself a control, and it has been wrong five times, always generously. The verdict is

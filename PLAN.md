@@ -141,7 +141,7 @@ Single source of status. Tier columns show the status of that phase's items for 
 | P03 | Architecture decisions & threat model | IN_PROGRESS | — | — | — | — | EXT-02 counsel not engaged | P03.05 review findings; founder sends the legal pack |
 | P04 | Feasibility proof & long-lead track | IN_PROGRESS | — | — | NOT_STARTED | — | EXT-01/07/10/11/12 | Adapter, gateway port and measurement harness built; every measurement waits on EXT-10/11/12 |
 | P05 | Cloud foundation & walking skeleton | NOT_STARTED | — | — | — | — | EXT-09 AWS | Terraform bootstrap |
-| P06 | Tenancy, identity, authorization, audit | IN_PROGRESS | — | NOT_STARTED | — | — | P05 for Cognito, Secrets Manager, pgaudit; EXT-09 for the audit alarm schedule | Audit table, chain, query API, daily verifier and argument scanner done; ADR-0017 accepted and P06.10.07 verified at QG-09 (2026-10-02); P06.10.03 adoption (incl. `locations`) and .05 scheduling (EXT-09) open; P06.05.04 claims contract and provider switch READY_FOR_REVIEW (EV-P06-037), P06.05.01–.03/.05 open (P05, EXT-09) |
+| P06 | Tenancy, identity, authorization, audit | IN_PROGRESS | — | NOT_STARTED | — | — | P05 for Cognito, Secrets Manager, pgaudit; EXT-09 for the audit alarm schedule | Audit table, chain, query API, daily verifier and argument scanner done; ADR-0017 accepted and P06.10.07 verified at QG-09 (2026-10-02); P06.10.03 adoption (incl. `locations`) and .05 scheduling (EXT-09) open; P06.05.04 claims contract and provider switch verified by the founder (2026-10-02, EV-P06-038), P06.05.01–.03/.05 open (P05, EXT-09) |
 | P07 | Core business action model | NOT_STARTED | — | NOT_STARTED | NOT_STARTED | — | — | after P06.02 |
 | P08 | Async, events, scheduling, realtime | NOT_STARTED | — | — | — | — | — | after P06.03 |
 | P09 | Knowledge system | NOT_STARTED | — | NOT_STARTED | NOT_STARTED | — | — | after P07 |
@@ -2589,7 +2589,7 @@ Roles and RLS framework · `withTenant` / `withSystemWork` · catalog check · o
   - [ ] P06.05.01 Terraform: customer pool (EU), app client (confidential, PKCE), managed login with German locale, email via SES, custom domain `auth.<domain>`
   - [ ] P06.05.02 MFA required for all users: TOTP and passkeys; SMS MFA disabled
   - [ ] P06.05.03 Password policy (≥ 12 chars) and threat protection (tier decision recorded)
-  - [x] P06.05.04 Local-development OIDC provider with the same claims shape; configuration switch per environment — EV-P06-037 · the Cognito side is the documented ID-token shape; the live Cognito comparison is P06.05.05
+  - [x] P06.05.04 Local-development OIDC provider with the same claims shape; configuration switch per environment — EV-P06-037 · founder-verified at reviewed HEAD `1801feb` (EV-P06-038); the Cognito side is the documented ID-token shape; the live Cognito comparison is P06.05.05
   - [ ] P06.05.05 Verify in staging: login without MFA enrolment is impossible; MFA enrolment forced on first login
 - [ ] **P06.06 Server-side sessions** `[G:PILOT]`
   - [ ] P06.06.01 Authorization Code + PKCE callback in `api`; `state` + nonce validation; Cognito tokens encrypted server-side
