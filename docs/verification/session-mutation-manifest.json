@@ -271,5 +271,122 @@
       "fullName": "the post-sign-in return path > refuses paths that only normalise into the sign-in routes"
     },
     "project": "unit"
+  },
+  {
+    "id": "G1-moin-app-executes-session-function",
+    "invariant": "ADR-0003 amendment / QG-09 I1: moin_app (voice, worker) executes no session function",
+    "expected": "Any voice or worker process could call begin_session for an active subject and obtain a valid seven-day session.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "GRANT EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea, timestamptz) TO moin_identity;\n",
+    "replace": "GRANT EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea, timestamptz) TO moin_identity, moin_app;\n",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "moin_app — the voice and worker role — and sessions > cannot mint, resolve, rotate or revoke a session by calling the functions"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "G2-identity-role-session-table-dml",
+    "invariant": "ADR-0003 amendment: moin_identity reaches sessions only through the reviewed functions",
+    "expected": "The api's identity credential could rewrite or read session rows directly, around every lifetime and revocation rule the functions enforce.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "GRANT EXECUTE ON FUNCTION app.revoke_session(bytea, timestamptz) TO moin_identity;\n",
+    "replace": "GRANT EXECUTE ON FUNCTION app.revoke_session(bytea, timestamptz) TO moin_identity;\nGRANT SELECT, INSERT, UPDATE, DELETE ON TABLE sessions TO moin_identity;\n",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "moin_identity — the api-only session role > has no table privilege anywhere, tenant table or session table"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "G3-identity-role-tenant-table",
+    "invariant": "ADR-0003 amendment / INV-01: moin_identity has no tenant-table access",
+    "expected": "The session credential would become a second, unreviewed path to tenant data.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "GRANT USAGE ON SCHEMA public, app TO moin_identity;\n",
+    "replace": "GRANT USAGE ON SCHEMA public, app TO moin_identity;\nGRANT SELECT ON TABLE organisations TO moin_identity;\n",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "moin_identity — the api-only session role > has no table privilege anywhere, tenant table or session table"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "G6-identity-role-other-definer",
+    "invariant": "ADR-0003 amendment: moin_identity executes exactly the six session functions",
+    "expected": "The session credential could drive another privileged function, here part of the audit sweep.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "GRANT EXECUTE ON FUNCTION app.revoke_session(bytea, timestamptz) TO moin_identity;\n",
+    "replace": "GRANT EXECUTE ON FUNCTION app.revoke_session(bytea, timestamptz) TO moin_identity;\nGRANT EXECUTE ON FUNCTION app.audit_chain_high_water() TO moin_identity;\n",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "moin_identity — the api-only session role > cannot execute any other privileged function"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "G4-identity-credential-in-voice",
+    "invariant": "ADR-0003 amendment: the identity credential reaches the api role only",
+    "expected": "A voice or worker process could be started holding the session credential, reopening I1 through configuration.",
+    "file": "apps/server/src/config/env.ts",
+    "find": "  if (value.IDENTITY_DATABASE_URL !== undefined && value.SERVER_ROLE !== 'api') {\n",
+    "replace": "  if (value.IDENTITY_DATABASE_URL !== undefined && value.SERVER_ROLE === 'never') {\n",
+    "killingTest": {
+      "file": "apps/server/src/config/env.test.ts",
+      "fullName": "the identity database credential (P06.06, ADR-0003) > is refused for voice, worker and migrate, so no other process can hold it"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "G5-identity-store-on-moin-app-pool",
+    "invariant": "ADR-0003 amendment: the api's identity store connects as moin_identity",
+    "expected": "Wiring the store to DATABASE_URL would only work if moin_app could execute the session functions, which is the grant I1 removed.",
+    "file": "apps/server/src/modules/platform/identity-pool.module.ts",
+    "find": "    connectionString: config.IDENTITY_DATABASE_URL,\n",
+    "replace": "    connectionString: config.DATABASE_URL,\n",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/sign-in.integration.test.ts",
+      "fullName": "signing in > issues one opaque session cookie and redirects to the stored path"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "G7-sign-in-without-identity-pool",
+    "invariant": "ADR-0003 amendment: an api that signs people in must have the identity pool",
+    "expected": "Sign-in would be built with no store and fail per request instead of refusing to start.",
+    "file": "apps/server/src/modules/identity-access/identity-access.module.ts",
+    "find": "  if (store === null) {\n",
+    "replace": "  if (store === null && config.NODE_ENV === 'never') {\n",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/identity-access.module.test.ts",
+      "fullName": "building sign-in > refuses to sign anyone in without the moin_identity pool"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "G8-identity-boundary-rule-blind",
+    "invariant": "ADR-0003 amendment: the voice, worker and migrate graphs cannot reach the identity module",
+    "expected": "A future import from the voice module into identity-access would pass CI unnoticed.",
+    "file": ".dependency-cruiser.cjs",
+    "find": "        path: '^apps/server/src/(main-(voice|worker|migrate)\\\\.ts|roots/(voice|worker|migrate)-root\\\\.module\\\\.ts)$',\n",
+    "replace": "        path: '^apps/server/never/(main-(voice|worker|migrate)\\\\.ts|roots/(voice|worker|migrate)-root\\\\.module\\\\.ts)$',\n",
+    "killingTest": {
+      "file": "scripts/identity-boundary.test.ts",
+      "fullName": "identity is api-only > rejects the voice role reaching the identity module through another module"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "G9-catalog-ignores-identity-role",
+    "invariant": "ADR-0003 amendment: the catalog check asserts moin_identity's whole ACL",
+    "expected": "A grant to moin_identity on a session or tenant table would pass the release-blocking catalog check.",
+    "file": "scripts/check-rls-catalog.ts",
+    "find": "    findings.push(...(await inspectIdentityRole(pool)));\n",
+    "replace": "",
+    "killingTest": {
+      "file": "scripts/check-rls-catalog.integration.test.ts",
+      "fullName": "the identity role boundary (P06.06, ADR-0003) > rejects moin_identity holding a table privilege, session or tenant"
+    },
+    "project": "integration"
   }
 ]
