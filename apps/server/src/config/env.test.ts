@@ -6,7 +6,92 @@ const VALID = {
   DATABASE_URL: 'postgres://moin_app:s3cr3t-p4ssw0rd@localhost:5432/moin',
 } satisfies NodeJS.ProcessEnv;
 
+const OIDC = {
+  OIDC_PROVIDER: 'keycloak',
+  OIDC_ISSUER_URL: 'http://127.0.0.1:8080/realms/moin-local',
+  OIDC_CLIENT_ID: 'moin-web',
+  OIDC_CLIENT_SECRET: 'local-development-only',
+  OIDC_REDIRECT_URI: 'http://localhost:3000/api/auth/callback',
+} satisfies NodeJS.ProcessEnv;
+
 describe('configuration loader (P02.03.03)', () => {
+  it('selects the local OIDC contract and redacts its client secret', () => {
+    const config = loadConfig({ ...VALID, ...OIDC });
+    expect(config.OIDC_PROVIDER).toBe('keycloak');
+    expect(describeConfig(config)['OIDC_CLIENT_SECRET']).toBe('[redacted]');
+    expect(describeConfig(config)['OIDC_ISSUER_URL']).toBe('[redacted]');
+  });
+
+  it('rejects partial OIDC settings and keeps secrets out of errors', () => {
+    const raw = 'private-client-secret';
+    try {
+      loadConfig({ ...VALID, OIDC_PROVIDER: 'keycloak', OIDC_CLIENT_SECRET: raw });
+      expect.unreachable('partial OIDC config must fail');
+    } catch (error) {
+      const message = (error as Error).message;
+      expect(message).toContain('OIDC_ISSUER_URL');
+      expect(message).not.toContain(raw);
+    }
+  });
+
+  it('keeps the local provider out of staging and production', () => {
+    for (const environment of ['staging', 'production']) {
+      expect(() => loadConfig({ ...VALID, ...OIDC, NODE_ENV: environment })).toThrow(
+        ConfigurationError,
+      );
+    }
+  });
+
+  it('requires HTTPS for Cognito and redirects outside local development', () => {
+    expect(() =>
+      loadConfig({
+        ...VALID,
+        ...OIDC,
+        OIDC_PROVIDER: 'cognito',
+        OIDC_ISSUER_URL: 'http://cognito-idp.eu-central-1.amazonaws.com/eu-central-1_pool',
+      }),
+    ).toThrow(ConfigurationError);
+    const config = loadConfig({
+      ...VALID,
+      ...OIDC,
+      NODE_ENV: 'production',
+      OIDC_PROVIDER: 'cognito',
+      OIDC_ISSUER_URL: 'https://cognito-idp.eu-central-1.amazonaws.com/eu-central-1_pool',
+      OIDC_REDIRECT_URI: 'https://app.example.de/api/auth/callback',
+    });
+    expect(config.OIDC_PROVIDER).toBe('cognito');
+  });
+
+  it('rejects a remote local issuer or callback that can receive an authorization code', () => {
+    expect(() =>
+      loadConfig({
+        ...VALID,
+        ...OIDC,
+        OIDC_ISSUER_URL: 'http://attacker.example/realms/moin-local',
+      }),
+    ).toThrow(ConfigurationError);
+    expect(() =>
+      loadConfig({
+        ...VALID,
+        ...OIDC,
+        OIDC_ISSUER_URL: 'http://127.0.0.1:8080/realms/moin-local?next=other',
+      }),
+    ).toThrow(ConfigurationError);
+    expect(() =>
+      loadConfig({
+        ...VALID,
+        ...OIDC,
+        OIDC_REDIRECT_URI: 'http://attacker.example/api/auth/callback',
+      }),
+    ).toThrow(ConfigurationError);
+    expect(() =>
+      loadConfig({
+        ...VALID,
+        ...OIDC,
+        OIDC_REDIRECT_URI: 'http://localhost:3000/api/auth/callback?next=https://attacker.example',
+      }),
+    ).toThrow(ConfigurationError);
+  });
   it('applies defaults and returns a frozen object', () => {
     const config = loadConfig(VALID);
     expect(config.NODE_ENV).toBe('development');

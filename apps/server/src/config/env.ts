@@ -56,6 +56,13 @@ const baseSchema = z.object({
 
   DATABASE_URL: secret('DATABASE_URL', z.url({ protocol: /^postgres(ql)?$/ })),
 
+  /** P06.05.04: one OIDC contract, selected by deployment rather than by business logic. */
+  OIDC_PROVIDER: z.enum(['keycloak', 'cognito']).optional(),
+  OIDC_ISSUER_URL: secret('OIDC_ISSUER_URL', z.url({ protocol: /^https?$/ }).optional()),
+  OIDC_CLIENT_ID: z.string().min(1).optional(),
+  OIDC_CLIENT_SECRET: secret('OIDC_CLIENT_SECRET', z.string().min(1).optional()),
+  OIDC_REDIRECT_URI: z.url({ protocol: /^https?$/ }).optional(),
+
   /**
    * Twilio account auth token, used to validate `X-Twilio-Signature` (P04.04.03). Optional in the
    * schema and required for the voice role below: the API and worker roles must not carry it, so
@@ -117,6 +124,90 @@ const baseSchema = z.object({
 });
 
 const schema = baseSchema.superRefine((value, ctx) => {
+  const oidcKeys = [
+    'OIDC_PROVIDER',
+    'OIDC_ISSUER_URL',
+    'OIDC_CLIENT_ID',
+    'OIDC_CLIENT_SECRET',
+    'OIDC_REDIRECT_URI',
+  ] as const;
+  const configured = oidcKeys.some((key) => value[key] !== undefined);
+  if (configured) {
+    for (const key of oidcKeys) {
+      if (value[key] === undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [key],
+          message: 'is required when OIDC is configured',
+        });
+      }
+    }
+    if (value.OIDC_PROVIDER === 'keycloak') {
+      if (value.NODE_ENV === 'staging' || value.NODE_ENV === 'production') {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['OIDC_PROVIDER'],
+          message: 'local provider is not allowed outside development or test',
+        });
+      }
+    }
+    if (value.OIDC_ISSUER_URL !== undefined) {
+      const issuer = new URL(value.OIDC_ISSUER_URL);
+      if (
+        issuer.search !== '' ||
+        issuer.hash !== '' ||
+        issuer.username !== '' ||
+        issuer.password !== ''
+      ) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['OIDC_ISSUER_URL'],
+          message: 'issuer must be a fixed origin and path',
+        });
+      }
+      if (
+        value.OIDC_PROVIDER === 'keycloak' &&
+        !['127.0.0.1', 'localhost'].includes(issuer.hostname)
+      ) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['OIDC_ISSUER_URL'],
+          message: 'local provider must use a loopback issuer',
+        });
+      }
+    }
+    if (
+      value.OIDC_PROVIDER === 'cognito' &&
+      value.OIDC_ISSUER_URL !== undefined &&
+      new URL(value.OIDC_ISSUER_URL).protocol !== 'https:'
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['OIDC_ISSUER_URL'],
+        message: 'Cognito issuer must use HTTPS',
+      });
+    }
+    if (value.OIDC_REDIRECT_URI !== undefined) {
+      const redirect = new URL(value.OIDC_REDIRECT_URI);
+      if (
+        redirect.search !== '' ||
+        redirect.hash !== '' ||
+        redirect.username !== '' ||
+        redirect.password !== '' ||
+        (value.OIDC_PROVIDER === 'keycloak' &&
+          !['127.0.0.1', 'localhost'].includes(redirect.hostname)) ||
+        (value.NODE_ENV !== 'development' &&
+          value.NODE_ENV !== 'test' &&
+          redirect.protocol !== 'https:')
+      ) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['OIDC_REDIRECT_URI'],
+          message: 'callback must be a fixed HTTPS URL outside local development',
+        });
+      }
+    }
+  }
   // The voice role answers the telephone. Starting it without the three values that make signature
   // validation possible would produce a service that either rejects every call or, worse, is
   // written later to skip validation "because the token is not set in this environment".

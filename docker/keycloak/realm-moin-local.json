@@ -37,7 +37,7 @@
       "secret": "local-development-only",
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
-      "directAccessGrantsEnabled": true,
+      "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
       "redirectUris": ["http://localhost:3000/*", "http://127.0.0.1:3000/*"],
       "webOrigins": ["http://localhost:3000"],
