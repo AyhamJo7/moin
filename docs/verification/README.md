@@ -49,6 +49,23 @@ need neither. Started without the file, every integration variant comes back `BA
 run collected no tests at all"): the harness refuses to count a kill on a tree whose baseline never
 ran, which is the point.
 
+## The identity mutation sweep (P06.05.04)
+
+- **Manifest:** [`identity-mutation-manifest.json`](identity-mutation-manifest.json): the
+  identity-claims contract, the per-environment OIDC provider switch, the client-secret boundary
+  and the local realm's claim scopes.
+- **Latest report:** [`identity-mutation-report.md`](identity-mutation-report.md)
+
+The same runner and the same verdict rules as the audit sweep. Every variant but one runs in the
+`unit` project; `I5-…` kills against a token the local Keycloak really issues, so it needs the
+local stack and `TEST_OIDC_ISSUER_URL`:
+
+```
+node --env-file=.env.example scripts/mutation-sweep.ts \
+  --manifest docs/verification/identity-mutation-manifest.json \
+  --report docs/verification/identity-mutation-report.md
+```
+
 ## What `KILLED_ASSERTION` is allowed to mean
 
 The harness is itself a control, and it has been wrong five times, always generously. The verdict is

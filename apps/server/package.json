@@ -29,6 +29,7 @@
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@moin/testing": "workspace:*",
     "@nestjs/testing": "12.1.1",
     "@types/node": "24.19.0",
     "@types/ws": "8.18.2",
