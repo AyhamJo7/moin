@@ -81,6 +81,15 @@ export async function createTestDatabase(label = 'test'): Promise<TestDatabase> 
     // this module generated — never from anything a test supplies verbatim.
     // eslint-disable-next-line no-restricted-syntax -- database identifier. `name` is built in this module from a sanitised label plus hex generated here; nothing a caller supplies reaches it verbatim.
     await adminPool.query(`create database "${name}" template "${TEMPLATE_DATABASE}"`);
+    // A database's ACL is not copied from its template, and PostgreSQL grants TEMPORARY to PUBLIC
+    // on every new one. moin_identity may create nothing (ADR-0003), so each test database is
+    // provisioned as the cluster init does: TEMPORARY moved from PUBLIC to the roles that keep it.
+    // eslint-disable-next-line no-restricted-syntax -- same generated database identifier as above.
+    await adminPool.query(`revoke temporary on database "${name}" from public`);
+    await adminPool.query(
+      // eslint-disable-next-line no-restricted-syntax -- same generated database identifier as above.
+      `grant temporary on database "${name}" to moin_app, moin_migrator, moin_readonly, moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting`,
+    );
   } finally {
     await adminPool.end();
   }

@@ -10,7 +10,13 @@
 import { createTestDatabase, type TestDatabase } from '@moin/testing';
 import { createPool } from '@moin/db/pool';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { inspect, allowlistedDefiners, type Finding } from './check-rls-catalog.ts';
+import { randomBytes } from 'node:crypto';
+import {
+  inspect,
+  inspectIdentityRole,
+  allowlistedDefiners,
+  type Finding,
+} from './check-rls-catalog.ts';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -514,6 +520,125 @@ describe('the identity role boundary (P06.06, ADR-0003)', () => {
       await ddl(`REVOKE EXECUTE ON FUNCTION ${signature} FROM moin_identity`);
     }
   });
+
+  /** Applies `grant`, asserts `rule` is reported for `subject`, and always applies `revoke`. */
+  async function fires(
+    grant: string,
+    revoke: string,
+    subject: string,
+    rule: string,
+  ): Promise<void> {
+    await ddl(grant);
+    try {
+      expect(rulesFor(await findings(), subject), grant).toContain(rule);
+    } finally {
+      await ddl(revoke);
+    }
+  }
+
+  evidenceTest(
+    'rejects a column privilege, MAINTAIN or a grant option held by moin_identity',
+    async () => {
+      await fires(
+        'GRANT SELECT (cognito_sub, email) ON TABLE users TO moin_identity',
+        'REVOKE SELECT (cognito_sub, email) ON TABLE users FROM moin_identity',
+        'moin_identity',
+        'identity-role-table-privilege',
+      );
+      await fires(
+        'GRANT MAINTAIN ON TABLE sessions TO moin_identity',
+        'REVOKE MAINTAIN ON TABLE sessions FROM moin_identity',
+        'moin_identity',
+        'identity-role-table-privilege',
+      );
+      await fires(
+        'GRANT EXECUTE ON FUNCTION app.resolve_session(bytea, timestamptz) TO moin_identity WITH GRANT OPTION',
+        'REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION app.resolve_session(bytea, timestamptz) FROM moin_identity',
+        'moin_identity',
+        'identity-role-grant-option',
+      );
+    },
+  );
+
+  evidenceTest('rejects moin_identity being able to create anything', async () => {
+    await fires(
+      'GRANT CREATE ON SCHEMA app TO moin_identity',
+      'REVOKE CREATE ON SCHEMA app FROM moin_identity',
+      'moin_identity',
+      'identity-role-schema-create',
+    );
+    const database_ = `"${database.name}"`;
+    await fires(
+      // eslint-disable-next-line no-restricted-syntax -- the harness-generated database name, never input.
+      `GRANT TEMPORARY ON DATABASE ${database_} TO moin_identity`,
+      // eslint-disable-next-line no-restricted-syntax -- the harness-generated database name, never input.
+      `REVOKE TEMPORARY ON DATABASE ${database_} FROM moin_identity`,
+      'moin_identity',
+      'identity-role-temporary',
+    );
+  });
+
+  evidenceTest(
+    'rejects any other runtime role holding a privilege on a session table',
+    async () => {
+      await fires(
+        'GRANT INSERT ON TABLE sessions TO moin_app',
+        'REVOKE INSERT ON TABLE sessions FROM moin_app',
+        'sessions',
+        'session-table-privilege',
+      );
+      await fires(
+        'GRANT UPDATE (max_skew) ON TABLE session_clock_policy TO moin_dispatcher',
+        'REVOKE UPDATE (max_skew) ON TABLE session_clock_policy FROM moin_dispatcher',
+        'session_clock_policy',
+        'session-table-privilege',
+      );
+    },
+  );
+
+  evidenceTest('rejects a widened clock bound', async () => {
+    await fires(
+      "UPDATE session_clock_policy SET max_skew = interval '1 day'",
+      "UPDATE session_clock_policy SET max_skew = interval '5 minutes'",
+      'session_clock_policy',
+      'session-clock-skew-widened',
+    );
+  });
+
+  /* eslint-disable no-restricted-syntax -- role DDL cannot be parameterised; the names are built in this test from a literal prefix and generated hex, and `SET FALSE` is a GRANT option, not a session-level SET. */
+  evidenceTest(
+    'tolerates only an ADMIN-only grant to the role that created it (RDS, PostgreSQL 16+)',
+    async () => {
+      // Throwaway roles: membership is cluster-wide, so moin_identity itself is never touched here.
+      const suffix = randomBytes(4).toString('hex');
+      const probe = `zz_identity_probe_${suffix}`;
+      const creator = `zz_identity_creator_${suffix}`;
+      await ddl(`CREATE ROLE ${probe} NOLOGIN; CREATE ROLE ${creator} NOLOGIN`);
+      const pool = createPool({ connectionString: database.migrationUrl, max: 1 });
+      try {
+        const membership = async (): Promise<boolean> =>
+          (await inspectIdentityRole(pool, probe)).some(
+            (f) => f.rule === 'identity-role-membership',
+          );
+        expect(await membership(), 'no members').toBe(false);
+        await ddl(`GRANT ${probe} TO ${creator} WITH ADMIN TRUE, INHERIT FALSE, SET FALSE`);
+        expect(await membership(), 'admin-only creator grant').toBe(false);
+        await ddl(`REVOKE ${probe} FROM ${creator}`);
+        await ddl(`GRANT ${probe} TO ${creator} WITH ADMIN TRUE, INHERIT TRUE, SET FALSE`);
+        expect(await membership(), 'a member that inherits').toBe(true);
+        await ddl(`REVOKE ${probe} FROM ${creator}`);
+        await ddl(`GRANT ${probe} TO ${creator} WITH ADMIN FALSE, INHERIT FALSE, SET TRUE`);
+        expect(await membership(), 'a member that can SET ROLE').toBe(true);
+        await ddl(`REVOKE ${probe} FROM ${creator}`);
+        await ddl(`GRANT ${creator} TO ${probe} WITH INHERIT FALSE, SET FALSE`);
+        expect(await membership(), 'a member of another role').toBe(true);
+      } finally {
+        await pool.end();
+        await ddl(`DROP ROLE IF EXISTS ${probe}; DROP ROLE IF EXISTS ${creator}`);
+      }
+    },
+  );
+  /* eslint-enable no-restricted-syntax */
 
   it('reports nothing about the identity boundary once the fixtures are revoked', async () => {
     // Scoped to its own subjects: earlier cases in this file leave their own fixtures behind.

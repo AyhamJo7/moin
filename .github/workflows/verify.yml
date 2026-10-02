@@ -145,6 +145,9 @@ jobs:
           GRANT CONNECT ON DATABASE moin TO moin_app, moin_migrator, moin_readonly,
             moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting, moin_identity;
           GRANT CREATE ON DATABASE moin TO moin_migrator;
+          REVOKE TEMPORARY ON DATABASE moin FROM PUBLIC;
+          GRANT TEMPORARY ON DATABASE moin TO moin_app, moin_migrator, moin_readonly,
+            moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting;
           SQL
 
       # The identity-claims test signs in to Keycloak with the committed realm (ADR-0045). Started
@@ -256,6 +259,9 @@ jobs:
           GRANT CONNECT ON DATABASE moin TO moin_app, moin_migrator, moin_readonly,
             moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting, moin_identity;
           GRANT CREATE ON DATABASE moin TO moin_migrator;
+          REVOKE TEMPORARY ON DATABASE moin FROM PUBLIC;
+          GRANT TEMPORARY ON DATABASE moin TO moin_app, moin_migrator, moin_readonly,
+            moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting;
           SQL
 
       - name: Extensions

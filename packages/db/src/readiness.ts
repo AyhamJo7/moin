@@ -52,7 +52,27 @@ export interface PostgresReadinessOptions {
   readonly connectionString: string;
   readonly timeoutMs?: number;
   readonly cacheTtlMs?: number;
+  /** Reported name; `postgres` by default. */
+  readonly name?: string;
+  /**
+   * A query returning one row with a boolean `ok`, run instead of `select 1`. Not ready unless it is
+   * true — so a probe can confirm *who* it is connected as, not only that it is connected.
+   */
+  readonly assertion?: string;
 }
+
+/**
+ * Readiness for the api's identity pool (P06.06, ADR-0003): connected as `moin_identity`, able to
+ * execute the session functions, and `moin_app` unable to. A rotated or mistyped credential, a
+ * missing grant or a URL naming the wrong role then fails the rollout at `/readyz` instead of
+ * failing every sign-in afterwards.
+ */
+export const IDENTITY_POOL_ASSERTION = `
+  select current_user = 'moin_identity'
+     and has_function_privilege('app.resolve_session(bytea, timestamptz)', 'EXECUTE')
+     and not has_function_privilege('moin_app', 'app.resolve_session(bytea, timestamptz)', 'EXECUTE')
+     as ok
+`;
 
 /**
  * A readiness check over its own tiny pool (max one connection).
@@ -78,21 +98,37 @@ export function postgresReadiness(options: PostgresReadinessOptions): ReadinessC
   });
 
   const cacheTtlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
+  const name = options.name ?? 'postgres';
   let cached: { at: number; result: ReadinessResult } | undefined;
   let inFlight: Promise<ReadinessResult> | undefined;
 
   async function probe(): Promise<ReadinessResult> {
     const started = performance.now();
     try {
-      await withTimeout(pool.query('select 1'), outerTimeoutMs);
+      if (options.assertion === undefined) {
+        await withTimeout(pool.query('select 1'), outerTimeoutMs);
+      } else {
+        const result = await withTimeout(
+          pool.query<{ ok: boolean }>(options.assertion),
+          outerTimeoutMs,
+        );
+        if (result.rows[0]?.ok !== true) {
+          return {
+            name,
+            ready: false,
+            durationMs: Math.round(performance.now() - started),
+            reason: 'role_mismatch',
+          };
+        }
+      }
       return {
-        name: 'postgres',
+        name,
         ready: true,
         durationMs: Math.round(performance.now() - started),
       };
     } catch (error) {
       return {
-        name: 'postgres',
+        name,
         ready: false,
         durationMs: Math.round(performance.now() - started),
         reason: classify(error),
@@ -101,7 +137,7 @@ export function postgresReadiness(options: PostgresReadinessOptions): ReadinessC
   }
 
   return {
-    name: 'postgres',
+    name,
 
     /**
      * Single-flight, plus a short cache.

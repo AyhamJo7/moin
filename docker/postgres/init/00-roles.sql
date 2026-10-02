@@ -43,6 +43,11 @@ CREATE ROLE moin_identity WITH LOGIN PASSWORD 'local-development-only' NOBYPASSR
 
 GRANT CONNECT ON DATABASE moin TO moin_app, moin_migrator, moin_readonly, moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting, moin_identity;
 
+-- PostgreSQL grants TEMPORARY on every database to PUBLIC. moin_identity may create nothing, so the
+-- grant is moved from PUBLIC to the roles that had it, leaving moin_identity without it.
+REVOKE TEMPORARY ON DATABASE moin FROM PUBLIC;
+GRANT TEMPORARY ON DATABASE moin TO moin_app, moin_migrator, moin_readonly, moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting;
+
 -- The public schema is not writable by default; P06 creates the application schema and grants.
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 GRANT USAGE ON SCHEMA public TO moin_app, moin_migrator, moin_readonly, moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting;

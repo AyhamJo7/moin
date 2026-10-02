@@ -260,10 +260,17 @@ describe('the identity database credential (P06.06, ADR-0003)', () => {
     }
   });
 
-  it('must not reuse the moin_app credential', () => {
-    expect(() => loadConfig({ ...VALID, IDENTITY_DATABASE_URL: VALID.DATABASE_URL })).toThrow(
-      ConfigurationError,
-    );
+  evidenceTest('must connect as moin_identity, never moin_app, the owner or the migrator', () => {
+    for (const user of ['moin_app', 'moin_owner', 'moin_migrator']) {
+      expect(
+        () =>
+          loadConfig({
+            ...VALID,
+            IDENTITY_DATABASE_URL: `postgres://${user}:x@localhost:5432/moin`,
+          }),
+        user,
+      ).toThrow(ConfigurationError);
+    }
   });
 
   it('is secret-bearing, so describeConfig never prints it', () => {

@@ -269,14 +269,17 @@ const schema = baseSchema.superRefine((value, ctx) => {
         'worker process holding it could mint sessions (ADR-0003)',
     });
   }
+  // Exactly the identity role: a URL naming moin_app could execute nothing, and one naming the
+  // owner or the migrator would run sign-in with every privilege the session functions bound.
   if (
     value.IDENTITY_DATABASE_URL !== undefined &&
-    new URL(value.IDENTITY_DATABASE_URL).username === new URL(value.DATABASE_URL).username
+    new URL(value.IDENTITY_DATABASE_URL).username !== 'moin_identity'
   ) {
     ctx.addIssue({
       code: 'custom',
       path: ['IDENTITY_DATABASE_URL'],
-      message: 'must use a different database role from DATABASE_URL (moin_identity, not moin_app)',
+      message:
+        'must connect as moin_identity, the only role that may execute the session functions',
     });
   }
 

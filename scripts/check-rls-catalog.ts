@@ -126,7 +126,7 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.reject_session_rewrite': '1b7209a5119fd835537b390fcbd558e0',
   'app.begin_sign_in': 'ddc3ba3aced18e126eb001e675c2ad01',
   'app.consume_sign_in': '4af36f18e683d4433ca1e8e83f900d2b',
-  'app.begin_session': '7fc46d4e22324ce57af5df630c0bf2c9',
+  'app.begin_session': 'f1e7e6ca64ae429270ee8f46d0d06ab6',
   'app.rotate_session': 'd09cade4d4b7d5581b25a8c77ac03edc',
   'app.resolve_session': 'c665a04b6d2f71832ebaab1d6c3e42e4',
   'app.revoke_session': '86553908119587e022c2f1fe8825eb11',
@@ -433,18 +433,36 @@ const IDENTITY_FUNCTIONS: readonly string[] = [
   'app.rotate_session',
 ];
 
+// Every schema but PostgreSQL's own (catalog, information schema, toast and temporary schemas) is
+// checked, so a grant in a schema added later cannot hide.
 const IDENTITY_ROLE_QUERY = `
   SELECT r.rolsuper, r.rolbypassrls, r.rolcreaterole, r.rolcreatedb, r.rolreplication,
-         (SELECT count(*) FROM pg_auth_members m WHERE m.member = r.oid OR m.roleid = r.oid)::int
-           AS memberships,
+         (SELECT count(*) FROM pg_auth_members m WHERE m.member = r.oid)::int AS member_of,
+         -- PostgreSQL 16+ records an ADMIN-only grant to the CREATEROLE role that created this one
+         -- (the RDS master user). Without INHERIT or SET the grantee can administer the role but
+         -- never act as it, so that row alone is tolerated; any member that can use the role is not.
+         (SELECT count(*) FROM pg_auth_members m
+          WHERE m.roleid = r.oid AND (m.inherit_option OR m.set_option OR NOT m.admin_option))::int
+           AS usable_members,
          (SELECT count(*) FROM pg_class c WHERE c.relowner = r.oid)::int
            + (SELECT count(*) FROM pg_proc p WHERE p.proowner = r.oid)::int
-           + (SELECT count(*) FROM pg_namespace n WHERE n.nspowner = r.oid)::int AS owned,
+           + (SELECT count(*) FROM pg_namespace n WHERE n.nspowner = r.oid)::int
+           + (SELECT count(*) FROM pg_type t WHERE t.typowner = r.oid)::int
+           + (SELECT count(*) FROM pg_database d WHERE d.datdba = r.oid)::int
+           + (SELECT count(*) FROM pg_largeobject_metadata l WHERE l.lomowner = r.oid)::int AS owned,
+         has_database_privilege(r.oid, current_database(), 'TEMPORARY') AS can_create_temporary,
+         COALESCE((
+           SELECT array_agg(n.nspname::text ORDER BY n.nspname) FROM pg_namespace n
+           WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg\\_toast%' AND n.nspname NOT LIKE 'pg\\_temp\\_%'
+             AND has_schema_privilege(r.oid, n.oid, 'CREATE')
+         ), '{}'::text[]) AS creatable_schemas,
          COALESCE((
            SELECT array_agg(n.nspname || '.' || c.relname ORDER BY n.nspname || '.' || c.relname)
            FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-           WHERE n.nspname IN ('public', 'app') AND c.relkind IN ('r', 'v', 'm', 'p', 'S')
-             AND (has_table_privilege(r.oid, c.oid, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
+           WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg\\_toast%' AND n.nspname NOT LIKE 'pg\\_temp\\_%'
+             AND c.relkind IN ('r', 'v', 'm', 'p', 'f', 'S')
+             AND (has_table_privilege(r.oid, c.oid, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN')
+                  OR (c.relkind <> 'S' AND has_any_column_privilege(r.oid, c.oid, 'SELECT, INSERT, UPDATE, REFERENCES'))
                   OR (c.relkind = 'S' AND has_sequence_privilege(r.oid, c.oid, 'USAGE, SELECT, UPDATE')))
          ), '{}') AS table_privileges,
          COALESCE((
@@ -457,7 +475,11 @@ const IDENTITY_ROLE_QUERY = `
            FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace,
                 aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a
            WHERE a.grantee = r.oid
-         ), '{}') AS granted_functions
+         ), '{}') AS granted_functions,
+         (SELECT count(*) FROM pg_proc p, aclexplode(p.proacl) a
+          WHERE a.grantee = r.oid AND a.is_grantable)::int
+           + (SELECT count(*) FROM pg_class c, aclexplode(c.relacl) a
+              WHERE a.grantee = r.oid AND a.is_grantable)::int AS grant_options
   FROM pg_roles r WHERE r.rolname = $1
 `;
 
@@ -467,14 +489,51 @@ interface IdentityRoleRow {
   readonly rolcreaterole: boolean;
   readonly rolcreatedb: boolean;
   readonly rolreplication: boolean;
-  readonly memberships: number;
+  readonly member_of: number;
+  readonly usable_members: number;
   readonly owned: number;
+  readonly can_create_temporary: boolean;
+  readonly creatable_schemas: string[];
   readonly table_privileges: string[];
   /** Every SECURITY DEFINER function it can execute, by any route (explicit grant or PUBLIC). */
   readonly executable_definers: string[];
   /** Every function granted to it by name. */
   readonly granted_functions: string[];
+  readonly grant_options: number;
 }
+
+/**
+ * The tables only the session functions may touch. No runtime role — `moin_identity` included —
+ * may hold a table or column privilege on them: a direct INSERT into `sessions` is a minted
+ * session, and an UPDATE of `session_clock_policy` re-opens revival.
+ */
+const SESSION_TABLES: readonly string[] = [
+  'auth_transactions',
+  'session_clock_policy',
+  'sessions',
+  'users',
+];
+
+const SESSION_TABLE_ACCESS_QUERY = `
+  SELECT r.rolname::text AS role, c.relname::text AS table_name
+  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace, pg_roles r
+  WHERE n.nspname = 'public' AND c.relname = ANY($1) AND r.rolname = ANY($2)
+    AND (has_table_privilege(r.oid, c.oid, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN')
+         OR has_any_column_privilege(r.oid, c.oid, 'SELECT, INSERT, UPDATE, REFERENCES'))
+  ORDER BY 1, 2
+`;
+
+/** Effective EXECUTE, by any route — grant, PUBLIC or membership — on the six, per runtime role. */
+const SESSION_FUNCTION_REACH_QUERY = `
+  SELECT r.rolname::text AS role, n.nspname || '.' || p.proname AS function_name
+  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace, pg_roles r
+  WHERE n.nspname || '.' || p.proname = ANY($1) AND r.rolname = ANY($2)
+    AND has_function_privilege(r.oid, p.oid, 'EXECUTE')
+  ORDER BY 1, 2
+`;
+
+/** The migrated bound on caller-supplied time (0012). Widening it re-opens revival. */
+const MAX_SESSION_CLOCK_SKEW_SECONDS = 300;
 
 export async function inspect(
   url: string,
@@ -750,25 +809,36 @@ export async function inspect(
       }
     }
 
-    findings.push(...(await inspectIdentityRole(pool)));
+    findings.push(...(await inspectIdentityRole(pool)), ...(await inspectSessionBoundary(pool)));
   } finally {
     await pool.end();
   }
   return findings;
 }
 
-async function inspectIdentityRole(pool: ReturnType<typeof createPool>): Promise<Finding[]> {
+/**
+ * The whole ACL of the identity role. Exported with the role as a parameter so the membership rule
+ * can be exercised on throwaway roles: membership is cluster-wide, so it is never mutated on the
+ * shared `moin_identity` in a test.
+ */
+export async function inspectIdentityRole(
+  pool: ReturnType<typeof createPool>,
+  role: string = IDENTITY_ROLE,
+): Promise<Finding[]> {
   const findings: Finding[] = [];
-  const row = (await pool.query<IdentityRoleRow>(IDENTITY_ROLE_QUERY, [IDENTITY_ROLE])).rows[0];
+  const row = (await pool.query<IdentityRoleRow>(IDENTITY_ROLE_QUERY, [role])).rows[0];
   if (row === undefined) {
     return [
       {
         rule: 'identity-role-missing',
-        subject: IDENTITY_ROLE,
+        subject: role,
         detail: 'the role that alone may execute the session functions does not exist.',
       },
     ];
   }
+  const push = (rule: string, detail: string): void => {
+    findings.push({ rule, subject: role, detail });
+  };
   if (
     row.rolsuper ||
     row.rolbypassrls ||
@@ -776,32 +846,46 @@ async function inspectIdentityRole(pool: ReturnType<typeof createPool>): Promise
     row.rolcreatedb ||
     row.rolreplication
   ) {
-    findings.push({
-      rule: 'identity-role-privileged',
-      subject: IDENTITY_ROLE,
-      detail: 'has a role attribute (SUPERUSER, BYPASSRLS, CREATEROLE, CREATEDB or REPLICATION).',
-    });
+    push(
+      'identity-role-privileged',
+      'has a role attribute (SUPERUSER, BYPASSRLS, CREATEROLE, CREATEDB or REPLICATION).',
+    );
   }
-  if (row.memberships > 0) {
-    findings.push({
-      rule: 'identity-role-membership',
-      subject: IDENTITY_ROLE,
-      detail: 'is a member of a role, or has members: either extends or shares what it may do.',
-    });
+  if (row.member_of > 0 || row.usable_members > 0) {
+    push(
+      'identity-role-membership',
+      'is a member of a role, or has a member with INHERIT or SET: either extends or shares what it may do. Only an ADMIN-only grant to its creator is tolerated.',
+    );
   }
   if (row.owned > 0) {
-    findings.push({
-      rule: 'identity-role-owns-objects',
-      subject: IDENTITY_ROLE,
-      detail: 'owns a table, function or schema; an owner holds every privilege on what it owns.',
-    });
+    push(
+      'identity-role-owns-objects',
+      'owns a table, function, type, schema, database or large object; an owner holds every privilege on what it owns.',
+    );
+  }
+  if (row.can_create_temporary) {
+    push(
+      'identity-role-temporary',
+      'may create temporary objects in this database; it may create nothing.',
+    );
+  }
+  if (row.creatable_schemas.length > 0) {
+    push(
+      'identity-role-schema-create',
+      `may create objects in ${row.creatable_schemas.join(', ')}.`,
+    );
   }
   if (row.table_privileges.length > 0) {
-    findings.push({
-      rule: 'identity-role-table-privilege',
-      subject: IDENTITY_ROLE,
-      detail: `holds a privilege on ${row.table_privileges.join(', ')}; it may reach data only through the session functions.`,
-    });
+    push(
+      'identity-role-table-privilege',
+      `holds a table or column privilege on ${row.table_privileges.join(', ')}; it may reach data only through the session functions.`,
+    );
+  }
+  if (row.grant_options > 0) {
+    push(
+      'identity-role-grant-option',
+      'holds a privilege WITH GRANT OPTION, so it could hand the session functions to another role.',
+    );
   }
   // Invoker functions any role may run (extension helpers, `app.current_org`) execute with the
   // caller's own privileges, so they give this role nothing. What could give it something is a
@@ -811,12 +895,57 @@ async function inspectIdentityRole(pool: ReturnType<typeof createPool>): Promise
     ['functions granted to it', row.granted_functions],
   ] as const) {
     if (functions.join(',') !== IDENTITY_FUNCTIONS.join(',')) {
-      findings.push({
-        rule: 'identity-role-unexpected-execute',
-        subject: IDENTITY_ROLE,
-        detail: `${kind}: ${functions.join(', ') || 'none'}; must be exactly ${IDENTITY_FUNCTIONS.join(', ')}.`,
-      });
+      push(
+        'identity-role-unexpected-execute',
+        `${kind}: ${functions.join(', ') || 'none'}; must be exactly ${IDENTITY_FUNCTIONS.join(', ')}.`,
+      );
     }
+  }
+  return findings;
+}
+
+/** No other runtime role reaches the session functions or tables, and the clock bound holds. */
+async function inspectSessionBoundary(pool: ReturnType<typeof createPool>): Promise<Finding[]> {
+  const findings: Finding[] = [];
+  const others = RUNTIME_ROLES.filter((role) => role !== IDENTITY_ROLE);
+  const reach = await pool.query<{ role: string; function_name: string }>(
+    SESSION_FUNCTION_REACH_QUERY,
+    [IDENTITY_FUNCTIONS, others],
+  );
+  for (const row of reach.rows) {
+    findings.push({
+      rule: 'session-function-reachable',
+      subject: row.function_name,
+      detail: `${row.role} can execute it — by grant, PUBLIC or membership; only ${IDENTITY_ROLE} may.`,
+    });
+  }
+  const access = await pool.query<{ role: string; table_name: string }>(
+    SESSION_TABLE_ACCESS_QUERY,
+    [SESSION_TABLES, RUNTIME_ROLES],
+  );
+  for (const row of access.rows) {
+    findings.push({
+      rule: 'session-table-privilege',
+      subject: row.table_name,
+      detail: `${row.role} holds a table or column privilege on it; only the session functions may touch it.`,
+    });
+  }
+  const present = await pool.query<{ present: boolean }>(
+    "SELECT to_regclass('public.session_clock_policy') IS NOT NULL AS present",
+  );
+  const policy =
+    present.rows[0]?.present === true
+      ? await pool.query<{ seconds: string }>(
+          'SELECT extract(epoch FROM max_skew)::text AS seconds FROM session_clock_policy',
+        )
+      : { rows: [] as { seconds: string }[] };
+  const seconds = policy.rows[0]?.seconds;
+  if (seconds !== undefined && Number(seconds) > MAX_SESSION_CLOCK_SKEW_SECONDS) {
+    findings.push({
+      rule: 'session-clock-skew-widened',
+      subject: 'session_clock_policy',
+      detail: `allows ${seconds} s of caller clock skew; the reviewed bound is ${String(MAX_SESSION_CLOCK_SKEW_SECONDS)} s, and a wider one lets a caller revive sessions.`,
+    });
   }
   return findings;
 }

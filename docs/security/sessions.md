@@ -124,9 +124,19 @@ in (`docs/architecture/security-definer-allowlist.md`, pinned by body digest in
 | `moin_app`                                                                 | `api`, `voice`, `worker`                           | **none**              | none           | under RLS, as before |
 | `moin_dispatcher`, `moin_provisioner`, `moin_support_ro`, `moin_reporting` | as before                                          | none                  | none           | as before            |
 
-`moin_identity` is `NOBYPASSRLS` with no other role attribute, is a member of no role and has no
-members, and owns nothing; migration 0012 refuses to apply otherwise, and the catalog check
-(`identity-role-*`) asserts the whole ACL on every run. The configuration loader refuses
+`moin_identity` is `NOBYPASSRLS` with no other role attribute, is a member of no role, has no member
+that can use it, and owns nothing; migration 0012 refuses to apply otherwise. The one membership
+tolerated is the grant PostgreSQL 16+ records by itself when a `CREATEROLE` non-superuser — the RDS
+master user — creates a role: `ADMIN` only, with neither `INHERIT` nor `SET`, so the master can
+administer the role but never act as it. It can create nothing: no `CREATE` on any schema, and
+`TEMPORARY` is moved off `PUBLIC` wherever roles are provisioned. The catalog check asserts the whole
+ACL on every run (`identity-role-*`: attributes, membership, ownership of tables, functions, types,
+schemas, databases and large objects, table, column and `MAINTAIN` privileges in every schema,
+grant options, temporary objects, exactly the six definers), and separately that no other runtime
+role can execute the six by any route or hold any privilege on the session tables
+(`session-function-reachable`, `session-table-privilege`), and that the clock bound is not widened
+(`session-clock-skew-widened`). `IDENTITY_DATABASE_URL` must name `moin_identity`, and `/readyz`
+fails unless the pool really connects as it and `moin_app` really cannot execute the functions. The configuration loader refuses
 `IDENTITY_DATABASE_URL` for `voice`, `worker` and `migrate`, `identity-is-api-only` keeps the
 identity module and pool out of their module graphs, and an api with OIDC but no identity pool
 refuses to start. So a compromised voice or worker process — which holds `moin_app` — cannot mint,
@@ -151,7 +161,9 @@ database's own clock (5 minutes as migrated). Without that bound any holder of `
 an earlier time to revive an idled-out session, or a later one to start a session's seven days a
 year from now — and with `moin_identity` that is only the api. The policy is one migration-controlled row with no runtime grant; the lifetime tests
 widen it in their private databases through the admin connection, and test the bound itself at its
-migrated value.
+migrated value. Within the bound a caller holding `moin_identity` can still choose its time to
+within ±5 minutes: a session that idled out less than five minutes ago can be resolved once more,
+never past its absolute expiry. That tolerance is the price of NTP-scale skew between replicas.
 
 ### Rotation
 
@@ -194,6 +206,10 @@ refusal is the token-custody check's, not the provider switch's.
 - **The database trusts the application for authentication proof.** `begin_session` cannot verify
   an ID token; it bounds what a caller can _shape_ (lifetimes, single use, revocation), not _who_ it
   may sign in. That is inherent to verifying tokens in the application.
+- **Two tabs finishing sign-in at once** both supersede the old session and each issue a new one;
+  the browser keeps the last cookie and the other session lives on until it expires. A sign-in and a
+  rotation of the session it supersedes do not race: the presented session is locked first and its
+  whole family is superseded. Listing and ending sessions is P06.06.05.
 - **A failed sign-in leaves the browser's existing session alone.** If person B's sign-in fails on a
   shared device where A is signed in, A stays signed in; supersession happens only when a new
   session is issued. A failed attempt is not a sign-out.

@@ -60,6 +60,13 @@ one mattered would be in staging with real data.
 
 `moin_migrator` is the only role permitted to run DDL. `pnpm db:migrate` uses it.
 
+The api also connects as **`moin_identity`** (`IDENTITY_DATABASE_URL`), the only role that may
+execute the sign-in and session functions; voice and worker must never be given it (ADR-0003). It is
+created by `docker/postgres/init/00-roles.sql`, which also moves `TEMPORARY` from `PUBLIC` to the
+other roles. Init scripts run only on an empty volume, so a database volume created before this role
+existed fails migration 0012 with "missing database role moin_identity". Either `pnpm dev:reset`, or
+run the `moin_identity` and `TEMPORARY` statements from that script once as `moin_owner`.
+
 ## Running things
 
 ```bash

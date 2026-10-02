@@ -10,8 +10,10 @@
  * It hands out only the identity store, whose every call is one reviewed `SECURITY DEFINER`
  * function. Tenant work arrives with its own `moin_app` pool behind `withTenant`.
  *
- * Absent when the api does not sign anyone in: the loader requires the credential whenever OIDC is
- * configured, so "no identity pool" can only mean "this deployment has no sign-in".
+ * Absent when `IDENTITY_DATABASE_URL` is not set. The loader does not require it — the verified
+ * P06.05.04 configuration contract stays as it is — so the one place that does is
+ * `buildSignInGate`: an api with OIDC and no identity pool refuses to start. `/readyz` checks the
+ * pool connects as `moin_identity` and that `moin_app` cannot execute the session functions.
  */
 
 import { Inject, Injectable, Module, type OnApplicationShutdown } from '@nestjs/common';

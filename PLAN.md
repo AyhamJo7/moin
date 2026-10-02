@@ -2561,7 +2561,7 @@ Roles and RLS framework · `withTenant` / `withSystemWork` · catalog check · o
   - [ ] P06.01.03 Credentials per role in Secrets Manager; rotation configured (P05.08)
   - [ ] P06.01.04 `pgaudit` configured for DDL, role changes and break-glass sessions
   - [x] P06.01.05 Tests: `moin_app` cannot run DDL, `TRUNCATE`, `SET ROLE` to owner/migrator, or disable RLS, and owns no tables — EV-P06-003
-  - [ ] P06.01.06 `moin_identity`: api-only login role provisioned locally, in CI and (P05) by Terraform with an api-only secret; executes exactly the six session functions, no table privilege, no membership, owns nothing; `moin_app` executes none of them (ADR-0003 amendment 2026-10-02). Added after EV-P06-001–003, which do not cover it
+  - [ ] P06.01.06 `moin_identity`: api-only login role provisioned locally, in CI and (P05) by Terraform with an api-only secret, `TEMPORARY` moved off `PUBLIC`; executes exactly the six session functions, no table or column privilege, no usable membership (only the creator's ADMIN-only grant tolerated), owns nothing, creates nothing; `moin_app` executes none of them (ADR-0003 amendment 2026-10-02). Added after EV-P06-001–003, which do not cover it
 - [x] **P06.02 RLS framework and catalog check** `[G:PILOT]` — EV-P06-007
   - [x] P06.02.01 `app.current_org()` helper (NULL when unset or empty → fail closed) — EV-P06-004
   - [x] P06.02.02 Policy template (USING + WITH CHECK) applied with ENABLE + FORCE on every tenant table — EV-P06-005

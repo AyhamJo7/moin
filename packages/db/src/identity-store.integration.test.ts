@@ -1,8 +1,9 @@
 /**
  * P06.06.01/.02: the sign-in and session functions, exercised as the real NOBYPASSRLS runtime role.
  *
- * Fixtures (users, direct row reads) go through the migration connection; every behaviour under test
- * goes through `moin_app`, which may execute the six functions and touch none of the tables.
+ * Fixtures (users, direct row reads) go through the migration connection. Every behaviour under test
+ * goes through `moin_identity`, the api-only role that alone may execute the six functions and that
+ * touches none of the tables; `moin_app` — the voice and worker role — is shown to reach none of it.
  */
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { createTestDatabase, evidenceTest, type TestDatabase } from '@moin/testing';
@@ -262,6 +263,13 @@ describe('moin_identity — the api-only session role', () => {
     await expect(identity.query('create table probe (x int)')).rejects.toMatchObject({
       code: '42501',
     });
+    // TEMPORARY is a PUBLIC default on every database; it is moved off PUBLIC at provisioning.
+    await expect(identity.query('create temporary table probe (x int)')).rejects.toMatchObject({
+      code: '42501',
+    });
+    await expect(
+      identity.query("create function pg_temp.probe() returns int language sql as 'select 1'"),
+    ).rejects.toMatchObject({ code: '42501' });
   });
 });
 
@@ -592,6 +600,74 @@ describe('two callers holding the same row', () => {
       b.release();
     }
   }
+
+  const beginSessionSql =
+    'select * from app.begin_session($1::text, $2::bytea, $3::uuid, $4::bytea, $5::text, $6::bytea, $7::timestamptz)';
+
+  evidenceTest(
+    'a sign-in waiting behind a rotation of the session it supersedes revokes the successor too',
+    async () => {
+      const person = await user();
+      const presented = await signIn(person.sub);
+      const successor = hash();
+      const next = hash();
+      await interleaved(
+        (client) =>
+          client.query('select * from app.rotate_session($1, $2, $3, $4, $5)', [
+            presented.tokenHash,
+            successor,
+            randomUUID(),
+            'step_up',
+            at(1_000),
+          ]),
+        (client) =>
+          client.query(beginSessionSql, [
+            person.sub,
+            next,
+            randomUUID(),
+            sealed(),
+            'test-v1',
+            presented.tokenHash,
+            at(2_000),
+          ]),
+      );
+      expect(await store.resolveSession(successor, at(3_000)), 'rotated successor').toBeUndefined();
+      expect(await store.resolveSession(next, at(3_000)), 'new sign-in').toBeDefined();
+    },
+  );
+
+  evidenceTest(
+    'a rotation waiting behind a sign-in that supersedes its session inserts nothing',
+    async () => {
+      const person = await user();
+      const presented = await signIn(person.sub);
+      const successor = hash();
+      const next = hash();
+      const { second } = await interleaved(
+        (client) =>
+          client.query(beginSessionSql, [
+            person.sub,
+            next,
+            randomUUID(),
+            sealed(),
+            'test-v1',
+            presented.tokenHash,
+            at(1_000),
+          ]),
+        (client) =>
+          client.query('select * from app.rotate_session($1, $2, $3, $4, $5)', [
+            presented.tokenHash,
+            successor,
+            randomUUID(),
+            'step_up',
+            at(2_000),
+          ]),
+      );
+      expect(second.rowCount).toBe(0);
+      expect(await store.resolveSession(successor, at(3_000))).toBeUndefined();
+      expect(await store.resolveSession(next, at(3_000))).toBeDefined();
+    },
+  );
 
   evidenceTest('a rotation waiting behind another rotation inserts nothing', async () => {
     const person = await user();

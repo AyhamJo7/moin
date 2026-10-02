@@ -58,17 +58,21 @@ revival and stretching, not minting.
 **Decision.** A dedicated login role, **`moin_identity`**, is the only role that may execute those
 six functions.
 
-- `NOSUPERUSER NOBYPASSRLS NOCREATEROLE NOCREATEDB NOREPLICATION`; a member of no role and with no
-  members; owns nothing; `USAGE` on `public` and `app`; **no** privilege on any table — session or
-  tenant — and no other `SECURITY DEFINER` function.
+- `NOSUPERUSER NOBYPASSRLS NOCREATEROLE NOCREATEDB NOREPLICATION`; a member of no role, and no
+  member that can use it (`INHERIT` or `SET`) — the only tolerated row is the `ADMIN`-only grant
+  PostgreSQL 16+ records for the `CREATEROLE` role that creates it, the RDS master user; owns
+  nothing; `USAGE` on `public` and `app`, `CREATE` nowhere and no `TEMPORARY` (moved off `PUBLIC`
+  where roles are provisioned); **no** privilege on any table — session or tenant — and no other
+  `SECURITY DEFINER` function.
 - `moin_app` has **zero** `EXECUTE` on the six.
-- Only the `api` task holds its credential (`IDENTITY_DATABASE_URL`), in a pool of its own beside its
-  `moin_app` pool. The configuration loader refuses the credential for `voice`, `worker` and
+- Only the `api` task holds its credential (`IDENTITY_DATABASE_URL`, which must name
+  `moin_identity`), in a pool of its own beside its `moin_app` pool; `/readyz` fails unless that pool
+  connects as `moin_identity` and `moin_app` cannot execute the session functions. The configuration loader refuses the credential for `voice`, `worker` and
   `migrate`; `identity-is-api-only` in `.dependency-cruiser.cjs` keeps the identity module and its
   pool out of those graphs.
 - Provisioning follows the other login roles: `docker/postgres/init/00-roles.sql` locally, the CI
   role step, Terraform and a Secrets Manager entry injected into the `api` task definition only in
-  P05 (P05.08.02/.03; no Terraform exists yet). Migration 0012 asserts the role's attributes and
+  P05 (P05.08.02/.03; no Terraform exists yet), which must also move `TEMPORARY` off `PUBLIC`. Migration 0012 asserts the role's attributes and
   membership and fails the apply otherwise.
 
 | Role            | Holds it                 | May execute                             | Table privileges                    |

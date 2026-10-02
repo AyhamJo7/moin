@@ -38,7 +38,8 @@ export function buildSignInGate(
     return { service: undefined };
   }
   if (store === null) {
-    // The loader already requires the credential with OIDC; this is the second lock.
+    // The only place the credential is required: the loader deliberately accepts OIDC without it
+    // (the P06.05.04 contract is unchanged), so removing this would let sign-in start broken.
     throw new ConfigurationError([
       'IDENTITY_DATABASE_URL: sign-in needs the moin_identity pool and none is configured',
     ]);
