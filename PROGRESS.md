@@ -5,8 +5,8 @@ mode: autonomous
 phase: P06
 tier: PILOT
 plan: docs/phases/P06-plan.md
-next: submit P06.04 for QG-09 founder review; continue dependency-valid P06 work
-updated: 2026-09-30
+next: founder — mark PR #31 ready and merge when satisfied; then P06.10.03 writer adoption (incl. `locations`) and EXT-09 for P06.10.05 and the dedicated verifier role
+updated: 2026-10-02
 ---
 
 # PROGRESS — moin
@@ -160,6 +160,25 @@ Rules
 | P06.04.03 | READY_FOR_REVIEW | 127ba14 | EV-P06-018 | Paid Early Access cap of five via one locked global counter; founder review pending |
 | P06.04.04 | READY_FOR_REVIEW | 127ba14 | EV-P06-019 | Retry and racing request IDs return one tenant |
 | P06.04.05 | READY_FOR_REVIEW | 127ba14 | EV-P06-020 | Real PostgreSQL attack suite, catalog defects and rollback tests |
+| P06.10 | IN_PROGRESS | feat/p06-10-audit | — | Audit migration, writer/query APIs, chain verifier, proposed ADR and real-PostgreSQL negative controls are in progress. Daily scheduling/alarm, adoption by business mutations, founder ADR acceptance and erasure design remain open. |
+| P06.10.03 | IN_PROGRESS | feat/p06-10-audit | — | Provisioning now triggers a tenant-scoped audit append in its authoritative transaction; failure rolls back tenant state and cap. Later tool, operator and security actions still need adoption. |
+| P06.10.01 | READY_FOR_REVIEW | 8e5bf76 | EV-P06-021 | Append-only tenant audit table; the trigger refuses UPDATE and DELETE for the owner too, and the catalog check proves the guard from `pg_catalog` |
+| P06.10.01 | READY_FOR_REVIEW | 8e5bf76 | EV-P06-021 | Deviation, flagged: the checklist's "except the pseudonymisation function" exception is **not** implemented. That function is P16.05.02 and does not exist, so the exception would be a hole with nothing legitimate behind it; ADR-0017/ADR-0018 own the chain-preserving design. Table, blocking trigger and revoked grants are delivered |
+| P06.10.02 | READY_FOR_REVIEW | 8e5bf76 | EV-P06-022 | Per-tenant gap-free sequence and hash chain; concurrent appends serialise at the head rather than racing |
+| P06.10.04 | READY_FOR_REVIEW | 8e5bf76 | EV-P06-023 | Tenant-scoped query by target, actor and correlation ID; malformed filters refused without echoing the input |
+| P06.10.05 | WAITING_FOR_EXTERNAL | 8e5bf76 | EV-P06-024 | Daily cross-tenant sweep, SEV2 alarm, runbook and exit-code split built and verified. **Counterparty:** AWS (EXT-09), founder-owned. **Requested:** 2026-09-30. **Expected:** with P05 cloud foundation. **Fallback:** run `pnpm db:verify-audit` manually and record the result, which is what the runbook says today. The daily trigger and the CloudWatch alarms are Terraform and are not provisioned |
+| P06.10.07 | READY_FOR_REVIEW | 8e5bf76 | EV-P06-025 | Tamper, privileged-mutation and argument-scanner suites; 25 injected defect variants all KILLED |
+| P06.10.07 | READY_FOR_REVIEW | 23d70ae | EV-P06-026 | QG-09 review of the diff by three independent reviewers; every High/Critical reproduced against real PostgreSQL, fixed and mutation-proven; 42 defect variants all KILLED; five residuals recorded with owners |
+| P06.10.07 | READY_FOR_REVIEW | c1bde7a | EV-P06-027 | Four HIGH defects from the independent post-fix QG-09 review, each reproduced against real PostgreSQL, fixed and mutation-proven; sweep now 54/54 KILLED with an inspectable manifest |
+| P06.10.07 | READY_FOR_REVIEW | fcc4473 | EV-P06-028 | Population-snapshot design replacing UUID-cursor paging; mutation harness rewritten so its outcomes are evidence — 62 KILLED_ASSERTION, 2 documented INFRA_FAILURE |
+| P06.10.07 | READY_FOR_REVIEW | f105882 | EV-P06-029 | Epoch allocation serialized by commit rather than by `nextval()`; assertion identity decided from typed error metadata rather than message text — 69 KILLED_ASSERTION, 2 documented INFRA_FAILURE |
+| P06.10.07 | READY_FOR_REVIEW | 986ae8b | EV-P06-030 | `KILLED_ASSERTION` redefined so it can only mean one thing: two in-process signals a thrown object cannot set, an exact unique `{file, fullName}` identity, and a run with no other failure — 77 KILLED_ASSERTION, 2 documented INFRA_FAILURE over 79 variants, 12 of which attack the harness itself |
+| P06.10.07 | READY_FOR_REVIEW | 96a5dad | EV-P06-031 | Assertion evidence moved from the serialized thrown value to the matcher boundary in-process: a plain object literal and a `toJSON` spoof both defeated the previous model. Anchor uniqueness enforced at application time. 90 KILLED_ASSERTION and 2 documented INFRA_FAILURE over 92 variants, 25 of which attack the harness |
+| P06.10.07 | READY_FOR_REVIEW | 953c47c | EV-P06-032 | Assertion evidence moved from a transferable token to **object identity**: the terminal value of the test body must be, by `===`, the object a Vitest matcher threw in this invocation. 52 KILLED_ASSERTION and 42 NOT_EVIDENCE_ELIGIBLE over 94 variants |
+| P06.10.07 | READY_FOR_REVIEW | bf02200 | EV-P06-033 | Eligibility gap closed: 30 killing tests under `packages/db/` moved to the trusted wrapper, registration only, and the wrapper moved into `@moin/testing` so no package reaches into `scripts/`. 92 KILLED_ASSERTION and 2 NOT_EVIDENCE_ELIGIBLE over 94 variants |
+| P06.10.06 | VERIFIED | 468827a | EV-P06-036 | ADR-0017 accepted by the founder under QG-09, with five recorded residual dispositions; deferred and external items stay open |
+| P06.10.07 | VERIFIED | 468827a | EV-P06-036 | Founder-authorized at QG-09 on the independent verdict `READY_FOR_FOUNDER_QG09` for reviewed HEAD `468827a`; evidence EV-P06-025 … EV-P06-035 |
+| P06.10 | IN_PROGRESS | 8e5bf76 | EV-P06-021…025 | Table, chain, query API, daily verifier, argument scanner and runbook done. Open: .03 adoption by the tool guard, operator and security paths (needs P10.08, P06.11/.12), .05 scheduling (EXT-09) and .06 founder acceptance of ADR-0017 |
 
 ## External waits
 
@@ -249,3 +268,385 @@ secret-rule fix (#25) merged, with its full-history scan green.
 - 2026-09-28 — P02.01 governance scaffolding implemented. `check-no-ai-mentions.ts --self-test` passes (9 patterns, 11 blocked and 7 allowed examples); `check-conventional-commit.ts --self-test` passes (13 cases). Both run clean over `HEAD~2..HEAD`. Node 24.21.0.
 - 2026-09-28 — P02 execution started from `docs/phases/P02-plan.md` (approved). Docker Desktop reachable (server 29.8.0), Node 24.21.0 available via nvm. Branch `chore/p02-01-governance`.
 - 2026-09-29 — F3 bookkeeping correction: no EV-P00-001 record exists in the registry, evidence directory or Git history. Unticked P00.02.04 and its P00.02 parent instead of reconstructing evidence from the historical inline note. The recorded P00 audit remains outstanding; this correction does not claim it was performed. The dedicated correction branch is based on PR #16 and must land after the bootstrap stack.
+
+- 2026-09-30 — **P06.10 audit infrastructure: the daily verifier, and the wall it ran into.** The
+  chain verifier existed for one tenant inside a caller's transaction, which is the wrong shape for
+  an alarm — the break that matters is in the tenant no request touched today. Walking every tenant
+  needs the tenant list, and there is no role permitted to read it: FORCE ROW LEVEL SECURITY applies
+  to the table owner, so with no tenant context `moin_migrator` counts **zero** organisations, and a
+  `SECURITY DEFINER` function owned by it returns nothing for the same reason. That was measured
+  against real PostgreSQL before anything was designed on top of it, and the assertion now lives in
+  the suite so the premise cannot rot silently. The only way round would have been `BYPASSRLS`,
+  which INV-01 forbids outright, so the tenant list became a global register of opaque identifiers —
+  filled by a trigger on `organisations` rather than by the provisioning function (a migration or
+  repair script can also create a tenant, and those are the paths that forget a bookkeeping step),
+  append-only for the owner too (a deletable registration makes "remove the row" the cheapest way to
+  hide a tampered chain), and enumerated instead of `audit_heads` (a deleted head must become a
+  `missing-head` finding, not a tenant that quietly leaves the worklist).
+  The sweep keeps `sound`, `broken` and `unchecked` disjoint and refuses to return an empty clean
+  report when it could not enumerate anything, because "verified nothing" must never read as
+  "nothing wrong". Exit codes split a break (3) from a sweep that could not finish (1), so a
+  database outage does not page anyone for suspected tampering.
+  The argument scanner is the check that the writer's policy held, which the writer cannot do for
+  itself. Its useful rule turned out to be structural, not pattern-based: the only string-valued
+  argument kind the registry permits is `uuid`, so any stored argument string that is not a UUID is
+  unreviewed — which catches a business name that no pattern list would have predicted.
+  Twenty-five defect variants were injected and all 25 were KILLED. Two initially SURVIVED, and both
+  were weak tests rather than weak code: the page-cap assertion could not tell a missing cap from a
+  working one with only three tenants, and the INV-12 field assertion ran only over a sound sweep, so
+  it never exercised the failure path where a driver message would leak. Both were fixed and
+  re-proven. `gates full` 14/14 at clean `8e5bf76f5ac9`; the final-HEAD run follows this entry.
+  Not done, and not claimed: P06.10.03 adoption by the tool guard, operator and security paths waits
+  on P10.08 and P06.11/.12; P06.10.05 scheduling and the CloudWatch alarms are Terraform and wait on
+  EXT-09; P06.10.06 acceptance of ADR-0017 is the founder's, so the ADR stays `PROPOSED`.
+
+- 2026-09-30 — **QG-09 review of P06.10, and what it found.** Three reviewers ran independently on
+  the diff and all three returned BLOCK MERGE. Two findings are worth recording beyond their fix,
+  because both were failures of _verification_ rather than of design, and both had passing tests
+  over them.
+  The argument scanner could not see a single row under any production role. As the runtime role it
+  died on a missing grant; as the role that owns the tables in production, FORCE RLS returned zero
+  rows, so it printed "every stored argument is a registered key with a reviewed value kind" and
+  exited 0 with a planted leak sitting in the table. It passed its own test only because the test
+  handed it the local bootstrap superuser — which is the exact trap this branch documents for
+  `organisations`, in a test two files away, not carried across. A check that fails open is worse
+  than no check, because it reports green and means nothing.
+  The verifier could be silenced without touching a committed event. Its upper bound is the chain
+  head, and the head had no guard: `last_seq = 0` left a full trail in place and returned
+  `valid: true, checked: 0`, while an insert past the head was neither an UPDATE nor a DELETE and so
+  never met the append-only trigger, leaving a forged row that the query API serves as genuine. Both
+  were reproduced before being fixed, and both measurements are now assertions.
+  The pattern in both: the code was checked against the threat it was designed for, and not against
+  the privilege level it would actually run at. Everything here now runs as `moin_app`, and where a
+  measured database fact underpins a design decision — FORCE RLS hiding a table from its own owner —
+  that fact is asserted in the suite rather than recorded in a comment.
+  42 defect variants were injected and all 42 KILLED. Ten initially SURVIVED and every one was a weak
+  test, not weak code; the two most instructive were an INV-12 assertion that only ever ran over a
+  sound sweep, so it never exercised the failure path where a driver message would leak, and a
+  vacuous-pass guard that no test reached because nothing ran the check as a process.
+  `gates full` 14/14 at clean `23d70ae293e4`. Five findings are open with named owners in ADR-0017's
+  "Known residuals" table rather than quietly closed: the verifier still runs as the request-serving
+  role until Terraform can provision a dedicated one (EXT-09); an `(operation, target_kind)` registry
+  needs a writer-contract change (P07/P16); `locations` still carries unaudited DML (P07); routing
+  the alarm lines through the redacting logger would edit the INV-12 allowlist, which is the
+  founder's call; and `pg_temp` in definer search paths is a repository-wide convention.
+
+- 2026-10-01 — **Second independent QG-09 review of P06.10: four HIGH defects, all fail-open.** The
+  pattern is the one worth recording, because three of the four were introduced _by_ the previous
+  round's fixes rather than surviving from the original design. Each was a control that reported
+  success while proving less than it claimed:
+  the deadline counted its shortfall from the tenants it had claimed, and since every claimed tenant
+  is also processed, that arithmetic yields zero whether or not any remain — "one claimed, one sound"
+  read exactly like a complete estate; the argument scanner reconciled against nothing, so a tenant
+  provisioned but absent from the register sat outside everything it inspected, with a planted leak
+  under it, and it exited 0; a registered argument key was treated as a validated value, so a `uuid`
+  argument holding `true` produced no finding at all; and verification asked "is there a head?" and
+  "is there an event?" as two statements, which at READ COMMITTED are two snapshots, so a tenant's
+  legitimate first append landing in between produced `missing-head` for a sound chain.
+  The lesson generalises past this phase: **a fix is a new control, and a new control needs the same
+  adversarial treatment as the thing it replaced.** Coverage checks are the ones to distrust most,
+  because their failure mode is silence. Every one of these was measured before it was fixed, and
+  each measurement is now an assertion.
+  The mutation set grew 42 → 54 and moved out of a scratch script into
+  `docs/verification/audit-mutation-manifest.json` with a committed runner, because a total count
+  says nothing about which properties are proven. Four new variants initially survived — every one
+  because it removed a _redundant_ guard the named test could not isolate. They were kept and the
+  tests sharpened instead of dropped; one of those sharpenings required the deadline check to move
+  after the first page, which also fixed a real behaviour (a sweep whose deadline had already expired
+  used to exit having verified nothing).
+  `gates full` 14/14 at clean `c1bde7a98672`. ADR-0017 stays **PROPOSED**. The five residuals are
+  unchanged and now carry explicit classifications: `moin_app` enumeration is
+  `EXTERNAL_DEPENDENCY` (EXT-09); caller-supplied operation/target-kind/versions, the `locations`
+  DML capability and the alarm lines bypassing the redacting logger are each
+  `FOUNDER_DECISION_REQUIRED`; `pg_temp` last in a definer search path is acceptable for this PR
+  only and must not be read as a general conclusion. P06.10.03 and P06.10.05 remain open as
+  recorded. P06.10 as a whole is not complete.
+
+- 2026-10-01 — **Third QG-09 review of P06.10: a paging model that could not see its own gap, and a
+  harness whose numbers were not evidence.** Both worth recording for the general lesson.
+  The register was paged by `tenant_id`. With one tenant registered, a sweep that had claimed it,
+  and a second tenant registered concurrently: the next page returned 0 rows, the shortfall count
+  returned 0, and the unregistered-tenant witness returned 0 — the last because the new tenant _was_
+  registered. A complete-coverage verdict over half the estate, and none of the three checks could
+  see it. UUID order does not encode registration order, so no cursor over it can distinguish
+  "nothing left" from "something arrived behind me"; and counting cannot either, because a late
+  tenant ahead of the cursor is processed and pushes the total up while an original member is still
+  unvisited. The previous round's count-after-cursor fix was a patch on the wrong axis.
+  The fix records registration order — a monotonic sequence, immutable once assigned — and bounds
+  each sweep by a high-water mark read once. The guarantee is now stated rather than implied:
+  **sound for the register population captured at sweep start**, with the mark on the alarm line,
+  because "sound" is not interpretable without the population it is sound for. Continuous-current
+  soundness would need one snapshot held across every tenant's chain, and that is not worth pinning
+  `xmin` on the fastest-growing table in the schema.
+  The mutation harness counted any non-zero exit as a kill. Pointed at a closed database port it
+  reported every variant killed; given a nonexistent test name it reported survived. So "54/54" was
+  a count of failures of any kind. Rewritten, the first honest run said **47 killed, 4 unusable
+  baselines, 6 infra failures, 5 no-match, 2 survived** — seventeen of the previous kills were not
+  evidence, and every one was a defect in the _tests or the variants_, not the code: three tests
+  passed only in file order, five variants broke a migration instead of the behaviour, two mutated
+  code a later migration had replaced, one changed `const` to `let`, and two classifier bugs came
+  from matching on what the runner seems to print rather than what it does.
+  The generalisable lesson, and it is the third time this phase has taught it: **a verification
+  tool is a control, and an unverified control tends to be generous.** The way to find out is to
+  make it fail on purpose. Final distribution at `fcc44730ace5`: `KILLED_ASSERTION: 62`,
+  `INFRA_FAILURE: 2` — the two documented in the manifest as rejected by an assertion inside a
+  migration during global setup, where no test can claim the kill. Not rounded up to 64.
+  Incidental, and closed: the personal-data gate parsed only `CREATE TABLE`, so a column added by
+  `ALTER TABLE` never reached the inventory and an erasure request would have missed it silently.
+  Found by adding one and noticing the checked-column count had not moved. Coverage went 73 → 76.
+  `gates full` at the final HEAD follows this entry. ADR-0017 stays **PROPOSED** and its five
+  residuals are unchanged: `moin_app` enumeration `EXTERNAL_DEPENDENCY` (EXT-09); caller-supplied
+  operation/target-kind/versions, the `locations` DML capability and the alarm lines bypassing the
+  redacting logger each `FOUNDER_DECISION_REQUIRED`; `pg_temp` last acceptable for this PR only.
+  P06.10.03 remains open; P06.10.05 remains `WAITING_FOR_EXTERNAL` on EXT-09; P06.10 is not
+  complete.
+
+- 2026-10-01 — **Fourth QG-09 review of P06.10: a sequence that is not transactional, and an
+  assertion decided by reading words.** Both reproduced before being fixed, and both are the same
+  failure of imagination: trusting a mechanism to mean what its name suggests.
+  `nextval()` is not transactional. It does not lock and does not roll back, so allocation order is
+  not commit order — which makes it useless as a population authority however monotonic it looks.
+  Measured: Tx A takes epoch 1 and stays open, Tx B takes 2 and commits, a sweep reads
+  `max(registration_seq)` = 2 and sees one of that population's two members, then A commits and the
+  same population has two. A complete-coverage report over a half-covered population: the previous
+  round's defect reintroduced one layer down by the fix for it.
+  Epochs are now allocated by incrementing one authoritative row inside the registering
+  transaction, so PostgreSQL's row lock does the serialization and epoch order is commit order.
+  While epoch N is in flight, no epoch above N can be committed, because nobody else can allocate
+  one. There is no sequence and no column default — a dormant allocator is a second allocator. The
+  guarantee is a counter serialized by a row lock, and it is no longer described as a snapshot,
+  which it never was.
+  The mutation classifier decided "was this an assertion?" from the words in the failure message.
+  `database connection refused while executing toThrow assertion` contains `toThrow`, so an
+  unreachable database counted as proof an invariant was enforced — three of four crafted messages
+  were misclassified. A custom reporter now reads the live error objects and records what they are:
+  the name, plus whether Chai's `expected`/`actual`/`showDiff`/`ok` are present. Both halves are
+  required, because a name can be reassigned in one line. Message text survives for exactly one job
+  — telling a hung test from other non-assertion failures — where it cannot promote anything.
+  And a third defect found while regenerating, which is the one worth remembering: the sweep applied
+  mutations with `String.prototype.replace` and a **string** replacement, so `$$` in any SQL
+  function body became `$` and the migration failed with a syntax error. The variant looked
+  detected; nothing had been tested. It resisted diagnosis because the mutated migration applied
+  cleanly by hand and failed only through the harness.
+  Three rounds running, the thing that was wrong was the _verification_, not the subject. A tool
+  that reports on correctness is itself a control, and this one has now been wrong in four distinct
+  ways — exit codes, message text, string escaping, and variants that broke rather than mutated.
+  Final distribution at `f10588228b2a`: `KILLED_ASSERTION: 69`, `INFRA_FAILURE: 2`, over 71
+  variants. One variant was deleted rather than left looking proven: with allocation serialized,
+  `max(registration_seq)` and the state row cannot diverge, so the high-water source and the
+  allocator are one invariant and not two.
+  ADR-0017 stays **PROPOSED**; the five residuals are unchanged. P06.10.03 remains open; P06.10.05
+  remains `WAITING_FOR_EXTERNAL` on EXT-09; P06.10 is not complete.
+
+- 2026-10-01 — **Fifth QG-09 review of P06.10: the audit architecture was accepted; the evidence
+  harness was not.** No new database or security blocker. The three blockers were all one thing —
+  `KILLED_ASSERTION` meant less than it claimed — and all three were reproduced before being fixed.
+  **Assertion identity cannot come from the error object.** Vitest serializes errors before a
+  reporter sees them, so there is no live `Error` and no prototype left to test — `instanceof` is
+  unavailable even inside `onTestFailed`. Everything that survives is a mutable own property, which
+  is why decorating an ordinary `Error` with `name = 'AssertionError'` and the four matcher fields
+  was accepted as proof an invariant was enforced. Identity now needs two signals the thrown object
+  cannot touch, both required: `expect.getState().assertionCalls` read in `beforeEach`/`afterEach`
+  by a setup-file probe inside the test process, and the `constructor`/`toString` markers Vitest's
+  own serializer adds to every error it does **not** own. Measured, not assumed: a genuine
+  `AssertionError` serializes with exactly `actual, diff, expected, message, name, ok, operator,
+showDiff, stack, stacks` and neither marker; a plain `Error`, a decorated `Error` and Node's own
+  `assert.AssertionError` all gain both.
+  The second signal is undocumented behaviour, so it is pinned by a test that spawns a real Vitest
+  run over real fixture suites rather than by fixture JSON that re-encodes the assumption. That run
+  is what settled the hardest case: passing expectations followed by a decorated throw gives
+  `expectCalls: 2`, so the probe alone would have accepted it and only the foreign markers reject
+  it. The two signals are not redundant.
+  **A killing test is a module and a name, both exact.** `fullName.includes(expectedTest)` was
+  unsound three ways at once: a same-named test in another file could claim the kill, two tests
+  could match and the first was taken, and `"rejects invalid chain"` matched `"rejects invalid chain
+after retry"`. Zero matches is `NO_TEST_MATCH`, two is `AMBIGUOUS_TEST_IDENTITY`, and `--validate`
+  now refuses the manifest before any test runs.
+  **A kill must be attributable.** The previous classifier returned `KILLED_ASSERTION` while
+  recording `unrelatedFailures > 0` in the same object. An unrelated failure may be the reason the
+  intended test failed, so the run is `UNRELATED_FAILURE` and not evidence.
+  Tightening `--validate` immediately found a latent defect of its own: one existing anchor resolved
+  to **two** places in `cli.ts`, and `String.prototype.replace` rewrites the first — so which guard
+  that variant had been attacking was down to file order. It happened to be the intended one. The
+  anchor is now unique and the check refuses a non-unique one.
+  Twelve new `H*` variants attack the harness: each removes one conjunct of the trust rule and names
+  the adversarial test that must catch it. All twelve are killed, which is what makes the other 65
+  mean anything.
+  Final distribution at `986ae8b9dd4b`: `KILLED_ASSERTION: 77`, `INFRA_FAILURE: 2`, over 79 variants.
+  The two are **not** rounded up, and their recorded reason was corrected after measurement: they
+  are not global-setup rejections as previously claimed but the migration's own guard firing inside
+  the test that applies it — `0010` raising "backfill covered 0 of 3 organisation(s)" and `0011`
+  failing `NOT NULL` — so the test fails on a thrown database error after real `expect` calls. A
+  guard inside a migration is stronger than a test; it is not assertion evidence, and saying so is
+  the point of the taxonomy.
+  ADR-0017 stays **PROPOSED**; the five residuals are unchanged. P06.10.03 remains open; P06.10.05
+  remains `WAITING_FOR_EXTERNAL` on EXT-09; P06.10 is not complete.
+
+- 2026-10-01 — **Fifth QG-09 review of P06.10, second harness round: the thrown value was never a
+  trust boundary.** The audit architecture was accepted; the evidence harness was not, and the one
+  remaining blocker was the important one. Both exploits were reproduced before anything was fixed.
+  A **plain object literal** — `throw { name: 'AssertionError', expected: 1, actual: 2, showDiff:
+true, ok: false }` — is serialized by Vitest with none of the `constructor`/`toString` markers the
+  previous model treated as proof of foreignness, because it is not an `Error` at all. Measured: the
+  reporter returned `ASSERTION`. An ordinary `Error` whose `toJSON()` returns that shape did the
+  same. Four generations of this decision had now been spoofed — exit code, message text, name plus
+  matcher fields, serializer markers — and the pattern is not that each list of fields was too
+  short. A thrown value is **data authored by the code under test**. No property of it can be
+  authority for what the test framework did, so there is no tighter heuristic to reach for.
+  Evidence now comes from provenance. Every function on Vitest's `Assertion.prototype` is wrapped in
+  the setup file, and only that wrapper can append a `MATCHER_FAILURE` record; `throw` does not call
+  a matcher, so no throw of any shape can create one. The `rejects`/`resolves` getters are wrapped
+  too, because Vitest raises "promise resolved instead of rejecting" from inside its own async chain
+  without running a matcher — still its assertion machinery, and a shape several real kills depend
+  on. `assertionCalls` is now diagnostic only: a successful `expect` followed by any throw reports
+  two calls and zero failures, which is exactly why the counter could never be the signal.
+  Two things about the design are worth keeping. Identity is read from `context.task`, never from
+  `expect.getState()` — measured: under `it.concurrent` the module-level state reports _another_
+  test's name — and overlapping invocation windows are detected and refused rather than attributed.
+  And the probe is the **last** writer of its own key: a fixture writes a complete, self-consistent,
+  token-stamped record naming itself into `task.meta`, and a setup file's `afterEach` overwrites it.
+  The forgery is not hidden from; it is overwritten.
+  One narrow use of the error survives and is stated as such: the wrapper stamps an invocation-scoped
+  token on the value it rethrows, and the reporter requires the failing test to carry it. That
+  answers only "did the earned failure actually propagate" — a test that catches `expect(1).toBe(2)`
+  and then throws something else has the event but not the token — and it can only ever _remove_
+  evidence, because without the event nothing reads a token.
+  Anchor uniqueness moved into `applyMutation`, which both the sweep and `--validate` now use, so an
+  operator who skips validation gets the same guarantee: zero, several, empty or no-op anchors are
+  all `INVALID_MUTANT`. The splice is positional, which retires the `$$`-interpretation bug by
+  construction rather than by remembering to pass a function.
+  Two limits are recorded rather than hidden. The sweep hands the mutated reporter to the mutated
+  run, which is sound only because every `H*` reporter variant is a relaxation; and a probe mutation
+  broad enough to stop _any_ test producing `ASSERTION` cannot be killed by an assertion, because the
+  harness could not then report its own kill. Three variants were narrowed for exactly that reason,
+  and the properties they would have covered are proven by the real-Vitest suite instead.
+  Final distribution at `96a5dadcfe30`: `KILLED_ASSERTION: 90`, `INFRA_FAILURE: 2`, over 92
+  variants. `77/2 over 79` is superseded.
+  ADR-0017 stays **PROPOSED**; the five residuals are unchanged. P06.10.03 remains open; P06.10.05
+  remains `WAITING_FOR_EXTERNAL` on EXT-09; P06.10 is not complete.
+
+- 2026-10-01 — **Sixth QG-09 review of P06.10: a token is a credential, and credentials copy.** The
+  previous round stamped an invocation-scoped token on the object a matcher threw and required the
+  failing test to carry it. Reproduced in one line:
+
+      try { expect(1).toBe(2) } catch (e) { caught = e }
+      const terminal = new Error('ordinary'); Object.assign(terminal, caught); throw terminal
+
+  `Object.assign` copies the token, and the run was reported `ASSERTION`. Making the token
+  non-enumerable, a symbol, random, hashed or signed would have changed nothing: whatever a test can
+  read off one object it can write onto another. That is five generations of this decision defeated
+  — exit code, message text, name plus matcher fields, serializer markers, and now a credential —
+  and the thing they have in common is that each read _the thrown value_, which is data authored by
+  the code under test.
+  Evidence is now **object identity**, which is the one property of a value that cannot be
+  transferred: `Object.assign(terminal, caught)` gives `terminal !== caught`. A module-private
+  `WeakMap` maps each object a matcher threw to its invocation; the trusted `evidenceTest` wrapper
+  catches the value that terminated the test body and asks the map about that exact object. Nothing
+  is written onto the thrown value at all, and no field of it is read anywhere in the verdict.
+  The wrapper is necessary, not stylistic, and measurement is what settled it: by the time any
+  Vitest hook runs the live object is gone — in both `afterEach` and `onTestFailed`,
+  `task.result.errors[0]` is already a serialized plain object with `instanceof Error` false.
+  `task.fn` is not exposed to hooks, and Vitest 5 exports no base runner class to extend. Inside the
+  test callback is the only place the terminal value still exists.
+  That has a cost, and it is the honest one: **a test registered with plain `it` cannot bear
+  evidence.** The harness's own tests and the `scripts/check-*` suites were migrated to
+  `evidenceTest`; the 42 variants whose killing tests live under `packages/db/` were not, because
+  this round was told not to modify that directory. They are reported `NOT_EVIDENCE_ELIGIBLE` rather
+  than quietly counted. Forty of them would become evidence with a one-line change per test; `N8`
+  and `P8` would not, because nothing in them fails a matcher at all — their control is an assertion
+  inside the migration.
+  Two candidate self-mutants were **removed** rather than kept: deleting `confirmTerminal` or
+  `beginEvidence` stops _any_ test producing `ASSERTION`, so the harness cannot report its own kill
+  and the row would have been permanent fake non-evidence. The real-Vitest suite asserts both
+  invariants directly instead. The old `H12` was also removed on the review's finding that its
+  stated replay defect was false — dropping the invocation id from the token left the sequence
+  component unique — and replaced with a mutant that ignores the invocation binding in the WeakMap,
+  killed by an actual cross-test replay.
+  Final distribution at `953c47c73bf4`: `KILLED_ASSERTION: 52`, `NOT_EVIDENCE_ELIGIBLE: 42`, over 94
+  variants. `90/2 over 92` is superseded. The number went down because the standard went up.
+  ADR-0017 stays **PROPOSED**; the five residuals are unchanged. P06.10.03 remains open; P06.10.05
+  remains `WAITING_FOR_EXTERNAL` on EXT-09; P06.10 is not complete.
+
+- 2026-10-01 — **Closing the eligibility gap, with the scope the founder opened.** The previous round
+  left 42 variants `NOT_EVIDENCE_ELIGIBLE` because their killing tests live under `packages/db/`,
+  which that round was told not to touch. Test files there are now in scope, product code still is
+  not, so the migration is **registration only**: `it(` → `evidenceTest(` on exactly the 30 distinct
+  tests the 40 eligible variants name. No test name, body, assertion, setup, database work or timeout
+  changed, and every suite's count is identical (`audit-verification` 24, `cli-verify-audit` 8,
+  `audit-chain-population` 10, `audit-chain-epoch` 8, `audit-chain-backfill` 2, `audit` 11).
+  One structural change was needed and is worth recording. The wrapper lived in `scripts/`, and a
+  relative import from `packages/db/src/` into `scripts/` is exactly the six-level path this
+  repository's own boundary test calls unacceptable. So the contract, the private state and the
+  wrapper moved to `packages/testing/src/mutation/` and are re-exported from `@moin/testing` — the
+  same door `createTestDatabase` already comes through. The mechanism is byte-for-byte the same; only
+  its address changed. `depcruise` is clean over 197 modules.
+  `N8-backfill-removed` and `P8-sequence-backfill-removed` were **deliberately not migrated**. Their
+  defects are caught by a guard inside the migration — `0010` refusing an incomplete register
+  backfill, `0011` failing `NOT NULL` — so the test fails on a thrown database error and no matcher
+  ever throws. Wrapping them would not change that, and rewriting them to catch the error and
+  `expect()` it would be manufacturing evidence rather than finding it. They stay
+  `NOT_EVIDENCE_ELIGIBLE`, outside the numerator, with the reason in the manifest.
+  The result was not forced: every one of the 40 migrated variants came back `KILLED_ASSERTION` on
+  its own, because each of those tests already terminated on a genuine matcher failure. Final
+  distribution at `bf022008a1d2`: `KILLED_ASSERTION: 92`, `NOT_EVIDENCE_ELIGIBLE: 2`, over 94
+  variants. `52/42` is superseded.
+  Object-identity provenance is unchanged: the private `WeakMap`, the terminal `T === M` check, and
+  every attack case — copied properties, copied symbols, cloned Error, async copy, swallowed matcher,
+  cross-test replay, retry replay, parameterized replay, two matcher failures, concurrency. No token
+  returned.
+  ADR-0017 stays **PROPOSED**; the five residuals are unchanged. P06.10.03 remains open; P06.10.05
+  remains `WAITING_FOR_EXTERNAL` on EXT-09; P06.10 is not complete.
+
+- 2026-10-02 — **The two remaining QG-09 blockers, harness only (EV-P06-034).** (1) A plain `it`
+  test could import `beginEvidence` and `confirmTerminal` from `@moin/testing`, confirm a matcher
+  object it had caught, throw an unrelated error and come out `ASSERTION`. This was reproduced in a
+  child Vitest before the fix. Removing the re-exports would not have been enough, because any
+  `export` is one relative import away. So both functions, and the `intercept` wrapper that calls
+  them, are now module-scoped in `evidence-state.ts` and exported from no module. The only path to
+  them is `evidenceTest` registration, and Vitest refuses that inside a running test. The probe takes
+  its recorder and window controls once, via `installProbe`. The root exports an allow-list, and the
+  `exports` map stays root-only. A surface test pins both, plus every occurrence of the names.
+  (2) A sweep killed mid-mutant left the mutant on disk, and the next sweep read it as "original". Now
+  every manifest target is hashed as Git would store it (`hash-object --path`) and compared with its
+  HEAD blob before anything runs and after every variant. The restore writes back the proved bytes
+  and verifies them. Any mismatch aborts with exit 3 and changes nothing. The baseline cache comes
+  after the checks. SIGINT and SIGTERM restore; SIGKILL is covered by the next run refusing to start.
+  Nine new `H*` self-mutations all kill, and both fixes are mutation-checked KILLED. The sweep was
+  regenerated at `52cc10f`: `KILLED_ASSERTION: 101`, `NOT_EVIDENCE_ELIGIBLE: 2` (N8, P8, unchanged)
+  over 103 variants. `92/2 over 94` is superseded. No product, migration or app change. ADR-0017
+  stays **PROPOSED**; P06.10 is not complete.
+
+- 2026-10-02 — **One mutation sweep per worktree (EV-P06-035).** The last QG-09 blocker: two
+  sweeps in one worktree both passed the pristine check and then took turns writing one file. The
+  overlap was reproduced before the fix with the review's M1/M5 shape (same file, same killing test)
+  as real processes. A's mutant run observed M5's bytes, B's baseline observed A's M1, both reported
+  `KILLED_ASSERTION`, and every restore check passed. A sweep now takes an exclusive lock first —
+  `mkdir` of `$(git rev-parse --absolute-git-dir)/moin-mutation-sweep.lock`, atomic, per worktree —
+  before HEAD, the source or the baseline cache is read. It holds the lock until the last restore is
+  verified and the report is written, then releases it in one `finally`. A failed restore keeps the
+  lock for a human. SIGINT and SIGTERM release only after the verified restore. SIGKILL leaves the
+  lock; the next sweep and `--validate` refuse with exit 4, recovery is manual and documented, and
+  the HEAD-pristine check remains behind it. 13 process-level and lifecycle tests; four new `H*`
+  variants all kill; the fix is mutation-checked KILLED; a 20× stress run passed with zero double
+  owners. Regenerated at `1a924a0`: `KILLED_ASSERTION: 105`, `NOT_EVIDENCE_ELIGIBLE: 2` (N8, P8)
+  over 107 variants. `101/2 over 103` is superseded. No product, migration or app change. ADR-0017
+  stays **PROPOSED**; P06.10 is not complete.
+
+- 2026-10-02 — **QG-09 accepted for PR #31 (EV-P06-036).** Independent verdict
+  `READY_FOR_FOUNDER_QG09` on reviewed implementation HEAD `468827a`. Before the two conditional
+  dispositions were recorded, both conditions were checked against the source.
+  (a) `operation`/`target_kind`/`versions`: `appendAuditEvent` has no production caller, the
+  provisioning trigger writes fixed literals, `EXECUTE` is `moin_app`-only, and no HTTP route
+  reaches the writer.
+  (b) `verify-audit` output: fixed literals, counts, sequence numbers, opaque organisation UUIDs,
+  six fixed break reasons, and a SQLSTATE or error class name — never a message.
+  Dispositions:
+  - verifier role deferred, not waived (EXT-09);
+  - caller-supplied fields accepted for trusted internal writers only;
+  - `locations` DML deferred coverage under P06.10.03;
+  - alarm output accepted for this PR only, with future dynamic payloads through the redacting logger;
+  - `pg_temp` last acceptable for this PR only, not a precedent.
+
+  ADR-0017 is **ACCEPTED** (P06.10.06); P06.10.07 is **VERIFIED**. Still open: P06.10.03 (including
+  `locations`) and P06.10.05 (`WAITING_FOR_EXTERNAL`, EXT-09). P06.10 and P06 remain `IN_PROGRESS`.
+  Governance-only commit; no implementation change.

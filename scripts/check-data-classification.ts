@@ -44,6 +44,17 @@ const STRUCTURAL = new Set([
 
 const CREATE_TABLE = /create table (?:if not exists )?"?(\w+)"?\s*\(([\s\S]*?)\n\);/gi;
 
+/**
+ * A column added to an existing table.
+ *
+ * Parsing only `CREATE TABLE` left a hole in this gate: a migration could add a personal-data
+ * column with `ALTER TABLE … ADD COLUMN` and it would never appear in the inventory, so an erasure
+ * request would miss it silently — exactly the failure the file exists to prevent. Found by adding
+ * such a column and noticing the checked-column count had not moved.
+ */
+const ADD_COLUMN =
+  /alter table (?:if exists )?"?(\w+)"?\s+add column (?:if not exists )?"?(\w+)"?/gi;
+
 export interface Column {
   readonly table: string;
   readonly column: string;
@@ -57,6 +68,9 @@ export function schemaColumns(directory: string = MIGRATIONS): Column[] {
     .join('\n');
 
   const columns: Column[] = [];
+  for (const match of sql.matchAll(ADD_COLUMN)) {
+    columns.push({ table: match[1] ?? '', column: match[2] ?? '' });
+  }
   for (const match of sql.matchAll(CREATE_TABLE)) {
     const table = match[1] ?? '';
     for (const line of (match[2] ?? '').split('\n')) {

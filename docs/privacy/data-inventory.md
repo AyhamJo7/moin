@@ -128,19 +128,28 @@ approval step (INV-08) is where that is caught, and the approval UI says so.
 
 ### Identity, audit and security
 
-| Field                                       | Category                 | Personal?            | Retention                       | Method                | Subprocessor |
-| ------------------------------------------- | ------------------------ | -------------------- | ------------------------------- | --------------------- | ------------ |
-| `users.email`                               | Account (**controller**) | yes                  | while the account exists + 30 d | hard delete           | AWS Cognito  |
-| `users.cognito_subject`                     | Account                  | pseudonymous         | same                            | hard delete           | AWS Cognito  |
-| `sessions.*`                                | Account                  | yes (IP, user agent) | 30 d after expiry               | hard delete           | —            |
-| `audit_events.actor_id`, `operation`        | Audit                    | pseudonymous         | **2 years, restricted**         | **crypto-erase only** | —            |
-| `audit_events.arguments`                    | Audit                    | sanitised            | 2 years                         | crypto-erase only     | —            |
-| Security logs (IP, user agent, auth events) | Security                 | yes                  | 1 year                          | hard delete           | AWS          |
+| Field                                                                             | Category                 | Personal?                                                                       | Retention                       | Method                                                           | Subprocessor |
+| --------------------------------------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------- | ------------------------------- | ---------------------------------------------------------------- | ------------ |
+| `users.email`                                                                     | Account (**controller**) | yes                                                                             | while the account exists + 30 d | hard delete                                                      | AWS Cognito  |
+| `users.cognito_subject`                                                           | Account                  | pseudonymous                                                                    | same                            | hard delete                                                      | AWS Cognito  |
+| `sessions.*`                                                                      | Account                  | yes (IP, user agent)                                                            | 30 d after expiry               | hard delete                                                      | —            |
+| `audit_events.actor_id`, `target_id`, `approval_id`, `correlation_id`, `trace_id` | Audit                    | pseudonymous identifiers                                                        | **2 years, restricted**         | pseudonymisation/crypto-erase design pending P16 and EXT-02      | —            |
+| `audit_events.source`, `operation`, `target_kind`, `result`                       | Audit                    | no raw personal value allowed                                                   | 2 years                         | retention handler pending P16                                    | —            |
+| `audit_events.versions`, `validation`, `args_sanitized`                           | Audit                    | allowlisted keys and constrained values; potentially identifying in combination | 2 years                         | retention handler pending P16                                    | —            |
+| `audit_events.canonical_payload`                                                  | Audit                    | duplicates the structured event fields above for integrity verification         | 2 years                         | retention handler pending P16                                    | —            |
+| `audit_events.seq`, `prev_hash`, `hash`                                           | Audit integrity          | no alone                                                                        | 2 years                         | retention handler pending P16                                    | —            |
+| `audit_heads.last_seq`, `last_hash`                                               | Audit integrity          | no alone                                                                        | life of the tenant              | erase after audit retention closes                               | —            |
+| `audit_chain_population_state.last_registration_epoch`                            | Audit integrity          | no — a single platform-wide counter of register epochs                          | life of the audit trail         | never erased; it is a counter, not a record about anyone         | —            |
+| `audit_chain_registry.tenant_id`, `registered_at`, `registration_seq`             | Audit integrity          | no — an opaque tenant identifier and the time its chain began                   | life of the audit trail         | erase with the tenant's audit retention (append-only until then) | —            |
+| `audit_argument_allowlist.operation`, `argument_key`, `value_kind`, `reason`      | Platform policy          | no                                                                              | permanent versioned policy      | retain                                                           | —            |
+| Security logs (IP, user agent, auth events)                                       | Security                 | yes                                                                             | 1 year                          | hard delete                                                      | AWS          |
 
 **The audit trail is append-only by construction (INV-10)** — there is no update or delete path.
 That is a deliberate tension with erasure, and the resolution is crypto-erase plus the two-year
 bound. **EXT-02 must confirm it**: the design position is that the integrity of an audit trail is
 itself a legal obligation, and that a pseudonymous actor reference inside it is proportionate.
+The P06.10 schema does not implement that erasure mechanism yet. Customer launch must wait for
+the P16 retention handler and EXT-02 review; no erasure completion claim is made here.
 
 ### Billing
 

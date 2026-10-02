@@ -14,6 +14,7 @@ import { inspect, allowlistedDefiners, type Finding } from './check-rls-catalog.
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { evidenceTest } from '@moin/testing';
 
 let database: TestDatabase;
 
@@ -101,6 +102,364 @@ describe('the QG-09 provisioning registration', () => {
     } finally {
       await ddl(`ALTER FUNCTION app.provision_tenant(uuid, citext, text, text, text, text, text, boolean, text)
         OWNER TO moin_migrator`);
+    }
+  });
+});
+
+describe('the QG-09 audit registration', () => {
+  it('rejects a missing reviewed audit writer signature', async () => {
+    await ddl(
+      `ALTER FUNCTION app.append_audit_event(uuid, uuid, text, text, text, uuid, jsonb, jsonb, jsonb, text, uuid, uuid, text) RENAME TO append_audit_event_mutant`,
+    );
+    try {
+      expect(rulesFor(await findings(), 'app.append_audit_event')).toContain(
+        'reviewed-function-missing',
+      );
+      expect(rulesFor(await findings(), 'app.append_audit_event_mutant')).toContain(
+        'security-definer-not-allowlisted',
+      );
+    } finally {
+      await ddl(
+        `ALTER FUNCTION app.append_audit_event_mutant(uuid, uuid, text, text, text, uuid, jsonb, jsonb, jsonb, text, uuid, uuid, text) RENAME TO append_audit_event`,
+      );
+    }
+  });
+
+  it('rejects a reviewed audit writer changed to SECURITY INVOKER', async () => {
+    await ddl(
+      `ALTER FUNCTION app.append_audit_event(uuid, uuid, text, text, text, uuid, jsonb, jsonb, jsonb, text, uuid, uuid, text) SECURITY INVOKER`,
+    );
+    try {
+      expect(rulesFor(await findings(), 'app.append_audit_event')).toContain(
+        'reviewed-function-not-security-definer',
+      );
+    } finally {
+      await ddl(
+        `ALTER FUNCTION app.append_audit_event(uuid, uuid, text, text, text, uuid, jsonb, jsonb, jsonb, text, uuid, uuid, text) SECURITY DEFINER`,
+      );
+    }
+  });
+
+  it('rejects the exact audit writer without its documented registration', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'moin-audit-definers-'));
+    try {
+      const path = join(directory, 'allowlist.md');
+      writeFileSync(path, '| Function | Why | Role |\n| --- | --- | --- |\n');
+      expect(
+        rulesFor(await inspect(database.migrationUrl, path), 'app.append_audit_event'),
+      ).toContain('security-definer-not-allowlisted');
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects an unsafe audit writer path and extra runtime grant', async () => {
+    await ddl(
+      // eslint-disable-next-line no-restricted-syntax -- defective function-level setting is the negative control.
+      `ALTER FUNCTION app.append_audit_event(uuid, uuid, text, text, text, uuid, jsonb, jsonb, jsonb, text, uuid, uuid, text) SET search_path = public, app, pg_catalog`,
+    );
+    try {
+      expect(rulesFor(await findings(), 'app.append_audit_event')).toContain(
+        'security-definer-unsafe-search-path',
+      );
+    } finally {
+      await ddl(
+        // eslint-disable-next-line no-restricted-syntax -- restore the reviewed setting.
+        `ALTER FUNCTION app.append_audit_event(uuid, uuid, text, text, text, uuid, jsonb, jsonb, jsonb, text, uuid, uuid, text) SET search_path = pg_catalog, public, app, pg_temp`,
+      );
+    }
+    await ddl(
+      `GRANT EXECUTE ON FUNCTION app.append_audit_event(uuid, uuid, text, text, text, uuid, jsonb, jsonb, jsonb, text, uuid, uuid, text) TO moin_provisioner`,
+    );
+    try {
+      expect(rulesFor(await findings(), 'app.append_audit_event')).toContain(
+        'security-definer-unexpected-execute-grant',
+      );
+    } finally {
+      await ddl(
+        `REVOKE EXECUTE ON FUNCTION app.append_audit_event(uuid, uuid, text, text, text, uuid, jsonb, jsonb, jsonb, text, uuid, uuid, text) FROM moin_provisioner`,
+      );
+    }
+  });
+
+  it('rejects an unreviewed audit writer owner', async () => {
+    await ddl(
+      `ALTER FUNCTION app.append_audit_event(uuid, uuid, text, text, text, uuid, jsonb, jsonb, jsonb, text, uuid, uuid, text) OWNER TO moin_app`,
+    );
+    try {
+      expect(rulesFor(await findings(), 'app.append_audit_event')).toContain(
+        'security-definer-unsafe-owner',
+      );
+    } finally {
+      await ddl(
+        `ALTER FUNCTION app.append_audit_event(uuid, uuid, text, text, text, uuid, jsonb, jsonb, jsonb, text, uuid, uuid, text) OWNER TO moin_migrator`,
+      );
+    }
+  });
+});
+
+describe('audit append-only catalog control', () => {
+  evidenceTest('rejects a disabled mutation guard', async () => {
+    await ddl('ALTER TABLE audit_events DISABLE TRIGGER audit_events_append_only');
+    try {
+      expect(rulesFor(await findings(), 'audit_events.audit_events_append_only')).toContain(
+        'audit-append-only-trigger-unsafe',
+      );
+    } finally {
+      await ddl('ALTER TABLE audit_events ENABLE ALWAYS TRIGGER audit_events_append_only');
+    }
+
+    // `ENABLE` alone is "origin only", which replica mode skips — the weaker of the two states,
+    // and the one a careless restore leaves behind.
+    await ddl('ALTER TABLE audit_events ENABLE TRIGGER audit_events_append_only');
+    try {
+      expect(rulesFor(await findings(), 'audit_events.audit_events_append_only')).toContain(
+        'audit-append-only-trigger-unsafe',
+      );
+    } finally {
+      await ddl('ALTER TABLE audit_events ENABLE ALWAYS TRIGGER audit_events_append_only');
+    }
+  });
+
+  it('rejects a dropped mutation guard', async () => {
+    await ddl('DROP TRIGGER audit_events_append_only ON audit_events');
+    try {
+      expect(rulesFor(await findings(), 'audit_events.audit_events_append_only')).toContain(
+        'audit-append-only-trigger-missing',
+      );
+    } finally {
+      await ddl(`CREATE TRIGGER audit_events_append_only BEFORE UPDATE OR DELETE ON audit_events
+        FOR EACH ROW EXECUTE FUNCTION app.reject_audit_mutation()`);
+      await ddl('ALTER TABLE audit_events ENABLE ALWAYS TRIGGER audit_events_append_only');
+    }
+  });
+});
+
+describe('audit chain verification catalog controls', () => {
+  evidenceTest('rejects a disabled and a dropped register guard', async () => {
+    // A deletable registration is how a whole tenant's chain disappears from the daily sweep while
+    // the sweep keeps reporting that it found nothing wrong.
+    await ddl('ALTER TABLE audit_chain_registry DISABLE TRIGGER audit_chain_registry_append_only');
+    try {
+      expect(
+        rulesFor(await findings(), 'audit_chain_registry.audit_chain_registry_append_only'),
+      ).toContain('audit-append-only-trigger-unsafe');
+    } finally {
+      await ddl(
+        'ALTER TABLE audit_chain_registry ENABLE ALWAYS TRIGGER audit_chain_registry_append_only',
+      );
+    }
+
+    await ddl('DROP TRIGGER audit_chain_registry_append_only ON audit_chain_registry');
+    try {
+      expect(
+        rulesFor(await findings(), 'audit_chain_registry.audit_chain_registry_append_only'),
+      ).toContain('audit-append-only-trigger-missing');
+    } finally {
+      await ddl(`CREATE TRIGGER audit_chain_registry_append_only
+        BEFORE UPDATE OR DELETE ON audit_chain_registry
+        FOR EACH ROW EXECUTE FUNCTION app.reject_registry_mutation()`);
+      await ddl(
+        'ALTER TABLE audit_chain_registry ENABLE ALWAYS TRIGGER audit_chain_registry_append_only',
+      );
+    }
+  });
+
+  it('rejects a register guard repointed at a function that does not reject', async () => {
+    await ddl(
+      // eslint-disable-next-line no-restricted-syntax -- function-level setting in a DDL fixture, not a pooled session.
+      `
+      CREATE FUNCTION app.pretend_reject() RETURNS trigger
+        LANGUAGE plpgsql SET search_path = pg_catalog AS $$ BEGIN RETURN NEW; END $$;
+      DROP TRIGGER audit_chain_registry_append_only ON audit_chain_registry;
+      CREATE TRIGGER audit_chain_registry_append_only
+        BEFORE UPDATE OR DELETE ON audit_chain_registry
+        FOR EACH ROW EXECUTE FUNCTION app.pretend_reject();
+    `,
+    );
+    try {
+      expect(
+        rulesFor(await findings(), 'audit_chain_registry.audit_chain_registry_append_only'),
+      ).toContain('audit-append-only-trigger-unsafe');
+    } finally {
+      await ddl(`DROP TRIGGER audit_chain_registry_append_only ON audit_chain_registry;
+        CREATE TRIGGER audit_chain_registry_append_only
+          BEFORE UPDATE OR DELETE ON audit_chain_registry
+          FOR EACH ROW EXECUTE FUNCTION app.reject_registry_mutation();
+        ALTER TABLE audit_chain_registry
+          ENABLE ALWAYS TRIGGER audit_chain_registry_append_only;
+        DROP FUNCTION app.pretend_reject();`);
+    }
+  });
+
+  evidenceTest('rejects a dropped and a disabled chain-registration trigger', async () => {
+    // Without it a newly provisioned tenant is never registered, so the verifier silently stops
+    // covering it — and silence is what a clean run looks like.
+    await ddl('DROP TRIGGER organisations_register_audit_chain ON organisations');
+    try {
+      expect(rulesFor(await findings(), 'organisations')).toContain(
+        'audit-chain-registration-trigger-unsafe',
+      );
+    } finally {
+      await ddl(`CREATE TRIGGER organisations_register_audit_chain AFTER INSERT ON organisations
+        FOR EACH ROW EXECUTE FUNCTION app.register_audit_chain()`);
+      await ddl(
+        'ALTER TABLE organisations ENABLE ALWAYS TRIGGER organisations_register_audit_chain',
+      );
+    }
+
+    await ddl('ALTER TABLE organisations DISABLE TRIGGER organisations_register_audit_chain');
+    try {
+      expect(rulesFor(await findings(), 'organisations')).toContain(
+        'audit-chain-registration-trigger-unsafe',
+      );
+    } finally {
+      await ddl(
+        'ALTER TABLE organisations ENABLE ALWAYS TRIGGER organisations_register_audit_chain',
+      );
+    }
+  });
+
+  evidenceTest('rejects a guard whose body was replaced with one that does not raise', async () => {
+    // The cheapest attack on a guard, and the one every identity rule misses: same OID, same name,
+    // same owner, same signature, same trigger — a body that just returns.
+    await ddl(
+      // eslint-disable-next-line no-restricted-syntax -- function-level setting in a DDL fixture, not a pooled session.
+      `CREATE OR REPLACE FUNCTION app.reject_registry_mutation() RETURNS trigger
+      LANGUAGE plpgsql SET search_path = pg_catalog
+      AS $$ BEGIN RETURN NEW; END $$`,
+    );
+    try {
+      expect(rulesFor(await findings(), 'app.reject_registry_mutation')).toStrictEqual([
+        'reviewed-function-body-changed',
+      ]);
+    } finally {
+      await ddl(
+        // eslint-disable-next-line no-restricted-syntax -- restoring the reviewed function-level setting.
+        `CREATE OR REPLACE FUNCTION app.reject_registry_mutation() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = pg_catalog
+AS $$ BEGIN
+  RAISE EXCEPTION 'audit chain registrations are append-only' USING ERRCODE = 'insufficient_privilege';
+END $$`,
+      );
+    }
+    // The restore has to bring the digest back, or every later case would inherit the finding.
+    expect(rulesFor(await findings(), 'app.reject_registry_mutation')).toStrictEqual([]);
+  });
+
+  evidenceTest(
+    'rejects a register that does not account for every provisioned tenant',
+    async () => {
+      // The register is otherwise its own witness: disabling the registration trigger around one
+      // insert leaves nothing in the catalog to find afterwards.
+      // A literal rather than an interpolated value: the lint rule that forbids building SQL by
+      // interpolation is right, and `ddl()` takes no parameters.
+      await ddl('ALTER TABLE organisations DISABLE TRIGGER organisations_register_audit_chain');
+      await ddl('ALTER TABLE provisioning_requests DISABLE TRIGGER provisioning_request_audit');
+      try {
+        await ddl(`INSERT INTO organisations(id, slug, name)
+        VALUES ('19191919-1919-4919-8919-191919191919', 'catalog-hidden', 'Hidden')`);
+        await ddl(`INSERT INTO provisioning_requests(request_id, tenant_id)
+        VALUES (gen_random_uuid(), '19191919-1919-4919-8919-191919191919')`);
+        expect(rulesFor(await findings(), 'audit_chain_registry')).toContain(
+          'audit-chain-registry-incomplete',
+        );
+      } finally {
+        await ddl(`DELETE FROM provisioning_requests
+        WHERE tenant_id = '19191919-1919-4919-8919-191919191919'`);
+        await ddl(`DELETE FROM organisations WHERE id = '19191919-1919-4919-8919-191919191919'`);
+        await ddl('ALTER TABLE provisioning_requests ENABLE TRIGGER provisioning_request_audit');
+        await ddl(
+          'ALTER TABLE organisations ENABLE ALWAYS TRIGGER organisations_register_audit_chain',
+        );
+      }
+    },
+  );
+
+  evidenceTest('rejects the claim function changed to SECURITY INVOKER', async () => {
+    // As SECURITY INVOKER it returns nothing at all — FORCE RLS hides the register from the caller —
+    // so the sweep would verify zero tenants and report a clean run.
+    await ddl('ALTER FUNCTION app.claim_audit_chains(integer, bigint, bigint) SECURITY INVOKER');
+    try {
+      expect(rulesFor(await findings(), 'app.claim_audit_chains')).toStrictEqual([
+        'reviewed-function-not-security-definer',
+      ]);
+    } finally {
+      await ddl('ALTER FUNCTION app.claim_audit_chains(integer, bigint, bigint) SECURITY DEFINER');
+    }
+  });
+
+  it('rejects a missing reviewed claim function signature', async () => {
+    await ddl('DROP FUNCTION app.claim_audit_chains(integer, bigint, bigint)');
+    try {
+      // Two findings, because identity and body are pinned separately and both are now absent.
+      expect(rulesFor(await findings(), 'app.claim_audit_chains')).toStrictEqual([
+        'reviewed-function-body-missing',
+        'reviewed-function-missing',
+      ]);
+    } finally {
+      await ddl(
+        // eslint-disable-next-line no-restricted-syntax -- function-level setting in a DDL fixture, not a pooled session.
+        `CREATE FUNCTION app.claim_audit_chains(p_limit integer, p_after bigint, p_high_water bigint)
+          RETURNS TABLE (organisation_id uuid, id uuid, registration_seq bigint)
+          LANGUAGE sql STABLE SECURITY DEFINER
+          SET search_path = pg_catalog, public, app, pg_temp
+        AS $$
+  SELECT r.tenant_id AS organisation_id, r.tenant_id AS id, r.registration_seq
+  FROM audit_chain_registry r
+  WHERE r.registration_seq > coalesce(p_after, 0)
+    AND r.registration_seq <= coalesce(p_high_water, 0)
+  ORDER BY r.registration_seq
+  LIMIT least(greatest(coalesce(p_limit, 0), 0), 1000)
+$$;
+        REVOKE ALL ON FUNCTION app.claim_audit_chains(integer, bigint, bigint) FROM PUBLIC;
+        GRANT EXECUTE ON FUNCTION app.claim_audit_chains(integer, bigint, bigint) TO moin_app;`,
+      );
+    }
+  });
+
+  it('rejects a mutable path and an extra runtime grant on the claim function', async () => {
+    await ddl(
+      // eslint-disable-next-line no-restricted-syntax -- defective function-level setting is the negative control.
+      `ALTER FUNCTION app.claim_audit_chains(integer, bigint, bigint) SET search_path = public, pg_temp`,
+    );
+    try {
+      expect(rulesFor(await findings(), 'app.claim_audit_chains')).toContain(
+        'security-definer-unsafe-search-path',
+      );
+    } finally {
+      await ddl(
+        // eslint-disable-next-line no-restricted-syntax -- restore the reviewed setting.
+        `ALTER FUNCTION app.claim_audit_chains(integer, bigint, bigint) SET search_path = pg_catalog, public, app, pg_temp`,
+      );
+    }
+
+    await ddl(
+      'GRANT EXECUTE ON FUNCTION app.claim_audit_chains(integer, bigint, bigint) TO moin_reporting',
+    );
+    try {
+      expect(rulesFor(await findings(), 'app.claim_audit_chains')).toContain(
+        'security-definer-unexpected-execute-grant',
+      );
+    } finally {
+      await ddl(
+        'REVOKE EXECUTE ON FUNCTION app.claim_audit_chains(integer, bigint, bigint) FROM moin_reporting',
+      );
+    }
+  });
+
+  it('rejects the exact claim function without its documented registration', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'moin-definers-'));
+    try {
+      const path = join(directory, 'allowlist.md');
+      writeFileSync(path, '| Function | Why | Role |\n| --- | --- | --- |\n');
+      expect(allowlistedDefiners(path).has('app.claim_audit_chains')).toBe(false);
+      const list = await inspect(database.migrationUrl, path);
+      expect(rulesFor(list, 'app.claim_audit_chains')).toContain(
+        'security-definer-not-allowlisted',
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
     }
   });
 });

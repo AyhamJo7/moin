@@ -22,3 +22,12 @@ export type {
   SystemWorkResult,
 } from './tenant.ts';
 export type { ReadinessCheck, ReadinessResult, PostgresReadinessOptions } from './readiness.ts';
+export { appendAuditEvent, listAuditEvents, verifyAuditChain } from './audit.ts';
+export type { AuditChainResult, AuditEventInput, AuditQuery, AuditEvent } from './audit.ts';
+export { verifyAuditChains, isSound } from './audit-verification.ts';
+export type {
+  AuditChainBreak,
+  AuditChainFailure,
+  AuditVerificationReport,
+  VerifyAuditChainsOptions,
+} from './audit-verification.ts';

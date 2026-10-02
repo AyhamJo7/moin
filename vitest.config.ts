@@ -26,6 +26,10 @@ export default defineConfig({
         test: {
           name: 'unit',
           root: import.meta.dirname,
+          // The mutation harness's in-process assertion probe (P06.10.07). Loaded for every run,
+          // not only the sweep's, so that the sweep measures tests exactly as CI runs them — a
+          // harness that changes the thing it measures is not measuring it.
+          setupFiles: ['./scripts/mutation-evidence-probe.ts'],
           include: ['{apps,packages,scripts}/**/*.test.ts', '{apps,packages}/**/*.test.tsx'],
           exclude: [
             '**/node_modules/**',
@@ -41,6 +45,7 @@ export default defineConfig({
         test: {
           name: 'integration',
           root: import.meta.dirname,
+          setupFiles: ['./scripts/mutation-evidence-probe.ts'],
           include: ['{apps,packages,scripts}/**/*.integration.test.ts'],
           exclude: ['**/node_modules/**', '**/dist/**'],
           environment: 'node',

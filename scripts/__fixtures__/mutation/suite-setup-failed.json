@@ -1,0 +1,19 @@
+{
+  "success": false,
+  "numTotalTests": 1,
+  "numFailedTests": 0,
+  "testResults": [
+    {
+      "status": "failed",
+      "message": "connect ECONNREFUSED 127.0.0.1:59999",
+      "name": "captured-fixture",
+      "assertionResults": [
+        {
+          "status": "skipped",
+          "fullName": "fixture never runs",
+          "failureMessages": []
+        }
+      ]
+    }
+  ]
+}

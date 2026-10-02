@@ -1,0 +1,1329 @@
+[
+  {
+    "id": "M1-unchecked-collapsed-into-sound",
+    "invariant": "INV-10: a tenant that could not be verified is not a verified tenant",
+    "expected": "A tenant whose chain could not be checked would be counted sound, so an unverifiable estate would report a clean day.",
+    "file": "packages/db/src/audit-verification.ts",
+    "find": "        outcomes.delete(item.organisationId);\n        const failure: AuditChainFailure = { organisationId: item.organisationId, error };",
+    "replace": "        outcomes.set(item.organisationId, 'sound');\n        const failure: AuditChainFailure = { organisationId: item.organisationId, error };",
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "what the sweep finds > counts a tenant it could not check as unchecked, never as sound"
+    }
+  },
+  {
+    "id": "M2-claim-error-swallowed",
+    "invariant": "INV-10: a sweep that enumerated nothing has verified nothing",
+    "expected": "A failure to read the register would return an empty, sound-looking report instead of rejecting.",
+    "file": "packages/db/src/audit-verification.ts",
+    "find": "          [pageSize, after, highWater],\n        );\n        cursor = claimed.rows.at(-1)?.registration_seq ?? cursor;",
+    "replace": "          [pageSize, after, highWater],\n        ).catch(() => ({ rows: [] as { organisation_id: string; id: string; registration_seq: string }[] }));\n        cursor = claimed.rows.at(-1)?.registration_seq ?? cursor;",
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "what the sweep finds > refuses to report a clean run when the register cannot be read at all"
+    }
+  },
+  {
+    "id": "M3-paging-stops-after-first-page",
+    "invariant": "INV-10: every registered tenant is walked",
+    "expected": "Only the first page of tenants would ever be verified; the rest would be silently skipped.",
+    "file": "packages/db/src/audit-verification.ts",
+    "find": "    if (result.claimed < pageSize) break;\n    after = cursor;",
+    "replace": "    void cursor;\n    break;",
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "the daily sweep > walks every tenant across page boundaries"
+    }
+  },
+  {
+    "id": "M4-page-size-validation-removed",
+    "invariant": "Bounded work: a caller cannot request an unbounded or empty page",
+    "expected": "A page size of 0 or 1001 would be accepted, yielding an empty or oversized sweep.",
+    "file": "packages/db/src/audit-verification.ts",
+    "find": "  if (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > MAX_PAGE_SIZE) {\n    throw new Error('invalid audit verification page size');\n  }",
+    "replace": "  void MAX_PAGE_SIZE;",
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "the daily sweep > rejects a page size outside the reviewed bounds instead of silently clamping"
+    }
+  },
+  {
+    "id": "M5-isSound-ignores-unchecked",
+    "invariant": "INV-10: 'not verified' must never read as 'nothing wrong'",
+    "expected": "A report with unchecked tenants would be declared sound.",
+    "file": "packages/db/src/audit-verification.ts",
+    "find": "    report.unchecked === 0 &&\n",
+    "replace": "",
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "what the sweep finds > counts a tenant it could not check as unchecked, never as sound"
+    }
+  },
+  {
+    "id": "M6-enumerate-heads-instead-of-register",
+    "invariant": "INV-10: a deleted head is a finding, not a tenant leaving the worklist",
+    "expected": "Deleting a tenant's chain head would remove it from the sweep entirely and report success.",
+    "file": "packages/db/migrations/0011_audit_chain_population.sql",
+    "find": "  WHERE r.registration_seq > coalesce(p_after, 0)\n    AND r.registration_seq <= coalesce(p_high_water, 0)\n  ORDER BY r.registration_seq\n  LIMIT least(greatest(coalesce(p_limit, 0), 0), 1000)",
+    "replace": "  WHERE r.registration_seq > coalesce(p_after, 0)\n    AND r.registration_seq <= coalesce(p_high_water, 0)\n    AND EXISTS (SELECT 1 FROM audit_heads h WHERE h.organisation_id = r.tenant_id)\n  ORDER BY r.registration_seq\n  LIMIT least(greatest(coalesce(p_limit, 0), 0), 1000)",
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "what the sweep finds > still covers a tenant whose chain head was deleted, because it walks the register"
+    }
+  },
+  {
+    "id": "M7-register-append-only-trigger-dropped",
+    "invariant": "INV-10: a chain registration cannot be removed",
+    "expected": "Deleting a register row would hide that tenant's chain from every future sweep.",
+    "file": "packages/db/migrations/0011_audit_chain_population.sql",
+    "find": "ALTER TABLE audit_chain_registry ENABLE ALWAYS TRIGGER audit_chain_registry_append_only;",
+    "replace": "ALTER TABLE audit_chain_registry DISABLE TRIGGER audit_chain_registry_append_only;",
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "the tenant register > rejects a privileged DELETE and UPDATE, so a chain cannot be hidden by dropping its row"
+    }
+  },
+  {
+    "id": "M8-claim-cap-removed",
+    "invariant": "Bounded work: a page is capped however much the caller asks for",
+    "expected": "A caller could request the entire register in one call, unbounded.",
+    "file": "packages/db/migrations/0011_audit_chain_population.sql",
+    "find": "  ORDER BY r.registration_seq\n  LIMIT least(greatest(coalesce(p_limit, 0), 0), 1000)",
+    "replace": "  ORDER BY r.registration_seq\n  LIMIT greatest(coalesce(p_limit, 0), 0)",
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "the tenant register > caps a page at the reviewed maximum however much the caller asks for"
+    }
+  },
+  {
+    "id": "M9-registration-trigger-dropped",
+    "invariant": "INV-10: registration cannot be forgotten",
+    "expected": "A new tenant would never be registered, so its chain would never be verified.",
+    "file": "packages/db/migrations/0010_audit_chain_verification.sql",
+    "find": "CREATE TRIGGER organisations_register_audit_chain AFTER INSERT ON organisations\n  FOR EACH ROW EXECUTE FUNCTION app.register_audit_chain();\nALTER TABLE organisations ENABLE ALWAYS TRIGGER organisations_register_audit_chain;",
+    "replace": "CREATE TRIGGER organisations_register_audit_chain AFTER INSERT ON organisations\n  FOR EACH ROW EXECUTE FUNCTION app.register_audit_chain();\nALTER TABLE organisations DISABLE TRIGGER organisations_register_audit_chain;",
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "the tenant register > is filled by the trigger, not by the caller remembering"
+    }
+  },
+  {
+    "id": "M10-register-readable-by-runtime-role",
+    "invariant": "INV-01/least privilege: the runtime role has no grant on the register",
+    "expected": "`moin_app` could select and join the tenant register directly instead of a capped identifier list.",
+    "file": "packages/db/migrations/0010_audit_chain_verification.sql",
+    "find": "REVOKE ALL ON audit_chain_registry FROM moin_app, moin_provisioner;",
+    "replace": "REVOKE ALL ON audit_chain_registry FROM moin_app, moin_provisioner;\nGRANT SELECT ON audit_chain_registry TO moin_app;",
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "the tenant register > cannot be enumerated unelevated — not even by the role that owns organisations"
+    }
+  },
+  {
+    "id": "M11-catalog-drops-register-from-append-only",
+    "invariant": "QG-09: the catalog check asserts the register's guard from pg_catalog",
+    "expected": "A disabled or dropped register guard would pass CI.",
+    "file": "scripts/check-rls-catalog.ts",
+    "find": "  {\n    table: 'audit_chain_registry',\n    trigger: 'audit_chain_registry_append_only',\n    fn: 'app.reject_registry_mutation()',\n    triggerType: AUDIT_TRIGGER_TYPE,\n  },\n",
+    "replace": "",
+    "killingTest": {
+      "file": "scripts/check-rls-catalog.integration.test.ts",
+      "fullName": "audit chain verification catalog controls > rejects a disabled and a dropped register guard"
+    }
+  },
+  {
+    "id": "M12-catalog-drops-registration-trigger-check",
+    "invariant": "QG-09: the catalog check asserts the registration trigger",
+    "expected": "A dropped registration trigger would pass CI while new tenants went unverified.",
+    "file": "scripts/check-rls-catalog.ts",
+    "find": "      if (guard?.enabled !== TRIGGER_ALWAYS || !guard.correct_function) {",
+    "replace": "      if (false) {",
+    "killingTest": {
+      "file": "scripts/check-rls-catalog.integration.test.ts",
+      "fullName": "audit chain verification catalog controls > rejects a dropped and a disabled chain-registration trigger"
+    }
+  },
+  {
+    "id": "M13-catalog-drops-claim-fn-registration",
+    "invariant": "QG-09: every reviewed SECURITY DEFINER is pinned by signature, owner, path and grants",
+    "expected": "The claim function could be downgraded to SECURITY INVOKER, or regranted, without CI noticing.",
+    "file": "scripts/check-rls-catalog.ts",
+    "find": "  'app.claim_audit_chains': {\n    arguments: 'integer, bigint, bigint',\n    owners: ['moin_migrator', 'moin_owner'],\n    searchPath: 'search_path=pg_catalog, public, app, pg_temp',\n    executeGrantees: ['moin_app'],\n  },\n",
+    "replace": "",
+    "killingTest": {
+      "file": "scripts/check-rls-catalog.integration.test.ts",
+      "fullName": "audit chain verification catalog controls > rejects the claim function changed to SECURITY INVOKER"
+    }
+  },
+  {
+    "id": "C1-exit-codes-collapsed",
+    "invariant": "Operability: a break and an incomplete run are different incidents",
+    "expected": "A database outage would page someone for suspected tampering.",
+    "file": "packages/db/src/cli.ts",
+    "find": "const EXIT_CHAIN_BROKEN = 3;",
+    "replace": "const EXIT_CHAIN_BROKEN = 1;",
+    "killingTest": {
+      "file": "packages/db/src/cli-verify-audit.integration.test.ts",
+      "fullName": "the scheduled verifier process > raises a SEV2 alarm with its runbook and a distinct exit code on a break"
+    }
+  },
+  {
+    "id": "C2-break-severity-downgraded",
+    "invariant": "Operability: a broken chain is SEV2",
+    "expected": "An integrity break would be routed as a low-severity alert.",
+    "file": "packages/db/src/cli.ts",
+    "find": "          event: 'audit.chain.broken',\n          severity: 'SEV2',",
+    "replace": "          event: 'audit.chain.broken',\n          severity: 'SEV3',",
+    "killingTest": {
+      "file": "packages/db/src/cli-verify-audit.integration.test.ts",
+      "fullName": "the scheduled verifier process > raises a SEV2 alarm with its runbook and a distinct exit code on a break"
+    }
+  },
+  {
+    "id": "C3-enumeration-failure-reported-clean",
+    "invariant": "INV-10: a sweep that could not run exits non-zero",
+    "expected": "A sweep that never enumerated a tenant would exit 0.",
+    "file": "packages/db/src/cli.ts",
+    "find": "      reason: sqlState(error),\n      runbook: 'docs/runbooks/audit-chain-break.md',\n    });\n    return EXIT_FAILED;",
+    "replace": "      reason: sqlState(error),\n      runbook: 'docs/runbooks/audit-chain-break.md',\n    });\n    return EXIT_OK;",
+    "killingTest": {
+      "file": "packages/db/src/cli-verify-audit.integration.test.ts",
+      "fullName": "the scheduled verifier process > reports a failure rather than a clean run when it cannot enumerate tenants"
+    }
+  },
+  {
+    "id": "C4-driver-message-leaked-into-log",
+    "invariant": "INV-12: no personal data or driver text on the log stream",
+    "expected": "A database error message — which routinely quotes its input — would be written to the alarm line.",
+    "file": "packages/db/src/cli.ts",
+    "find": "          reason: sqlState(failure.error),",
+    "replace": "          reason: String(failure.error),",
+    "killingTest": {
+      "file": "packages/db/src/cli-verify-audit.integration.test.ts",
+      "fullName": "the scheduled verifier process > emits only the reviewed non-personal fields on every line kind (INV-12)"
+    }
+  },
+  {
+    "id": "C5-runbook-link-dropped",
+    "invariant": "Operability: every alarm names its runbook",
+    "expected": "A SEV2 integrity alarm would arrive with no runbook to follow.",
+    "file": "packages/db/src/cli.ts",
+    "find": "          seq: found.seq,\n          checked: found.checked,\n          runbook: 'docs/runbooks/audit-chain-break.md',",
+    "replace": "          seq: found.seq,\n          checked: found.checked,",
+    "killingTest": {
+      "file": "packages/db/src/cli-verify-audit.integration.test.ts",
+      "fullName": "the scheduled verifier process > raises a SEV2 alarm with its runbook and a distinct exit code on a break"
+    }
+  },
+  {
+    "id": "C6-broken-run-reported-sound",
+    "invariant": "INV-10: a broken chain exits non-zero",
+    "expected": "A run that found a broken chain would exit 0.",
+    "file": "packages/db/src/cli.ts",
+    "find": "  if (report.broken > 0) return EXIT_CHAIN_BROKEN;",
+    "replace": "",
+    "killingTest": {
+      "file": "packages/db/src/cli-verify-audit.integration.test.ts",
+      "fullName": "the scheduled verifier process > raises a SEV2 alarm with its runbook and a distinct exit code on a break"
+    }
+  },
+  {
+    "id": "S1-structural-rule-removed",
+    "invariant": "INV-12: the only string-valued argument kind is `uuid`",
+    "expected": "A business name or any other free text stored as an argument would pass unreported.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "  uuid: { jsonType: 'string', check: (value) => UUID.test(value) },",
+    "replace": "  uuid: { jsonType: 'string', check: () => true },",
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "what the scanner catches > a name, which no pattern would predict, by the structural rule"
+    }
+  },
+  {
+    "id": "S2-unregistered-key-ignored",
+    "invariant": "INV-10: every stored argument key is on the reviewed allowlist",
+    "expected": "A key that never passed the writer — a restore, a bulk import — would pass unreported.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "            if (kind === undefined) {",
+    "replace": "            if (false && kind === undefined) {",
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "what the scanner catches > a key that never passed the writer at all"
+    }
+  },
+  {
+    "id": "S3-value-kind-widening-ignored",
+    "invariant": "QG-09: the argument registry's value kinds cannot be widened silently",
+    "expected": "A migration adding a free-text value kind would turn the audit trail into a text sink unreported.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "      if (!reviewedKinds.has(row.value_kind)) {",
+    "replace": "      if (false && !reviewedKinds.has(row.value_kind)) {",
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "what the scanner catches > a value kind the registry was widened to accept"
+    }
+  },
+  {
+    "id": "S4-validation-rule-removed",
+    "invariant": "INV-12: validation values are bounded scalars",
+    "expected": "A validation entry carrying text would pass unreported.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "          for (const row of (await client.query<ValidationRow>(VALIDATION_QUERY)).rows) {",
+    "replace": "          for (const row of ([] as ValidationRow[])) {",
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "what the scanner catches > a validation entry carrying something other than a bounded scalar"
+    }
+  },
+  {
+    "id": "S5-contact-classification-lost",
+    "invariant": "INV-12: a contact detail is named as such",
+    "expected": "An email or phone number in an argument would be reported only as generic free text.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "          rule: contact === undefined ? 'free-text-argument' : 'personal-data-in-argument',",
+    "replace": "          rule: 'free-text-argument',",
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "what the scanner catches > a contact detail, named as such"
+    }
+  },
+  {
+    "id": "S6-finding-quotes-the-value",
+    "invariant": "INV-12: the check never prints the value it found",
+    "expected": "The check itself would write the personal data it detected into CI logs.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "                      'printing it would be the leak.'",
+    "replace": "                      'printing it would be the leak: ' + row.value",
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "what the scanner catches > a name, which no pattern would predict, by the structural rule"
+    }
+  },
+  {
+    "id": "N1-head-rollback-allowed",
+    "invariant": "INV-10: a chain head may only advance by one",
+    "expected": "Setting `last_seq = 0` would silence verification for that tenant with every event still in place.",
+    "file": "packages/db/migrations/0008_audit_events.sql",
+    "find": "    OR NEW.last_seq < OLD.last_seq\n    OR NEW.last_seq > OLD.last_seq + 1",
+    "replace": "    OR false",
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "what the sweep finds > detects a head rolled back to zero, which leaves every event in place"
+    }
+  },
+  {
+    "id": "N2-event-past-head-undetected",
+    "invariant": "INV-10: nothing exists beyond the head unreported",
+    "expected": "A forged insert past the head, or a rolled-back head, would verify as sound.",
+    "file": "packages/db/src/audit.ts",
+    "find": "  if (head.max_seq !== null && BigInt(head.max_seq) > finalSeq) {",
+    "replace": "  if (false && head.max_seq !== null && BigInt(head.max_seq) > finalSeq) {",
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "what the sweep finds > detects a head rolled back to zero, which leaves every event in place"
+    }
+  },
+  {
+    "id": "N3-insert-link-guard-dropped",
+    "invariant": "INV-10: an event may only be inserted correctly linked to the head",
+    "expected": "A privileged direct INSERT could place an unlinked forged event in the trail.",
+    "file": "packages/db/migrations/0008_audit_events.sql",
+    "find": "CREATE TRIGGER audit_events_linked_only BEFORE INSERT ON audit_events\n  FOR EACH ROW EXECUTE FUNCTION app.reject_unlinked_audit_event();\nALTER TABLE audit_events ENABLE ALWAYS TRIGGER audit_events_linked_only;",
+    "replace": "CREATE TRIGGER audit_events_linked_only BEFORE INSERT ON audit_events\n  FOR EACH ROW EXECUTE FUNCTION app.reject_unlinked_audit_event();\nALTER TABLE audit_events DISABLE TRIGGER audit_events_linked_only;",
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "what the sweep finds > detects a forged event written past the head"
+    }
+  },
+  {
+    "id": "N4-truncate-guards-dropped",
+    "invariant": "INV-10: TRUNCATE is refused on the audit tables",
+    "expected": "`TRUNCATE audit_events` would erase the whole trail and the next sweep would report it clean.",
+    "file": "packages/db/migrations/0008_audit_events.sql",
+    "find": "CREATE TRIGGER audit_events_no_truncate BEFORE TRUNCATE ON audit_events\n  FOR EACH STATEMENT EXECUTE FUNCTION app.reject_audit_mutation();\nALTER TABLE audit_events ENABLE ALWAYS TRIGGER audit_events_no_truncate;",
+    "replace": "CREATE TRIGGER audit_events_no_truncate BEFORE TRUNCATE ON audit_events\n  FOR EACH STATEMENT EXECUTE FUNCTION app.reject_audit_mutation();\nALTER TABLE audit_events DISABLE TRIGGER audit_events_no_truncate;",
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "what the sweep finds > refuses TRUNCATE on the register, the events and the heads"
+    }
+  },
+  {
+    "id": "N5-registry-truncate-guard-dropped",
+    "invariant": "INV-10: TRUNCATE is refused on the register",
+    "expected": "Emptying the register would take every tenant off the worklist at once.",
+    "file": "packages/db/migrations/0010_audit_chain_verification.sql",
+    "find": "CREATE TRIGGER audit_chain_registry_no_truncate BEFORE TRUNCATE ON audit_chain_registry\n  FOR EACH STATEMENT EXECUTE FUNCTION app.reject_registry_mutation();\nALTER TABLE audit_chain_registry ENABLE ALWAYS TRIGGER audit_chain_registry_no_truncate;",
+    "replace": "CREATE TRIGGER audit_chain_registry_no_truncate BEFORE TRUNCATE ON audit_chain_registry\n  FOR EACH STATEMENT EXECUTE FUNCTION app.reject_registry_mutation();\nALTER TABLE audit_chain_registry DISABLE TRIGGER audit_chain_registry_no_truncate;",
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "what the sweep finds > refuses TRUNCATE on the register, the events and the heads"
+    }
+  },
+  {
+    "id": "N6-reconciliation-removed",
+    "invariant": "INV-10: the register is reconciled against an independent witness",
+    "expected": "A tenant provisioned but never registered would be invisible to the sweep forever.",
+    "file": "packages/db/src/audit-verification.ts",
+    "find": "  const unregisteredTenants = await unregistered(pool);",
+    "replace": "  const unregisteredTenants: readonly string[] = [];\n  void unregistered;",
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "what the sweep finds > reports a provisioned tenant that never reached the register"
+    }
+  },
+  {
+    "id": "N7-isSound-ignores-unregistered",
+    "invariant": "INV-10: an unregistered tenant is never 'sound'",
+    "expected": "A sweep would report a clean estate while a tenant sat outside it.",
+    "file": "packages/db/src/audit-verification.ts",
+    "find": "    report.unregistered === 0 &&\n",
+    "replace": "",
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "what the sweep finds > reports a provisioned tenant that never reached the register"
+    }
+  },
+  {
+    "id": "N8-backfill-removed",
+    "invariant": "INV-10/INV-17: the register covers tenants that predate it",
+    "expected": "Every tenant existing when the migration landed would be permanently unverifiable.",
+    "file": "packages/db/migrations/0010_audit_chain_verification.sql",
+    "find": "INSERT INTO audit_chain_registry(tenant_id) SELECT id FROM organisations ON CONFLICT DO NOTHING;",
+    "replace": "",
+    "note": "Deliberately **not** evidence, and deliberately not migrated to `evidenceTest`. The defect is detected by a guard inside the migration itself: `0010` raises \"audit chain register backfill covered 0 of 3 organisation(s)\" and rolls back, so the test that applies it fails on a thrown database error and no matcher ever throws. That is a stronger control than a test assertion — it refuses the migration rather than reporting afterwards — but it is not assertion mutation evidence, and wrapping the test would not make it so. Classified NOT_EVIDENCE_ELIGIBLE and kept outside the KILLED_ASSERTION numerator.",
+    "killingTest": {
+      "file": "packages/db/src/audit-chain-backfill.integration.test.ts",
+      "fullName": "applying the register migration to a database that already has tenants > registers every pre-existing organisation"
+    }
+  },
+  {
+    "id": "N9-catalog-accepts-origin-only-trigger",
+    "invariant": "INV-10: guards are ENABLE ALWAYS, not origin-only",
+    "expected": "`session_replication_role = 'replica'` would bypass every append-only guard with no schema change.",
+    "file": "scripts/check-rls-catalog.ts",
+    "find": "const TRIGGER_ALWAYS = 'A';",
+    "replace": "const TRIGGER_ALWAYS = 'O';",
+    "killingTest": {
+      "file": "scripts/check-rls-catalog.integration.test.ts",
+      "fullName": "audit append-only catalog control > rejects a disabled mutation guard"
+    }
+  },
+  {
+    "id": "N10-catalog-body-pinning-removed",
+    "invariant": "QG-09: a reviewed function's body is pinned, not only its identity",
+    "expected": "A guard could be replaced with one that returns without raising, keeping name, owner and triggers.",
+    "file": "scripts/check-rls-catalog.ts",
+    "find": "      if (fn.body_digest !== expected) {",
+    "replace": "      if (false && fn.body_digest !== expected) {",
+    "killingTest": {
+      "file": "scripts/check-rls-catalog.integration.test.ts",
+      "fullName": "audit chain verification catalog controls > rejects a guard whose body was replaced with one that does not raise"
+    }
+  },
+  {
+    "id": "N11-registry-reconciliation-catalog-removed",
+    "invariant": "QG-09: CI fails on a register that misses a provisioned tenant",
+    "expected": "A registration gap would pass CI even after the trigger was put back.",
+    "file": "scripts/check-rls-catalog.ts",
+    "find": "      if (missing > 0) {",
+    "replace": "      if (false && missing > 0) {",
+    "killingTest": {
+      "file": "scripts/check-rls-catalog.integration.test.ts",
+      "fullName": "audit chain verification catalog controls > rejects a register that does not account for every provisioned tenant"
+    }
+  },
+  {
+    "id": "N12-scanner-reads-without-tenant-scope",
+    "invariant": "INV-01: the scanner reads under tenant scope as the runtime role",
+    "expected": "FORCE RLS would return zero rows and the check would report a clean trail having inspected nothing.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "          const counted = await client.query<{ n: string }>(EVENT_COUNT_QUERY);",
+    "replace": "          const counted = await pool.query<{ n: string }>(EVENT_COUNT_QUERY);",
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "what the scanner catches > a name, which no pattern would predict, by the structural rule"
+    }
+  },
+  {
+    "id": "N13-scanner-vacuous-pass-refused-by-main",
+    "invariant": "INV-10: a scan that inspected nothing is not a clean scan",
+    "expected": "A vacuous scan would print a reassuring sentence and exit 0.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "  if (result.events === 0) {",
+    "replace": "  if (false && result.events === 0) {",
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "the check as a process > refuses to pass when tenants exist but it inspected no events"
+    }
+  },
+  {
+    "id": "N14-scanner-prints-forged-key",
+    "invariant": "INV-12: an argument key is not printed unless its shape is safe",
+    "expected": "A forged key that is itself personal data would be written into CI logs by the check.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "  const safeKey = SAFE_KEY.test(key) ? key : '<unprintable key>';",
+    "replace": "  const safeKey = key;",
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "what the scanner catches > a forged argument key that is itself personal data, without printing it"
+    }
+  },
+  {
+    "id": "N15-scanner-shape-rule-removed",
+    "invariant": "INV-12: operation and target_kind shapes are asserted",
+    "expected": "A dropped column CHECK would let free text into retained, un-erasable columns unreported.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "            if (!SAFE_OPERATION.test(row.operation) || !SAFE_TARGET_KIND.test(row.target_kind)) {",
+    "replace": "            if (false) {",
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "what the scanner catches > an operation or target kind that only a dropped CHECK could have allowed"
+    }
+  },
+  {
+    "id": "N16-empty-register-reported-clean",
+    "invariant": "INV-10: a sweep of zero tenants is not a clean day",
+    "expected": "A truncated or unreadable register would exit 0, indistinguishable from a healthy estate.",
+    "file": "packages/db/src/cli.ts",
+    "find": "  if (report.tenants === 0) {",
+    "replace": "  if (false && report.tenants === 0) {",
+    "killingTest": {
+      "file": "packages/db/src/cli-verify-audit.integration.test.ts",
+      "fullName": "the scheduled verifier process > exits non-zero on a sweep of zero tenants"
+    }
+  },
+  {
+    "id": "N17-sqlstate-replaced-by-error-name",
+    "invariant": "Operability: the unchecked alarm carries a SQLSTATE",
+    "expected": "Every database failure would emit the same useless reason, since `pg` sets `name` to 'error'.",
+    "file": "packages/db/src/cli.ts",
+    "find": "  const code = (error as { code?: unknown } | null)?.code;\n  if (typeof code === 'string' && /^[0-9A-Z]{5}$/u.test(code)) return code;",
+    "replace": "",
+    "killingTest": {
+      "file": "packages/db/src/cli-verify-audit.integration.test.ts",
+      "fullName": "the scheduled verifier process > emits only the reviewed non-personal fields on every line kind (INV-12)"
+    }
+  },
+  {
+    "id": "B1-1-deadline-shortfall-inferred-from-claims",
+    "invariant": "INV-10: coverage is a property of the register, not of the worklist drained from it",
+    "expected": "A deadline expiring between pages would report `unreached: 0` and a sound sweep, having verified one tenant out of many.",
+    "file": "packages/db/src/audit-verification.ts",
+    "find": "      unreached = await remaining(pool, after, highWater);",
+    "replace": "      unreached = Math.max(tenants - (outcomes.size + failures.length), 0);",
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "the daily sweep > does not call a deadline-truncated sweep sound, even when every tenant it reached was"
+    }
+  },
+  {
+    "id": "B1-2-coverage-ignored-by-isSound",
+    "invariant": "INV-10: a sweep that did not reach the end of the register is not sound",
+    "expected": "An incomplete sweep would be declared sound despite reporting a shortfall.",
+    "file": "packages/db/src/audit-verification.ts",
+    "find": "    report.unregistered === 0 &&\n    report.coverageComplete\n  );",
+    "replace": "    report.unregistered === 0\n  );",
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "the daily sweep > treats a shortfall it could not count as incomplete, not as zero"
+    }
+  },
+  {
+    "id": "B1-3-uncountable-shortfall-treated-as-none",
+    "invariant": "INV-10: not knowing whether coverage was complete is not the same as it being complete",
+    "expected": "If the shortfall could not be counted, the sweep would claim complete coverage.",
+    "file": "packages/db/src/audit-verification.ts",
+    "find": "    } catch {\n      // Not knowing the shortfall is not the same as there being none. Fail closed, and let the\n      // count stay 0 rather than inventing one.\n      coverageComplete = false;\n    }",
+    "replace": "    } catch {\n      unreached = 0;\n    }",
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "the daily sweep > treats a shortfall it could not count as incomplete, not as zero"
+    }
+  },
+  {
+    "id": "B1-4-cli-ignores-incomplete-coverage",
+    "invariant": "Operability: an incomplete sweep exits non-zero",
+    "expected": "A deadline-truncated sweep would exit 0, so the schedule would record a clean day.",
+    "file": "packages/db/src/cli.ts",
+    "find": "  if (report.unchecked > 0 || report.unregistered > 0 || !report.coverageComplete) {",
+    "replace": "  if (false && (report.unchecked > 0 || report.unregistered > 0 || !report.coverageComplete)) {",
+    "killingTest": {
+      "file": "packages/db/src/cli-verify-audit.integration.test.ts",
+      "fullName": "the scheduled verifier process > fails when it cannot even establish whether coverage was complete"
+    }
+  },
+  {
+    "id": "B2-1-scanner-skips-coverage-reconciliation",
+    "invariant": "INV-10: the scanner reconciles its coverage against the provisioning witness",
+    "expected": "A tenant provisioned but absent from the register would be outside the scan, and a planted leak under it would go unreported.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "    const missing = await pool.query<{ id: string }>(UNREGISTERED_QUERY, [UNREGISTERED_SAMPLE]);",
+    "replace": "    const missing = { rows: [] as { id: string }[] };",
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "scanner coverage is reconciled, not assumed > fails when a provisioned tenant hides a leaking argument outside the register"
+    }
+  },
+  {
+    "id": "B2-2-coverage-gap-not-explained",
+    "invariant": "Operability: the scanner names the coverage gap, not just a finding count",
+    "expected": "An operator would see a list of findings with no statement that whole tenants were never reached.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "    console.error(\n      `audit argument scan could not reach ${String(result.unregistered)} provisioned tenant(s): ` +\n        'they have no audit chain register row. Nothing is proven about the arguments stored under ' +\n        'them — see docs/runbooks/audit-chain-break.md.',\n    );",
+    "replace": "",
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "scanner coverage is reconciled, not assumed > fails when a provisioned tenant hides a leaking argument outside the register"
+    }
+  },
+  {
+    "id": "B3-1-nonstring-values-skipped",
+    "invariant": "INV-10/INV-12: a stored value must match its registered kind's JSON type",
+    "expected": "A `uuid`-kind argument holding a boolean or a number would produce no finding at all.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "            if (row.kind !== rule.jsonType) {",
+    "replace": "            if (false && row.kind !== rule.jsonType) {",
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "values are validated against their registered kind > catches a uuid kind holding a boolean"
+    }
+  },
+  {
+    "id": "B3-2-registered-is-treated-as-sufficient",
+    "invariant": "INV-10/INV-12: a stored value is validated against its registered kind, not merely typed",
+    "expected": "Value validation would be skipped entirely: a non-UUID string under a `uuid` kind, and any out-of-bounds count, would pass.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "            if (rule.check(row.value)) continue;",
+    "replace": "            continue;",
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "what the scanner catches > a name, which no pattern would predict, by the structural rule"
+    }
+  },
+  {
+    "id": "B3-3-count-bounds-not-enforced",
+    "invariant": "INV-10: a `count` is a non-negative integer within its reviewed bound",
+    "expected": "A negative, fractional or oversized count would be stored and reported as conforming.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "    check: (value) => /^(0|[1-9][0-9]{0,8})$/u.test(value) && Number(value) <= COUNT_MAX,",
+    "replace": "    check: () => true,",
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "values are validated against their registered kind > catches a count kind holding a negative number"
+    }
+  },
+  {
+    "id": "B3-4-unknown-kind-fails-open",
+    "invariant": "INV-10: an argument kind with no validator fails closed",
+    "expected": "A kind the check cannot validate would be silently accepted, so widening the registry would bypass the scanner.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "            if (rule === undefined) {",
+    "replace": "            if (false && rule === undefined) {",
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "values are validated against their registered kind > fails closed on a registered kind it has no validator for"
+    }
+  },
+  {
+    "id": "B4-1-head-and-orphan-read-in-two-statements",
+    "invariant": "INV-10: 'head absent' and 'event exists' come from one snapshot",
+    "expected": "A legitimate first append committing mid-verification would be reported as `missing-head` — a false integrity alarm on a sound chain.",
+    "file": "packages/db/src/audit.ts",
+    "find": "  if (head.last_seq === null || head.last_hash === null) {\n    // No head. In the same snapshot, either there are no events — an empty chain, which is sound —\n    // or events exist without a head, which is a genuine break and still detected.\n    return head.max_seq === null\n      ? { valid: true, checked: '0' }\n      : { valid: false, checked: '0', reason: 'missing-head', seq: head.max_seq };\n  }",
+    "replace": "  if (head.last_seq === null || head.last_hash === null) {\n    const orphan = await client.query<{ n: string }>('select max(seq)::text as n from audit_events');\n    const n = orphan.rows[0]?.n ?? null;\n    return n === null\n      ? { valid: true, checked: '0' }\n      : { valid: false, checked: '0', reason: 'missing-head', seq: n };\n  }",
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "the head-and-orphan determination > does not report missing-head when a first append commits mid-verification"
+    }
+  },
+  {
+    "id": "B4-2-missing-head-suppressed",
+    "invariant": "INV-10: events without a head are a break",
+    "expected": "Fixing the false alarm by suppressing the real one: an orphaned trail with no head would verify as sound.",
+    "file": "packages/db/src/audit.ts",
+    "find": "    return head.max_seq === null\n      ? { valid: true, checked: '0' }\n      : { valid: false, checked: '0', reason: 'missing-head', seq: head.max_seq };",
+    "replace": "    return { valid: true, checked: '0' };",
+    "killingTest": {
+      "file": "packages/db/src/audit-verification.integration.test.ts",
+      "fullName": "the head-and-orphan determination > still detects a genuine orphan event with no head"
+    }
+  },
+  {
+    "id": "P1-high-water-bound-ignored",
+    "invariant": "INV-10: a sweep's population is bounded by the high-water mark captured at its start",
+    "expected": "The sweep would chase registrations that land while it runs, so on a busy estate it would never terminate and its verdict would cover an ever-shifting population.",
+    "file": "packages/db/migrations/0011_audit_chain_population.sql",
+    "find": "    AND r.registration_seq <= coalesce(p_high_water, 0)\n  ORDER BY r.registration_seq",
+    "replace": "  ORDER BY r.registration_seq",
+    "killingTest": {
+      "file": "packages/db/src/audit-chain-population.integration.test.ts",
+      "fullName": "the sweep does not widen its own population > reads the high-water mark once, not once per page"
+    }
+  },
+  {
+    "id": "P2-high-water-recomputed-each-page",
+    "invariant": "INV-10: the high-water mark is read once per sweep, not once per page",
+    "expected": "The population would grow underneath the sweep meant to be bounded by it, so 'complete coverage' would mean nothing.",
+    "file": "packages/db/src/audit-verification.ts",
+    "find": "          [pageSize, after, highWater],",
+    "replace": "          [pageSize, after, await populationHighWater(pool)],",
+    "killingTest": {
+      "file": "packages/db/src/audit-chain-population.integration.test.ts",
+      "fullName": "the sweep does not widen its own population > reads the high-water mark once, not once per page"
+    }
+  },
+  {
+    "id": "P3-uuid-cursor-instead-of-sequence",
+    "invariant": "INV-10: paging follows registration order, which UUID order does not encode",
+    "expected": "The original defect: a registration landing behind the cursor would be invisible to the sweep and to its shortfall count, and a half-covered estate would report sound.",
+    "file": "packages/db/migrations/0011_audit_chain_population.sql",
+    "find": "  SELECT r.tenant_id AS organisation_id, r.tenant_id AS id, r.registration_seq\n  FROM audit_chain_registry r\n  WHERE r.registration_seq > coalesce(p_after, 0)",
+    "replace": "  SELECT r.tenant_id AS organisation_id, r.tenant_id AS id,\n         (row_number() OVER (ORDER BY r.tenant_id))::bigint AS registration_seq\n  FROM audit_chain_registry r\n  WHERE r.registration_seq > coalesce(p_after, 0)",
+    "killingTest": {
+      "file": "packages/db/src/audit-chain-population.integration.test.ts",
+      "fullName": "CASE 2 — a member that existed at snapshot start > is verified before coverage is complete, whatever its UUID sorts like"
+    }
+  },
+  {
+    "id": "P4-coverage-complete-on-empty-page-without-checking-snapshot",
+    "invariant": "INV-10: a deadline shortfall is counted inside the captured population",
+    "expected": "A deadline would end the sweep and declare complete coverage, because nothing would check how much of the population was left.",
+    "file": "packages/db/src/audit-verification.ts",
+    "find": "    if (unreached > 0) coverageComplete = false;",
+    "replace": "    void unreached;",
+    "killingTest": {
+      "file": "packages/db/src/audit-chain-population.integration.test.ts",
+      "fullName": "CASE 4 — a deadline inside the captured population > reports the snapshot shortfall and is not sound"
+    }
+  },
+  {
+    "id": "P5-scanner-ignores-high-water",
+    "invariant": "INV-10: the scanner scans exactly the population it captured",
+    "expected": "The scanner would re-acquire tenants as they register and could loop, and its clean verdict would not correspond to any fixed population.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "    highWater = capturedHighWater;",
+    "replace": "    highWater = '9223372036854775807';",
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "CASE 5 — the scanner uses the same population snapshot > does not adopt a registration that lands while it is running"
+    }
+  },
+  {
+    "id": "P6-scanner-skips-population-traversal",
+    "invariant": "INV-10: the scanner traverses the register population as well as reconciling it",
+    "expected": "A leaking argument under a registered tenant would go unreported, because the scan would inspect nobody while the provisioning witness stayed silent.",
+    "file": "scripts/check-audit-arguments.ts",
+    "find": "      if (result.claimed < TENANT_PAGE_SIZE) break;\n      after = cursor;",
+    "replace": "      void cursor;\n      break;",
+    "killingTest": {
+      "file": "scripts/check-audit-arguments.integration.test.ts",
+      "fullName": "CASE 5 — the scanner uses the same population snapshot > a late registration behind the cursor is excluded by the bound, not skipped by ordering"
+    }
+  },
+  {
+    "id": "P7-registration-sequence-not-monotonic",
+    "invariant": "A registration's position in the population order is assigned once and strictly advances",
+    "expected": "Two registrations could share a position, so a cursor could step over one of them and the population order would stop being a total order.",
+    "file": "packages/db/migrations/0011_audit_chain_population.sql",
+    "find": "ALTER TABLE audit_chain_registry\n  ADD CONSTRAINT audit_chain_registry_registration_seq_key UNIQUE (registration_seq);",
+    "replace": "",
+    "killingTest": {
+      "file": "packages/db/src/audit-chain-population.integration.test.ts",
+      "fullName": "the registration sequence > refuses two registrations sharing a position"
+    }
+  },
+  {
+    "id": "P8-sequence-backfill-removed",
+    "invariant": "INV-10/INV-17: registrations that predate the sequence column join the population",
+    "expected": "Every tenant registered before this migration would be outside every sweep's population for ever: the register is append-only and the column is NOT NULL only after the backfill.",
+    "file": "packages/db/migrations/0011_audit_chain_population.sql",
+    "find": "UPDATE audit_chain_registry r\nSET registration_seq = ordered.position\nFROM ordered\nWHERE r.tenant_id = ordered.tenant_id AND r.registration_seq IS NULL;",
+    "replace": "UPDATE audit_chain_registry r\nSET registration_seq = NULL\nFROM ordered\nWHERE false;",
+    "note": "Deliberately **not** evidence, same shape as N8 and not migrated either. `0011` fails on `column \"registration_seq\" of relation \"audit_chain_registry\" contains null values` and rolls back: the NOT NULL constraint is the control, the test fails on a thrown database error, and no matcher throws. Detected by a migration guard, not by an assertion. Kept outside the KILLED_ASSERTION numerator.",
+    "killingTest": {
+      "file": "packages/db/src/audit-chain-backfill.integration.test.ts",
+      "fullName": "applying the registration-sequence migration to a populated register > backfills every existing row deterministically and keeps advancing afterwards"
+    }
+  },
+  {
+    "id": "P9-population-state-writable-by-runtime-role",
+    "invariant": "A registration epoch is immutable, and the allocator is not writable by the runtime role",
+    "expected": "`moin_app` could increment the population state and move a sweep's bound out from under it, or rewrite a registration's epoch — the UUID-cursor defect made deliberate.",
+    "file": "packages/db/migrations/0011_audit_chain_population.sql",
+    "find": "REVOKE ALL ON audit_chain_population_state FROM moin_app, moin_provisioner;",
+    "replace": "GRANT SELECT, UPDATE ON audit_chain_population_state TO moin_app;\nGRANT UPDATE ON audit_chain_registry TO moin_app;",
+    "killingTest": {
+      "file": "packages/db/src/audit-chain-population.integration.test.ts",
+      "fullName": "the registration sequence > cannot be rewritten by the application role or by the table owner"
+    }
+  },
+  {
+    "id": "P10-next-sweep-starts-from-previous-mark",
+    "invariant": "INV-10: no registration falls outside both of two consecutive sweeps",
+    "expected": "Starting a sweep's cursor at the previous mark rather than at zero would strand any registration the previous sweep had already passed.",
+    "file": "packages/db/src/audit-verification.ts",
+    "find": "  let after = FIRST_CURSOR;",
+    "replace": "  let after = await populationHighWater(pool);",
+    "killingTest": {
+      "file": "packages/db/src/audit-chain-population.integration.test.ts",
+      "fullName": "CASE 6 — the exact snapshot boundary > leaves no registration outside both of two consecutive sweeps"
+    }
+  },
+  {
+    "id": "E1-epoch-allocated-by-sequence",
+    "invariant": "INV-10: epoch order is commit order, which a sequence does not provide",
+    "expected": "The exact rejected architecture: `nextval()` hands out distinct values without locking, so a higher epoch can commit while a lower one is still in flight and a sweep reports complete coverage of a population it half covered.",
+    "file": "packages/db/migrations/0011_audit_chain_population.sql",
+    "find": "CREATE OR REPLACE FUNCTION app.register_audit_chain() RETURNS trigger\n  LANGUAGE plpgsql SET search_path = pg_catalog, public, app, pg_temp\nAS $$\nDECLARE\n  v_epoch bigint;\nBEGIN\n  UPDATE audit_chain_population_state\n     SET last_registration_epoch = last_registration_epoch + 1\n   WHERE id\n  RETURNING last_registration_epoch INTO v_epoch;",
+    "replace": "CREATE SEQUENCE mutation_rejected_epoch_seq;\nCREATE OR REPLACE FUNCTION app.register_audit_chain() RETURNS trigger\n  LANGUAGE plpgsql SET search_path = pg_catalog, public, app, pg_temp\nAS $$\nDECLARE\n  v_epoch bigint;\nBEGIN\n  v_epoch := nextval('mutation_rejected_epoch_seq');",
+    "killingTest": {
+      "file": "packages/db/src/audit-chain-epoch.integration.test.ts",
+      "fullName": "the allocator is a row lock, not a sequence > blocks a second registration while the first is uncommitted"
+    }
+  },
+  {
+    "id": "E3-allocator-does-not-fail-closed",
+    "invariant": "A registration with no allocatable epoch fails rather than registering nothing",
+    "expected": "If the population state row were missing, registrations would silently insert a null epoch or none at all, and those tenants would never enter any sweep's population.",
+    "file": "packages/db/migrations/0011_audit_chain_population.sql",
+    "find": "  IF v_epoch IS NULL THEN\n    RAISE EXCEPTION 'audit chain population state is missing, so no registration epoch can be allocated'\n      USING ERRCODE = 'internal_error';\n  END IF;",
+    "replace": "  v_epoch := coalesce(v_epoch, 0);",
+    "killingTest": {
+      "file": "packages/db/src/audit-chain-epoch.integration.test.ts",
+      "fullName": "the allocator fails closed > refuses to register a tenant when no epoch can be allocated"
+    }
+  },
+  {
+    "id": "C1-privacy-gate-ignores-added-columns",
+    "invariant": "QG-12: every column reaches the personal-data inventory, however it was added",
+    "expected": "A column added by `ALTER TABLE ... ADD COLUMN` would never be classified, so an erasure request would miss it silently.",
+    "file": "scripts/check-data-classification.ts",
+    "find": "  for (const match of sql.matchAll(ADD_COLUMN)) {\n    columns.push({ table: match[1] ?? '', column: match[2] ?? '' });\n  }",
+    "replace": "",
+    "project": "unit",
+    "killingTest": {
+      "file": "scripts/check-data-classification.test.ts",
+      "fullName": "data classification check (QG-12) > flags an ALTER-added column the inventory has never seen"
+    }
+  },
+  {
+    "id": "H1-reporter-trusts-serialized-assertion-shape",
+    "invariant": "A serialized thrown value is never assertion authority",
+    "expected": "The rejected model, restored: an assertion would be recognised from the error's own `name`, so a plain object literal `{ name: 'AssertionError', … }` would count as proof an invariant was enforced.",
+    "file": "scripts/mutation-reporter.ts",
+    "find": "  // Fail closed on a missing, stale or self-doubting probe: without it there is no provenance.\n  if (probe === undefined) return 'UNKNOWN';\n  if (probe.version !== PROBE_VERSION) return 'UNKNOWN';\n  if (probe.suspect.length > 0) return 'UNKNOWN';\n  if (probe.rejected > 0) return 'UNKNOWN';",
+    "replace": "  if (errors.some((error) => error.name === 'AssertionError')) return 'ASSERTION';\n  if (probe === undefined) return 'UNKNOWN';",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.realvitest.test.ts",
+      "fullName": "the shapes that defeated earlier designs > are all refused, and none of them involves a matcher failing"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H2-reporter-skips-the-trusted-event",
+    "invariant": "Provenance: only a confirmed terminal identity can mean an assertion failed",
+    "expected": "A failure the wrapper never confirmed would fall through to the remaining checks instead of being refused.",
+    "file": "scripts/mutation-reporter.ts",
+    "find": "  if (probe.event !== MATCHER_IDENTITY_CONFIRMED) return 'ERROR';",
+    "replace": "  if (probe.event === 'a value the contract never emits') return 'ERROR';",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.test.ts",
+      "fullName": "the ASSERTION verdict > refuses an unconfirmed terminal value, whatever the error looks like"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H3-reporter-accepts-a-stale-probe-version",
+    "invariant": "A record from another contract version is not readable",
+    "expected": "A probe from a different contract would be read as though its fields meant what this version expects.",
+    "file": "scripts/mutation-reporter.ts",
+    "find": "  if (probe.version !== PROBE_VERSION) return 'UNKNOWN';",
+    "replace": "  if (probe.version < 0) return 'UNKNOWN';",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.test.ts",
+      "fullName": "the ASSERTION verdict > fails closed when the probe is missing or from another contract version"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H4-reporter-ignores-probe-suspicion",
+    "invariant": "A probe that doubts itself is not evidence",
+    "expected": "An invocation the probe refused to vouch for — overlapping windows, uninstrumented matchers — would be read as a clean one.",
+    "file": "scripts/mutation-reporter.ts",
+    "find": "  if (probe.suspect.length > 0) return 'UNKNOWN';",
+    "replace": "  if (probe.suspect.length > 99) return 'UNKNOWN';",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.test.ts",
+      "fullName": "the ASSERTION verdict > fails closed when the probe doubts itself"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H5-reporter-ignores-rejected-events",
+    "invariant": "A window that discarded a record cannot be trusted whole",
+    "expected": "An invocation that saw a matcher failure belonging to another window would still be counted.",
+    "file": "scripts/mutation-reporter.ts",
+    "find": "  if (probe.rejected > 0) return 'UNKNOWN';",
+    "replace": "  if (probe.rejected > 99) return 'UNKNOWN';",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.test.ts",
+      "fullName": "the ASSERTION verdict > fails closed when the probe doubts itself"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H6-reporter-weakens-the-record-identity",
+    "invariant": "The record must belong to this exact test",
+    "expected": "A record naming a different file — or a different test in the same file — would vouch for this one.",
+    "file": "scripts/mutation-reporter.ts",
+    "find": "  if (probe.testFile !== identity.file || probe.testFullName !== identity.fullName) {",
+    "replace": "  if (probe.testFile !== identity.file && probe.testFullName !== identity.fullName) {",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.test.ts",
+      "fullName": "the ASSERTION verdict > fails closed when the record names another test"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H7-reporter-accepts-ambiguous-events",
+    "invariant": "Exactly one matcher failure, or the kill is unattributable",
+    "expected": "A test that failed two matchers, having caught the first, would be counted although which assertion rejected the mutation is unknown.",
+    "file": "scripts/mutation-reporter.ts",
+    "find": "  if (probe.matcherFailures !== 1) return 'UNKNOWN';",
+    "replace": "  if (probe.matcherFailures < 0) return 'UNKNOWN';",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.test.ts",
+      "fullName": "the ASSERTION verdict > fails closed on anything but exactly one matcher failure"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H8-reporter-ignores-evidence-eligibility",
+    "invariant": "Only a test whose terminal value was actually compared may bear evidence",
+    "expected": "A test registered with plain `it` — whose terminal value no one ever saw, because by any hook it is already serialized — would be treated as though it had been checked.",
+    "file": "scripts/mutation-reporter.ts",
+    "find": "  if (!probe.evidenceEligible) return 'NOT_ELIGIBLE';",
+    "replace": "  if (!probe.evidenceEligible && probe.matcherFailures === 0) return 'NOT_ELIGIBLE';",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.test.ts",
+      "fullName": "the ASSERTION verdict > refuses a test that is not registered for evidence"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H9-reporter-prefers-assertion-over-timeout",
+    "invariant": "A hung test is a detection, but it is not an assertion",
+    "expected": "A test killed by its deadline would be reported as having asserted.",
+    "file": "scripts/mutation-reporter.ts",
+    "find": "  if (errors.some((error) => error.category === 'TIMEOUT')) return 'TIMEOUT';",
+    "replace": "  if (errors.some((error) => error.category === 'TIMEOUT') && errors.length > 99) return 'TIMEOUT';",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.test.ts",
+      "fullName": "the ASSERTION verdict > prefers a timeout or load verdict over anything else"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H10-state-skips-the-terminal-identity-check",
+    "invariant": "Provenance is the terminal value's object identity, not the existence of a matcher failure",
+    "expected": "The copy attack would succeed: catch a real matcher failure, `Object.assign` it onto an ordinary Error, throw that, and the invocation's own matcher record would vouch for it.",
+    "file": "packages/testing/src/mutation/evidence-state.ts",
+    "find": "    const entry = matcherFailures.get(terminal);\n    if (entry === undefined) {",
+    "replace": "    const entry = matcherFailures.get(terminal) ?? mine[0];\n    if (entry === undefined) {",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.realvitest.test.ts",
+      "fullName": "1 — the token-copy attack > fails because a copy is a different object"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H11-state-ignores-invocation-binding",
+    "invariant": "A matcher object is bound to the invocation that produced it",
+    "expected": "A genuine matcher object kept from an earlier test, an earlier retry or an earlier parameterized case would be replayed as this invocation's evidence.",
+    "file": "packages/testing/src/mutation/evidence-state.ts",
+    "find": "    if (entry.invocationId !== invocation.id) {",
+    "replace": "    if (entry.invocationId === 'a value no invocation ever has') {",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.realvitest.test.ts",
+      "fullName": "8 — a matcher object from another test > is rejected by invocation identity"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H12-state-accepts-multiple-matcher-failures",
+    "invariant": "Exactly one matcher failure per invocation, or nothing is attributable",
+    "expected": "A test that swallowed one matcher failure and then failed another would be reported with whichever record came first.",
+    "file": "packages/testing/src/mutation/evidence-state.ts",
+    "find": "    if (mine.length !== 1) {",
+    "replace": "    if (mine.length < 0) {",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.realvitest.test.ts",
+      "fullName": "11 — two matcher failures in one invocation > fails closed rather than picking one"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H13-state-treats-every-test-as-eligible",
+    "invariant": "Eligibility is a fact about the test's registration, not a default",
+    "expected": "Every ordinary `it` test would be reported as evidence-eligible although its terminal value was never compared, so an unrelated failure in it could be read as an assertion.",
+    "file": "packages/testing/src/mutation/evidence-state.ts",
+    "find": "    eligible: invocation.eligible,",
+    "replace": "    eligible: true,",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.realvitest.test.ts",
+      "fullName": "the trusted wrapper > is what makes a test eligible at all"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H14-state-window-admits-the-previous-invocation",
+    "invariant": "An invocation counts only the matcher failures recorded inside its own window",
+    "expected": "A matcher failure from the previous test would be counted in this one, so a clean kill would look ambiguous.",
+    "file": "packages/testing/src/mutation/evidence-state.ts",
+    "find": "  if (invocation === undefined) return;\n  const mine = recorded.filter((entry) => entry.seq >= invocation.firstSeq);",
+    "replace": "  if (invocation === undefined) return;\n  const mine = recorded.filter((entry) => entry.seq >= invocation.firstSeq - 1);",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.realvitest.test.ts",
+      "fullName": "the trusted wrapper > covers every assertion style the corpus uses"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H15-state-ignores-overlapping-invocations",
+    "invariant": "Concurrent invocations are refused, not attributed",
+    "expected": "A concurrent test's matcher failure would be attributed to whichever window happened to be open, and Vitest's own assertion state is known to name the wrong test there.",
+    "file": "packages/testing/src/mutation/evidence-state.ts",
+    "find": "    suspect.push(`another invocation (${open.id}) was still open`);\n    open.suspect.push('a later invocation opened while this one was still open');",
+    "replace": "    open.suspect.push('a later invocation opened while this one was still open');",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.realvitest.test.ts",
+      "fullName": "12 — concurrent invocations > fail closed, because their windows overlap"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H16-probe-lets-a-forged-record-stand",
+    "invariant": "The probe is the last writer of its own key",
+    "expected": "A test could write a complete, self-consistent record into its own `task.meta` and have it believed — evidence authored by the code under test.",
+    "file": "scripts/mutation-evidence-probe.ts",
+    "find": "  meta[PROBE_META_KEY] = probe;",
+    "replace": "  meta[PROBE_META_KEY] ??= probe;",
+    "killingTest": {
+      "file": "scripts/mutation-reporter.realvitest.test.ts",
+      "fullName": "a forged probe record > cannot be planted, because the probe writes last"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H19-sweep-mutates-the-first-of-several-anchors",
+    "invariant": "A mutation must identify exactly one place to change",
+    "expected": "A two-place anchor would mutate whichever came first, so which guard a variant attacks would be decided by file order.",
+    "file": "scripts/mutation-sweep.ts",
+    "find": "  if (occurrences > 1) {\n    return {\n      ok: false,\n      reason: `the anchor occurs ${String(occurrences)} times, so which one is mutated is arbitrary`,\n    };\n  }",
+    "replace": "  if (occurrences > 99) {\n    return { ok: false, reason: 'unreachable' };\n  }",
+    "killingTest": {
+      "file": "scripts/mutation-sweep.test.ts",
+      "fullName": "a duplicate anchor > is refused at application time, not only by --validate"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H20-sweep-accepts-a-noop-mutant",
+    "invariant": "A mutant identical to the pristine tree proves nothing",
+    "expected": "A variant whose replacement equals its anchor would run the suite against unmodified source and report the pass as a kill.",
+    "file": "scripts/mutation-sweep.ts",
+    "find": "  if (replace === find) {\n    return {\n      ok: false,\n      reason: 'the replacement is identical to the anchor, so the mutant is the pristine tree',\n    };\n  }",
+    "replace": "  if (replace === find && find.length > 1e9) {\n    return { ok: false, reason: 'unreachable' };\n  }",
+    "killingTest": {
+      "file": "scripts/mutation-sweep.test.ts",
+      "fullName": "a replacement identical to the anchor > is refused, because the mutant would be the pristine tree"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H21-sweep-accepts-a-missing-anchor",
+    "invariant": "A variant whose anchor has gone is a manifest error, not a surviving defect",
+    "expected": "A refactor that orphaned a control would silently inject nothing and the sweep would report on the pristine tree.",
+    "file": "scripts/mutation-sweep.ts",
+    "find": "  if (occurrences === 0) {\n    return { ok: false, reason: 'the anchor is not present' };\n  }",
+    "replace": "  if (occurrences < 0) {\n    return { ok: false, reason: 'the anchor is not present' };\n  }",
+    "killingTest": {
+      "file": "scripts/mutation-sweep.test.ts",
+      "fullName": "a missing anchor > is refused rather than applied as a no-op"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H22-sweep-interprets-the-replacement",
+    "invariant": "The replacement is spliced in literally, never interpreted",
+    "expected": "`$$` in a SQL function body would collapse to `$` and the migration would fail with a syntax error; the variant would look detected while nothing had been tested.",
+    "file": "scripts/mutation-sweep.ts",
+    "find": "  const index = source.indexOf(find);\n  return { ok: true, source: source.slice(0, index) + replace + source.slice(index + find.length) };",
+    "replace": "  return { ok: true, source: source.replace(find, replace) };",
+    "killingTest": {
+      "file": "scripts/mutation-sweep.test.ts",
+      "fullName": "a unique anchor > does not interpret the replacement"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H23-classifier-trusts-the-error-name",
+    "invariant": "The classifier consumes the reporter's verdict and never an error",
+    "expected": "An error decorated with `name = 'AssertionError'` would be promoted past the reporter's verdict, reopening the spoof one layer down.",
+    "file": "scripts/mutation-outcome.ts",
+    "find": "  if (test.failureCategory !== 'ASSERTION') {",
+    "replace": "  if (test.failureCategory !== 'ASSERTION' && !test.errors.some((error) => error.name === 'AssertionError')) {",
+    "killingTest": {
+      "file": "scripts/mutation-outcome.test.ts",
+      "fullName": "1 — a spoofed assertion object > is not evidence, however it is decorated"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H24-classifier-ignores-module-identity",
+    "invariant": "A killing test is identified by module and name together",
+    "expected": "A same-named test in another file could claim the kill, so a passing namesake would launder a defect nobody detected.",
+    "file": "scripts/mutation-outcome.ts",
+    "find": "  return test.file === identity.file && test.fullName === identity.fullName;",
+    "replace": "  return test.fullName === identity.fullName;",
+    "killingTest": {
+      "file": "scripts/mutation-outcome.test.ts",
+      "fullName": "2 — the same test name in another file > cannot claim the kill"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H25-classifier-matches-by-substring",
+    "invariant": "The full name is compared exactly, never as a substring",
+    "expected": "“rejects invalid chain” would match “rejects invalid chain after retry”, so an unrelated test's failure would be recorded as the kill.",
+    "file": "scripts/mutation-outcome.ts",
+    "find": "  return test.file === identity.file && test.fullName === identity.fullName;",
+    "replace": "  return test.file === identity.file && test.fullName.includes(identity.fullName);",
+    "killingTest": {
+      "file": "scripts/mutation-outcome.test.ts",
+      "fullName": "4 — a substring collision > does not match a longer name that contains the intended one"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H26-classifier-resolves-duplicates-arbitrarily",
+    "invariant": "Exactly one test may carry the identity",
+    "expected": "With two tests of the same name the classifier would take the first and report a kill.",
+    "file": "scripts/mutation-outcome.ts",
+    "find": "  if (named.length > 1) {",
+    "replace": "  if (named.length > 2) {",
+    "killingTest": {
+      "file": "scripts/mutation-outcome.test.ts",
+      "fullName": "3 — duplicate identity > is rejected rather than resolved arbitrarily"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H27-classifier-ignores-unrelated-failures",
+    "invariant": "A kill must be attributable, so no other test may have failed",
+    "expected": "A run where the intended test asserted and an exhausted pool failed other tests would be recorded as clean evidence.",
+    "file": "scripts/mutation-outcome.ts",
+    "find": "  if (unrelatedFailures > 0) {",
+    "replace": "  if (unrelatedFailures > 999) {",
+    "killingTest": {
+      "file": "scripts/mutation-outcome.test.ts",
+      "fullName": "5 — the intended test asserts, something unrelated throws > is not a clean kill"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H28-classifier-ignores-hook-failures",
+    "invariant": "A hook that threw is infrastructure, whatever the tests reported",
+    "expected": "An unreachable database failing `beforeAll` would be classified from whatever the tests reported.",
+    "file": "scripts/mutation-outcome.ts",
+    "find": "  const hookError = report.modules.flatMap((module) => module.hookErrors)[0];",
+    "replace": "  const hookError = report.modules.flatMap((module) => module.hookErrors).find(() => false);",
+    "killingTest": {
+      "file": "scripts/mutation-outcome.test.ts",
+      "fullName": "9 — a beforeAll failure > wins even when a test also recorded an assertion"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H29-classifier-folds-ineligibility-into-infrastructure",
+    "invariant": "An ineligible test is named as such, not hidden among environment failures",
+    "expected": "A manifest entry pointing at an unwrapped test would be reported as an infrastructure failure, so a gap in the corpus's reach would look like a flaky database.",
+    "file": "scripts/mutation-outcome.ts",
+    "find": "  if (test.failureCategory === 'NOT_ELIGIBLE') {",
+    "replace": "  if (test.failureCategory === 'a category that never occurs') {",
+    "killingTest": {
+      "file": "scripts/mutation-outcome.test.ts",
+      "fullName": "an ineligible test > is reported as such, not as infrastructure"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H30-state-exports-begin-evidence",
+    "invariant": "Only the trusted wrapper may open evidence eligibility",
+    "expected": "Any test could import `beginEvidence` by relative path, open eligibility for itself, and — with the confirmation capability — turn an ordinary failure into assertion evidence without being registered through `evidenceTest`.",
+    "file": "packages/testing/src/mutation/evidence-state.ts",
+    "find": "function beginEvidence(): void {",
+    "replace": "export function beginEvidence(): void {",
+    "killingTest": {
+      "file": "scripts/testing-export-surface.test.ts",
+      "fullName": "the state module itself > exports registration and the probe handover, and no capability"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H31-state-exports-confirm-terminal",
+    "invariant": "Only the trusted wrapper may confirm a terminal value",
+    "expected": "Any test could import `confirmTerminal` and vouch for a matcher object it caught, then fail with an unrelated error — the exact sequence an independent review reproduced through the package root.",
+    "file": "packages/testing/src/mutation/evidence-state.ts",
+    "find": "function confirmTerminal(terminal: unknown): void {",
+    "replace": "export function confirmTerminal(terminal: unknown): void {",
+    "killingTest": {
+      "file": "scripts/testing-export-surface.test.ts",
+      "fullName": "the state module itself > exports registration and the probe handover, and no capability"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H32-root-reexports-a-capability",
+    "invariant": "`@moin/testing` exports registration and inert contract constants only",
+    "expected": "A consumer of the package root would reach a provenance-writing capability by a supported import.",
+    "file": "packages/testing/src/index.ts",
+    "find": "export { evidenceTest, concurrentEvidenceTest } from './mutation/evidence-test.ts';",
+    "replace": "export { evidenceTest, concurrentEvidenceTest } from './mutation/evidence-test.ts';\nexport { installProbe } from './mutation/evidence-state.ts';",
+    "killingTest": {
+      "file": "scripts/testing-export-surface.test.ts",
+      "fullName": "the public root > exports exactly the allow-list"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H33-state-hands-the-probe-out-twice",
+    "invariant": "The matcher recorder and invocation window have exactly one writer",
+    "expected": "A test could take its own recorder and window controls after the probe did, and register objects of its choosing as matcher failures.",
+    "file": "packages/testing/src/mutation/evidence-state.ts",
+    "find": "  if (probeInstalled) {",
+    "replace": "  if (probeInstalled && process.pid < 0) {",
+    "killingTest": {
+      "file": "scripts/testing-export-surface.test.ts",
+      "fullName": "the state module itself > has already handed the probe its capabilities, so a test cannot take them"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H34-sweep-skips-the-startup-pristine-check",
+    "invariant": "Exactly one mutant against the HEAD tree: nothing is measured before every target is proved pristine",
+    "expected": "After a sweep killed mid-mutant, a restarted sweep would baseline and mutate a target while a stale mutant still sat in another file.",
+    "file": "scripts/mutation-sweep.ts",
+    "find": "    assertTargetsPristine(root, head, targets, 'before the sweep started');\n",
+    "replace": "",
+    "killingTest": {
+      "file": "scripts/mutation-sweep-isolation.test.ts",
+      "fullName": "a stale mutant in another file > stops a variant whose own target is pristine"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H35-sweep-checks-only-the-selected-targets",
+    "invariant": "Exactly one mutant against the HEAD tree: every manifest target, not only the selected one",
+    "expected": "`--only M2` would check only M2's file, so a stale M1 in another file would contaminate what M2's test observes.",
+    "file": "scripts/mutation-sweep.ts",
+    "find": "    assertTargetsPristine(root, head, targets, 'before the sweep started');",
+    "replace": "    assertTargetsPristine(\n      root,\n      head,\n      selected.map((variant) => variant.file),\n      'before the sweep started',\n    );",
+    "killingTest": {
+      "file": "scripts/mutation-sweep-isolation.test.ts",
+      "fullName": "a stale mutant in another file > stops a variant whose own target is pristine"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H36-sweep-trusts-the-working-tree-as-original",
+    "invariant": "\"Original\" means the HEAD blob, never whatever bytes the working tree holds",
+    "expected": "A stale mutant left by a killed sweep would be read as the pristine source, restored as such after every later variant, and baselined against.",
+    "file": "scripts/mutation-sweep.ts",
+    "find": "  if (actual !== expected) {",
+    "replace": "  if (actual !== expected && actual.length === 0) {",
+    "killingTest": {
+      "file": "scripts/mutation-sweep-isolation.test.ts",
+      "fullName": "what counts as pristine > is the HEAD blob, not whatever the working tree holds"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H37-sweep-skips-the-restore-verification",
+    "invariant": "A restore is verified byte for byte and against the HEAD blob before the sweep continues",
+    "expected": "A restore that silently left one byte changed would go unnoticed by the restore itself; only a later, unrelated check could catch it, and only if it ran.",
+    "file": "scripts/mutation-sweep.ts",
+    "find": "  if (!restored.equals(pristine) || blobOf(root, file, restored) !== headBlob(root, head, file)) {",
+    "replace": "  if (restored.length < 0) {",
+    "killingTest": {
+      "file": "scripts/mutation-sweep-isolation.test.ts",
+      "fullName": "restoring a target after its mutant > aborts the sweep when the restored file is one byte off, before the next variant"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H38-sweep-continues-after-a-failed-restore",
+    "invariant": "A failed restore ends the sweep; no variant runs on top of an unverified tree",
+    "expected": "The next variant would be baselined and mutated while the previous mutant, or a corrupted restore, was still on disk.",
+    "file": "scripts/mutation-sweep.ts",
+    "find": "      const result = await sweepOne(variant, head, baselines, dependencies);\n      assertTargetsPristine(root, head, targets, `after ${variant.id}`);",
+    "replace": "      let result: Result;\n      try {\n        result = await sweepOne(variant, head, baselines, dependencies);\n        assertTargetsPristine(root, head, targets, `after ${variant.id}`);\n      } catch {\n        continue;\n      }",
+    "killingTest": {
+      "file": "scripts/mutation-sweep-isolation.test.ts",
+      "fullName": "restoring a target after its mutant > aborts the sweep when the restored file is one byte off, before the next variant"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H39-sweep-takes-no-lock",
+    "invariant": "One sweep per worktree: a mutable sweep excludes every other in the same worktree",
+    "expected": "Two sweeps in one worktree would both pass the pristine check and take turns writing one file: one sweep's test would run against the other's mutant, and both would report a kill.",
+    "file": "scripts/mutation-sweep.ts",
+    "find": "  const lock = acquireSweepLock(root, dependencies.write ?? writeFileSync);",
+    "replace": "  const lock = {\n    path: '',\n    record: (): void => undefined,\n    retain: (): void => undefined,\n    release: (): void => undefined,\n  };",
+    "killingTest": {
+      "file": "scripts/mutation-sweep-lock.test.ts",
+      "fullName": "two sweeps in one worktree > the second is refused before any baseline, and the first observes only its own mutant"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H40-sweep-checks-the-source-before-taking-the-lock",
+    "invariant": "The lock is taken before HEAD, the pristine check, the baseline cache or any baseline",
+    "expected": "Two sweeps could both pass the pristine check before either held the lock, which is the window the lock exists to close; a refusal would also misreport another sweep's mutant as a dirty tree.",
+    "file": "scripts/mutation-sweep.ts",
+    "find": "  const lock = acquireSweepLock(root, dependencies.write ?? writeFileSync);\n  try {\n    const head = resolveHead(root);\n    lock.record(head);\n    const targets = manifestVariants.map((variant) => variant.file);\n    assertTargetsPristine(root, head, targets, 'before the sweep started');",
+    "replace": "  const head = resolveHead(root);\n  const targets = manifestVariants.map((variant) => variant.file);\n  assertTargetsPristine(root, head, targets, 'before the sweep started');\n  const lock = acquireSweepLock(root, dependencies.write ?? writeFileSync);\n  try {\n    lock.record(head);",
+    "killingTest": {
+      "file": "scripts/mutation-sweep-lock.test.ts",
+      "fullName": "one ownership lifecycle > takes the lock before HEAD or any source is read, and never overwrites one"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H41-sweep-releases-the-lock-before-its-work-is-done",
+    "invariant": "The lock is held until every restore is verified and the report is written",
+    "expected": "A second sweep could take the lock while the first was still baselining, mutating or restoring, and the two would overlap in one worktree.",
+    "file": "scripts/mutation-sweep.ts",
+    "find": "    lock.record(head);\n",
+    "replace": "    lock.record(head);\n    lock.release();\n",
+    "killingTest": {
+      "file": "scripts/mutation-sweep-lock.test.ts",
+      "fullName": "two sweeps in one worktree > the second is refused before any baseline, and the first observes only its own mutant"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "H42-sweep-locks-the-whole-repository",
+    "invariant": "The lock is scoped to one worktree, so linked worktrees sweep independently",
+    "expected": "A sweep in any linked worktree would refuse every other worktree of the repository, serializing independent checkouts for no safety gain.",
+    "file": "scripts/mutation-sweep.ts",
+    "find": "['rev-parse', '--absolute-git-dir']",
+    "replace": "['rev-parse', '--path-format=absolute', '--git-common-dir']",
+    "killingTest": {
+      "file": "scripts/mutation-sweep-lock.test.ts",
+      "fullName": "the lock is per worktree > a linked worktree sweeps while the main worktree is locked"
+    },
+    "project": "unit"
+  }
+]

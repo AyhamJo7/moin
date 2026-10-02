@@ -1,0 +1,24 @@
+{
+  "success": false,
+  "numTotalTests": 2,
+  "numFailedTests": 1,
+  "testResults": [
+    {
+      "status": "failed",
+      "message": "",
+      "name": "captured-fixture",
+      "assertionResults": [
+        {
+          "status": "failed",
+          "fullName": "fixture fails an assertion",
+          "failureMessages": ["AssertionError: expected 1 to be 2 // Object.is equality"]
+        },
+        {
+          "status": "passed",
+          "fullName": "fixture passes",
+          "failureMessages": []
+        }
+      ]
+    }
+  ]
+}
