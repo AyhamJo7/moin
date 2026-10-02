@@ -141,7 +141,7 @@ Single source of status. Tier columns show the status of that phase's items for 
 | P03 | Architecture decisions & threat model | IN_PROGRESS | — | — | — | — | EXT-02 counsel not engaged | P03.05 review findings; founder sends the legal pack |
 | P04 | Feasibility proof & long-lead track | IN_PROGRESS | — | — | NOT_STARTED | — | EXT-01/07/10/11/12 | Adapter, gateway port and measurement harness built; every measurement waits on EXT-10/11/12 |
 | P05 | Cloud foundation & walking skeleton | NOT_STARTED | — | — | — | — | EXT-09 AWS | Terraform bootstrap |
-| P06 | Tenancy, identity, authorization, audit | IN_PROGRESS | — | NOT_STARTED | — | — | P05 for Cognito, Secrets Manager, pgaudit; EXT-09 for the audit alarm schedule | Audit table, chain, query API, daily verifier and argument scanner done; ADR-0017 accepted and P06.10.07 verified at QG-09 (2026-10-02); P06.10.03 adoption (incl. `locations`) and .05 scheduling (EXT-09) open; P06.05.04 claims contract and provider switch verified by the founder (2026-10-02, EV-P06-038), P06.05.01–.03/.05 open (P05, EXT-09) |
+| P06 | Tenancy, identity, authorization, audit | IN_PROGRESS | — | NOT_STARTED | — | — | P05 for Cognito, Secrets Manager, pgaudit; EXT-09 for the audit alarm schedule | Audit table, chain, query API, daily verifier and argument scanner done; ADR-0017 accepted and P06.10.07 verified at QG-09 (2026-10-02); P06.10.03 adoption (incl. `locations`) and .05 scheduling (EXT-09) open; P06.05.04 claims contract and provider switch verified by the founder (2026-10-02, EV-P06-038), P06.05.01–.03/.05 open (P05, EXT-09); P06.09.03 recovery runbooks READY_FOR_REVIEW (EV-P06-039), P06.09.01/.02/.04 open |
 | P07 | Core business action model | NOT_STARTED | — | NOT_STARTED | NOT_STARTED | — | — | after P06.02 |
 | P08 | Async, events, scheduling, realtime | NOT_STARTED | — | — | — | — | — | after P06.03 |
 | P09 | Knowledge system | NOT_STARTED | — | NOT_STARTED | NOT_STARTED | — | — | after P07 |
@@ -2613,7 +2613,7 @@ Roles and RLS framework · `withTenant` / `withSystemWork` · catalog check · o
 - [ ] **P06.09 Account recovery and MFA reset** `[G:PILOT]`
   - [ ] P06.09.01 Password reset through Cognito (email)
   - [ ] P06.09.02 MFA-reset procedure: support-verified identity (owner callback on the registered business number + second factor such as billing data), audited, all sessions revoked
-  - [ ] P06.09.03 Runbook `docs/runbooks/mfa-reset.md` and `compromised-account.md`
+  - [x] P06.09.03 Runbook `docs/runbooks/mfa-reset.md` and `compromised-account.md` — EV-P06-039 · READY_FOR_REVIEW; runbooks only: not executable until P06.09.02 and the controls they list exist, and not verified until the P06.09.04 tabletop
   - [ ] P06.09.04 Verify: tabletop run of both runbooks
 - [ ] **P06.10 Audit event infrastructure** `[G:PILOT]`
   - [x] P06.10.01 `audit_events` table; trigger blocking UPDATE/DELETE (except the pseudonymisation function); privileges revoked (nis2 pattern) — EV-P06-021 · **Resolution:** the pseudonymisation exception is *not* implemented and is deferred to P16.05.02, which is where that function arrives; an exception now would be a hole with nothing legitimate behind it. ADR-0017/ADR-0018 own the chain-preserving design. Table, blocking trigger (plus `TRUNCATE` and head guards) and revoked grants are delivered.
