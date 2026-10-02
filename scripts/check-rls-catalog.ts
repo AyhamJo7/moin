@@ -45,6 +45,7 @@ const DEFINER_ALLOWLIST = join(REPO_ROOT, 'docs', 'architecture', 'security-defi
 /** Roles that serve traffic. None of them may ever see past a policy. */
 const RUNTIME_ROLES = [
   'moin_app',
+  'moin_identity',
   'moin_provisioner',
   'moin_dispatcher',
   'moin_support_ro',
@@ -184,37 +185,37 @@ const APPROVED_DEFINERS: Readonly<
     arguments: 'bytea, bytea, bytea, bytea, text, text, timestamp with time zone',
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
-    executeGrantees: ['moin_app'],
+    executeGrantees: ['moin_identity'],
   },
   'app.consume_sign_in': {
     arguments: 'bytea, bytea, timestamp with time zone',
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
-    executeGrantees: ['moin_app'],
+    executeGrantees: ['moin_identity'],
   },
   'app.begin_session': {
     arguments: 'text, bytea, uuid, bytea, text, bytea, timestamp with time zone',
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
-    executeGrantees: ['moin_app'],
+    executeGrantees: ['moin_identity'],
   },
   'app.rotate_session': {
     arguments: 'bytea, bytea, uuid, text, timestamp with time zone',
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
-    executeGrantees: ['moin_app'],
+    executeGrantees: ['moin_identity'],
   },
   'app.resolve_session': {
     arguments: 'bytea, timestamp with time zone',
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
-    executeGrantees: ['moin_app'],
+    executeGrantees: ['moin_identity'],
   },
   'app.revoke_session': {
     arguments: 'bytea, timestamp with time zone',
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
-    executeGrantees: ['moin_app'],
+    executeGrantees: ['moin_identity'],
   },
 };
 
@@ -412,6 +413,68 @@ const REGISTRY_TRIGGER = {
 } as const;
 
 const ROLE_QUERY = `SELECT rolname::text, rolbypassrls, rolsuper FROM pg_roles WHERE rolname = ANY($1)`;
+
+/**
+ * The sign-in and session functions, and the one role that may execute them (P06.06, ADR-0003).
+ *
+ * `moin_identity` is the api task's second pool. It exists so that `moin_app` — which voice and
+ * worker hold too — can execute none of these: a session function reachable from the voice role is
+ * a session a compromised voice process could mint (QG-09 finding I1). The role is useful only as
+ * long as it can do nothing else, so its whole ACL is asserted here rather than assumed. That
+ * `moin_app` executes none of the six follows from `APPROVED_DEFINERS`, whose grantee lists are exact.
+ */
+const IDENTITY_ROLE = 'moin_identity';
+const IDENTITY_FUNCTIONS: readonly string[] = [
+  'app.begin_session',
+  'app.begin_sign_in',
+  'app.consume_sign_in',
+  'app.resolve_session',
+  'app.revoke_session',
+  'app.rotate_session',
+];
+
+const IDENTITY_ROLE_QUERY = `
+  SELECT r.rolsuper, r.rolbypassrls, r.rolcreaterole, r.rolcreatedb, r.rolreplication,
+         (SELECT count(*) FROM pg_auth_members m WHERE m.member = r.oid OR m.roleid = r.oid)::int
+           AS memberships,
+         (SELECT count(*) FROM pg_class c WHERE c.relowner = r.oid)::int
+           + (SELECT count(*) FROM pg_proc p WHERE p.proowner = r.oid)::int
+           + (SELECT count(*) FROM pg_namespace n WHERE n.nspowner = r.oid)::int AS owned,
+         COALESCE((
+           SELECT array_agg(n.nspname || '.' || c.relname ORDER BY n.nspname || '.' || c.relname)
+           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+           WHERE n.nspname IN ('public', 'app') AND c.relkind IN ('r', 'v', 'm', 'p', 'S')
+             AND (has_table_privilege(r.oid, c.oid, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
+                  OR (c.relkind = 'S' AND has_sequence_privilege(r.oid, c.oid, 'USAGE, SELECT, UPDATE')))
+         ), '{}') AS table_privileges,
+         COALESCE((
+           SELECT array_agg(DISTINCT n.nspname || '.' || p.proname ORDER BY n.nspname || '.' || p.proname)
+           FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+           WHERE p.prosecdef AND has_function_privilege(r.oid, p.oid, 'EXECUTE')
+         ), '{}') AS executable_definers,
+         COALESCE((
+           SELECT array_agg(DISTINCT n.nspname || '.' || p.proname ORDER BY n.nspname || '.' || p.proname)
+           FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace,
+                aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a
+           WHERE a.grantee = r.oid
+         ), '{}') AS granted_functions
+  FROM pg_roles r WHERE r.rolname = $1
+`;
+
+interface IdentityRoleRow {
+  readonly rolsuper: boolean;
+  readonly rolbypassrls: boolean;
+  readonly rolcreaterole: boolean;
+  readonly rolcreatedb: boolean;
+  readonly rolreplication: boolean;
+  readonly memberships: number;
+  readonly owned: number;
+  readonly table_privileges: string[];
+  /** Every SECURITY DEFINER function it can execute, by any route (explicit grant or PUBLIC). */
+  readonly executable_definers: string[];
+  /** Every function granted to it by name. */
+  readonly granted_functions: string[];
+}
 
 export async function inspect(
   url: string,
@@ -686,8 +749,74 @@ export async function inspect(
         });
       }
     }
+
+    findings.push(...(await inspectIdentityRole(pool)));
   } finally {
     await pool.end();
+  }
+  return findings;
+}
+
+async function inspectIdentityRole(pool: ReturnType<typeof createPool>): Promise<Finding[]> {
+  const findings: Finding[] = [];
+  const row = (await pool.query<IdentityRoleRow>(IDENTITY_ROLE_QUERY, [IDENTITY_ROLE])).rows[0];
+  if (row === undefined) {
+    return [
+      {
+        rule: 'identity-role-missing',
+        subject: IDENTITY_ROLE,
+        detail: 'the role that alone may execute the session functions does not exist.',
+      },
+    ];
+  }
+  if (
+    row.rolsuper ||
+    row.rolbypassrls ||
+    row.rolcreaterole ||
+    row.rolcreatedb ||
+    row.rolreplication
+  ) {
+    findings.push({
+      rule: 'identity-role-privileged',
+      subject: IDENTITY_ROLE,
+      detail: 'has a role attribute (SUPERUSER, BYPASSRLS, CREATEROLE, CREATEDB or REPLICATION).',
+    });
+  }
+  if (row.memberships > 0) {
+    findings.push({
+      rule: 'identity-role-membership',
+      subject: IDENTITY_ROLE,
+      detail: 'is a member of a role, or has members: either extends or shares what it may do.',
+    });
+  }
+  if (row.owned > 0) {
+    findings.push({
+      rule: 'identity-role-owns-objects',
+      subject: IDENTITY_ROLE,
+      detail: 'owns a table, function or schema; an owner holds every privilege on what it owns.',
+    });
+  }
+  if (row.table_privileges.length > 0) {
+    findings.push({
+      rule: 'identity-role-table-privilege',
+      subject: IDENTITY_ROLE,
+      detail: `holds a privilege on ${row.table_privileges.join(', ')}; it may reach data only through the session functions.`,
+    });
+  }
+  // Invoker functions any role may run (extension helpers, `app.current_org`) execute with the
+  // caller's own privileges, so they give this role nothing. What could give it something is a
+  // definer function, or a grant by name: both must be exactly the six.
+  for (const [kind, functions] of [
+    ['SECURITY DEFINER functions it can execute', row.executable_definers],
+    ['functions granted to it', row.granted_functions],
+  ] as const) {
+    if (functions.join(',') !== IDENTITY_FUNCTIONS.join(',')) {
+      findings.push({
+        rule: 'identity-role-unexpected-execute',
+        subject: IDENTITY_ROLE,
+        detail: `${kind}: ${functions.join(', ') || 'none'}; must be exactly ${IDENTITY_FUNCTIONS.join(', ')}.`,
+      });
+    }
   }
   return findings;
 }

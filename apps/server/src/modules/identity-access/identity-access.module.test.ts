@@ -22,6 +22,7 @@ const LOCAL = {
   OIDC_CLIENT_SECRET: 'local-development-only',
   OIDC_REDIRECT_URI: 'http://localhost:3000/api/auth/callback',
   AUTH_LOCAL_TOKEN_KEY: 'local-v1:local-development-only',
+  IDENTITY_DATABASE_URL: 'postgres://moin_identity:x@localhost:5432/moin',
 };
 
 function without(source: Record<string, string>, ...keys: string[]): Record<string, string> {
@@ -67,6 +68,12 @@ describe('building sign-in', () => {
   it('refuses a redirect URI that does not name the callback route', () => {
     const config = loadConfig({ ...LOCAL, OIDC_REDIRECT_URI: 'http://localhost:3000/elsewhere' });
     expect(() => buildSignInGate(config, store, systemClock, logger)).toThrow(ConfigurationError);
+  });
+
+  evidenceTest('refuses to sign anyone in without the moin_identity pool', () => {
+    expect(() => buildSignInGate(loadConfig(LOCAL), null, systemClock, logger)).toThrow(
+      /IDENTITY_DATABASE_URL/,
+    );
   });
 
   it('refuses a local configuration without a local token key', () => {

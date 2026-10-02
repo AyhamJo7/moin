@@ -114,6 +114,7 @@ jobs:
       TEST_DATABASE_MIGRATOR_URL: postgres://moin_migrator:ci-only-not-a-secret@127.0.0.1:5432/postgres
       TEST_DATABASE_APP_URL: postgres://moin_app:ci-only-not-a-secret@127.0.0.1:5432/postgres
       TEST_DATABASE_PROVISIONER_URL: postgres://moin_provisioner:ci-only-not-a-secret@127.0.0.1:5432/postgres
+      TEST_DATABASE_IDENTITY_URL: postgres://moin_identity:ci-only-not-a-secret@127.0.0.1:5432/postgres
       TEST_OIDC_ISSUER_URL: http://127.0.0.1:8080/realms/moin-local
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -140,8 +141,9 @@ jobs:
           CREATE ROLE moin_dispatcher WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
           CREATE ROLE moin_support_ro WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
           CREATE ROLE moin_reporting WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
+          CREATE ROLE moin_identity WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
           GRANT CONNECT ON DATABASE moin TO moin_app, moin_migrator, moin_readonly,
-            moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting;
+            moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting, moin_identity;
           GRANT CREATE ON DATABASE moin TO moin_migrator;
           SQL
 
@@ -250,8 +252,9 @@ jobs:
           CREATE ROLE moin_dispatcher WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
           CREATE ROLE moin_support_ro WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
           CREATE ROLE moin_reporting WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
+          CREATE ROLE moin_identity WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
           GRANT CONNECT ON DATABASE moin TO moin_app, moin_migrator, moin_readonly,
-            moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting;
+            moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting, moin_identity;
           GRANT CREATE ON DATABASE moin TO moin_migrator;
           SQL
 

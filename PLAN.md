@@ -846,7 +846,8 @@ ADRs live in `docs/adr/NNNN-title.md` (MADR format: context, decision, alternati
 |---|---|---|---|
 | `moin_owner` | no | Owns all schema objects | Never used by running services |
 | `moin_migrator` | yes (IAM/Secrets Manager) | Runs migrations via `SET ROLE moin_owner` in the `migrate` task only | Only reachable from the migrate task role |
-| `moin_app` | yes | Runtime role for `api`, `voice`, `worker` (tenant work) | `NOBYPASSRLS`, owns nothing, no DDL, no `TRUNCATE`, cannot `SET ROLE` to privileged roles; DML only on tenant tables; **INSERT-only** on the global `outbox` and `provider_inbox`; other global tables only through whitelisted `SECURITY DEFINER` functions |
+| `moin_app` | yes | Runtime role for `api`, `voice`, `worker` (tenant work) | `NOBYPASSRLS`, owns nothing, no DDL, no `TRUNCATE`, cannot `SET ROLE` to privileged roles; DML only on tenant tables; **INSERT-only** on the global `outbox` and `provider_inbox`; other global tables only through whitelisted `SECURITY DEFINER` functions; **no** `EXECUTE` on the sign-in/session functions |
+| `moin_identity` | yes | Second pool in `api` only: sign-in transactions and sessions (P06.06; ADR-0003 amendment 2026-10-02) | `NOBYPASSRLS`, no role attributes, member of no role, owns nothing; `EXECUTE` on exactly the six session `SECURITY DEFINER` functions and nothing else; no table privilege; credential refused for `voice`, `worker`, `migrate` |
 | `moin_provisioner` | yes | Tenant provisioning path (ops CLI/wizard) | Only `EXECUTE provision_tenant(…)`; no general DML |
 | `moin_dispatcher` | yes | Separate bookkeeping pool in `worker`: outbox dispatch, inbox hand-off, job history, timer claims | `SELECT`/`UPDATE` only on `outbox`, `provider_inbox`, `job_runs`, `timers`; no tenant tables. Tenant effects always run afterwards under `moin_app` inside `withTenant` |
 | `moin_support_ro` | yes | Support diagnostics | `SELECT` only through support views gated by an active `support_access_grants` row |
@@ -2560,6 +2561,7 @@ Roles and RLS framework · `withTenant` / `withSystemWork` · catalog check · o
   - [ ] P06.01.03 Credentials per role in Secrets Manager; rotation configured (P05.08)
   - [ ] P06.01.04 `pgaudit` configured for DDL, role changes and break-glass sessions
   - [x] P06.01.05 Tests: `moin_app` cannot run DDL, `TRUNCATE`, `SET ROLE` to owner/migrator, or disable RLS, and owns no tables — EV-P06-003
+  - [ ] P06.01.06 `moin_identity`: api-only login role provisioned locally, in CI and (P05) by Terraform with an api-only secret; executes exactly the six session functions, no table privilege, no membership, owns nothing; `moin_app` executes none of them (ADR-0003 amendment 2026-10-02). Added after EV-P06-001–003, which do not cover it
 - [x] **P06.02 RLS framework and catalog check** `[G:PILOT]` — EV-P06-007
   - [x] P06.02.01 `app.current_org()` helper (NULL when unset or empty → fail closed) — EV-P06-004
   - [x] P06.02.02 Policy template (USING + WITH CHECK) applied with ENABLE + FORCE on every tenant table — EV-P06-005

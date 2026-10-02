@@ -18,7 +18,10 @@ const AUTH_TTL_MS = 10 * 60_000;
 const T0 = new Date('2026-10-02T08:00:00.000Z');
 
 let database: TestDatabase;
+/** `moin_app`: tenant work in api, voice and worker. It must reach none of this. */
 let app: Pool;
+/** `moin_identity`: api's second pool, and the only role that may execute the session functions. */
+let identity: Pool;
 let admin: Pool;
 let store: IdentityStore;
 
@@ -91,8 +94,9 @@ async function clockSkew(value: string): Promise<void> {
 beforeAll(async () => {
   database = await createTestDatabase('identity');
   app = database.pool();
+  identity = database.identityPool();
   admin = createPool({ connectionString: database.migrationUrl, max: 4 });
-  store = createIdentityStore(app);
+  store = createIdentityStore(identity);
   await clockSkew(WIDE_SKEW);
 });
 
@@ -101,55 +105,189 @@ afterAll(async () => {
   await database.drop();
 });
 
-describe('the runtime role and the identity tables', () => {
-  evidenceTest('has no privilege on users, auth_transactions or sessions', async () => {
+const SESSION_FUNCTIONS = [
+  'begin_session',
+  'begin_sign_in',
+  'consume_sign_in',
+  'resolve_session',
+  'revoke_session',
+  'rotate_session',
+] as const;
+
+/** Every call shape a holder of a role could use to mint, read or change a session. */
+function directCalls(subject: string, tokenHash: Buffer): [string, string, unknown[]][] {
+  const now = new Date();
+  return [
+    [
+      'begin_session',
+      'select * from app.begin_session($1::text, $2::bytea, $3::uuid, $4::bytea, $5::text, null, $6::timestamptz)',
+      [subject, hash(), randomUUID(), sealed(), 'test-v1', now],
+    ],
+    [
+      'begin_sign_in',
+      'select app.begin_sign_in($1::bytea, $2::bytea, $3::bytea, $4::bytea, $5::text, $6::text, $7::timestamptz)',
+      [hash(), hash(), hash(), sealed(), 'test-v1', '/', now],
+    ],
+    [
+      'consume_sign_in',
+      'select * from app.consume_sign_in($1::bytea, $2::bytea, $3::timestamptz)',
+      [hash(), hash(), now],
+    ],
+    [
+      'resolve_session',
+      'select * from app.resolve_session($1::bytea, $2::timestamptz)',
+      [tokenHash, now],
+    ],
+    [
+      'rotate_session',
+      'select * from app.rotate_session($1::bytea, $2::bytea, $3::uuid, $4::text, $5::timestamptz)',
+      [tokenHash, hash(), randomUUID(), 'step_up', now],
+    ],
+    ['revoke_session', 'select app.revoke_session($1::bytea, $2::timestamptz)', [tokenHash, now]],
+  ];
+}
+
+describe('moin_app — the voice and worker role — and sessions', () => {
+  evidenceTest(
+    'cannot mint, resolve, rotate or revoke a session by calling the functions',
+    async () => {
+      const person = await user();
+      const live = await signIn(person.sub, new Date());
+      const before = await admin.query<{ n: string }>('select count(*)::text as n from sessions');
+      for (const [name, sql, params] of directCalls(person.sub, live.tokenHash)) {
+        await expect(app.query(sql, params), name).rejects.toMatchObject({ code: '42501' });
+      }
+      const after = await admin.query<{ n: string }>('select count(*)::text as n from sessions');
+      expect(after.rows[0]?.n).toBe(before.rows[0]?.n);
+      const row = await admin.query<{ revoked_at: Date | null }>(
+        'select revoked_at from sessions where token_hash = $1',
+        [live.tokenHash],
+      );
+      expect(row.rows[0]?.revoked_at).toBeNull();
+    },
+  );
+
+  evidenceTest(
+    'has no privilege on users, sign-in transactions, sessions or the clock policy',
+    async () => {
+      for (const statement of [
+        'select * from users',
+        'delete from users',
+        'update users set id = id',
+        'select * from auth_transactions',
+        'delete from auth_transactions',
+        'update auth_transactions set state_hash = state_hash',
+        'select * from sessions',
+        'delete from sessions',
+        'update sessions set id = id',
+        'select * from session_clock_policy',
+        'delete from session_clock_policy',
+        'update session_clock_policy set id = id',
+      ]) {
+        await expect(app.query(statement), statement).rejects.toMatchObject({ code: '42501' });
+      }
+      await expect(
+        app.query(
+          "insert into sessions (token_hash, id, family_id, user_id, rotation_reason, created_at, last_seen_at, idle_expires_at, absolute_expires_at, provider_tokens_sealed, provider_tokens_key_id) values ($1, $2, $2, $3, 'login', now(), now(), now(), now(), $4, 'k')",
+          [hash(), randomUUID(), randomUUID(), sealed()],
+        ),
+      ).rejects.toMatchObject({ code: '42501' });
+    },
+  );
+});
+
+describe('moin_identity — the api-only session role', () => {
+  evidenceTest('has no table privilege anywhere, tenant table or session table', async () => {
     for (const statement of [
       'select * from users',
-      'delete from users',
-      'update users set created_at = now()',
-      'select * from auth_transactions',
-      'delete from auth_transactions',
-      'update auth_transactions set created_at = now()',
       'select * from sessions',
+      'select * from auth_transactions',
+      'select * from session_clock_policy',
+      'update sessions set revoked_at = now()',
       'delete from sessions',
-      'update sessions set created_at = now()',
+      'select * from organisations',
+      'select * from locations',
+      'select * from audit_events',
+      'select * from provisioning_requests',
     ]) {
-      await expect(app.query(statement), statement).rejects.toMatchObject({ code: '42501' });
+      await expect(identity.query(statement), statement).rejects.toMatchObject({ code: '42501' });
     }
-    await expect(
-      app.query(
-        "insert into users (id, cognito_sub, email, status) values ($1, 'x', 'a@b.c', 'active')",
-        [randomUUID()],
-      ),
-    ).rejects.toMatchObject({ code: '42501' });
   });
 
-  it('may execute only the six reviewed functions, and not the guard', async () => {
-    const result = await app.query<{ name: string; allowed: boolean }>(
-      `select p.proname::text as name, has_function_privilege('moin_app', p.oid, 'EXECUTE') as allowed
-       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-       where n.nspname = 'app' and p.proname = any($1) order by 1`,
+  evidenceTest('cannot execute any other privileged function', async () => {
+    for (const [name, sql] of [
       [
-        [
-          'begin_sign_in',
-          'consume_sign_in',
-          'begin_session',
-          'rotate_session',
-          'resolve_session',
-          'revoke_session',
-          'reject_session_rewrite',
-        ],
+        'provision_tenant',
+        "select app.provision_tenant(gen_random_uuid(), 'x', 'x', 'x', 'x', 'x', 'x', false, 'Europe/Berlin')",
       ],
+      ['claim_audit_chains', 'select * from app.claim_audit_chains(1, 0, 0)'],
+      ['audit_chain_high_water', 'select app.audit_chain_high_water()'],
+      ['session_clock', 'select app.session_clock(now())'],
+      ['apply_tenant_rls', "select app.apply_tenant_rls('sessions'::regclass)"],
+    ] as const) {
+      await expect(identity.query(sql), name).rejects.toMatchObject({ code: '42501' });
+    }
+  });
+
+  evidenceTest('is unprivileged, a member of nothing, and owns nothing', async () => {
+    const role = await admin.query<{
+      rolsuper: boolean;
+      rolbypassrls: boolean;
+      rolcreaterole: boolean;
+      rolcreatedb: boolean;
+      rolreplication: boolean;
+      rolcanlogin: boolean;
+      memberships: number;
+      owned: number;
+    }>(
+      `select r.rolsuper, r.rolbypassrls, r.rolcreaterole, r.rolcreatedb, r.rolreplication, r.rolcanlogin,
+              (select count(*) from pg_auth_members m where m.member = r.oid or m.roleid = r.oid)::int as memberships,
+              ((select count(*) from pg_class c where c.relowner = r.oid)
+               + (select count(*) from pg_proc p where p.proowner = r.oid)
+               + (select count(*) from pg_namespace n where n.nspowner = r.oid))::int as owned
+       from pg_roles r where r.rolname = 'moin_identity'`,
     );
-    expect(Object.fromEntries(result.rows.map((row) => [row.name, row.allowed]))).toStrictEqual({
-      begin_sign_in: true,
-      begin_session: true,
-      consume_sign_in: true,
-      reject_session_rewrite: false,
-      resolve_session: true,
-      revoke_session: true,
-      rotate_session: true,
+    expect(role.rows[0]).toStrictEqual({
+      rolsuper: false,
+      rolbypassrls: false,
+      rolcreaterole: false,
+      rolcreatedb: false,
+      rolreplication: false,
+      rolcanlogin: true,
+      memberships: 0,
+      owned: 0,
     });
+    // eslint-disable-next-line no-restricted-syntax -- negative probe: the role must be unable to assume another, and the statement is refused before it could take effect.
+    await expect(identity.query('set role moin_app')).rejects.toMatchObject({ code: '42501' });
+    await expect(identity.query('create table probe (x int)')).rejects.toMatchObject({
+      code: '42501',
+    });
+  });
+});
+
+describe('who may execute the session functions', () => {
+  evidenceTest('moin_identity alone, among every runtime role', async () => {
+    const roles = [
+      'moin_identity',
+      'moin_app',
+      'moin_provisioner',
+      'moin_dispatcher',
+      'moin_support_ro',
+      'moin_reporting',
+    ];
+    const result = await admin.query<{ role: string; fn: string; allowed: boolean }>(
+      `select r.rolname::text as role, p.proname::text as fn,
+              has_function_privilege(r.rolname, p.oid, 'EXECUTE') as allowed
+       from pg_proc p join pg_namespace n on n.oid = p.pronamespace, pg_roles r
+       where n.nspname = 'app' and p.proname = any($1) and r.rolname = any($2)`,
+      [[...SESSION_FUNCTIONS, 'reject_session_rewrite', 'session_clock'], roles],
+    );
+    const matrix: Record<string, string[]> = {};
+    for (const row of result.rows) {
+      if (row.allowed) (matrix[row.role] ??= []).push(row.fn);
+    }
+    for (const role of Object.keys(matrix)) matrix[role]?.sort();
+    expect(matrix).toStrictEqual({ moin_identity: [...SESSION_FUNCTIONS] });
   });
 });
 
@@ -414,7 +552,7 @@ describe('rotation', () => {
     const person = await user();
     const { tokenHash } = await signIn(person.sub);
     await expect(
-      app.query('select * from app.rotate_session($1, $2, $3, $4, $5)', [
+      identity.query('select * from app.rotate_session($1, $2, $3, $4, $5)', [
         tokenHash,
         hash(),
         randomUUID(),
@@ -431,8 +569,8 @@ describe('two callers holding the same row', () => {
     first: (client: PoolClient) => Promise<T>,
     second: (client: PoolClient) => Promise<T>,
   ): Promise<{ first: T; second: T }> {
-    const a = await app.connect();
-    const b = await app.connect();
+    const a = await identity.connect();
+    const b = await identity.connect();
     try {
       await a.query('begin');
       const firstResult = await first(a);

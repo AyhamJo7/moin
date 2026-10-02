@@ -29,6 +29,13 @@ const CLEARED_SIGN_IN = '__Host-moin_signin=; Max-Age=0; Path=/; HttpOnly; Secur
 
 const clock = fixedClock(new Date());
 let database: TestDatabase;
+
+/** The api's second pool connects as moin_identity, exactly as deployed. */
+function identityUrl(): string {
+  const url = database.identityUrl;
+  if (url === undefined) throw new Error('TEST_DATABASE_IDENTITY_URL is required');
+  return url;
+}
 let admin: ReturnType<TestDatabase['fixturePool']>;
 let provider: FakeOidcProvider;
 let app: NestFastifyApplication;
@@ -45,6 +52,7 @@ function config(env: Record<string, string> = {}) {
     OIDC_CLIENT_SECRET: 'local-development-only',
     OIDC_REDIRECT_URI: 'http://localhost:3000/api/auth/callback',
     AUTH_LOCAL_TOKEN_KEY: LOCAL_KEY,
+    IDENTITY_DATABASE_URL: identityUrl(),
     ...env,
   });
 }

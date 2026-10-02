@@ -111,10 +111,26 @@ KMS key and the cipher is given a KMS-backed keyring.
 ## The session
 
 `sessions` is a global table (no tenant column; see `docs/architecture/global-tables.md`) keyed by
-`token_hash` = SHA-256 of the cookie value. `moin_app` has **no privilege on it**, nor on `users` or
-`auth_transactions`; it may execute six `SECURITY DEFINER` functions and nothing else
-(`docs/architecture/security-definer-allowlist.md`, pinned by body digest in
-`scripts/check-rls-catalog.ts`).
+`token_hash` = SHA-256 of the cookie value. No runtime role has a privilege on it, on `users`, on
+`auth_transactions` or on `session_clock_policy`. Six `SECURITY DEFINER` functions are the only way
+in (`docs/architecture/security-definer-allowlist.md`, pinned by body digest in
+`scripts/check-rls-catalog.ts`), and they are executable by **`moin_identity` alone**.
+
+### Who may reach a session (ADR-0003 amendment, QG-09 finding I1)
+
+| Role                                                                       | Process                                            | Session functions     | Session tables | Tenant tables        |
+| -------------------------------------------------------------------------- | -------------------------------------------------- | --------------------- | -------------- | -------------------- |
+| `moin_identity`                                                            | `api` only (`IDENTITY_DATABASE_URL`, its own pool) | the six, nothing else | none           | none                 |
+| `moin_app`                                                                 | `api`, `voice`, `worker`                           | **none**              | none           | under RLS, as before |
+| `moin_dispatcher`, `moin_provisioner`, `moin_support_ro`, `moin_reporting` | as before                                          | none                  | none           | as before            |
+
+`moin_identity` is `NOBYPASSRLS` with no other role attribute, is a member of no role and has no
+members, and owns nothing; migration 0012 refuses to apply otherwise, and the catalog check
+(`identity-role-*`) asserts the whole ACL on every run. The configuration loader refuses
+`IDENTITY_DATABASE_URL` for `voice`, `worker` and `migrate`, `identity-is-api-only` keeps the
+identity module and pool out of their module graphs, and an api with OIDC but no identity pool
+refuses to start. So a compromised voice or worker process — which holds `moin_app` — cannot mint,
+resolve, rotate or revoke a session.
 
 ### Lifetime (T-15)
 
@@ -133,7 +149,7 @@ so the 12-hour bound holds exactly. Time is the application's injectable clock (
 boundaries are tested at the millisecond — but only within `session_clock_policy.max_skew` of the
 database's own clock (5 minutes as migrated). Without that bound any holder of `moin_app` could pass
 an earlier time to revive an idled-out session, or a later one to start a session's seven days a
-year from now. The policy is one migration-controlled row with no runtime grant; the lifetime tests
+year from now — and with `moin_identity` that is only the api. The policy is one migration-controlled row with no runtime grant; the lifetime tests
 widen it in their private databases through the admin connection, and test the bound itself at its
 migrated value.
 
@@ -175,16 +191,6 @@ refusal is the token-custody check's, not the provider switch's.
 
 ## Residual risks for review
 
-- **Any holder of `moin_app` can call the session functions (open decision, QG-09).** PLAN's role
-  table gives `moin_app` to `api`, `voice` and `worker`, and the six functions are granted to it.
-  The clock bound stops a non-`api` process from reviving or stretching sessions, but a compromised
-  voice or worker process could still call `begin_session` for an active subject with a token it
-  chose, and so obtain a valid 7-day session — something only `api`, which holds the OIDC client
-  secret, should be able to do. The same process can already read and write every tenant's rows
-  through `withTenant`, so this widens impersonation (acting through the HTTP API as a person)
-  rather than data access. Closing it needs a dedicated identity database role reachable only from
-  the `api` task, which changes the ADR-0003 role table and the cluster provisioning (local init,
-  CI, Terraform). **That is the founder's decision** and is not made here.
 - **The database trusts the application for authentication proof.** `begin_session` cannot verify
   an ID token; it bounds what a caller can _shape_ (lifetimes, single use, revocation), not _who_ it
   may sign in. That is inherent to verifying tokens in the application.
@@ -203,13 +209,14 @@ refusal is the token-custody check's, not the provider switch's.
 
 ## Still open
 
-| Item      | What is missing                                                                                   |
-| --------- | ------------------------------------------------------------------------------------------------- |
-| P06.06.03 | per-request session + membership re-check; `active_organisation_id`; the 30 s read-only cache     |
-| P06.06.04 | step-up MFA policy and its caller of `rotate_session('step_up')`; `step_up_at`                    |
-| P06.06.05 | revocation on password/MFA reset, role change, membership removal, "sign out other devices"       |
-| P06.06.06 | CSRF synchronizer token and Origin check (the sign-in routes are GETs and change no tenant state) |
-| P06.06.07 | the complete lifecycle acceptance suite, including FS-16                                          |
-| P06.05.05 | the same flow against the staging Cognito pool; nothing here is verified against Cognito          |
-| P05.08.01 | the KMS data key for provider-token custody; until then deployed sign-in refuses to start         |
-| P06.08.02 | creation of `users` rows (invitation acceptance)                                                  |
+| Item          | What is missing                                                                                             |
+| ------------- | ----------------------------------------------------------------------------------------------------------- |
+| P06.06.03     | per-request session + membership re-check; `active_organisation_id`; the 30 s read-only cache               |
+| P06.06.04     | step-up MFA policy and its caller of `rotate_session('step_up')`; `step_up_at`                              |
+| P06.06.05     | revocation on password/MFA reset, role change, membership removal, "sign out other devices"                 |
+| P06.06.06     | CSRF synchronizer token and Origin check (the sign-in routes are GETs and change no tenant state)           |
+| P06.06.07     | the complete lifecycle acceptance suite, including FS-16                                                    |
+| P06.05.05     | the same flow against the staging Cognito pool; nothing here is verified against Cognito                    |
+| P05.08.01     | the KMS data key for provider-token custody; until then deployed sign-in refuses to start                   |
+| P06.08.02     | creation of `users` rows (invitation acceptance)                                                            |
+| P05.08.02/.03 | Secrets Manager entry for `moin_identity`, injected into the `api` task definition only; the Terraform role |

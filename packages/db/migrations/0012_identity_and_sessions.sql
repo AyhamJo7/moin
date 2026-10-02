@@ -10,14 +10,19 @@
 -- reason. A token claim never reaches any column here except the provider subject, which the
 -- reviewed identity-claims parser (P06.05.04) has already reduced to `sub`.
 --
--- ## No runtime table grant
+-- ## A role of its own, and no table grant
 --
--- `moin_app` serves the sign-in routes, and it holds **no privilege on any of these tables**. The
--- default privileges from 0003 would have given it DML, so they are revoked explicitly below. Every
--- read and write goes through one of six `SECURITY DEFINER` functions, each of which does one thing
--- and returns the minimum (PLAN Data Architecture: "reachable only through … `SECURITY DEFINER`
--- functions that return the minimum"). That is what makes the security properties below properties
--- of the database rather than promises of the caller:
+-- The six functions below are executable by **`moin_identity` alone** — the api task's second pool
+-- (ADR-0003 amendment, QG-09 finding I1). `moin_app` is also the voice and worker role, and a session
+-- function it could execute is a session any compromised voice or worker process could mint. So
+-- `moin_app` gets no EXECUTE here at all, and `moin_identity` gets those six and nothing else: no
+-- table privilege, no tenant table, no membership in any role, no ownership.
+--
+-- Neither role holds a privilege on the tables. The default privileges from 0003 would have given
+-- `moin_app` DML, so they are revoked explicitly below. Every read and write goes through one of the
+-- six `SECURITY DEFINER` functions, each of which does one thing and returns the minimum (PLAN Data
+-- Architecture). That is what makes the security properties below properties of the database rather
+-- than promises of the caller:
 --
 --   * a sign-in transaction is consumed exactly once, whatever the caller does;
 --   * the absolute lifetime of a session cannot be extended, by any caller, ever;
@@ -37,6 +42,43 @@
 -- it agrees with `clock_timestamp()` within `session_clock_policy.max_skew`. The lifetimes are not
 -- parameters: they are fixed here and enforced again by CHECK constraints, so a caller can neither
 -- choose how long a session lives nor move "now" to revive or stretch one.
+
+-- ---------------------------------------------------------------------------------------------
+-- moin_identity exists and can do nothing on its own.
+-- ---------------------------------------------------------------------------------------------
+--
+-- Login roles are provisioned by the cluster owner (`docker/postgres/init/00-roles.sql` locally, the
+-- CI role step, Terraform in P05), never by a migration — see 0003. This asserts what the grants
+-- below rely on, and fails the apply naming the problem rather than granting to a role that could
+-- do more than call six functions.
+DO $$
+DECLARE
+  r record;
+BEGIN
+  SELECT rolsuper, rolbypassrls, rolcreaterole, rolcreatedb, rolreplication
+    INTO r FROM pg_roles WHERE rolname = 'moin_identity';
+  IF NOT FOUND THEN
+    RAISE EXCEPTION
+      'missing database role moin_identity. It is provisioned by the cluster owner (docker/postgres/init/00-roles.sql locally, Terraform in P05), not by migrations.';
+  END IF;
+  IF r.rolsuper OR r.rolbypassrls OR r.rolcreaterole OR r.rolcreatedb OR r.rolreplication THEN
+    RAISE EXCEPTION
+      'moin_identity must be NOSUPERUSER NOBYPASSRLS NOCREATEROLE NOCREATEDB NOREPLICATION: it executes the session functions and nothing else.';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_auth_members m JOIN pg_roles g ON g.oid = m.roleid
+    WHERE m.member = (SELECT oid FROM pg_roles WHERE rolname = 'moin_identity')
+  ) OR EXISTS (
+    SELECT 1 FROM pg_auth_members m
+    WHERE m.roleid = (SELECT oid FROM pg_roles WHERE rolname = 'moin_identity')
+  ) THEN
+    RAISE EXCEPTION
+      'moin_identity must be a member of no role and have no members: membership would extend or share what it may do.';
+  END IF;
+END
+$$;
+
+GRANT USAGE ON SCHEMA public, app TO moin_identity;
 
 -- ---------------------------------------------------------------------------------------------
 -- users: the link between a provider subject and a person in our model.
@@ -136,10 +178,10 @@ COMMENT ON TABLE sessions IS
 -- ---------------------------------------------------------------------------------------------
 --
 -- Every function takes `p_now` from the application's injectable clock (ADR-0036), so lifetimes
--- are testable at the millisecond. Unbounded, that would let any holder of the runtime role — not
--- only `api`: PLAN gives `moin_app` to voice and worker too — revive an expired session by passing
--- an earlier time, or issue one whose 7 days start a year from now. So the time a caller supplies
--- must agree with the database's own clock within `max_skew`, and a disagreement raises.
+-- are testable at the millisecond. Unbounded, that would let whoever can call them — `moin_identity`,
+-- so the api — revive an expired session by passing an earlier time, or issue one whose 7 days start
+-- a year from now. So the time a caller supplies must agree with the database's own clock within
+-- `max_skew`, and a disagreement raises.
 --
 -- One row, changed only by a reviewed migration; no runtime role can read or write it. A test
 -- database that exercises exact lifetime boundaries widens it through the admin connection, which
@@ -185,7 +227,8 @@ REVOKE ALL ON FUNCTION app.session_clock(timestamptz) FROM PUBLIC;
 -- Grants: none. 0003's default privileges would have given moin_app DML on all of these.
 -- ---------------------------------------------------------------------------------------------
 REVOKE ALL ON TABLE users, auth_transactions, sessions, session_clock_policy
-  FROM PUBLIC, moin_app, moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting;
+  FROM PUBLIC, moin_app, moin_identity, moin_provisioner, moin_dispatcher, moin_support_ro,
+       moin_reporting;
 
 -- ---------------------------------------------------------------------------------------------
 -- A session's identity and lifetime are fixed at creation; revocation is final.
@@ -499,18 +542,19 @@ END
 $$;
 
 -- ---------------------------------------------------------------------------------------------
--- Execution: moin_app only, each by exact signature.
+-- Execution: moin_identity only, each by exact signature. moin_app — the voice and worker role as
+-- well as api's tenant pool — is revoked explicitly, so no default or earlier grant can survive.
 -- ---------------------------------------------------------------------------------------------
-REVOKE ALL ON FUNCTION app.begin_sign_in(bytea, bytea, bytea, bytea, text, text, timestamptz) FROM PUBLIC;
-REVOKE ALL ON FUNCTION app.consume_sign_in(bytea, bytea, timestamptz) FROM PUBLIC;
-REVOKE ALL ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea, timestamptz) FROM PUBLIC;
-REVOKE ALL ON FUNCTION app.rotate_session(bytea, bytea, uuid, text, timestamptz) FROM PUBLIC;
-REVOKE ALL ON FUNCTION app.resolve_session(bytea, timestamptz) FROM PUBLIC;
-REVOKE ALL ON FUNCTION app.revoke_session(bytea, timestamptz) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app.begin_sign_in(bytea, bytea, bytea, bytea, text, text, timestamptz) FROM PUBLIC, moin_app;
+REVOKE ALL ON FUNCTION app.consume_sign_in(bytea, bytea, timestamptz) FROM PUBLIC, moin_app;
+REVOKE ALL ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea, timestamptz) FROM PUBLIC, moin_app;
+REVOKE ALL ON FUNCTION app.rotate_session(bytea, bytea, uuid, text, timestamptz) FROM PUBLIC, moin_app;
+REVOKE ALL ON FUNCTION app.resolve_session(bytea, timestamptz) FROM PUBLIC, moin_app;
+REVOKE ALL ON FUNCTION app.revoke_session(bytea, timestamptz) FROM PUBLIC, moin_app;
 
-GRANT EXECUTE ON FUNCTION app.begin_sign_in(bytea, bytea, bytea, bytea, text, text, timestamptz) TO moin_app;
-GRANT EXECUTE ON FUNCTION app.consume_sign_in(bytea, bytea, timestamptz) TO moin_app;
-GRANT EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea, timestamptz) TO moin_app;
-GRANT EXECUTE ON FUNCTION app.rotate_session(bytea, bytea, uuid, text, timestamptz) TO moin_app;
-GRANT EXECUTE ON FUNCTION app.resolve_session(bytea, timestamptz) TO moin_app;
-GRANT EXECUTE ON FUNCTION app.revoke_session(bytea, timestamptz) TO moin_app;
+GRANT EXECUTE ON FUNCTION app.begin_sign_in(bytea, bytea, bytea, bytea, text, text, timestamptz) TO moin_identity;
+GRANT EXECUTE ON FUNCTION app.consume_sign_in(bytea, bytea, timestamptz) TO moin_identity;
+GRANT EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea, timestamptz) TO moin_identity;
+GRANT EXECUTE ON FUNCTION app.rotate_session(bytea, bytea, uuid, text, timestamptz) TO moin_identity;
+GRANT EXECUTE ON FUNCTION app.resolve_session(bytea, timestamptz) TO moin_identity;
+GRANT EXECUTE ON FUNCTION app.revoke_session(bytea, timestamptz) TO moin_identity;

@@ -36,7 +36,12 @@ CREATE ROLE moin_support_ro WITH LOGIN PASSWORD 'local-development-only' NOBYPAS
 -- Founder KPI dashboards: aggregate, PII-free views only.
 CREATE ROLE moin_reporting WITH LOGIN PASSWORD 'local-development-only' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
 
-GRANT CONNECT ON DATABASE moin TO moin_app, moin_migrator, moin_readonly, moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting;
+-- Sign-in and sessions (P06.06, ADR-0003 amendment): the api role's second pool, and the only role
+-- that may execute the session functions. voice and worker never hold its credential, so neither
+-- can mint, resolve, rotate or revoke a session even if compromised. It may do nothing else.
+CREATE ROLE moin_identity WITH LOGIN PASSWORD 'local-development-only' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
+
+GRANT CONNECT ON DATABASE moin TO moin_app, moin_migrator, moin_readonly, moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting, moin_identity;
 
 -- The public schema is not writable by default; P06 creates the application schema and grants.
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;

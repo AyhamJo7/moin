@@ -44,9 +44,16 @@ export interface TestDatabase {
   readonly appUrl: string;
   /** Connection string for the migration role. */
   readonly migrationUrl: string;
+  /**
+   * Connection string for `moin_identity`, the api-only role that alone may execute the session
+   * functions (P06.06, ADR-0003). Undefined when `TEST_DATABASE_IDENTITY_URL` is not set.
+   */
+  readonly identityUrl: string | undefined;
   readonly name: string;
   /** A pool as the application role. Closed by `drop()`. */
   pool(): Pool;
+  /** A pool as `moin_identity`. Throws, naming the variable, when it is not configured. */
+  identityPool(): Pool;
   /**
    * A pool on `migrationUrl`, for fixtures and for reading rows back. It is the admin connection
    * and bypasses row-level security, so it must never drive the behaviour under test — only set
@@ -93,12 +100,19 @@ export async function createTestDatabase(label = 'test'): Promise<TestDatabase> 
   }
   const appUrl = urlForDatabase(appBase, name);
   const migrationUrl = urlForDatabase(admin, name);
+  const identityBase = process.env['TEST_DATABASE_IDENTITY_URL'];
+  const identityUrl =
+    identityBase === undefined || identityBase.length === 0
+      ? undefined
+      : urlForDatabase(identityBase, name);
   let fixtures: Pool | undefined;
+  let identity: Pool | undefined;
 
   return {
     name,
     appUrl,
     migrationUrl,
+    identityUrl,
     pool(): Pool {
       appPool ??= createPool({ connectionString: appUrl, max: 4 });
       return appPool;
@@ -106,6 +120,16 @@ export async function createTestDatabase(label = 'test'): Promise<TestDatabase> 
     fixturePool(): Pool {
       fixtures ??= createPool({ connectionString: migrationUrl, max: 2 });
       return fixtures;
+    },
+    identityPool(): Pool {
+      if (identityUrl === undefined) {
+        throw new Error(
+          'TEST_DATABASE_IDENTITY_URL is not set. The session functions are executable by ' +
+            'moin_identity alone, so their tests connect as it; the example environment file has it.',
+        );
+      }
+      identity ??= createPool({ connectionString: identityUrl, max: 4 });
+      return identity;
     },
     async drop(): Promise<void> {
       if (appPool !== undefined) {
@@ -115,6 +139,10 @@ export async function createTestDatabase(label = 'test'): Promise<TestDatabase> 
       if (fixtures !== undefined) {
         await fixtures.end();
         fixtures = undefined;
+      }
+      if (identity !== undefined) {
+        await identity.end();
+        identity = undefined;
       }
       const cleanup = createPool({ connectionString: admin, max: 1 });
       try {

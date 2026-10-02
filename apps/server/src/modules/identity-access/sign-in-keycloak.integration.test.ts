@@ -80,6 +80,13 @@ function issuerUrl(): string {
 }
 
 let database: TestDatabase;
+
+/** The api's second pool connects as moin_identity, exactly as deployed. */
+function identityUrl(): string {
+  const url = database.identityUrl;
+  if (url === undefined) throw new Error('TEST_DATABASE_IDENTITY_URL is required');
+  return url;
+}
 let admin: ReturnType<TestDatabase['fixturePool']>;
 let app: NestFastifyApplication;
 const issuer = issuerUrl();
@@ -186,6 +193,7 @@ beforeAll(async () => {
     OIDC_CLIENT_SECRET: secretOf(BROWSER_CLIENT),
     OIDC_REDIRECT_URI: REDIRECT_URI,
     AUTH_LOCAL_TOKEN_KEY: LOCAL_KEY,
+    IDENTITY_DATABASE_URL: identityUrl(),
   });
   const moduleRef = await Test.createTestingModule({
     imports: [ConfigModule.forRoot(config), LoggerModule, IdentityAccessModule],

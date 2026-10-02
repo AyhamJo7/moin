@@ -83,6 +83,18 @@ const baseSchema = z.object({
 
   DATABASE_URL: secret('DATABASE_URL', z.url({ protocol: /^postgres(ql)?$/ })),
 
+  /**
+   * The api role's second pool: `moin_identity`, the only role that may execute the sign-in and
+   * session functions (P06.06, ADR-0003). It exists so that `moin_app` — which voice and worker
+   * hold too — can mint no session. So it is refused for every other role here; an api that signs
+   * people in without it refuses to start (`buildSignInGate`). Holds the resolved credential; the
+   * task definition references the ARN.
+   */
+  IDENTITY_DATABASE_URL: secret(
+    'IDENTITY_DATABASE_URL',
+    z.url({ protocol: /^postgres(ql)?$/ }).optional(),
+  ),
+
   /** P06.05.04: one OIDC contract, selected by deployment rather than by business logic. */
   OIDC_PROVIDER: z.enum(OIDC_PROVIDERS).optional(),
   OIDC_ISSUER_URL: secret('OIDC_ISSUER_URL', z.url({ protocol: /^https?$/ }).optional()),
@@ -248,6 +260,26 @@ const schema = baseSchema.superRefine((value, ctx) => {
       }
     }
   }
+  if (value.IDENTITY_DATABASE_URL !== undefined && value.SERVER_ROLE !== 'api') {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['IDENTITY_DATABASE_URL'],
+      message:
+        "is the api role's session credential and must not reach any other role: a voice or " +
+        'worker process holding it could mint sessions (ADR-0003)',
+    });
+  }
+  if (
+    value.IDENTITY_DATABASE_URL !== undefined &&
+    new URL(value.IDENTITY_DATABASE_URL).username === new URL(value.DATABASE_URL).username
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['IDENTITY_DATABASE_URL'],
+      message: 'must use a different database role from DATABASE_URL (moin_identity, not moin_app)',
+    });
+  }
+
   if (
     value.AUTH_LOCAL_TOKEN_KEY !== undefined &&
     value.NODE_ENV !== 'development' &&

@@ -106,6 +106,43 @@ function cruise(files: Record<string, string>): string[] {
 }
 
 describe('module boundary rules', () => {
+  it('rejects the voice role reaching the identity module, even through another module', () => {
+    expect(
+      cruise({
+        'apps/server/src/main-voice.ts':
+          "import { Voice } from './roots/voice-root.module.ts';\nexport const use = Voice;\n",
+        'apps/server/src/roots/voice-root.module.ts':
+          "import { Calls } from '../modules/voice/voice.module.ts';\nexport const Voice = Calls;\n",
+        'apps/server/src/modules/voice/voice.module.ts':
+          "import { Identity } from '../identity-access/identity-access.module.ts';\nexport const Calls = Identity;\n",
+        'apps/server/src/modules/identity-access/identity-access.module.ts':
+          'export const Identity = 1;\n',
+      }),
+    ).toContain('identity-is-api-only');
+  });
+
+  it('rejects the worker role importing the identity pool', () => {
+    expect(
+      cruise({
+        'apps/server/src/roots/worker-root.module.ts':
+          "import { IdentityPool } from '../modules/platform/identity-pool.module.ts';\nexport const Worker = IdentityPool;\n",
+        'apps/server/src/modules/platform/identity-pool.module.ts':
+          'export const IdentityPool = 1;\n',
+      }),
+    ).toContain('identity-is-api-only');
+  });
+
+  it('allows the api role to import the identity module', () => {
+    expect(
+      cruise({
+        'apps/server/src/roots/api-root.module.ts':
+          "import { Identity } from '../modules/identity-access/identity-access.module.ts';\nexport const Api = Identity;\n",
+        'apps/server/src/modules/identity-access/identity-access.module.ts':
+          'export const Identity = 1;\n',
+      }),
+    ).not.toContain('identity-is-api-only');
+  });
+
   it('rejects a module reaching into another module’s domain layer', () => {
     expect(
       cruise({

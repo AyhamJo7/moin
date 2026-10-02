@@ -464,6 +464,72 @@ $$;
   });
 });
 
+describe('the identity role boundary (P06.06, ADR-0003)', () => {
+  // Grants here are per-database objects, so they cannot leak into another test file's database.
+  // Role membership is cluster-wide and is therefore asserted by the migration and the role tests,
+  // never mutated here.
+  evidenceTest('rejects moin_app regaining EXECUTE on a session function', async () => {
+    await ddl(
+      'GRANT EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea, timestamptz) TO moin_app',
+    );
+    try {
+      expect(rulesFor(await findings(), 'app.begin_session')).toContain(
+        'security-definer-unexpected-execute-grant',
+      );
+    } finally {
+      await ddl(
+        'REVOKE EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea, timestamptz) FROM moin_app',
+      );
+    }
+  });
+
+  evidenceTest('rejects moin_identity holding a table privilege, session or tenant', async () => {
+    for (const table of ['sessions', 'organisations']) {
+      // eslint-disable-next-line no-restricted-syntax -- table name from a two-entry literal list in this test.
+      await ddl(`GRANT SELECT ON TABLE ${table} TO moin_identity`);
+      try {
+        expect(rulesFor(await findings(), 'moin_identity'), table).toContain(
+          'identity-role-table-privilege',
+        );
+      } finally {
+        // eslint-disable-next-line no-restricted-syntax -- same literal list.
+        await ddl(`REVOKE SELECT ON TABLE ${table} FROM moin_identity`);
+      }
+    }
+  });
+
+  evidenceTest('rejects moin_identity executing any other privileged function', async () => {
+    const signature =
+      'app.provision_tenant(uuid, citext, text, text, text, text, text, boolean, text)';
+    // eslint-disable-next-line no-restricted-syntax -- signature is a literal in this test.
+    await ddl(`GRANT EXECUTE ON FUNCTION ${signature} TO moin_identity`);
+    try {
+      const list = await findings();
+      expect(rulesFor(list, 'moin_identity')).toContain('identity-role-unexpected-execute');
+      expect(rulesFor(list, 'app.provision_tenant')).toContain(
+        'security-definer-unexpected-execute-grant',
+      );
+    } finally {
+      // eslint-disable-next-line no-restricted-syntax -- same literal.
+      await ddl(`REVOKE EXECUTE ON FUNCTION ${signature} FROM moin_identity`);
+    }
+  });
+
+  it('reports nothing about the identity boundary once the fixtures are revoked', async () => {
+    // Scoped to its own subjects: earlier cases in this file leave their own fixtures behind.
+    const subjects = new Set([
+      'moin_identity',
+      'app.begin_session',
+      'app.begin_sign_in',
+      'app.consume_sign_in',
+      'app.resolve_session',
+      'app.revoke_session',
+      'app.rotate_session',
+    ]);
+    expect((await findings()).filter((finding) => subjects.has(finding.subject))).toStrictEqual([]);
+  });
+});
+
 describe('what the check catches', () => {
   // The case PLAN names. ENABLE without FORCE reads as protected and is not: the policy does not
   // apply to the table's owner, who runs migrations, backfills and admin connections.

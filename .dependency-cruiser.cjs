@@ -75,6 +75,19 @@ module.exports = {
       to: { path: '^packages/db/src/pool\\.ts$' },
     },
     {
+      name: 'identity-is-api-only',
+      severity: 'error',
+      comment:
+        'Sign-in and sessions run behind moin_identity, a credential only the api role holds (P06.06, ADR-0003). If the voice, worker or migrate graph could reach the identity module or its pool, a compromise of that process would be one configuration mistake away from minting sessions. The configuration loader refuses the credential for those roles; this keeps the code that would use it out of their graphs as well.',
+      from: {
+        path: '^apps/server/src/(main-(voice|worker|migrate)\\.ts|roots/(voice|worker|migrate)-root\\.module\\.ts)$',
+      },
+      to: {
+        path: '^apps/server/src/modules/(identity-access/|platform/identity-pool\\.module\\.ts$)',
+        reachable: true,
+      },
+    },
+    {
       name: 'no-domain-imports-outward',
       severity: 'error',
       comment:
