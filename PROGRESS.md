@@ -5,7 +5,7 @@ mode: autonomous
 phase: P06
 tier: PILOT
 plan: docs/phases/P06-plan.md
-next: founder — mark PR #31 ready and merge when satisfied; then P06.10.03 writer adoption (incl. `locations`) and EXT-09 for P06.10.05 and the dedicated verifier role
+next: founder — review the P06.06.01/.02 draft PR (EV-P06-041) and decide the identity DB role; then P06.06.03 membership re-check; P06.10.03 writer adoption and EXT-09 for P06.10.05 still open
 updated: 2026-10-02
 ---
 
@@ -184,6 +184,8 @@ Rules
 | P06.05.04 | VERIFIED | 1801feb | EV-P06-038 | Founder-authorized on the independent verdict `READY_FOR_FOUNDER_P06_05_04` for reviewed HEAD `1801feb`; evidence EV-P06-037. IdP roles removed, environment provider matrix and strict `email_verified` accepted; P06.05.01–.03 and .05 stay open, so P06.05 is not complete |
 | P06.09.03 | READY_FOR_REVIEW | b4ac244 | EV-P06-039 | MFA-reset and compromised-account runbooks normalized from `74bc27f` (`feat/p06-05-oidc`, superseding its stale `IN_PROGRESS` row) onto current main: callback and billing data treated as compromised by default per the threat model, an additional factor pending in P06.09.02, every unbuilt control labelled with its item. Not executable; P06.09.01, .02 and .04 open |
 | P06.09.03 | VERIFIED | 15433fb | EV-P06-040 | Founder-authorized on independent verdict `READY_FOR_FOUNDER_P06_09_03` for reviewed runbook HEAD `15433fb`; runbook evidence EV-P06-039. Existing sessions and fresh access both blocked for containment; verified replacement MFA and mandatory audit precede ordinary access. Documentation only; P06.09.01/.02/.04 open and P06.09 incomplete |
+| P06.06.01 | READY_FOR_REVIEW | 65e0865 | EV-P06-041 | Authorization Code + PKCE S256 callback in `api`: single-use, browser-bound, 10-minute `state`; nonce-bound ID token verified with `jose`; code exchanged server-side; provider tokens AES-256-GCM sealed and wiped at revocation; internal return paths only. Real `moin-web` code flow proven against recreated local Keycloak. Not Cognito (P06.05.05); deployed environments refuse sign-in until the KMS key exists (P05.08.01) |
+| P06.06.02 | READY_FOR_REVIEW | 65e0865 | EV-P06-041 | `users` and `sessions` (global, no runtime table grant, six pinned `SECURITY DEFINER` functions); SHA-256 of a 256-bit token in `__Host-moin_sid` (HttpOnly, Secure, SameSite=Lax, Path=/, no Domain); 12 h idle / 7 d absolute enforced by functions, CHECKs and a guard trigger; caller time bounded to 5 min of the DB clock; rotation primitive (login wired; step-up and privilege-change callers are P06.06.04/P06.07). Open founder decision: a dedicated identity DB role (QG-09 invariant finding I1). P06.06.03–.07 open |
 
 ## External waits
 
