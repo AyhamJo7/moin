@@ -18,6 +18,33 @@
 import { z } from 'zod';
 
 const NODE_ENVS = ['development', 'test', 'staging', 'production'] as const;
+const OIDC_PROVIDERS = ['keycloak', 'cognito'] as const;
+
+export type NodeEnvironment = (typeof NODE_ENVS)[number];
+export type OidcProvider = (typeof OIDC_PROVIDERS)[number];
+
+/**
+ * The one OIDC provider each environment may use (P06.05.04). Keycloak exists only on developer
+ * machines and in CI (ADR-0045); a deployed environment authenticates against Cognito
+ * (ADR-0005). `OIDC_PROVIDER` must agree with this table rather than being inferred from it, so a
+ * local environment file copied into a deployment fails at boot instead of quietly pointing
+ * sign-in at a laptop.
+ */
+export const OIDC_PROVIDER_BY_ENVIRONMENT: Readonly<Record<NodeEnvironment, OidcProvider>> = {
+  development: 'keycloak',
+  test: 'keycloak',
+  staging: 'cognito',
+  production: 'cognito',
+};
+
+/**
+ * The issuer of a Cognito user pool, exactly as it appears in the `iss` claim: HTTPS, the
+ * regional endpoint, and a pool id prefixed with the same region. EU regions only, because the
+ * customer pool lives in the EU (P06.05.01).
+ */
+const COGNITO_ISSUER = /^https:\/\/cognito-idp\.(eu-[a-z]+-\d)\.amazonaws\.com\/\1_[0-9A-Za-z]+$/;
+
+const LOOPBACK_HOSTS: readonly string[] = ['127.0.0.1', 'localhost'];
 const ROLES = ['api', 'voice', 'worker', 'migrate'] as const;
 const LOG_LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'] as const;
 
@@ -57,7 +84,7 @@ const baseSchema = z.object({
   DATABASE_URL: secret('DATABASE_URL', z.url({ protocol: /^postgres(ql)?$/ })),
 
   /** P06.05.04: one OIDC contract, selected by deployment rather than by business logic. */
-  OIDC_PROVIDER: z.enum(['keycloak', 'cognito']).optional(),
+  OIDC_PROVIDER: z.enum(OIDC_PROVIDERS).optional(),
   OIDC_ISSUER_URL: secret('OIDC_ISSUER_URL', z.url({ protocol: /^https?$/ }).optional()),
   OIDC_CLIENT_ID: z.string().min(1).optional(),
   OIDC_CLIENT_SECRET: secret('OIDC_CLIENT_SECRET', z.string().min(1).optional()),
@@ -142,14 +169,16 @@ const schema = baseSchema.superRefine((value, ctx) => {
         });
       }
     }
-    if (value.OIDC_PROVIDER === 'keycloak') {
-      if (value.NODE_ENV === 'staging' || value.NODE_ENV === 'production') {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['OIDC_PROVIDER'],
-          message: 'local provider is not allowed outside development or test',
-        });
-      }
+    const expected = OIDC_PROVIDER_BY_ENVIRONMENT[value.NODE_ENV];
+    if (value.OIDC_PROVIDER !== undefined && value.OIDC_PROVIDER !== expected) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['OIDC_PROVIDER'],
+        message:
+          expected === 'cognito'
+            ? 'local provider is not allowed outside development or test'
+            : 'development and test use the local provider, never a deployed user pool',
+      });
     }
     if (value.OIDC_ISSUER_URL !== undefined) {
       const issuer = new URL(value.OIDC_ISSUER_URL);
@@ -165,10 +194,7 @@ const schema = baseSchema.superRefine((value, ctx) => {
           message: 'issuer must be a fixed origin and path',
         });
       }
-      if (
-        value.OIDC_PROVIDER === 'keycloak' &&
-        !['127.0.0.1', 'localhost'].includes(issuer.hostname)
-      ) {
+      if (value.OIDC_PROVIDER === 'keycloak' && !LOOPBACK_HOSTS.includes(issuer.hostname)) {
         ctx.addIssue({
           code: 'custom',
           path: ['OIDC_ISSUER_URL'],
@@ -179,12 +205,12 @@ const schema = baseSchema.superRefine((value, ctx) => {
     if (
       value.OIDC_PROVIDER === 'cognito' &&
       value.OIDC_ISSUER_URL !== undefined &&
-      new URL(value.OIDC_ISSUER_URL).protocol !== 'https:'
+      !COGNITO_ISSUER.test(value.OIDC_ISSUER_URL)
     ) {
       ctx.addIssue({
         code: 'custom',
         path: ['OIDC_ISSUER_URL'],
-        message: 'Cognito issuer must use HTTPS',
+        message: 'Cognito issuer must be an EU user pool over HTTPS',
       });
     }
     if (value.OIDC_REDIRECT_URI !== undefined) {
@@ -194,8 +220,7 @@ const schema = baseSchema.superRefine((value, ctx) => {
         redirect.hash !== '' ||
         redirect.username !== '' ||
         redirect.password !== '' ||
-        (value.OIDC_PROVIDER === 'keycloak' &&
-          !['127.0.0.1', 'localhost'].includes(redirect.hostname)) ||
+        (value.OIDC_PROVIDER === 'keycloak' && !LOOPBACK_HOSTS.includes(redirect.hostname)) ||
         (value.NODE_ENV !== 'development' &&
           value.NODE_ENV !== 'test' &&
           redirect.protocol !== 'https:')

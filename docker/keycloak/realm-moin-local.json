@@ -11,22 +11,6 @@
   "ssoSessionMaxLifespan": 36000,
   "refreshTokenMaxReuse": 0,
   "revokeRefreshToken": true,
-  "roles": {
-    "realm": [
-      {
-        "name": "owner",
-        "description": "Betriebsinhaber: full access to their own organisation"
-      },
-      {
-        "name": "staff",
-        "description": "Mitarbeiter: day-to-day tasks and conversations"
-      },
-      {
-        "name": "operator",
-        "description": "iQuantum operator: support access, never tenant data by default"
-      }
-    ]
-  },
   "clients": [
     {
       "clientId": "moin-web",
@@ -45,7 +29,8 @@
         "pkce.code.challenge.method": "S256",
         "post.logout.redirect.uris": "http://localhost:3000/*"
       },
-      "defaultClientScopes": ["openid", "profile", "email", "roles"]
+      "defaultClientScopes": ["basic", "email"],
+      "optionalClientScopes": []
     },
     {
       "clientId": "moin-tests",
@@ -58,7 +43,9 @@
       "directAccessGrantsEnabled": true,
       "attributes": {
         "pkce.code.challenge.method": "S256"
-      }
+      },
+      "defaultClientScopes": ["basic", "email"],
+      "optionalClientScopes": []
     }
   ],
   "users": [
@@ -75,8 +62,7 @@
           "value": "local-development-only",
           "temporary": false
         }
-      ],
-      "realmRoles": ["owner"]
+      ]
     },
     {
       "username": "mitarbeiter@musterbetrieb-shk.example",
@@ -91,8 +77,7 @@
           "value": "local-development-only",
           "temporary": false
         }
-      ],
-      "realmRoles": ["staff"]
+      ]
     }
   ]
 }

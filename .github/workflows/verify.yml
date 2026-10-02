@@ -114,6 +114,7 @@ jobs:
       TEST_DATABASE_MIGRATOR_URL: postgres://moin_migrator:ci-only-not-a-secret@127.0.0.1:5432/postgres
       TEST_DATABASE_APP_URL: postgres://moin_app:ci-only-not-a-secret@127.0.0.1:5432/postgres
       TEST_DATABASE_PROVISIONER_URL: postgres://moin_provisioner:ci-only-not-a-secret@127.0.0.1:5432/postgres
+      TEST_OIDC_ISSUER_URL: http://127.0.0.1:8080/realms/moin-local
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -143,6 +144,12 @@ jobs:
             moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting;
           GRANT CREATE ON DATABASE moin TO moin_migrator;
           SQL
+
+      # The identity-claims test signs in to Keycloak with the committed realm (ADR-0045). Started
+      # from the compose file rather than as a service container: a service starts before checkout,
+      # so it could not import the realm, and the image digest keeps one source of truth.
+      - name: Start the local OIDC provider
+        run: docker compose up -d --wait oidc
 
       - run: pnpm test:integration
 

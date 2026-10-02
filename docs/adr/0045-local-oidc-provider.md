@@ -2,7 +2,8 @@
 
 - **Status:** Accepted (P02.04.01, 2026-09-28) · **Deciders:** founder
 - **Scope:** local development and automated tests only
-- **Related:** ADR-0002, INV-02, P06 (identity and access)
+- **Related:** ADR-0002, ADR-0005, INV-02, P06 (identity and access)
+- **Amended:** P06.05.04 (2026-10-02): identity-claims contract and per-environment provider switch
 
 ## Context
 
@@ -38,9 +39,54 @@ Chosen because our auth boundary genuinely depends on each:
 - JWKS discovery at the standard `.well-known` endpoint, and key rotation.
 - Access-token and ID-token validation, expiry (`accessTokenLifespan` 300 s), refresh-token
   rotation with reuse revoked.
-- Roles as claims (`owner`, `staff`, `operator`) — only the shape our authorization contract reads.
+- The identity-claims contract below, and nothing else. The realm defines no roles or groups and
+  emits no role claims: roles and permissions are rows in our database (ADR-0005), so a local
+  token that carried them would invite code that reads them.
 - Negative cases, which are the point: invalid issuer, invalid audience, expired token, unknown
   signing key, malformed token.
+
+### Identity-claims contract (P06.05.04)
+
+An ID token tells us who a person is, never what they may do. Both providers normalise to one
+`VerifiedIdentity` (`apps/server/src/modules/identity-access/domain/identity-claims.ts`), so code
+after the sign-in callback cannot tell them apart:
+
+| Canonical field | Source requirement                                            | Keycloak (local)                        | Cognito (staging, production) | Required         | Meaning                                                    |
+| --------------- | ------------------------------------------------------------- | --------------------------------------- | ----------------------------- | ---------------- | ---------------------------------------------------------- |
+| `subject`       | `users.cognito_sub` UNIQUE (Data Architecture); ADR-0005 link | `sub` (client scope `basic`)            | `sub`                         | yes              | Stable link to our user row; never the email               |
+| `email`         | `users.email` citext; P06.08.02 binds by verified email       | `email` (client scope `email`)          | `email`                       | yes, lower-cased | Address invitations are matched against                    |
+| (gate only)     | P06.08.02 "verified email"                                    | `email_verified` (client scope `email`) | `email_verified`              | must be `true`   | An unverified identity is refused, not carried with a flag |
+
+- Wrong types, arrays or objects where a string is expected, a malformed or overlong email and a
+  missing claim all fail closed. Errors name the claim, never its value.
+- Every other claim is ignored. `organisation_id`, `tenant_id`, `location_id`, roles,
+  `permissions`, `realm_access`, `cognito:groups`, `custom:*`, `preferred_username` and
+  `cognito:username` never become identity attributes or aliases: tenancy and authorization are
+  resolved server-side from memberships (INV-02, BR-109).
+- Both providers are asked for the same scopes, `openid email` (`OIDC_SCOPES`). Both local clients
+  map exactly the `basic` and `email` client scopes: Keycloak 25 moved `sub` into `basic`, so a
+  client that lists its scopes without it issues ID tokens with no subject.
+- The Cognito column is the documented Cognito ID-token shape, exercised as a fixture. It is not
+  evidence about Cognito; P06.05.05 verifies it in staging.
+
+### Provider per environment (P06.05.04)
+
+| `NODE_ENV`              | Provider   | Issuer accepted                                                      |
+| ----------------------- | ---------- | -------------------------------------------------------------------- |
+| `development`, `test`   | `keycloak` | loopback only                                                        |
+| `staging`, `production` | `cognito`  | `https://cognito-idp.<eu-region>.amazonaws.com/<eu-region>_<poolId>` |
+
+`OIDC_PROVIDER` is declared and must agree with this table; it is never inferred. All five
+`OIDC_*` settings are present or none are, and `loadConfig` refuses anything else at boot. There is
+no fallback from one provider to the other. `resolveOidcConfig` turns the validated settings into
+one provider-neutral `OidcClientConfig` (provider, issuer, client id, redacted client secret,
+callback, scopes) and fails closed when sign-in asks for it and none is configured. The client
+secret stays server-side: it is printable only through `reveal()`, and `apps/web` cannot import
+server configuration.
+
+**Not here.** The authorization-code callback, code exchange, PKCE verifier, `state` and nonce
+validation, token signature/issuer/audience checks, sessions and cookies belong to P06.06.01 and
+later, which consume `OidcClientConfig` and `parseIdentityClaims` without knowing the provider.
 
 ### What Keycloak cannot honestly prove
 
@@ -83,4 +129,7 @@ evidence.
 | PKCE is required, matching production                       | Realm attribute `pkce.code.challenge.method: S256`; `oidc-realm.test.ts` checks the browser client cannot use implicit or direct password grants |
 | The negative cases are exercised                            | P06 auth suite: invalid issuer, invalid audience, expired token, unknown signing key, malformed token                                            |
 | No Keycloak-specific concept reaches production code        | The auth boundary depends on standard OIDC only; no admin-API call and no Keycloak claim outside the local fixtures                              |
+| Both providers normalise to one identity; roles are ignored | `identity-claims.test.ts`; `oidc-realm.test.ts` pins both local clients to the `basic` and `email` scopes and the realm to no roles              |
+| A real local token satisfies the contract                   | `oidc-realm.integration.test.ts`: signs in through `moin-tests`, verifies the signature against the realm keys, parses the ID token              |
+| One provider per environment, no fallback                   | `oidc.test.ts`: environment × provider matrix, Cognito issuer shape, partial settings, secret redaction and the browser boundary                 |
 | Cognito-specific behaviour is verified against Cognito      | P06 records each such item as a staging verification; a local pass is a precondition, not evidence                                               |

@@ -180,6 +180,8 @@ Rules
 | P06.10.07 | VERIFIED | 468827a | EV-P06-036 | Founder-authorized at QG-09 on the independent verdict `READY_FOR_FOUNDER_QG09` for reviewed HEAD `468827a`; evidence EV-P06-025 … EV-P06-035 |
 | P06.10 | IN_PROGRESS | 8e5bf76 | EV-P06-021…025 | Table, chain, query API, daily verifier, argument scanner and runbook done. Open: .03 adoption by the tool guard, operator and security paths (needs P10.08, P06.11/.12), .05 scheduling (EXT-09) and .06 founder acceptance of ADR-0017 |
 | P06.05.04 | IN_PROGRESS | feat/p06-05-local-oidc | — | Local Keycloak realm and fixture existed from P02; browser client now disallows direct grants, and OIDC settings validate the selected environment. Auth callback adoption and claim-contract verification remain open. |
+| P06.05.04 | READY_FOR_REVIEW | 215e878 | EV-P06-037 | Identity-claims contract (subject, verified lower-cased email) proven on a real local Keycloak token and the documented Cognito shape; both local clients pinned to the `basic`+`email` scopes (`moin-web` lacked `sub`), realm roles removed; one OIDC provider per environment with an EU Cognito issuer check; 12/12 mutation variants KILLED_ASSERTION. Callback, state, nonce and sessions stay with P06.06.01 |
+| P06.05.04 | VERIFIED | 1801feb | EV-P06-038 | Founder-authorized on the independent verdict `READY_FOR_FOUNDER_P06_05_04` for reviewed HEAD `1801feb`; evidence EV-P06-037. IdP roles removed, environment provider matrix and strict `email_verified` accepted; P06.05.01–.03 and .05 stay open, so P06.05 is not complete |
 
 ## External waits
 
