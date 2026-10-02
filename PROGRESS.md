@@ -5,7 +5,7 @@ mode: autonomous
 phase: P06
 tier: PILOT
 plan: docs/phases/P06-plan.md
-next: founder — independent QG-09 re-review of PR #31, then the five ADR-0017 residuals and acceptance of ADR-0017 (P06.10.06)
+next: founder — mark PR #31 ready and merge when satisfied; then P06.10.03 writer adoption (incl. `locations`) and EXT-09 for P06.10.05 and the dedicated verifier role
 updated: 2026-10-02
 ---
 
@@ -176,6 +176,8 @@ Rules
 | P06.10.07 | READY_FOR_REVIEW | 96a5dad | EV-P06-031 | Assertion evidence moved from the serialized thrown value to the matcher boundary in-process: a plain object literal and a `toJSON` spoof both defeated the previous model. Anchor uniqueness enforced at application time. 90 KILLED_ASSERTION and 2 documented INFRA_FAILURE over 92 variants, 25 of which attack the harness |
 | P06.10.07 | READY_FOR_REVIEW | 953c47c | EV-P06-032 | Assertion evidence moved from a transferable token to **object identity**: the terminal value of the test body must be, by `===`, the object a Vitest matcher threw in this invocation. 52 KILLED_ASSERTION and 42 NOT_EVIDENCE_ELIGIBLE over 94 variants |
 | P06.10.07 | READY_FOR_REVIEW | bf02200 | EV-P06-033 | Eligibility gap closed: 30 killing tests under `packages/db/` moved to the trusted wrapper, registration only, and the wrapper moved into `@moin/testing` so no package reaches into `scripts/`. 92 KILLED_ASSERTION and 2 NOT_EVIDENCE_ELIGIBLE over 94 variants |
+| P06.10.06 | VERIFIED | 468827a | EV-P06-036 | ADR-0017 accepted by the founder under QG-09, with five recorded residual dispositions; deferred and external items stay open |
+| P06.10.07 | VERIFIED | 468827a | EV-P06-036 | Founder-authorized at QG-09 on the independent verdict `READY_FOR_FOUNDER_QG09` for reviewed HEAD `468827a`; evidence EV-P06-025 … EV-P06-035 |
 | P06.10 | IN_PROGRESS | 8e5bf76 | EV-P06-021…025 | Table, chain, query API, daily verifier, argument scanner and runbook done. Open: .03 adoption by the tool guard, operator and security paths (needs P10.08, P06.11/.12), .05 scheduling (EXT-09) and .06 founder acceptance of ADR-0017 |
 
 ## External waits
@@ -629,3 +631,22 @@ true, ok: false }` — is serialized by Vitest with none of the `constructor`/`t
   owners. Regenerated at `1a924a0`: `KILLED_ASSERTION: 105`, `NOT_EVIDENCE_ELIGIBLE: 2` (N8, P8)
   over 107 variants. `101/2 over 103` is superseded. No product, migration or app change. ADR-0017
   stays **PROPOSED**; P06.10 is not complete.
+
+- 2026-10-02 — **QG-09 accepted for PR #31 (EV-P06-036).** Independent verdict
+  `READY_FOR_FOUNDER_QG09` on reviewed implementation HEAD `468827a`. Before the two conditional
+  dispositions were recorded, both conditions were checked against the source.
+  (a) `operation`/`target_kind`/`versions`: `appendAuditEvent` has no production caller, the
+  provisioning trigger writes fixed literals, `EXECUTE` is `moin_app`-only, and no HTTP route
+  reaches the writer.
+  (b) `verify-audit` output: fixed literals, counts, sequence numbers, opaque organisation UUIDs,
+  six fixed break reasons, and a SQLSTATE or error class name — never a message.
+  Dispositions:
+  - verifier role deferred, not waived (EXT-09);
+  - caller-supplied fields accepted for trusted internal writers only;
+  - `locations` DML deferred coverage under P06.10.03;
+  - alarm output accepted for this PR only, with future dynamic payloads through the redacting logger;
+  - `pg_temp` last acceptable for this PR only, not a precedent.
+
+  ADR-0017 is **ACCEPTED** (P06.10.06); P06.10.07 is **VERIFIED**. Still open: P06.10.03 (including
+  `locations`) and P06.10.05 (`WAITING_FOR_EXTERNAL`, EXT-09). P06.10 and P06 remain `IN_PROGRESS`.
+  Governance-only commit; no implementation change.

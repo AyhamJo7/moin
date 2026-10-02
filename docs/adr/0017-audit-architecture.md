@@ -1,6 +1,6 @@
 # ADR-0017 — Tenant audit architecture
 
-- **Status:** PROPOSED (founder acceptance pending)
+- **Status:** ACCEPTED (P06.10.06, 2026-10-02, founder QG-09 acceptance at reviewed HEAD `468827a`; residual dispositions under [Acceptance](#acceptance))
 - **Deciders:** founder
 - **Phase:** P06
 - **Related:** ADR-0003, ADR-0018, INV-01, INV-10, INV-12, QG-09
@@ -9,7 +9,7 @@
 
 Every business mutation must leave an ordered, tenant-scoped record that a later reviewer can inspect. Application code also needs to record rejected actions and security events without writing raw request bodies, credentials or contact details into a durable audit trail. Tenant isolation and FORCE RLS apply to audit records as they do to other tenant data.
 
-## Decision (draft)
+## Decision
 
 An audit append and the business mutation it describes run in one tenant transaction. Provisioning precedes an application tenant session, so its global request insert triggers the audit append after the provisioning function sets transaction-local tenant context. The runtime role has SELECT but no direct INSERT, UPDATE, DELETE or TRUNCATE grant on `audit_events` or `audit_heads`. A reviewed `SECURITY DEFINER` function checks a fixed operation and argument policy, locks the tenant head, allocates the next sequence, hashes the previous hash with a canonical payload, inserts the event and advances the head in that transaction. A trigger rejects UPDATE and DELETE even by the table owner, and a second one rejects `TRUNCATE`,
 which is a third row-removing verb that no row-level trigger sees. Every guard is `ENABLE ALWAYS`
@@ -213,16 +213,47 @@ Pseudonymisation and retention are separate decisions under ADR-0018 and require
 
 ## Known residuals, named rather than implied
 
-These are open. Each was found by adversarial review of this design and each needs a decision that
-is outside P06.10's scope; none is claimed as handled.
+Each was found by adversarial review of this design. None is claimed as handled. Each carries the
+founder's disposition from the QG-09 acceptance; see [Acceptance](#acceptance) for the full wording
+and constraints.
 
-| Residual                                                                                        | Why it is still open                                 | Owner                                                                                                                                                                                                                                                                                                         |
-| ----------------------------------------------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`moin_app` can enumerate every tenant id.**                                                   | `EXTERNAL_DEPENDENCY` (EXT-09)                       | The daily sweep runs as the request-serving role, so a SQL-injection flaw reachable as `moin_app` yields the tenant inventory and the customer count. RLS still prevents data access and tenant context is server-derived, so this costs the unguessable-identifier layer, not isolation.                     | The fix is a dedicated non-superuser role for the verifier (`DATABASE_AUDIT_URL`), and roles are cluster-level objects that `moin_migrator` deliberately cannot create — Terraform provisions them (P05, EXT-09). Until then the capability is granted to `moin_app`, which is the reviewed claim-function shape P06.14.01 already sanctions. | founder / P05 |
-| **`operation`, `target_kind` and `versions` are caller-supplied and only pattern-constrained.** | `FOUNDER_DECISION_REQUIRED`                          | `hans.mueller-at-example.de` satisfies the `operation` CHECK, so a future handler that derives an operation name from request data could write personal data into an append-only, un-erasable column.                                                                                                         | Closing it properly means a reviewed registry of permitted `(operation, target_kind)` pairs and a writer that fails closed on an unregistered pair — a change to the writer contract every future caller depends on. The scanner currently catches only values that violate the CHECK, i.e. a dropped constraint.                             | P07 / P16     |
-| **`locations` carries full DML for `moin_app` with no audit obligation.**                       | `FOUNDER_DECISION_REQUIRED`                          | A location rename or delete leaves no audit event and the chain still verifies. Latent today: no application code mutates `locations` yet.                                                                                                                                                                    | The general shape is already acknowledged below ("Infrastructure alone cannot prove that every future caller does so"), but this is the one concrete place the database _hands out_ the capability. The fix belongs with the business-action model, which decides how mutations and their audit appends are bound together.                   | P07           |
-| **The alarm lines bypass `@moin/observability`.**                                               | `FOUNDER_DECISION_REQUIRED`                          | `verify-audit` writes JSON to stdout with `console.log`, which skips the INV-12 redaction allowlist that every service log line goes through. The emitted shape is a closed TypeScript type and is asserted field-by-field across all line kinds, so the current output is safe; the risk is the next commit. | Routing it through `createLogger` requires adding `severity`, `seq`, `checked`, `runbook`, `sound`, `broken`, `unchecked` and `unregistered` to `ALLOWED_FIELDS`. All are non-personal counters and enums and the net effect is stricter, but it edits the INV-12 allowlist, which is a privacy control and not a session's call to loosen.   | founder       |
-| **`pg_temp` sits in every definer `search_path`.**                                              | Acceptable for this PR; **not** a general conclusion | Last in the list and not exploitable for these functions, but a definer has no legitimate need to resolve caller temp objects.                                                                                                                                                                                | It is the existing repository-wide convention; changing it is a project-wide change, not a P06.10 one.                                                                                                                                                                                                                                        | founder       |
+| Residual                                                                                        | Why it is still open                                          | Owner                                                                                                                                                                                                                                                                                                         |
+| ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`moin_app` can enumerate every tenant id.**                                                   | `EXTERNAL_DEPENDENCY` (EXT-09): deferral accepted, not waived | The daily sweep runs as the request-serving role, so a SQL-injection flaw reachable as `moin_app` yields the tenant inventory and the customer count. RLS still prevents data access and tenant context is server-derived, so this costs the unguessable-identifier layer, not isolation.                     | The fix is a dedicated non-superuser role for the verifier (`DATABASE_AUDIT_URL`), and roles are cluster-level objects that `moin_migrator` deliberately cannot create — Terraform provisions them (P05, EXT-09). Until then the capability is granted to `moin_app`, which is the reviewed claim-function shape P06.14.01 already sanctions. | founder / P05 |
+| **`operation`, `target_kind` and `versions` are caller-supplied and only pattern-constrained.** | Accepted for current trusted internal writers only            | `hans.mueller-at-example.de` satisfies the `operation` CHECK, so a future handler that derives an operation name from request data could write personal data into an append-only, un-erasable column.                                                                                                         | Closing it properly means a reviewed registry of permitted `(operation, target_kind)` pairs and a writer that fails closed on an unregistered pair — a change to the writer contract every future caller depends on. The scanner currently catches only values that violate the CHECK, i.e. a dropped constraint.                             | P07 / P16     |
+| **`locations` carries full DML for `moin_app` with no audit obligation.**                       | Deferred coverage, tied to P06.10.03                          | A location rename or delete leaves no audit event and the chain still verifies. Latent today: no application code mutates `locations` yet.                                                                                                                                                                    | The general shape is already acknowledged below ("Infrastructure alone cannot prove that every future caller does so"), but this is the one concrete place the database _hands out_ the capability. The fix belongs with the business-action model, which decides how mutations and their audit appends are bound together.                   | P07           |
+| **The alarm lines bypass `@moin/observability`.**                                               | Accepted for this PR only; output verified non-sensitive      | `verify-audit` writes JSON to stdout with `console.log`, which skips the INV-12 redaction allowlist that every service log line goes through. The emitted shape is a closed TypeScript type and is asserted field-by-field across all line kinds, so the current output is safe; the risk is the next commit. | Routing it through `createLogger` requires adding `severity`, `seq`, `checked`, `runbook`, `sound`, `broken`, `unchecked` and `unregistered` to `ALLOWED_FIELDS`. All are non-personal counters and enums and the net effect is stricter, but it edits the INV-12 allowlist, which is a privacy control and not a session's call to loosen.   | founder       |
+| **`pg_temp` sits in every definer `search_path`.**                                              | Acceptable for this PR; **not** a general conclusion          | Last in the list and not exploitable for these functions, but a definer has no legitimate need to resolve caller temp objects.                                                                                                                                                                                | It is the existing repository-wide convention; changing it is a project-wide change, not a P06.10 one.                                                                                                                                                                                                                                        | founder       |
+
+## Acceptance
+
+Accepted by the founder under QG-09 on 2026-10-02 (P06.10.06, [EV-P06-036](../evidence/P06/EV-P06-036-qg09-founder-acceptance.md)).
+
+- **Independent QG-09 verdict:** `READY_FOR_FOUNDER_QG09`
+- **Reviewed implementation HEAD:** `468827a2e9622c9ecd831d8ea661c28738174070` (PR #31)
+
+Acceptance covers the design and the implementation reviewed at that HEAD. It does **not** close
+P06.10. Deferred and external items remain deferred and external:
+
+1. **Dedicated verifier role: deferral accepted, not waived.** `EXTERNAL_DEPENDENCY` / EXT-09, and a
+   hard pre-production dependency. P06.10.05 stays `WAITING_FOR_EXTERNAL`.
+2. **Caller-supplied `operation`, `target_kind`, `versions`: accepted for the current trusted
+   internal writers only.** At acceptance, the writer is reachable only from the provisioning
+   trigger, with fixed literals, and by holders of the `moin_app` credential. `appendAuditEvent` has
+   no production caller, and no HTTP route reaches either. These fields are **not** an authorization
+   or security boundary. Before any untrusted or external writer is permitted, they must be
+   server-derived or constrained and validated at the trusted service boundary.
+3. **Unaudited `locations` DML: accepted as deferred coverage**, tied to P06.10.03 and later writer
+   adoption. Until P06.10.03 closes, `locations` DML is outside the adopted writer coverage, and
+   complete or universal audit-writer coverage must not be claimed.
+4. **`verify-audit` alarm output bypassing the redacting logger: accepted for this PR only.** At
+   acceptance the output was inspected field by field. It holds fixed literals, counts, sequence
+   numbers, opaque organisation UUIDs, six fixed break reasons, and a SQLSTATE or error class name,
+   never a message or stack. Forward rule: any future dynamic tenant, user or error payload must go
+   through the redacting logger. INV-12 is not waived.
+5. **`pg_temp` last in definer `search_path`: acceptable for this PR only.** Not a precedent for
+   future `SECURITY DEFINER` functions; each future privileged path needs its own `search_path` and
+   QG-09 assessment.
 
 ## Alternatives considered
 
