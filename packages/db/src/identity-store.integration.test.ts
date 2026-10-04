@@ -521,6 +521,45 @@ describe('a session over time', () => {
     await admin.query("update users set status = 'disabled' where id = $1", [person.id]);
     expect(await store.resolveSession(tokenHash)).toBeUndefined();
   });
+
+  evidenceTest('a disable racing resolution blocks it, not one stale read', async () => {
+    const person = await user();
+    const { tokenHash } = await signIn(person.sub);
+
+    const a = await admin.connect();
+    const b = await identity.connect();
+    try {
+      // Hold the user row so the disable below provably waits on this resolution.
+      await a.query('begin');
+      await a.query('select 1 from users where id = $1 for update', [person.id]);
+
+      await b.query('begin');
+      const pending = b.query('select * from app.resolve_session($1::bytea)', [tokenHash]);
+
+      const deadline = Date.now() + LOCK_WAIT_DEADLINE_MS;
+      let waiting = '0';
+      while (waiting !== '1' && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT_POLL_MS));
+        const result = await admin.query<{ n: string }>(
+          "select count(*)::text as n from pg_stat_activity where wait_event_type = 'Lock' and datname = $1",
+          [database.name],
+        );
+        waiting = result.rows[0]?.n ?? '0';
+      }
+      expect(waiting, 'resolution waits on the user lock').toBe('1');
+
+      await a.query("update users set status = 'disabled' where id = $1", [person.id]);
+      await a.query('commit');
+
+      const resolved = await pending;
+      await b.query('commit');
+
+      expect(resolved.rowCount, 'resolution after disable returned 0 rows').toBe(0);
+    } finally {
+      a.release();
+      b.release();
+    }
+  });
 });
 
 describe('rotation', () => {

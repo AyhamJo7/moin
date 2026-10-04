@@ -497,8 +497,17 @@ CREATE FUNCTION app.resolve_session(
   SET search_path = pg_catalog, public, app, pg_temp
 AS $$
 DECLARE
-  v_now timestamptz := clock_timestamp();
+  v_now timestamptz;
 BEGIN
+  -- Lock the owning user row (FOR SHARE conflicts with a concurrent disable's UPDATE), mirroring
+  -- `rotate_session`: without it a disable committing mid-call lets one stale resolution through.
+  PERFORM 1
+  FROM public.sessions s JOIN public.users u ON u.id = s.user_id
+  WHERE s.token_hash = p_token_hash FOR SHARE OF u;
+
+  -- Fresh DB clock obtained after acquiring the lock
+  v_now := clock_timestamp();
+
   RETURN QUERY
   UPDATE public.sessions s
   SET last_seen_at = GREATEST(s.last_seen_at, v_now),

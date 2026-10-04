@@ -147,7 +147,7 @@
     "invariant": "P06.06.02: login rotates \u2014 the session the browser held does not survive as a parallel login",
     "expected": "Signing in again would leave the previous session valid and unnoticed.",
     "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "      SET revoked_at = v_now, revocation_reason = 'superseded',\n          provider_tokens_sealed = NULL, provider_tokens_key_id = NULL\n",
+    "find": "    SET revoked_at = v_now, revocation_reason = 'superseded',\n        provider_tokens_sealed = NULL, provider_tokens_key_id = NULL\n",
     "replace": "      SET last_seen_at = s.last_seen_at\n",
     "killingTest": {
       "file": "apps/server/src/modules/identity-access/sign-in.integration.test.ts",
@@ -407,7 +407,7 @@
     "invariant": "P06.06.02 (QG-09 review): a sign-in leaves no live session of the family it supersedes",
     "expected": "A rotation racing the sign-in would leave its successor alive beside the new session.",
     "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "      WHERE s.family_id = v_family AND s.revoked_at IS NULL;\n",
+    "find": "    WHERE s.family_id = v_family AND s.revoked_at IS NULL;\n",
     "replace": "      WHERE s.token_hash = p_replaced_hash AND s.revoked_at IS NULL;\n",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
@@ -659,6 +659,19 @@
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "two callers holding the same row > a re-login racing a rotation on the same family never deadlocks"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "U4-disable-racing-resolve-leaks-read",
+    "invariant": "P06.06.02: a disable racing resolution blocks it (user row locked FOR SHARE OF u)",
+    "expected": "A disable committing mid-resolution would let one stale read through.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "  -- Lock the owning user row (FOR SHARE conflicts with a concurrent disable's UPDATE), mirroring\n  -- `rotate_session`: without it a disable committing mid-call lets one stale resolution through.\n  PERFORM 1\n  FROM public.sessions s JOIN public.users u ON u.id = s.user_id\n  WHERE s.token_hash = p_token_hash FOR SHARE OF u;\n\n  -- Fresh DB clock obtained after acquiring the lock\n  v_now := clock_timestamp();\n\n  RETURN QUERY\n  UPDATE public.sessions s\n",
+    "replace": "  -- Fresh DB clock obtained without the user-row lock\n  v_now := clock_timestamp();\n\n  RETURN QUERY\n  UPDATE public.sessions s\n",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "a session over time > a disable racing resolution blocks it, not one stale read"
     },
     "project": "integration"
   }
