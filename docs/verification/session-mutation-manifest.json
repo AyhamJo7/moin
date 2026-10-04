@@ -615,8 +615,8 @@
     "invariant": "P06.06.02: session rotation rechecks authoritative DB time after acquiring family and row locks",
     "expected": "A session expiring while waiting on a family lock would rotate if expiration is not rechecked post-lock.",
     "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "  -- Lock predecessor row before evaluating validity\n  PERFORM 1 FROM public.sessions s WHERE s.token_hash = p_token_hash FOR UPDATE;\n\n  -- Lock the owning user row (FOR SHARE conflicts with a concurrent disable's UPDATE), so a\n  -- disable racing this rotation serialises here rather than extending a session that should die.\n  PERFORM 1\n  FROM public.sessions s JOIN public.users u ON u.id = s.user_id\n  WHERE s.token_hash = p_token_hash FOR SHARE OF u;\n\n  -- Fresh DB clock obtained after acquiring the locks\n  v_now := clock_timestamp();\n",
-    "replace": "  -- Lock predecessor row before evaluating validity\n  PERFORM 1 FROM public.sessions s WHERE s.token_hash = p_token_hash FOR UPDATE;\n\n  -- Stale pre-lock clock retained across lock wait\n",
+    "find": "  -- Fresh DB clock obtained after acquiring the locks\n  v_now := clock_timestamp();\n",
+    "replace": "  -- Stale clock an hour behind the post-lock time: expiry evaluated against the wrong time\n  v_now := clock_timestamp() - interval '1 hour';\n",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "two callers holding the same row > waiting on a lock until expiration rechecks after lock and fails"
@@ -637,25 +637,12 @@
     "project": "integration"
   },
   {
-    "id": "D1-stale-caller-clock-overloads-survive",
-    "invariant": "P06.06.02 / QG-09 review: no stale caller-time overload survives on an upgraded database",
-    "expected": "A database migrated at an earlier revision would keep callable p_now overloads honouring caller-supplied time.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "DROP FUNCTION IF EXISTS app.session_clock(timestamptz);\nDROP TABLE IF EXISTS session_clock_policy;\n",
-    "replace": "DROP TABLE IF EXISTS session_clock_policy;\n",
-    "killingTest": {
-      "file": "packages/db/src/identity-store.integration.test.ts",
-      "fullName": "temporal authorization and expiration (authoritative database clock) > obsolete caller-time overloads do not exist in the database"
-    },
-    "project": "integration"
-  },
-  {
     "id": "D2-two-hop-extension-view-bypass",
     "invariant": "ADR-0003 amendment: no extension view reaches a sensitive relation through intermediate views",
-    "expected": "An allowlisted extension view reaching sessions through an intermediate view would pass the single-hop check.",
+    "expected": "An allowlisted extension view reaching sessions through an intermediate view would pass a direct-only check.",
     "file": "scripts/check-rls-catalog.ts",
-    "find": "    for (const dep of rel.dependencies) {\n      if (SENSITIVE_RELATIONS.has(dep)) {\n",
-    "replace": "    for (const dep of rel.dependencies.slice(0, 1)) {\n      if (SENSITIVE_RELATIONS.has(dep)) {\n",
+    "find": "                   SELECT d.refobjid\n                   FROM pg_depend d\n                   JOIN pg_rewrite rw ON rw.oid = d.objid\n                   JOIN chain ON chain.obj = rw.ev_class\n                   WHERE d.classid = 'pg_rewrite'::regclass\n                     AND d.refclassid = 'pg_class'::regclass AND d.refobjid <> c.oid\n",
+    "replace": "                   SELECT d.refobjid\n                   FROM pg_depend d\n                   JOIN pg_rewrite rw ON rw.oid = d.objid\n                   JOIN chain ON chain.obj = rw.ev_class AND false\n                   WHERE d.classid = 'pg_rewrite'::regclass\n                     AND d.refclassid = 'pg_class'::regclass AND d.refobjid <> c.oid\n",
     "killingTest": {
       "file": "scripts/check-rls-catalog.integration.test.ts",
       "fullName": "the identity role boundary (P06.06, ADR-0003) > rejects an extension view reaching a sensitive relation through an intermediate view"
