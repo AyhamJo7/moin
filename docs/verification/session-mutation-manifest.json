@@ -199,8 +199,8 @@
     "invariant": "P06.06.02: a disable racing rotation extends nothing (user row locked FOR SHARE OF u)",
     "expected": "Disabling a user while their rotation is in flight would issue a live successor.",
     "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "  WHERE s.token_hash = p_token_hash FOR SHARE OF u;\n",
-    "replace": "  -- User-row lock removed: a racing disable no longer serialises here\n",
+    "find": "  PERFORM 1\n  FROM public.sessions s JOIN public.users u ON u.id = s.user_id\n  WHERE s.token_hash = p_token_hash FOR SHARE OF u;\n",
+    "replace": "  PERFORM 1;\n",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "rotation > a disable racing rotation extends nothing"
