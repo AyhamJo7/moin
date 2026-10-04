@@ -6,7 +6,9 @@
 | Item | P06.06.02 |
 | Date (UTC) | 2026-10-05 |
 | Commit | `bfac30dd4511c1a3cf01dab313e41ad8a2f05ee9` |
-| Mutation sweep | 51/51 KILLED_ASSERTION, measured at exact HEAD `bfac30d` (`docs/verification/session-mutation-report.md`); manifest 51 variants (`docs/verification/session-mutation-manifest.json`); D1 convergent cleanup + L1 lock order review-proven, outside the count |
+| Environment | local |
+| Command / procedure | `node scripts/mutation-sweep.ts --manifest docs/verification/session-mutation-manifest.json --report docs/verification/session-mutation-report.md` at exact HEAD `bfac30d` (TEST_* database URLs + TEST_OIDC_ISSUER_URL exported, postgres + oidc up); every target proved equal to HEAD blob before/after; manifest 51 variants; D1 convergent cleanup + L1 lock order review-proven, outside the count |
+| Result | PASS — 51/51 KILLED_ASSERTION, 0 survived, 0 infra failures, clean restoration |
 | Reviewer A (temporal/PostgreSQL) | exact `bfac30d`, OK TO MERGE, no CRITICAL/HIGH/MEDIUM (2 optional LOWs: transaction-clock default, double clock read) |
 | Reviewer B (catalog/ACL/locking) | exact `bfac30d`, OK TO MERGE, no findings (all 11 directed items confirmed) |
 | Reviewer C (runtime/OIDC/supply-chain) | worktree at `bfac30d`, OK TO MERGE, no CRITICAL/HIGH/MEDIUM (2 LOWs: ignore-unfixed policy disclosure, misleading test name); live image scan covered in-session: Trivy HIGH 0 / CRITICAL 0 |
