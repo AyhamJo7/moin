@@ -124,9 +124,9 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.reject_session_rewrite': '1b7209a5119fd835537b390fcbd558e0',
   'app.begin_sign_in': '46d951fb285c7fe09aac5cdabbc24aa3',
   'app.consume_sign_in': 'bffb11e6e64f3896571948320dede4e3',
-  'app.begin_session': '1e416f40202ca8aef342379cab3a163d',
+  'app.begin_session': 'ccdbc158957df2561fd12588f5110744',
   'app.rotate_session': 'fe4a2f4e30221e87d1249a425838a102',
-  'app.resolve_session': '32ee8316ffe09329f74895ba6e6d0d28',
+  'app.resolve_session': '492a95689300b47f3f5f20ef92767d8a',
   'app.revoke_session': 'a4a30b649c5abf56fab3563d20576aa8',
 };
 
