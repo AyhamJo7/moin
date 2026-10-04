@@ -648,5 +648,18 @@
       "fullName": "the identity role boundary (P06.06, ADR-0003) > rejects an extension view reaching a sensitive relation through an intermediate view"
     },
     "project": "integration"
+  },
+  {
+    "id": "L1-religin-rotation-deadlock",
+    "invariant": "P06.06.02: re-login and rotation take family-then-user locks in the same order (no AB-BA deadlock)",
+    "expected": "Inverted lock order would deadlock a re-login racing a rotation, surfacing as 40P01 on the auth path.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "  SELECT u.id INTO v_user\n  FROM public.users u\n  WHERE u.cognito_sub = p_subject AND u.status = 'active'\n  FOR SHARE;\n",
+    "replace": "  SELECT u.id INTO v_user\n  FROM public.users u\n  WHERE u.cognito_sub = p_subject AND u.status = 'active'\n  FOR UPDATE;\n",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "two callers holding the same row > a re-login racing a rotation on the same family never deadlocks"
+    },
+    "project": "integration"
   }
 ]

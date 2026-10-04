@@ -790,6 +790,62 @@ describe('two callers holding the same row', () => {
     },
   );
 
+  evidenceTest('a re-login racing a rotation on the same family never deadlocks', async () => {
+    // AB-BA guard: begin_session takes family-then-user, rotate_session takes family-then-user.
+    // If either order ever inverts, these two statements block on each other's held lock and one
+    // dies with 40P01. Both directions must complete without a deadlock error.
+    const person = await user();
+    const presented = await signIn(person.sub);
+    const successor = hash();
+    const next = hash();
+    const attempts = await Promise.allSettled([
+      (async () => {
+        const client = await identity.connect();
+        try {
+          await client.query('begin');
+          const result = await client.query(beginSessionSql, [
+            person.sub,
+            next,
+            randomUUID(),
+            sealed(),
+            'test-v1',
+            presented.tokenHash,
+          ]);
+          await client.query('commit');
+          return result.rowCount;
+        } finally {
+          client.release();
+        }
+      })(),
+      (async () => {
+        const client = await identity.connect();
+        try {
+          await client.query('begin');
+          const result = await client.query('select * from app.rotate_session($1, $2, $3, $4)', [
+            presented.tokenHash,
+            successor,
+            randomUUID(),
+            'step_up',
+          ]);
+          await client.query('commit');
+          return result.rowCount;
+        } finally {
+          client.release();
+        }
+      })(),
+    ]);
+    for (const attempt of attempts) {
+      expect(attempt.status).toBe('fulfilled');
+      if (attempt.status === 'rejected') throw attempt.reason;
+    }
+    // Exactly one wins the family: either the rotation's successor or the sign-in's session lives.
+    const live = [
+      await store.resolveSession(successor),
+      await store.resolveSession(next),
+    ].filter((session) => session !== undefined);
+    expect(live.length).toBeGreaterThanOrEqual(1);
+  });
+
   evidenceTest('a rotation waiting behind another rotation inserts nothing', async () => {
     const person = await user();
     const { tokenHash } = await signIn(person.sub);

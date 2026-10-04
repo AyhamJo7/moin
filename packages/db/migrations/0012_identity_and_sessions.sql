@@ -349,10 +349,20 @@ DECLARE
   v_user uuid;
   v_family uuid;
 BEGIN
-  -- The user row is locked now (FOR SHARE conflicts with a concurrent disable's UPDATE), so a
-  -- disable racing this sign-in serialises here: either it commits first and v_user is NULL, or
-  -- this insert commits first and the disable revokes the session afterwards. Either way no live
-  -- session exists for a disabled user.
+  -- Lock order is family first, then user, in both this function and `rotate_session`: a re-login
+  -- superseding a family while a rotation of the same family is in flight takes both locks in the
+  -- same order, so the two serialise instead of deadlocking (AB-BA). The user-row FOR SHARE
+  -- conflicts with a concurrent disable's UPDATE: either the disable commits first and v_user is
+  -- NULL, or this insert commits first. Either way no live session exists for a disabled user —
+  -- `resolve_session` re-checks `u.status = 'active'`, so a session minted ahead of a racing
+  -- disable stops resolving rather than living on.
+  IF p_replaced_hash IS NOT NULL THEN
+    SELECT s.family_id INTO v_family FROM public.sessions s WHERE s.token_hash = p_replaced_hash;
+    IF v_family IS NOT NULL THEN
+      PERFORM 1 FROM public.sessions f WHERE f.id = v_family FOR UPDATE;
+    END IF;
+  END IF;
+
   SELECT u.id INTO v_user
   FROM public.users u
   WHERE u.cognito_sub = p_subject AND u.status = 'active'
@@ -361,22 +371,14 @@ BEGIN
     RETURN;
   END IF;
 
-  -- Every change to a family takes the lock on its first session (`id = family_id`) before it
-  -- touches anything else, here and in `rotate_session`. One lock, always taken first, so a sign-in
-  -- and any rotation within the family serialise without a deadlock: if the rotation committed
-  -- first, its successor is visible to the supersede below; if the sign-in did, the rotation finds
-  -- its predecessor revoked and inserts nothing. Every live session of the family is superseded,
-  -- never only the one token presented.
-  IF p_replaced_hash IS NOT NULL THEN
-    SELECT s.family_id INTO v_family FROM public.sessions s WHERE s.token_hash = p_replaced_hash;
-    IF v_family IS NOT NULL THEN
-      PERFORM 1 FROM public.sessions f WHERE f.id = v_family FOR UPDATE;
-      v_now := clock_timestamp();
-      UPDATE public.sessions s
-      SET revoked_at = v_now, revocation_reason = 'superseded',
-          provider_tokens_sealed = NULL, provider_tokens_key_id = NULL
-      WHERE s.family_id = v_family AND s.revoked_at IS NULL;
-    END IF;
+  -- The family lock above is held across the user-row lock: family first, then user, matching
+  -- `rotate_session`. The supersede below re-uses the already-held family lock.
+  IF v_family IS NOT NULL THEN
+    v_now := clock_timestamp();
+    UPDATE public.sessions s
+    SET revoked_at = v_now, revocation_reason = 'superseded',
+        provider_tokens_sealed = NULL, provider_tokens_key_id = NULL
+    WHERE s.family_id = v_family AND s.revoked_at IS NULL;
   END IF;
 
   v_now := clock_timestamp();
@@ -562,7 +564,7 @@ DROP FUNCTION IF EXISTS app.rotate_session(bytea, bytea, uuid, text, timestamptz
 DROP FUNCTION IF EXISTS app.resolve_session(bytea, timestamptz);
 DROP FUNCTION IF EXISTS app.revoke_session(bytea, timestamptz);
 DROP FUNCTION IF EXISTS app.session_clock(timestamptz);
-DROP TABLE IF EXISTS session_clock_policy;
+DROP TABLE IF EXISTS public.session_clock_policy;
 
 -- ---------------------------------------------------------------------------------------------
 -- Execution: moin_identity only, each by exact signature. moin_app — the voice and worker role as

@@ -922,11 +922,6 @@ export const SENSITIVE_RELATIONS: ReadonlySet<string> = new Set([
   'public.provisioning_requests',
 ]);
 
-/** Backwards-compatible alias for the bare table names. */
-export const SENSITIVE_TABLE_NAMES: ReadonlySet<string> = new Set(
-  [...SENSITIVE_RELATIONS].map((relation) => relation.split('.').pop() ?? relation),
-);
-
 interface RelationPrivilegeInfo {
   readonly relation: string;
   readonly schema: string;
