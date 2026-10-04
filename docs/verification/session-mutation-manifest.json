@@ -615,7 +615,7 @@
     "invariant": "P06.06.02: session rotation rechecks authoritative DB time after acquiring family and row locks",
     "expected": "A session expiring while waiting on a family lock would rotate if expiration is not rechecked post-lock.",
     "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "  -- Lock predecessor row before evaluating validity\n  PERFORM 1 FROM public.sessions s WHERE s.token_hash = p_token_hash FOR UPDATE;\n\n  -- Fresh DB clock obtained after acquiring the locks\n  v_now := clock_timestamp();\n",
+    "find": "  -- Lock predecessor row before evaluating validity\n  PERFORM 1 FROM public.sessions s WHERE s.token_hash = p_token_hash FOR UPDATE;\n\n  -- Lock the owning user row (FOR SHARE conflicts with a concurrent disable's UPDATE), so a\n  -- disable racing this rotation serialises here rather than extending a session that should die.\n  PERFORM 1\n  FROM public.sessions s JOIN public.users u ON u.id = s.user_id\n  WHERE s.token_hash = p_token_hash FOR SHARE OF u;\n\n  -- Fresh DB clock obtained after acquiring the locks\n  v_now := clock_timestamp();\n",
     "replace": "  -- Lock predecessor row before evaluating validity\n  PERFORM 1 FROM public.sessions s WHERE s.token_hash = p_token_hash FOR UPDATE;\n\n  -- Stale pre-lock clock retained across lock wait\n",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
