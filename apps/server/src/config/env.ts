@@ -271,6 +271,20 @@ const schema = baseSchema.superRefine((value, ctx) => {
   }
   // Exactly the identity role: a URL naming moin_app could execute nothing, and one naming the
   // owner or the migrator would run sign-in with every privilege the session functions bound.
+  // node-postgres lets a `user` query parameter override the URL's user, and `options` can carry
+  // `-c role=…`; either would connect as someone the username check never saw.
+  if (
+    value.IDENTITY_DATABASE_URL !== undefined &&
+    [...new URL(value.IDENTITY_DATABASE_URL).searchParams.keys()].some((key) =>
+      ['user', 'options', 'role'].includes(key.toLowerCase()),
+    )
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['IDENTITY_DATABASE_URL'],
+      message: 'must not carry user, options or role query parameters, which override its role',
+    });
+  }
   if (
     value.IDENTITY_DATABASE_URL !== undefined &&
     new URL(value.IDENTITY_DATABASE_URL).username !== 'moin_identity'

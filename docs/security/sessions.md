@@ -124,11 +124,12 @@ in (`docs/architecture/security-definer-allowlist.md`, pinned by body digest in
 | `moin_app`                                                                 | `api`, `voice`, `worker`                           | **none**              | none           | under RLS, as before |
 | `moin_dispatcher`, `moin_provisioner`, `moin_support_ro`, `moin_reporting` | as before                                          | none                  | none           | as before            |
 
-`moin_identity` is `NOBYPASSRLS` with no other role attribute, is a member of no role, has no member
-that can use it, and owns nothing; migration 0012 refuses to apply otherwise. The one membership
-tolerated is the grant PostgreSQL 16+ records by itself when a `CREATEROLE` non-superuser — the RDS
-master user — creates a role: `ADMIN` only, with neither `INHERIT` nor `SET`, so the master can
-administer the role but never act as it. It can create nothing: no `CREATE` on any schema, and
+`moin_identity` is `NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION`, is a member
+of no role, and owns nothing. Migration 0012 rejects members except a trusted provisioning role
+with `CREATEROLE`, an `ADMIN`-only grant (neither `INHERIT` nor `SET`), no `moin_` prefix, and no
+membership path from a runtime role. PostgreSQL 16+ records this grant when a non-superuser creates
+a role, including an RDS master user. **ADMIN can self-grant SET or INHERIT**: this exception trusts
+the provisioning administrator; it does not claim that ADMIN prevents impersonation. It can create nothing: no `CREATE` on any schema, and
 `TEMPORARY` is moved off `PUBLIC` wherever roles are provisioned. The catalog check asserts the whole
 ACL on every run (`identity-role-*`: attributes, membership, ownership of tables, functions, types,
 schemas, databases and large objects, table, column and `MAINTAIN` privileges in every schema,
@@ -208,8 +209,9 @@ refusal is the token-custody check's, not the provider switch's.
   may sign in. That is inherent to verifying tokens in the application.
 - **Two tabs finishing sign-in at once** both supersede the old session and each issue a new one;
   the browser keeps the last cookie and the other session lives on until it expires. A sign-in and a
-  rotation of the session it supersedes do not race: the presented session is locked first and its
-  whole family is superseded. Listing and ending sessions is P06.06.05.
+  rotation of the session it supersedes both lock the family root before changing the family. This
+  also serializes a stale cookie against rotation of its current successor; sign-in supersedes the
+  whole family. Listing and ending sessions is P06.06.05.
 - **A failed sign-in leaves the browser's existing session alone.** If person B's sign-in fails on a
   shared device where A is signed in, A stays signed in; supersession happens only when a new
   session is issued. A failed attempt is not a sign-out.

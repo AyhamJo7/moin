@@ -14,13 +14,17 @@
  * P06.05.04 configuration contract stays as it is — so the one place that does is
  * `buildSignInGate`: an api with OIDC and no identity pool refuses to start. `/readyz` checks the
  * pool connects as `moin_identity` and that `moin_app` cannot execute the session functions.
+ *
+ * Before the store exists the pool must pass the same assertion once (`verifyIdentityPool`): a
+ * credential for another role, an extra grant or a privileged attribute refuses startup rather than
+ * waiting for the first sign-in.
  */
 
 import { Inject, Injectable, Module, type OnApplicationShutdown } from '@nestjs/common';
-import { createIdentityStore, type IdentityStore } from '@moin/db';
+import { createIdentityStore, IDENTITY_POOL_ASSERTION, type IdentityStore } from '@moin/db';
 import { createPool, type Pool } from '@moin/db/pool';
 import { CONFIG } from '../../config/config.module.ts';
-import type { Config } from '../../config/env.ts';
+import { ConfigurationError, type Config } from '../../config/env.ts';
 
 export const IDENTITY_POOL = Symbol('IDENTITY_POOL');
 export const IDENTITY_STORE = Symbol('IDENTITY_STORE');
@@ -57,14 +61,33 @@ export function createIdentityPool(config: Config): Pool | null {
   });
 }
 
+/**
+ * Refuses an identity pool whose credential is not the restricted `moin_identity`. Closes the pool
+ * and reports a fixed message: the driver's error can carry the host and the user (INV-12, INV-15).
+ */
+export async function verifyIdentityPool(pool: Pool): Promise<void> {
+  const ok = await pool.query<{ ok: boolean }>(IDENTITY_POOL_ASSERTION).then(
+    (result) => result.rows[0]?.ok === true,
+    () => false,
+  );
+  if (ok) return;
+  await pool.end();
+  throw new ConfigurationError([
+    'IDENTITY_DATABASE_URL: the pool is not moin_identity limited to the six session functions, or the database is unreachable',
+  ]);
+}
+
 @Module({
   providers: [
     { provide: IDENTITY_POOL, inject: [CONFIG], useFactory: createIdentityPool },
     {
       provide: IDENTITY_STORE,
       inject: [IDENTITY_POOL],
-      useFactory: (pool: Pool | null): IdentityStore | null =>
-        pool === null ? null : createIdentityStore(pool),
+      useFactory: async (pool: Pool | null): Promise<IdentityStore | null> => {
+        if (pool === null) return null;
+        await verifyIdentityPool(pool);
+        return createIdentityStore(pool);
+      },
     },
     PoolLifecycle,
   ],

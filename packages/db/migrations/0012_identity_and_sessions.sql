@@ -75,14 +75,25 @@ BEGIN
   END IF;
   -- No role may use it. The one grant tolerated is the one PostgreSQL 16+ records by itself when a
   -- CREATEROLE non-superuser — the RDS master user — creates a role: ADMIN only, with neither
-  -- INHERIT nor SET, so the grantee can administer the role but never act as it.
+  -- INHERIT nor SET. ADMIN still lets its holder grant the role onward, itself included, so the
+  -- holder must be that kind of role and nothing else: CREATEROLE, not one of ours, and not
+  -- reachable from any of our runtime roles. Every other member is refused.
   IF EXISTS (
-    SELECT 1 FROM pg_auth_members m
+    SELECT 1 FROM pg_auth_members m JOIN pg_roles h ON h.oid = m.member
     WHERE m.roleid = (SELECT oid FROM pg_roles WHERE rolname = 'moin_identity')
-      AND (m.inherit_option OR m.set_option OR NOT m.admin_option)
+      AND NOT (
+        m.admin_option AND NOT m.inherit_option AND NOT m.set_option
+        AND h.rolcreaterole AND h.rolname NOT LIKE 'moin\_%'
+        AND NOT EXISTS (
+          SELECT 1 FROM pg_roles rr
+          WHERE rr.rolname IN ('moin_app', 'moin_provisioner', 'moin_dispatcher', 'moin_support_ro',
+                               'moin_reporting', 'moin_readonly', 'moin_identity')
+            AND pg_has_role(rr.oid, h.oid, 'MEMBER')
+        )
+      )
   ) THEN
     RAISE EXCEPTION
-      'moin_identity must have no members that can use it (INHERIT or SET): they would share what it may do.';
+      'moin_identity must have no members, except an ADMIN-only grant (no INHERIT, no SET) to the CREATEROLE role that created it, which no moin runtime role can reach.';
   END IF;
 END
 $$;
@@ -397,15 +408,16 @@ BEGIN
     RETURN;
   END IF;
 
-  -- The presented session is locked first, so a rotation of it either finished before this point
-  -- (and its successor is in the family below) or waits and then finds its predecessor revoked.
-  -- Every live session of that family is superseded, never only the one token presented.
+  -- Every change to a family takes the lock on its first session (`id = family_id`) before it
+  -- touches anything else, here and in `rotate_session`. One lock, always taken first, so a sign-in
+  -- and any rotation within the family serialise without a deadlock: if the rotation committed
+  -- first, its successor is visible to the supersede below; if the sign-in did, the rotation finds
+  -- its predecessor revoked and inserts nothing. Every live session of the family is superseded,
+  -- never only the one token presented.
   IF p_replaced_hash IS NOT NULL THEN
-    SELECT s.family_id INTO v_family
-    FROM public.sessions s
-    WHERE s.token_hash = p_replaced_hash
-    FOR UPDATE;
+    SELECT s.family_id INTO v_family FROM public.sessions s WHERE s.token_hash = p_replaced_hash;
     IF v_family IS NOT NULL THEN
+      PERFORM 1 FROM public.sessions f WHERE f.id = v_family FOR UPDATE;
       UPDATE public.sessions s
       SET revoked_at = v_now, revocation_reason = 'superseded',
           provider_tokens_sealed = NULL, provider_tokens_key_id = NULL
@@ -435,7 +447,8 @@ $$;
 -- Two rotations racing on one token: the second waits on the row lock, re-reads `revoked_at IS
 -- NULL` as false, and inserts nothing; `rotated_from` UNIQUE is the backstop. The successor's
 -- timestamps never precede the predecessor's, so a replica whose clock is slightly behind gets a
--- successor rather than a CHECK violation. Login has its own path (`begin_session`).
+-- successor rather than a CHECK violation. The family's lock is taken first, as in `begin_session`,
+-- so a rotation and a sign-in superseding the family serialise. Login has its own path.
 CREATE FUNCTION app.rotate_session(
   p_token_hash bytea,
   p_new_token_hash bytea,
@@ -449,11 +462,19 @@ CREATE FUNCTION app.rotate_session(
 AS $$
 DECLARE
   v_now timestamptz := app.session_clock(p_now);
+  v_family uuid;
 BEGIN
   IF p_reason IS NULL OR p_reason NOT IN ('step_up', 'privilege_change') THEN
     RAISE EXCEPTION 'rotation reason must be step_up or privilege_change'
       USING ERRCODE = 'invalid_parameter_value';
   END IF;
+
+  -- The family's lock first, as in `begin_session`: see there.
+  SELECT s.family_id INTO v_family FROM public.sessions s WHERE s.token_hash = p_token_hash;
+  IF v_family IS NULL THEN
+    RETURN;
+  END IF;
+  PERFORM 1 FROM public.sessions f WHERE f.id = v_family FOR UPDATE;
 
   RETURN QUERY
   WITH predecessor AS (

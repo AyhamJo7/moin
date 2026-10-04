@@ -65,7 +65,11 @@ execute the sign-in and session functions; voice and worker must never be given 
 created by `docker/postgres/init/00-roles.sql`, which also moves `TEMPORARY` from `PUBLIC` to the
 other roles. Init scripts run only on an empty volume, so a database volume created before this role
 existed fails migration 0012 with "missing database role moin_identity". Either `pnpm dev:reset`, or
-run the `moin_identity` and `TEMPORARY` statements from that script once as `moin_owner`.
+run the role and privilege-hardening statements from that script once as `moin_owner` before
+applying 0012. If an earlier version of this unmerged branch's 0012 was already applied, these
+statements are not enough: its checksum has changed. Use a fresh, isolated Compose project or reset
+only this checkout's disposable development volume; never edit the migration checksum or reset a
+volume shared with another worktree.
 
 ## Running things
 

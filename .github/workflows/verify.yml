@@ -148,6 +148,11 @@ jobs:
           REVOKE TEMPORARY ON DATABASE moin FROM PUBLIC;
           GRANT TEMPORARY ON DATABASE moin TO moin_app, moin_migrator, moin_readonly,
             moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting;
+          REVOKE CONNECT, TEMPORARY ON DATABASE postgres FROM PUBLIC;
+          GRANT CONNECT, TEMPORARY ON DATABASE postgres TO moin_app, moin_migrator, moin_readonly,
+            moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting;
+          REVOKE CONNECT ON DATABASE template1 FROM PUBLIC;
+          REVOKE EXECUTE ON FUNCTION lo_create(oid), lo_creat(integer), lo_from_bytea(oid, bytea) FROM PUBLIC;
           SQL
 
       # The identity-claims test signs in to Keycloak with the committed realm (ADR-0045). Started
@@ -262,6 +267,11 @@ jobs:
           REVOKE TEMPORARY ON DATABASE moin FROM PUBLIC;
           GRANT TEMPORARY ON DATABASE moin TO moin_app, moin_migrator, moin_readonly,
             moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting;
+          REVOKE CONNECT, TEMPORARY ON DATABASE postgres FROM PUBLIC;
+          GRANT CONNECT, TEMPORARY ON DATABASE postgres TO moin_app, moin_migrator, moin_readonly,
+            moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting;
+          REVOKE CONNECT ON DATABASE template1 FROM PUBLIC;
+          REVOKE EXECUTE ON FUNCTION lo_create(oid), lo_creat(integer), lo_from_bytea(oid, bytea) FROM PUBLIC;
           SQL
 
       - name: Extensions

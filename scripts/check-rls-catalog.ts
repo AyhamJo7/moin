@@ -126,8 +126,8 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.reject_session_rewrite': '1b7209a5119fd835537b390fcbd558e0',
   'app.begin_sign_in': 'ddc3ba3aced18e126eb001e675c2ad01',
   'app.consume_sign_in': '4af36f18e683d4433ca1e8e83f900d2b',
-  'app.begin_session': 'f1e7e6ca64ae429270ee8f46d0d06ab6',
-  'app.rotate_session': 'd09cade4d4b7d5581b25a8c77ac03edc',
+  'app.begin_session': '485cc2717da14eb1d031fe0ca7837202',
+  'app.rotate_session': 'ad4f40c35f8f6390461c92b695017179',
   'app.resolve_session': 'c665a04b6d2f71832ebaab1d6c3e42e4',
   'app.revoke_session': '86553908119587e022c2f1fe8825eb11',
 };
@@ -439,10 +439,15 @@ const IDENTITY_ROLE_QUERY = `
   SELECT r.rolsuper, r.rolbypassrls, r.rolcreaterole, r.rolcreatedb, r.rolreplication,
          (SELECT count(*) FROM pg_auth_members m WHERE m.member = r.oid)::int AS member_of,
          -- PostgreSQL 16+ records an ADMIN-only grant to the CREATEROLE role that created this one
-         -- (the RDS master user). Without INHERIT or SET the grantee can administer the role but
-         -- never act as it, so that row alone is tolerated; any member that can use the role is not.
-         (SELECT count(*) FROM pg_auth_members m
-          WHERE m.roleid = r.oid AND (m.inherit_option OR m.set_option OR NOT m.admin_option))::int
+         -- (the RDS master user). ADMIN still lets its holder grant the role onward, itself included,
+         -- so the row is tolerated only when the holder is exactly that: CREATEROLE, not one of ours,
+         -- and reachable from none of our runtime roles. Any other member is a finding.
+         (SELECT count(*) FROM pg_auth_members m JOIN pg_roles h ON h.oid = m.member
+          WHERE m.roleid = r.oid
+            AND NOT (m.admin_option AND NOT m.inherit_option AND NOT m.set_option
+                     AND h.rolcreaterole AND h.rolname NOT LIKE 'moin\\_%'
+                     AND NOT EXISTS (SELECT 1 FROM pg_roles rr
+                                     WHERE rr.rolname = ANY($2) AND pg_has_role(rr.oid, h.oid, 'MEMBER'))))::int
            AS usable_members,
          (SELECT count(*) FROM pg_class c WHERE c.relowner = r.oid)::int
            + (SELECT count(*) FROM pg_proc p WHERE p.proowner = r.oid)::int
@@ -451,6 +456,23 @@ const IDENTITY_ROLE_QUERY = `
            + (SELECT count(*) FROM pg_database d WHERE d.datdba = r.oid)::int
            + (SELECT count(*) FROM pg_largeobject_metadata l WHERE l.lomowner = r.oid)::int AS owned,
          has_database_privilege(r.oid, current_database(), 'TEMPORARY') AS can_create_temporary,
+         -- CREATE on the database is CREATE SCHEMA, after which the role owns what it makes.
+         has_database_privilege(r.oid, current_database(), 'CREATE') AS can_create_schema,
+         -- Every other database it could open a session in. Everything here is checked in this
+         -- database only, so a second one would be an unchecked place to create objects. PUBLIC
+         -- holds CONNECT on every database by default; provisioning revokes it.
+         COALESCE((
+           SELECT array_agg(d.datname::text ORDER BY d.datname) FROM pg_database d
+           WHERE d.datallowconn AND d.datname NOT IN (current_database(), 'moin')
+             AND d.datname NOT LIKE 'moin_t_%'
+             AND has_database_privilege(r.oid, d.oid, 'CONNECT')
+         ), '{}'::text[]) AS other_databases,
+         -- Creating a large object needs no privilege beyond EXECUTE on these, which PUBLIC holds
+         -- by default; provisioning revokes it.
+         (has_function_privilege(r.oid, 'pg_catalog.lo_create(oid)', 'EXECUTE')
+          OR has_function_privilege(r.oid, 'pg_catalog.lo_creat(integer)', 'EXECUTE')
+          OR has_function_privilege(r.oid, 'pg_catalog.lo_from_bytea(oid, bytea)', 'EXECUTE'))
+           AS can_create_large_objects,
          COALESCE((
            SELECT array_agg(n.nspname::text ORDER BY n.nspname) FROM pg_namespace n
            WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg\\_toast%' AND n.nspname NOT LIKE 'pg\\_temp\\_%'
@@ -461,9 +483,18 @@ const IDENTITY_ROLE_QUERY = `
            FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
            WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg\\_toast%' AND n.nspname NOT LIKE 'pg\\_temp\\_%'
              AND c.relkind IN ('r', 'v', 'm', 'p', 'f', 'S')
-             AND (has_table_privilege(r.oid, c.oid, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN')
-                  OR (c.relkind <> 'S' AND has_any_column_privilege(r.oid, c.oid, 'SELECT, INSERT, UPDATE, REFERENCES'))
-                  OR (c.relkind = 'S' AND has_sequence_privilege(r.oid, c.oid, 'USAGE, SELECT, UPDATE')))
+             AND (has_table_privilege(r.oid, c.oid, 'INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN')
+                  OR (c.relkind <> 'S' AND has_any_column_privilege(r.oid, c.oid, 'INSERT, UPDATE, REFERENCES'))
+                  OR (c.relkind = 'S' AND has_sequence_privilege(r.oid, c.oid, 'USAGE, SELECT, UPDATE'))
+                  -- Reading is tolerated on one thing only: a view an extension owns (e.g.
+                  -- pg_stat_statements', granted to PUBLIC on RDS), which is the extension's ACL.
+                  -- Any write privilege on it, and any read of anything else, is a finding.
+                  OR ((has_table_privilege(r.oid, c.oid, 'SELECT')
+                       OR (c.relkind <> 'S' AND has_any_column_privilege(r.oid, c.oid, 'SELECT')))
+                      AND NOT (c.relkind = 'v'
+                               AND EXISTS (SELECT 1 FROM pg_depend dep
+                                           WHERE dep.classid = 'pg_class'::regclass AND dep.objid = c.oid
+                                             AND dep.deptype = 'e'))))
          ), '{}') AS table_privileges,
          COALESCE((
            SELECT array_agg(DISTINCT n.nspname || '.' || p.proname ORDER BY n.nspname || '.' || p.proname)
@@ -493,6 +524,9 @@ interface IdentityRoleRow {
   readonly usable_members: number;
   readonly owned: number;
   readonly can_create_temporary: boolean;
+  readonly can_create_schema: boolean;
+  readonly other_databases: string[];
+  readonly can_create_large_objects: boolean;
   readonly creatable_schemas: string[];
   readonly table_privileges: string[];
   /** Every SECURITY DEFINER function it can execute, by any route (explicit grant or PUBLIC). */
@@ -529,6 +563,26 @@ const SESSION_FUNCTION_REACH_QUERY = `
   FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace, pg_roles r
   WHERE n.nspname || '.' || p.proname = ANY($1) AND r.rolname = ANY($2)
     AND has_function_privilege(r.oid, p.oid, 'EXECUTE')
+  ORDER BY 1, 2
+`;
+
+/** Our roles that must not reach the identity role, or the owner of the session functions. */
+const REACHING_ROLES: readonly string[] = [...RUNTIME_ROLES, 'moin_readonly'];
+
+/**
+ * Membership of any kind — INHERIT, SET or ADMIN, direct or through another role — in the identity
+ * role or in the owner of a session function. `has_function_privilege` follows inherited
+ * membership only; a role that can `SET ROLE` to the owner, or grant itself the identity role, can
+ * still execute the six.
+ */
+const SESSION_ROLE_REACH_QUERY = `
+  SELECT r.rolname::text AS role, t.rolname::text AS target
+  FROM pg_roles r, pg_roles t
+  WHERE r.rolname = ANY($1) AND r.rolname <> $3
+    AND (t.rolname = $3 OR t.oid IN (
+      SELECT p.proowner FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname || '.' || p.proname = ANY($2)))
+    AND pg_has_role(r.oid, t.oid, 'MEMBER')
   ORDER BY 1, 2
 `;
 
@@ -826,7 +880,8 @@ export async function inspectIdentityRole(
   role: string = IDENTITY_ROLE,
 ): Promise<Finding[]> {
   const findings: Finding[] = [];
-  const row = (await pool.query<IdentityRoleRow>(IDENTITY_ROLE_QUERY, [role])).rows[0];
+  const row = (await pool.query<IdentityRoleRow>(IDENTITY_ROLE_QUERY, [role, REACHING_ROLES]))
+    .rows[0];
   if (row === undefined) {
     return [
       {
@@ -854,7 +909,7 @@ export async function inspectIdentityRole(
   if (row.member_of > 0 || row.usable_members > 0) {
     push(
       'identity-role-membership',
-      'is a member of a role, or has a member with INHERIT or SET: either extends or shares what it may do. Only an ADMIN-only grant to its creator is tolerated.',
+      'is a member of a role, or has a member other than an ADMIN-only grant to the CREATEROLE role that created it (not one of ours, reachable from none of our runtime roles): either extends or shares what it may do.',
     );
   }
   if (row.owned > 0) {
@@ -863,10 +918,28 @@ export async function inspectIdentityRole(
       'owns a table, function, type, schema, database or large object; an owner holds every privilege on what it owns.',
     );
   }
+  if (row.can_create_large_objects) {
+    push(
+      'identity-role-large-object',
+      'may create large objects (lo_create, lo_creat, lo_from_bytea); it may create nothing.',
+    );
+  }
   if (row.can_create_temporary) {
     push(
       'identity-role-temporary',
       'may create temporary objects in this database; it may create nothing.',
+    );
+  }
+  if (row.can_create_schema) {
+    push(
+      'identity-role-database-create',
+      'holds CREATE on this database, so it may create a schema and own what it puts there.',
+    );
+  }
+  if (row.other_databases.length > 0) {
+    push(
+      'identity-role-other-database',
+      `may connect to ${row.other_databases.join(', ')}; it may connect to this database alone, where its privileges are checked.`,
     );
   }
   if (row.creatable_schemas.length > 0) {
@@ -917,6 +990,18 @@ async function inspectSessionBoundary(pool: ReturnType<typeof createPool>): Prom
       rule: 'session-function-reachable',
       subject: row.function_name,
       detail: `${row.role} can execute it — by grant, PUBLIC or membership; only ${IDENTITY_ROLE} may.`,
+    });
+  }
+  const reachable = await pool.query<{ role: string; target: string }>(SESSION_ROLE_REACH_QUERY, [
+    REACHING_ROLES,
+    IDENTITY_FUNCTIONS,
+    IDENTITY_ROLE,
+  ]);
+  for (const row of reachable.rows) {
+    findings.push({
+      rule: 'session-role-reachable',
+      subject: row.target,
+      detail: `${row.role} is a member of ${row.target} (by INHERIT, SET or ADMIN, directly or not), so it could act with its privileges over the session functions.`,
     });
   }
   const access = await pool.query<{ role: string; table_name: string }>(

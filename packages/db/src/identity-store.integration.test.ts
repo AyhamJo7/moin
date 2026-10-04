@@ -270,6 +270,14 @@ describe('moin_identity — the api-only session role', () => {
     await expect(
       identity.query("create function pg_temp.probe() returns int language sql as 'select 1'"),
     ).rejects.toMatchObject({ code: '42501' });
+    // Large objects need only EXECUTE on the creators, which PUBLIC held; provisioning revokes it.
+    for (const sql of [
+      "select lo_from_bytea(0, '\\x00'::bytea)",
+      'select lo_create(0)',
+      'select lo_creat(-1)',
+    ]) {
+      await expect(identity.query(sql), sql).rejects.toMatchObject({ code: '42501' });
+    }
   });
 });
 
@@ -571,6 +579,9 @@ describe('rotation', () => {
   });
 });
 
+const LOCK_WAIT_POLL_MS = 20;
+const LOCK_WAIT_DEADLINE_MS = 5_000;
+
 describe('two callers holding the same row', () => {
   /** Two connections, so the second statement provably waits on the first one's row lock. */
   async function interleaved<T>(
@@ -584,13 +595,18 @@ describe('two callers holding the same row', () => {
       const firstResult = await first(a);
       await b.query('begin');
       const pending = second(b);
-      // Give the second statement time to reach the lock, then let the first commit.
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      const waiting = await admin.query<{ n: string }>(
-        "select count(*)::text as n from pg_stat_activity where wait_event_type = 'Lock' and datname = $1",
-        [database.name],
-      );
-      expect(waiting.rows[0]?.n, 'second caller waits on the lock').toBe('1');
+      // Wait until the second statement is provably blocked on the lock, then let the first commit.
+      const deadline = Date.now() + LOCK_WAIT_DEADLINE_MS;
+      let waiting = '0';
+      while (waiting !== '1' && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT_POLL_MS));
+        const result = await admin.query<{ n: string }>(
+          "select count(*)::text as n from pg_stat_activity where wait_event_type = 'Lock' and datname = $1",
+          [database.name],
+        );
+        waiting = result.rows[0]?.n ?? '0';
+      }
+      expect(waiting, 'second caller waits on the lock').toBe('1');
       await a.query('commit');
       const secondResult = await pending;
       await b.query('commit');
@@ -633,6 +649,41 @@ describe('two callers holding the same row', () => {
       );
       expect(await store.resolveSession(successor, at(3_000)), 'rotated successor').toBeUndefined();
       expect(await store.resolveSession(next, at(3_000)), 'new sign-in').toBeDefined();
+    },
+  );
+
+  evidenceTest(
+    'a sign-in presenting a stale cookie supersedes a rotation in flight elsewhere in the family',
+    async () => {
+      const person = await user();
+      const stale = await signIn(person.sub);
+      const current = hash();
+      await store.rotateSession(stale.tokenHash, current, randomUUID(), 'step_up', at(1_000));
+      const inFlight = hash();
+      const next = hash();
+      await interleaved(
+        (client) =>
+          client.query('select * from app.rotate_session($1, $2, $3, $4, $5)', [
+            current,
+            inFlight,
+            randomUUID(),
+            'privilege_change',
+            at(2_000),
+          ]),
+        (client) =>
+          client.query(beginSessionSql, [
+            person.sub,
+            next,
+            randomUUID(),
+            sealed(),
+            'test-v1',
+            stale.tokenHash,
+            at(3_000),
+          ]),
+      );
+      expect(await store.resolveSession(inFlight, at(4_000)), 'rotated in flight').toBeUndefined();
+      expect(await store.resolveSession(current, at(4_000))).toBeUndefined();
+      expect(await store.resolveSession(next, at(4_000)), 'new sign-in').toBeDefined();
     },
   );
 

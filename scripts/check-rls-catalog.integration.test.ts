@@ -576,6 +576,36 @@ describe('the identity role boundary (P06.06, ADR-0003)', () => {
       'moin_identity',
       'identity-role-temporary',
     );
+    await fires(
+      // eslint-disable-next-line no-restricted-syntax -- the harness-generated database name, never input.
+      `GRANT CREATE ON DATABASE ${database_} TO moin_identity`,
+      // eslint-disable-next-line no-restricted-syntax -- the harness-generated database name, never input.
+      `REVOKE CREATE ON DATABASE ${database_} FROM moin_identity`,
+      'moin_identity',
+      'identity-role-database-create',
+    );
+  });
+
+  evidenceTest('rejects moin_identity being able to connect to another database', async () => {
+    // A throwaway database, so no database another test or worktree uses is touched. Other
+    // databases on a shared test cluster may already be reachable, so the assertion is about this
+    // one by name.
+    const other = `zz_identity_db_${randomBytes(4).toString('hex')}`;
+    const reaches = async (): Promise<boolean> =>
+      (await findings()).some(
+        (f) => f.rule === 'identity-role-other-database' && f.detail.includes(other),
+      );
+    /* eslint-disable no-restricted-syntax -- database DDL cannot be parameterised; the name is a literal prefix and generated hex. */
+    await ddl(`CREATE DATABASE ${other}`);
+    try {
+      await ddl(`REVOKE CONNECT ON DATABASE ${other} FROM PUBLIC`);
+      expect(await reaches()).toBe(false);
+      await ddl(`GRANT CONNECT ON DATABASE ${other} TO moin_identity`);
+      expect(await reaches()).toBe(true);
+    } finally {
+      await ddl(`DROP DATABASE IF EXISTS ${other} WITH (FORCE)`);
+    }
+    /* eslint-enable no-restricted-syntax */
   });
 
   evidenceTest(
@@ -596,6 +626,30 @@ describe('the identity role boundary (P06.06, ADR-0003)', () => {
     },
   );
 
+  evidenceTest('tolerates reading a view an extension owns, and nothing more', async () => {
+    // RDS installs extensions such as pg_stat_statements whose views are granted to PUBLIC. Reading
+    // one is the extension's ACL; the same view outside an extension, or a write to it, is a grant.
+    await ddl(
+      'CREATE VIEW zz_extension_probe AS SELECT 1 AS x; GRANT SELECT ON zz_extension_probe TO PUBLIC',
+    );
+    try {
+      expect(rulesFor(await findings(), 'moin_identity')).toContain(
+        'identity-role-table-privilege',
+      );
+      await ddl('ALTER EXTENSION pgcrypto ADD VIEW zz_extension_probe');
+      expect(rulesFor(await findings(), 'moin_identity')).not.toContain(
+        'identity-role-table-privilege',
+      );
+      await ddl('GRANT INSERT ON zz_extension_probe TO PUBLIC');
+      expect(rulesFor(await findings(), 'moin_identity')).toContain(
+        'identity-role-table-privilege',
+      );
+      await ddl('ALTER EXTENSION pgcrypto DROP VIEW zz_extension_probe');
+    } finally {
+      await ddl('DROP VIEW IF EXISTS zz_extension_probe');
+    }
+  });
+
   evidenceTest('rejects a widened clock bound', async () => {
     await fires(
       "UPDATE session_clock_policy SET max_skew = interval '1 day'",
@@ -613,17 +667,37 @@ describe('the identity role boundary (P06.06, ADR-0003)', () => {
       const suffix = randomBytes(4).toString('hex');
       const probe = `zz_identity_probe_${suffix}`;
       const creator = `zz_identity_creator_${suffix}`;
-      await ddl(`CREATE ROLE ${probe} NOLOGIN; CREATE ROLE ${creator} NOLOGIN`);
+      const plain = `zz_identity_plain_${suffix}`;
+      await ddl(
+        `CREATE ROLE ${probe} NOLOGIN; CREATE ROLE ${creator} NOLOGIN CREATEROLE; CREATE ROLE ${plain} NOLOGIN`,
+      );
       const pool = createPool({ connectionString: database.migrationUrl, max: 1 });
+      const membership = async (): Promise<boolean> =>
+        (await inspectIdentityRole(pool, probe)).some((f) => f.rule === 'identity-role-membership');
+      const adminOnly = (holder: string) =>
+        ddl(`GRANT ${probe} TO ${holder} WITH ADMIN TRUE, INHERIT FALSE, SET FALSE`);
       try {
-        const membership = async (): Promise<boolean> =>
-          (await inspectIdentityRole(pool, probe)).some(
-            (f) => f.rule === 'identity-role-membership',
-          );
         expect(await membership(), 'no members').toBe(false);
-        await ddl(`GRANT ${probe} TO ${creator} WITH ADMIN TRUE, INHERIT FALSE, SET FALSE`);
-        expect(await membership(), 'admin-only creator grant').toBe(false);
+
+        await adminOnly(creator);
+        expect(await membership(), 'ADMIN-only grant to its CREATEROLE creator').toBe(false);
+        // A runtime role that can reach the creator could grant itself the role through it.
+        await ddl(`GRANT ${creator} TO moin_reporting WITH INHERIT FALSE, SET FALSE`);
+        try {
+          expect(await membership(), 'creator reachable from a runtime role').toBe(true);
+        } finally {
+          await ddl(`REVOKE ${creator} FROM moin_reporting`);
+        }
         await ddl(`REVOKE ${probe} FROM ${creator}`);
+
+        await adminOnly(plain);
+        expect(await membership(), 'ADMIN-only grant to a role without CREATEROLE').toBe(true);
+        await ddl(`REVOKE ${probe} FROM ${plain}`);
+
+        await adminOnly('moin_dispatcher');
+        expect(await membership(), 'ADMIN-only grant to one of our runtime roles').toBe(true);
+        await ddl(`REVOKE ${probe} FROM moin_dispatcher`);
+
         await ddl(`GRANT ${probe} TO ${creator} WITH ADMIN TRUE, INHERIT TRUE, SET FALSE`);
         expect(await membership(), 'a member that inherits').toBe(true);
         await ddl(`REVOKE ${probe} FROM ${creator}`);
@@ -634,7 +708,31 @@ describe('the identity role boundary (P06.06, ADR-0003)', () => {
         expect(await membership(), 'a member of another role').toBe(true);
       } finally {
         await pool.end();
-        await ddl(`DROP ROLE IF EXISTS ${probe}; DROP ROLE IF EXISTS ${creator}`);
+        await ddl(
+          `REVOKE ${probe} FROM moin_dispatcher; REVOKE ${creator} FROM moin_reporting; DROP ROLE IF EXISTS ${probe}; DROP ROLE IF EXISTS ${creator}; DROP ROLE IF EXISTS ${plain}`,
+        );
+      }
+    },
+  );
+
+  evidenceTest(
+    "rejects a runtime role that can reach the identity role or the functions' owner",
+    async () => {
+      // Throwaway intermediary: a runtime role made a SET-only member of the owner could SET ROLE to
+      // it and execute the six, which has_function_privilege alone would not show.
+      const owner = (
+        await database
+          .fixturePool()
+          .query<{ owner: string }>(
+            "select pg_get_userbyid(proowner)::text as owner from pg_proc where proname = 'begin_session'",
+          )
+      ).rows[0]?.owner;
+      expect(owner).toBeDefined();
+      await ddl(`GRANT ${owner ?? ''} TO moin_reporting WITH INHERIT FALSE, SET TRUE`);
+      try {
+        expect(rulesFor(await findings(), owner ?? '')).toContain('session-role-reachable');
+      } finally {
+        await ddl(`REVOKE ${owner ?? ''} FROM moin_reporting`);
       }
     },
   );

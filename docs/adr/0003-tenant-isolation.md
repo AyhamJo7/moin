@@ -58,9 +58,11 @@ revival and stretching, not minting.
 **Decision.** A dedicated login role, **`moin_identity`**, is the only role that may execute those
 six functions.
 
-- `NOSUPERUSER NOBYPASSRLS NOCREATEROLE NOCREATEDB NOREPLICATION`; a member of no role, and no
-  member that can use it (`INHERIT` or `SET`) — the only tolerated row is the `ADMIN`-only grant
-  PostgreSQL 16+ records for the `CREATEROLE` role that creates it, the RDS master user; owns
+- `NOSUPERUSER NOBYPASSRLS NOCREATEROLE NOCREATEDB NOREPLICATION`; a member of no role. Members
+  are forbidden except a trusted `CREATEROLE` provisioning role with `ADMIN` only (neither
+  `INHERIT` nor `SET`), no `moin_` prefix, and no runtime membership path to it. PostgreSQL 16+
+  records that grant for a non-superuser creator such as the RDS master user. ADMIN can self-grant
+  SET or INHERIT, so the exception trusts the provisioning administrator, not an inert grant; owns
   nothing; `USAGE` on `public` and `app`, `CREATE` nowhere and no `TEMPORARY` (moved off `PUBLIC`
   where roles are provisioned); **no** privilege on any table — session or tenant — and no other
   `SECURITY DEFINER` function.

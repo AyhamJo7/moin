@@ -47,6 +47,15 @@ GRANT CONNECT ON DATABASE moin TO moin_app, moin_migrator, moin_readonly, moin_p
 -- grant is moved from PUBLIC to the roles that had it, leaving moin_identity without it.
 REVOKE TEMPORARY ON DATABASE moin FROM PUBLIC;
 GRANT TEMPORARY ON DATABASE moin TO moin_app, moin_migrator, moin_readonly, moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting;
+-- PUBLIC may also CONNECT to every database, so moin_identity could open a session in postgres or
+-- template1 and create there what it may not create here. It may connect to moin alone.
+REVOKE CONNECT, TEMPORARY ON DATABASE postgres FROM PUBLIC;
+GRANT CONNECT, TEMPORARY ON DATABASE postgres TO moin_app, moin_migrator, moin_readonly, moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting;
+REVOKE CONNECT ON DATABASE template1 FROM PUBLIC;
+
+-- Creating a large object needs only EXECUTE on these, which PUBLIC holds by default; nothing here
+-- uses large objects, and moin_identity must be unable to create anything.
+REVOKE EXECUTE ON FUNCTION lo_create(oid), lo_creat(integer), lo_from_bytea(oid, bytea) FROM PUBLIC;
 
 -- The public schema is not writable by default; P06 creates the application schema and grants.
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;

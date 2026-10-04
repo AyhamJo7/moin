@@ -56,8 +56,21 @@ export async function setup(): Promise<void> {
     // The template database is created by the local owner. Migrations must run as the
     // NOBYPASSRLS migrator so SECURITY DEFINER tests exercise FORCE RLS in earnest.
     await template.query('alter schema public owner to moin_migrator');
+    // As the cluster init does (ADR-0003): nothing may create large objects through PUBLIC's
+    // default EXECUTE. Function ACLs live in the database, so every clone inherits this.
+    await template.query(
+      'revoke execute on function lo_create(oid), lo_creat(integer), lo_from_bytea(oid, bytea) from public',
+    );
     // eslint-disable-next-line no-restricted-syntax -- TEMPLATE_DATABASE is a module constant, never user input.
     await template.query(`grant create on database "${TEMPLATE_DATABASE}" to moin_migrator`);
+    // Only the migrator works in the template. Database ACLs are not copied to a clone, so each
+    // clone starts from PostgreSQL's defaults and `createTestDatabase` narrows TEMPORARY there.
+    /* eslint-disable no-restricted-syntax -- TEMPLATE_DATABASE is a module constant, never user input. */
+    await template.query(
+      `revoke connect, temporary on database "${TEMPLATE_DATABASE}" from public`,
+    );
+    await template.query(`grant connect on database "${TEMPLATE_DATABASE}" to moin_migrator`);
+    /* eslint-enable no-restricted-syntax */
   } finally {
     await template.end();
   }
@@ -70,7 +83,8 @@ export async function setup(): Promise<void> {
   migratorUrl.pathname = `/${TEMPLATE_DATABASE}`;
   await migrate(migratorUrl.toString());
 
-  // Marking it a template lets Postgres copy it cheaply and refuses accidental writes to it.
+  // Marking it a template lets a role with CREATEDB clone it. It does not make it read-only; the
+  // CONNECT restriction above is what keeps other roles out of it.
   const mark = createPool({ connectionString: admin, max: 1 });
   try {
     await mark.query(`update pg_database set datistemplate = true where datname = $1`, [

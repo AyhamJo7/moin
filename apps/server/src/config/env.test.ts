@@ -273,6 +273,30 @@ describe('the identity database credential (P06.06, ADR-0003)', () => {
     }
   });
 
+  evidenceTest('refuses query parameters that would connect as another role', () => {
+    for (const query of [
+      '?user=moin_migrator',
+      '?USER=moin_owner',
+      '?options=-c%20role%3Dmoin_owner',
+      '?role=moin_app',
+    ]) {
+      expect(
+        () =>
+          loadConfig({
+            ...VALID,
+            IDENTITY_DATABASE_URL: `postgres://moin_identity:x@localhost:5432/moin${query}`,
+          }),
+        query,
+      ).toThrow(ConfigurationError);
+    }
+    expect(
+      loadConfig({
+        ...VALID,
+        IDENTITY_DATABASE_URL: 'postgres://moin_identity:x@db:5432/moin?sslmode=verify-full',
+      }).IDENTITY_DATABASE_URL,
+    ).toContain('sslmode=verify-full');
+  });
+
   it('is secret-bearing, so describeConfig never prints it', () => {
     const described = describeConfig(loadConfig({ ...VALID, IDENTITY_DATABASE_URL: IDENTITY }));
     expect(described['IDENTITY_DATABASE_URL']).toBe('[redacted]');

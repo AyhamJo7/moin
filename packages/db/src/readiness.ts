@@ -62,16 +62,32 @@ export interface PostgresReadinessOptions {
 }
 
 /**
- * Readiness for the api's identity pool (P06.06, ADR-0003): connected as `moin_identity`, able to
- * execute the session functions, and `moin_app` unable to. A rotated or mistyped credential, a
- * missing grant or a URL naming the wrong role then fails the rollout at `/readyz` instead of
- * failing every sign-in afterwards.
+ * The identity pool's own credential (P06.06, ADR-0003): connected as `moin_identity` and nothing
+ * else, without a privileged attribute or a role membership, able to execute exactly the six
+ * `SECURITY DEFINER` session functions, and `moin_app` unable to. The api checks it once before the
+ * identity store exists and `/readyz` keeps checking it, so a rotated or mistyped credential, a
+ * missing or extra grant, or a URL naming the wrong role stops the rollout instead of failing — or
+ * silently widening — every sign-in afterwards. The full ACL is the catalog check's job.
+ *
+ * Compared as a set with a count, not a sorted array: the database collation decides sort order.
  */
 export const IDENTITY_POOL_ASSERTION = `
-  select current_user = 'moin_identity'
-     and has_function_privilege('app.resolve_session(bytea, timestamptz)', 'EXECUTE')
+  select session_user = 'moin_identity' and current_user = 'moin_identity'
+     and not (r.rolsuper or r.rolbypassrls or r.rolcreaterole or r.rolcreatedb or r.rolreplication)
+     and not exists (select 1 from pg_auth_members m where m.member = r.oid)
      and not has_function_privilege('moin_app', 'app.resolve_session(bytea, timestamptz)', 'EXECUTE')
+     and d.functions @> d.expected and d.functions <@ d.expected and d.total = 6
      as ok
+    from pg_roles r,
+         lateral (
+           select coalesce(array_agg(n.nspname || '.' || p.proname), '{}') as functions,
+                  count(*) as total,
+                  array['app.begin_sign_in', 'app.consume_sign_in', 'app.begin_session',
+                        'app.rotate_session', 'app.resolve_session', 'app.revoke_session'] as expected
+             from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+            where p.prosecdef and has_function_privilege(p.oid, 'EXECUTE')
+         ) d
+   where r.rolname = current_user
 `;
 
 /**
