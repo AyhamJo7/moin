@@ -111,8 +111,8 @@ KMS key and the cipher is given a KMS-backed keyring.
 ## The session
 
 `sessions` is a global table (no tenant column; see `docs/architecture/global-tables.md`) keyed by
-`token_hash` = SHA-256 of the cookie value. No runtime role has a privilege on it, on `users`, on
-`auth_transactions` or on `session_clock_policy`. Six `SECURITY DEFINER` functions are the only way
+`token_hash` = SHA-256 of the cookie value. No runtime role has a privilege on it, on `users`, or on
+`auth_transactions`. Six `SECURITY DEFINER` functions are the only way
 in (`docs/architecture/security-definer-allowlist.md`, pinned by body digest in
 `scripts/check-rls-catalog.ts`), and they are executable by **`moin_identity` alone**.
 
@@ -135,8 +135,7 @@ ACL on every run (`identity-role-*`: attributes, membership, ownership of tables
 schemas, databases and large objects, table, column and `MAINTAIN` privileges in every schema,
 grant options, temporary objects, exactly the six definers), and separately that no other runtime
 role can execute the six by any route or hold any privilege on the session tables
-(`session-function-reachable`, `session-table-privilege`), and that the clock bound is not widened
-(`session-clock-skew-widened`). `IDENTITY_DATABASE_URL` must name `moin_identity`, and `/readyz`
+(`session-function-reachable`, `session-table-privilege`). `IDENTITY_DATABASE_URL` must name `moin_identity`, and `/readyz`
 fails unless the pool really connects as it and `moin_app` really cannot execute the functions. The configuration loader refuses
 `IDENTITY_DATABASE_URL` for `voice`, `worker` and `migrate`, `identity-is-api-only` keeps the
 identity module and pool out of their module graphs, and an api with OIDC but no identity pool
@@ -145,26 +144,22 @@ resolve, rotate or revoke a session.
 
 ### Lifetime (T-15)
 
-| Rule                                       | Enforced by                                                                                             |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
-| idle timeout 12 h after the last activity  | `resolve_session` validity predicate; CHECK `idle_expires_at <= last_seen_at + 12 h`                    |
-| absolute timeout 7 days after sign-in      | `begin_session` sets it; CHECK `absolute_expires_at <= created_at + 7 d`; trigger forbids changing it   |
-| idle expiry never passes absolute expiry   | `LEAST(now + 12 h, absolute)`; CHECK `idle_expires_at <= absolute_expires_at`                           |
-| a revoked session never revives            | no function clears `revoked_at`; trigger rejects it, even for the table owner                           |
-| an expired session never revives           | validity is `idle > now AND absolute > now`; rotation requires a currently valid predecessor            |
-| "now" cannot be moved to revive or stretch | `app.session_clock` refuses a `p_now` more than 5 min from `clock_timestamp()` (`session_clock_policy`) |
+| Rule                                      | Enforced by                                                                                                  |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| idle timeout 12 h after the last activity | `resolve_session` validity predicate; CHECK `idle_expires_at <= last_seen_at + 12 h`                         |
+| absolute timeout 7 days after sign-in     | `begin_session` sets it; CHECK `absolute_expires_at <= created_at + 7 d`; trigger forbids changing it        |
+| idle expiry never passes absolute expiry  | `LEAST(now + 12 h, absolute)`; CHECK `idle_expires_at <= absolute_expires_at`                                |
+| a revoked session never revives           | no function clears `revoked_at`; trigger rejects it, even for the table owner                                |
+| an expired session never revives          | validity is `idle > clock_timestamp() AND absolute > clock_timestamp()`; rotation requires valid predecessor |
+| authoritative database clock only         | `clock_timestamp()` evaluated in PostgreSQL; caller-supplied time is never accepted for authorization        |
 
 Activity is written at most once a minute: a touch that would move the idle expiry by less than
 60 s is skipped. That only ever leaves the stored idle expiry **earlier** than ideal, never later,
-so the 12-hour bound holds exactly. Time is the application's injectable clock (`p_now`), so the
-boundaries are tested at the millisecond — but only within `session_clock_policy.max_skew` of the
-database's own clock (5 minutes as migrated). Without that bound any holder of `moin_app` could pass
-an earlier time to revive an idled-out session, or a later one to start a session's seven days a
-year from now — and with `moin_identity` that is only the api. The policy is one migration-controlled row with no runtime grant; the lifetime tests
-widen it in their private databases through the admin connection, and test the bound itself at its
-migrated value. Within the bound a caller holding `moin_identity` can still choose its time to
-within ±5 minutes: a session that idled out less than five minutes ago can be resolved once more,
-never past its absolute expiry. That tolerance is the price of NTP-scale skew between replicas.
+so the 12-hour bound holds exactly. Time is PostgreSQL's own `clock_timestamp()`, so callers
+holding `moin_identity` cannot backdate or forward-date any authorization decision. An expired or
+revoked session cannot be resolved, rotated, or revived. On rotation, family and predecessor locks are
+acquired first, a fresh `clock_timestamp()` is obtained, and validity is rechecked post-lock before any
+mutation occurs.
 
 ### Rotation
 

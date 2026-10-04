@@ -82,6 +82,12 @@ ENV NODE_ENV=production \
     NODE_OPTIONS=--enable-source-maps \
     PORT=3000
 
+# Security update for CVE-2026-103111 (libpcre2-8-0 10.42-1+deb12u2 from bookworm-security).
+# Pins exact Debian security package version (hadolint DL3008).
+RUN apt-get update -qq \
+ && apt-get install -y --no-install-recommends libpcre2-8-0=10.42-1+deb12u2 \
+ && rm -rf /var/lib/apt/lists/*
+
 # The base image ships npm, npx, corepack and yarn. A review caught the earlier claim that this
 # layer had "no package manager": it had four, because they come from the base rather than from
 # anything this file installs. An attacker with code execution in the container otherwise has a

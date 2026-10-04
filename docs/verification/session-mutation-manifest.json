@@ -234,19 +234,6 @@
     "project": "unit"
   },
   {
-    "id": "B1-caller-clock-unbounded",
-    "invariant": "P06.06.02 (QG-09 finding I1): no caller can move \"now\" to revive or stretch a session",
-    "expected": "Any holder of the runtime role could pass an earlier time to revive an idled-out session, or a later one to start a session's seven days a year from now.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "  IF p_now > clock_timestamp() + v_skew OR p_now < clock_timestamp() - v_skew THEN\n",
-    "replace": "  IF false THEN\n",
-    "killingTest": {
-      "file": "packages/db/src/identity-store.integration.test.ts",
-      "fullName": "the clock a caller supplies > must agree with the database clock, so time cannot be moved to revive or stretch a session"
-    },
-    "project": "integration"
-  },
-  {
     "id": "W1-revocation-keeps-provider-tokens",
     "invariant": "P06.06.01 / data minimisation (QG-09 finding M4): sealed provider tokens do not outlive their session",
     "expected": "A signed-out session would keep its sealed refresh token for the whole retention period.",
@@ -277,8 +264,8 @@
     "invariant": "ADR-0003 amendment / QG-09 I1: moin_app (voice, worker) executes no session function",
     "expected": "Any voice or worker process could call begin_session for an active subject and obtain a valid seven-day session.",
     "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "GRANT EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea, timestamptz) TO moin_identity;\n",
-    "replace": "GRANT EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea, timestamptz) TO moin_identity, moin_app;\n",
+    "find": "GRANT EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea) TO moin_identity;\n",
+    "replace": "GRANT EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea) TO moin_identity, moin_app;\n",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "moin_app \u2014 the voice and worker role \u2014 and sessions > cannot mint, resolve, rotate or revoke a session by calling the functions"
@@ -290,8 +277,8 @@
     "invariant": "ADR-0003 amendment: moin_identity reaches sessions only through the reviewed functions",
     "expected": "The api's identity credential could rewrite or read session rows directly, around every lifetime and revocation rule the functions enforce.",
     "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "GRANT EXECUTE ON FUNCTION app.revoke_session(bytea, timestamptz) TO moin_identity;\n",
-    "replace": "GRANT EXECUTE ON FUNCTION app.revoke_session(bytea, timestamptz) TO moin_identity;\nGRANT SELECT, INSERT, UPDATE, DELETE ON TABLE sessions TO moin_identity;\n",
+    "find": "GRANT EXECUTE ON FUNCTION app.revoke_session(bytea) TO moin_identity;\n",
+    "replace": "GRANT EXECUTE ON FUNCTION app.revoke_session(bytea) TO moin_identity;\nGRANT SELECT, INSERT, UPDATE, DELETE ON TABLE sessions TO moin_identity;\n",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "moin_identity \u2014 the api-only session role > has no table privilege anywhere, tenant table or session table"
@@ -316,8 +303,8 @@
     "invariant": "ADR-0003 amendment: moin_identity executes exactly the six session functions",
     "expected": "The session credential could drive another privileged function, here part of the audit sweep.",
     "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "GRANT EXECUTE ON FUNCTION app.revoke_session(bytea, timestamptz) TO moin_identity;\n",
-    "replace": "GRANT EXECUTE ON FUNCTION app.revoke_session(bytea, timestamptz) TO moin_identity;\nGRANT EXECUTE ON FUNCTION app.audit_chain_high_water() TO moin_identity;\n",
+    "find": "GRANT EXECUTE ON FUNCTION app.revoke_session(bytea) TO moin_identity;\n",
+    "replace": "GRANT EXECUTE ON FUNCTION app.revoke_session(bytea) TO moin_identity;\nGRANT EXECUTE ON FUNCTION app.audit_chain_high_water() TO moin_identity;\n",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "moin_identity \u2014 the api-only session role > cannot execute any other privileged function"
@@ -537,11 +524,11 @@
     "invariant": "ADR-0003 amendment: extension exemption is strictly limited to read-only views",
     "expected": "An extension table with write privileges granted to PUBLIC would be ignored by the catalog check, violating the no-table-privilege rule.",
     "file": "scripts/check-rls-catalog.ts",
-    "find": "                  -- Reading is tolerated on one thing only: a view an extension owns (e.g.\n                  -- pg_stat_statements', granted to PUBLIC on RDS), which is the extension's ACL.\n                  -- Any write privilege on it, and any read of anything else, is a finding.\n                  OR ((has_table_privilege(r.oid, c.oid, 'SELECT')\n                       OR (c.relkind <> 'S' AND has_any_column_privilege(r.oid, c.oid, 'SELECT')))\n                      AND NOT (c.relkind = 'v'\n                               AND EXISTS (SELECT 1 FROM pg_depend dep\n                                           WHERE dep.classid = 'pg_class'::regclass AND dep.objid = c.oid\n                                             AND dep.deptype = 'e'))))\n",
-    "replace": "                  AND NOT EXISTS (SELECT 1 FROM pg_depend dep WHERE dep.classid = 'pg_class'::regclass AND dep.objid = c.oid AND dep.deptype = 'e'))\n",
+    "find": "    const isAllowlisted = allowedViews.some(\n      (a) =>\n        a.schema === rel.schema &&\n        a.name === rel.name &&\n        a.extension === rel.extension &&\n        rel.kind === 'v',\n    );\n",
+    "replace": "    const isAllowlisted = rel.kind === 'v';\n",
     "killingTest": {
       "file": "scripts/check-rls-catalog.integration.test.ts",
-      "fullName": "the identity role boundary (P06.06, ADR-0003) > tolerates reading a view an extension owns, and nothing more"
+      "fullName": "the identity role boundary (P06.06, ADR-0003) > rejects an extension-owned view exposing sensitive session columns"
     },
     "project": "integration"
   },
@@ -555,6 +542,71 @@
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "moin_identity \u2014 the api-only session role > is unprivileged, a member of nothing, and owns nothing"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "CLK1-resolve-idle-expiry-bypassed",
+    "invariant": "P06.06.02: authoritative DB time governs session resolution; idle-expired sessions cannot resolve",
+    "expected": "A session whose idle timeout expired in the database would be resolved if the idle expiry check is relaxed.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "  SELECT s.id, s.user_id, s.idle_expires_at, s.absolute_expires_at\n  FROM public.sessions s\n  JOIN public.users u ON u.id = s.user_id\n  WHERE s.token_hash = p_token_hash\n    AND s.revoked_at IS NULL\n    AND s.idle_expires_at > v_now\n    AND s.absolute_expires_at > v_now\n    AND u.status = 'active';\n",
+    "replace": "  SELECT s.id, s.user_id, s.idle_expires_at, s.absolute_expires_at\n  FROM public.sessions s\n  JOIN public.users u ON u.id = s.user_id\n  WHERE s.token_hash = p_token_hash\n    AND s.revoked_at IS NULL\n    AND s.absolute_expires_at > v_now\n    AND u.status = 'active';\n",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "temporal authorization and expiration (authoritative database clock) > idle expired 1 ms ago cannot resolve"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "CLK2-rotate-idle-expiry-bypassed",
+    "invariant": "P06.06.02: authoritative DB time governs session rotation; expired sessions cannot rotate",
+    "expected": "An expired session would be rotated and a new successor issued if rotation ignored idle expiry.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "  WITH predecessor AS (\n    SELECT s.token_hash, s.id, s.family_id, s.user_id, s.created_at, s.absolute_expires_at,\n           s.provider_tokens_sealed, s.provider_tokens_key_id\n    FROM public.sessions s\n    JOIN public.users u ON u.id = s.user_id\n    WHERE s.token_hash = p_token_hash\n      AND s.revoked_at IS NULL\n      AND s.idle_expires_at > v_now\n      AND s.absolute_expires_at > v_now\n      AND u.status = 'active'\n  )",
+    "replace": "  WITH predecessor AS (\n    SELECT s.token_hash, s.id, s.family_id, s.user_id, s.created_at, s.absolute_expires_at,\n           s.provider_tokens_sealed, s.provider_tokens_key_id\n    FROM public.sessions s\n    JOIN public.users u ON u.id = s.user_id\n    WHERE s.token_hash = p_token_hash\n      AND s.revoked_at IS NULL\n      AND s.absolute_expires_at > v_now\n      AND u.status = 'active'\n  )",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "temporal authorization and expiration (authoritative database clock) > expired session cannot rotate"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "CLK3-auth-transaction-expiry-bypassed",
+    "invariant": "P06.06.01: authoritative DB time governs auth transactions; expired transactions cannot be consumed",
+    "expected": "An expired authorization transaction would be accepted and consumed if its expiry check is bypassed.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "  SELECT c.nonce_hash, c.verifier_sealed, c.key_id, c.return_to\n  FROM claimed c\n  WHERE c.binding_hash = p_binding_hash\n    AND c.expires_at > v_now;\n",
+    "replace": "  SELECT c.nonce_hash, c.verifier_sealed, c.key_id, c.return_to\n  FROM claimed c\n  WHERE c.binding_hash = p_binding_hash\n    AND c.expires_at > (v_now - interval '1 hour');\n",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "temporal authorization and expiration (authoritative database clock) > expired auth transaction cannot consume"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "CLK4-rotate-expiry-before-lock-only",
+    "invariant": "P06.06.02: session rotation rechecks authoritative DB time after acquiring family and row locks",
+    "expected": "A session expiring while waiting on a family lock would rotate if expiration is not rechecked post-lock.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "  -- Lock predecessor row before evaluating validity\n  PERFORM 1 FROM public.sessions s WHERE s.token_hash = p_token_hash FOR UPDATE;\n\n  -- Fresh DB clock obtained after acquiring the locks\n  v_now := clock_timestamp();\n",
+    "replace": "  -- Lock predecessor row before evaluating validity\n  PERFORM 1 FROM public.sessions s WHERE s.token_hash = p_token_hash FOR UPDATE;\n\n  -- Stale pre-lock clock retained across lock wait\n",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "two callers holding the same row > waiting on a lock until expiration rechecks after lock and fails"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "CLK5-resolve-expired-session-updates-last-seen",
+    "invariant": "P06.06.02: activity on an expired session cannot update last_seen_at or extend idle expiry",
+    "expected": "An expired session would update last_seen_at and extend idle expiry if the UPDATE omitted the idle expiry condition.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "  UPDATE public.sessions s\n  SET last_seen_at = GREATEST(s.last_seen_at, v_now),\n      idle_expires_at = LEAST(v_now + interval '12 hours', s.absolute_expires_at)\n  FROM public.users u\n  WHERE s.token_hash = p_token_hash\n    AND s.revoked_at IS NULL\n    AND s.idle_expires_at > v_now\n",
+    "replace": "  UPDATE public.sessions s\n  SET last_seen_at = GREATEST(s.last_seen_at, v_now),\n      idle_expires_at = LEAST(v_now + interval '12 hours', s.absolute_expires_at)\n  FROM public.users u\n  WHERE s.token_hash = p_token_hash\n    AND s.revoked_at IS NULL\n",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "temporal authorization and expiration (authoritative database clock) > activity on expired session cannot move last_seen_at or extend idle expiry"
     },
     "project": "integration"
   }

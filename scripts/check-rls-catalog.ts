@@ -121,15 +121,13 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.provision_tenant': '187d4a4589e54a39cdadc6f3726cce26',
   // Sign-in and sessions (P06.06.01/.02): the guard that fixes a session's lifetime, and the six
   // functions that are the runtime role's only access to users, auth_transactions and sessions.
-  // Refuses a caller-supplied time the database clock disagrees with; runs inside the six.
-  'app.session_clock': '26b267351ef1bb3e00fd7c0ae043ba50',
   'app.reject_session_rewrite': '1b7209a5119fd835537b390fcbd558e0',
-  'app.begin_sign_in': 'ddc3ba3aced18e126eb001e675c2ad01',
-  'app.consume_sign_in': '4af36f18e683d4433ca1e8e83f900d2b',
-  'app.begin_session': '485cc2717da14eb1d031fe0ca7837202',
-  'app.rotate_session': 'ad4f40c35f8f6390461c92b695017179',
-  'app.resolve_session': 'c665a04b6d2f71832ebaab1d6c3e42e4',
-  'app.revoke_session': '86553908119587e022c2f1fe8825eb11',
+  'app.begin_sign_in': '46d951fb285c7fe09aac5cdabbc24aa3',
+  'app.consume_sign_in': 'bffb11e6e64f3896571948320dede4e3',
+  'app.begin_session': 'fc4531dbef3a0b274663f2a029631631',
+  'app.rotate_session': '3f3deacfe7b24e2804723e6fc0597d55',
+  'app.resolve_session': '32ee8316ffe09329f74895ba6e6d0d28',
+  'app.revoke_session': 'a4a30b649c5abf56fab3563d20576aa8',
 };
 
 /** Reviewed QG-09 contract. Documentation registration alone cannot change privileges. */
@@ -182,37 +180,37 @@ const APPROVED_DEFINERS: Readonly<
     executeGrantees: ['moin_app'],
   },
   'app.begin_sign_in': {
-    arguments: 'bytea, bytea, bytea, bytea, text, text, timestamp with time zone',
+    arguments: 'bytea, bytea, bytea, bytea, text, text',
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
     executeGrantees: ['moin_identity'],
   },
   'app.consume_sign_in': {
-    arguments: 'bytea, bytea, timestamp with time zone',
+    arguments: 'bytea, bytea',
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
     executeGrantees: ['moin_identity'],
   },
   'app.begin_session': {
-    arguments: 'text, bytea, uuid, bytea, text, bytea, timestamp with time zone',
+    arguments: 'text, bytea, uuid, bytea, text, bytea',
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
     executeGrantees: ['moin_identity'],
   },
   'app.rotate_session': {
-    arguments: 'bytea, bytea, uuid, text, timestamp with time zone',
+    arguments: 'bytea, bytea, uuid, text',
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
     executeGrantees: ['moin_identity'],
   },
   'app.resolve_session': {
-    arguments: 'bytea, timestamp with time zone',
+    arguments: 'bytea',
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
     executeGrantees: ['moin_identity'],
   },
   'app.revoke_session': {
-    arguments: 'bytea, timestamp with time zone',
+    arguments: 'bytea',
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
     executeGrantees: ['moin_identity'],
@@ -479,22 +477,41 @@ const IDENTITY_ROLE_QUERY = `
              AND has_schema_privilege(r.oid, n.oid, 'CREATE')
          ), '{}'::text[]) AS creatable_schemas,
          COALESCE((
-           SELECT array_agg(n.nspname || '.' || c.relname ORDER BY n.nspname || '.' || c.relname)
+           SELECT array_agg(
+             json_build_object(
+               'relation', n.nspname || '.' || c.relname,
+               'schema', n.nspname::text,
+               'name', c.relname::text,
+               'kind', c.relkind::text,
+               'has_write', (
+                 has_table_privilege(r.oid, c.oid, 'INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN')
+                 OR (c.relkind <> 'S' AND has_any_column_privilege(r.oid, c.oid, 'INSERT, UPDATE, REFERENCES'))
+                 OR (c.relkind = 'S' AND has_sequence_privilege(r.oid, c.oid, 'USAGE, UPDATE'))
+               ),
+               'extension', (
+                 SELECT e.extname::text FROM pg_depend dep JOIN pg_extension e ON e.oid = dep.refobjid
+                 WHERE dep.classid = 'pg_class'::regclass AND dep.objid = c.oid AND dep.deptype = 'e'
+                 LIMIT 1
+               ),
+               'dependencies', COALESCE((
+                 SELECT array_agg(DISTINCT dn.nspname || '.' || dc.relname)
+                 FROM pg_depend d
+                 JOIN pg_rewrite rw ON rw.oid = d.objid
+                 JOIN pg_class dc ON dc.oid = d.refobjid
+                 JOIN pg_namespace dn ON dn.oid = dc.relnamespace
+                 WHERE rw.ev_class = c.oid AND d.classid = 'pg_rewrite'::regclass
+                   AND d.refclassid = 'pg_class'::regclass AND dc.oid <> c.oid
+                   AND dn.nspname NOT IN ('pg_catalog', 'information_schema')
+               ), '{}'::text[])
+             )::text
+             ORDER BY n.nspname || '.' || c.relname
+           )
            FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
            WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg\\_toast%' AND n.nspname NOT LIKE 'pg\\_temp\\_%'
              AND c.relkind IN ('r', 'v', 'm', 'p', 'f', 'S')
-             AND (has_table_privilege(r.oid, c.oid, 'INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN')
-                  OR (c.relkind <> 'S' AND has_any_column_privilege(r.oid, c.oid, 'INSERT, UPDATE, REFERENCES'))
-                  OR (c.relkind = 'S' AND has_sequence_privilege(r.oid, c.oid, 'USAGE, SELECT, UPDATE'))
-                  -- Reading is tolerated on one thing only: a view an extension owns (e.g.
-                  -- pg_stat_statements', granted to PUBLIC on RDS), which is the extension's ACL.
-                  -- Any write privilege on it, and any read of anything else, is a finding.
-                  OR ((has_table_privilege(r.oid, c.oid, 'SELECT')
-                       OR (c.relkind <> 'S' AND has_any_column_privilege(r.oid, c.oid, 'SELECT')))
-                      AND NOT (c.relkind = 'v'
-                               AND EXISTS (SELECT 1 FROM pg_depend dep
-                                           WHERE dep.classid = 'pg_class'::regclass AND dep.objid = c.oid
-                                             AND dep.deptype = 'e'))))
+             AND (has_table_privilege(r.oid, c.oid, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN')
+                  OR (c.relkind <> 'S' AND has_any_column_privilege(r.oid, c.oid, 'SELECT, INSERT, UPDATE, REFERENCES'))
+                  OR (c.relkind = 'S' AND has_sequence_privilege(r.oid, c.oid, 'USAGE, SELECT, UPDATE')))
          ), '{}') AS table_privileges,
          COALESCE((
            SELECT array_agg(DISTINCT n.nspname || '.' || p.proname ORDER BY n.nspname || '.' || p.proname)
@@ -539,14 +556,9 @@ interface IdentityRoleRow {
 /**
  * The tables only the session functions may touch. No runtime role — `moin_identity` included —
  * may hold a table or column privilege on them: a direct INSERT into `sessions` is a minted
- * session, and an UPDATE of `session_clock_policy` re-opens revival.
+ * session.
  */
-const SESSION_TABLES: readonly string[] = [
-  'auth_transactions',
-  'session_clock_policy',
-  'sessions',
-  'users',
-];
+const SESSION_TABLES: readonly string[] = ['auth_transactions', 'sessions', 'users'];
 
 const SESSION_TABLE_ACCESS_QUERY = `
   SELECT r.rolname::text AS role, c.relname::text AS table_name
@@ -585,9 +597,6 @@ const SESSION_ROLE_REACH_QUERY = `
     AND pg_has_role(r.oid, t.oid, 'MEMBER')
   ORDER BY 1, 2
 `;
-
-/** The migrated bound on caller-supplied time (0012). Widening it re-opens revival. */
-const MAX_SESSION_CLOCK_SKEW_SECONDS = 300;
 
 export async function inspect(
   url: string,
@@ -870,6 +879,43 @@ export async function inspect(
   return findings;
 }
 
+export interface ReviewedExtensionView {
+  readonly schema: string;
+  readonly name: string;
+  readonly extension: string;
+}
+
+/**
+ * Reviewed extension views that moin_identity is permitted to read.
+ * Default is zero: moin_identity needs no direct relation access of any kind.
+ */
+export const REVIEWED_EXTENSION_VIEWS: readonly ReviewedExtensionView[] = [];
+
+/**
+ * Tables that must never be reachable, directly or indirectly through any view.
+ */
+export const SENSITIVE_TABLE_NAMES: ReadonlySet<string> = new Set([
+  'sessions',
+  'auth_transactions',
+  'users',
+  'organisations',
+  'locations',
+  'audit_events',
+  'audit_heads',
+  'audit_chain_registry',
+  'provisioning_requests',
+]);
+
+interface RelationPrivilegeInfo {
+  readonly relation: string;
+  readonly schema: string;
+  readonly name: string;
+  readonly kind: string;
+  readonly has_write: boolean;
+  readonly extension: string | null;
+  readonly dependencies: readonly string[];
+}
+
 /**
  * The whole ACL of the identity role. Exported with the role as a parameter so the membership rule
  * can be exercised on throwaway roles: membership is cluster-wide, so it is never mutated on the
@@ -878,6 +924,7 @@ export async function inspect(
 export async function inspectIdentityRole(
   pool: ReturnType<typeof createPool>,
   role: string = IDENTITY_ROLE,
+  options?: { readonly allowedExtensionViews?: readonly ReviewedExtensionView[] },
 ): Promise<Finding[]> {
   const findings: Finding[] = [];
   const row = (await pool.query<IdentityRoleRow>(IDENTITY_ROLE_QUERY, [role, REACHING_ROLES]))
@@ -948,11 +995,50 @@ export async function inspectIdentityRole(
       `may create objects in ${row.creatable_schemas.join(', ')}.`,
     );
   }
-  if (row.table_privileges.length > 0) {
-    push(
-      'identity-role-table-privilege',
-      `holds a table or column privilege on ${row.table_privileges.join(', ')}; it may reach data only through the session functions.`,
+  const allowedViews = options?.allowedExtensionViews ?? REVIEWED_EXTENSION_VIEWS;
+  for (const raw of row.table_privileges) {
+    const rel = (
+      typeof raw === 'string' && raw.startsWith('{')
+        ? JSON.parse(raw)
+        : {
+            relation: raw,
+            schema: '',
+            name: raw,
+            kind: 'r',
+            has_write: true,
+            extension: null,
+            dependencies: [],
+          }
+    ) as RelationPrivilegeInfo;
+    const isAllowlisted = allowedViews.some(
+      (a) =>
+        a.schema === rel.schema &&
+        a.name === rel.name &&
+        a.extension === rel.extension &&
+        rel.kind === 'v',
     );
+    if (!isAllowlisted) {
+      push(
+        'identity-role-table-privilege',
+        `holds a table or column privilege on ${rel.relation}; it may reach data only through the session functions.`,
+      );
+      continue;
+    }
+    if (rel.has_write) {
+      push(
+        'identity-role-table-privilege',
+        `holds a write privilege on allowlisted extension view ${rel.relation}; extension views must be strictly read-only.`,
+      );
+    }
+    for (const dep of rel.dependencies) {
+      const depName = dep.split('.').pop() ?? '';
+      if (SENSITIVE_TABLE_NAMES.has(depName)) {
+        push(
+          'identity-role-table-privilege',
+          `extension view ${rel.relation} depends on sensitive relation ${dep}; forbidden.`,
+        );
+      }
+    }
   }
   if (row.grant_options > 0) {
     push(
@@ -977,7 +1063,7 @@ export async function inspectIdentityRole(
   return findings;
 }
 
-/** No other runtime role reaches the session functions or tables, and the clock bound holds. */
+/** No other runtime role reaches the session functions or tables. */
 async function inspectSessionBoundary(pool: ReturnType<typeof createPool>): Promise<Finding[]> {
   const findings: Finding[] = [];
   const others = RUNTIME_ROLES.filter((role) => role !== IDENTITY_ROLE);
@@ -1013,23 +1099,6 @@ async function inspectSessionBoundary(pool: ReturnType<typeof createPool>): Prom
       rule: 'session-table-privilege',
       subject: row.table_name,
       detail: `${row.role} holds a table or column privilege on it; only the session functions may touch it.`,
-    });
-  }
-  const present = await pool.query<{ present: boolean }>(
-    "SELECT to_regclass('public.session_clock_policy') IS NOT NULL AS present",
-  );
-  const policy =
-    present.rows[0]?.present === true
-      ? await pool.query<{ seconds: string }>(
-          'SELECT extract(epoch FROM max_skew)::text AS seconds FROM session_clock_policy',
-        )
-      : { rows: [] as { seconds: string }[] };
-  const seconds = policy.rows[0]?.seconds;
-  if (seconds !== undefined && Number(seconds) > MAX_SESSION_CLOCK_SKEW_SECONDS) {
-    findings.push({
-      rule: 'session-clock-skew-widened',
-      subject: 'session_clock_policy',
-      detail: `allows ${seconds} s of caller clock skew; the reviewed bound is ${String(MAX_SESSION_CLOCK_SKEW_SECONDS)} s, and a wider one lets a caller revive sessions.`,
     });
   }
   return findings;

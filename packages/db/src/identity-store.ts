@@ -29,7 +29,6 @@ export interface NewAuthTransaction {
   readonly verifierSealed: Buffer;
   readonly keyId: string;
   readonly returnTo: string;
-  readonly now: Date;
 }
 
 export interface ConsumedAuthTransaction {
@@ -47,7 +46,6 @@ export interface NewSession {
   readonly keyId: string;
   /** The session the browser presented at sign-in, if any; it is revoked as superseded. */
   readonly replacedHash?: Buffer | undefined;
-  readonly now: Date;
 }
 
 export interface SessionGrant {
@@ -69,7 +67,6 @@ export interface IdentityStore {
   consumeAuthTransaction(
     stateHash: Buffer,
     bindingHash: Buffer,
-    now: Date,
   ): Promise<ConsumedAuthTransaction | undefined>;
   /** Undefined when the subject has no active user: sign-in never provisions one. */
   beginSession(input: NewSession): Promise<SessionGrant | undefined>;
@@ -79,10 +76,9 @@ export interface IdentityStore {
     newTokenHash: Buffer,
     newSessionId: string,
     reason: RotationReason,
-    now: Date,
   ): Promise<SessionGrant | undefined>;
-  resolveSession(tokenHash: Buffer, now: Date): Promise<ResolvedSession | undefined>;
-  revokeSession(tokenHash: Buffer, now: Date): Promise<boolean>;
+  resolveSession(tokenHash: Buffer): Promise<ResolvedSession | undefined>;
+  revokeSession(tokenHash: Buffer): Promise<boolean>;
 }
 
 function digest(value: Buffer): Buffer {
@@ -112,7 +108,7 @@ export function createIdentityStore(pool: Pool): IdentityStore {
   return {
     async beginAuthTransaction(input) {
       await pool.query(
-        'select app.begin_sign_in($1::bytea, $2::bytea, $3::bytea, $4::bytea, $5::text, $6::text, $7::timestamptz)',
+        'select app.begin_sign_in($1::bytea, $2::bytea, $3::bytea, $4::bytea, $5::text, $6::text)',
         [
           digest(input.stateHash),
           digest(input.bindingHash),
@@ -120,20 +116,19 @@ export function createIdentityStore(pool: Pool): IdentityStore {
           input.verifierSealed,
           input.keyId,
           input.returnTo,
-          input.now,
         ],
       );
     },
 
-    async consumeAuthTransaction(stateHash, bindingHash, now) {
+    async consumeAuthTransaction(stateHash, bindingHash) {
       const result = await pool.query<{
         nonce_hash: Buffer;
         verifier_sealed: Buffer;
         key_id: string;
         return_to: string;
       }>(
-        'select nonce_hash, verifier_sealed, key_id, return_to from app.consume_sign_in($1::bytea, $2::bytea, $3::timestamptz)',
-        [digest(stateHash), digest(bindingHash), now],
+        'select nonce_hash, verifier_sealed, key_id, return_to from app.consume_sign_in($1::bytea, $2::bytea)',
+        [digest(stateHash), digest(bindingHash)],
       );
       const row = result.rows[0];
       return row === undefined
@@ -148,7 +143,7 @@ export function createIdentityStore(pool: Pool): IdentityStore {
 
     async beginSession(input) {
       const result = await pool.query<GrantRow>(
-        'select session_id, user_id, absolute_expires_at from app.begin_session($1::text, $2::bytea, $3::uuid, $4::bytea, $5::text, $6::bytea, $7::timestamptz)',
+        'select session_id, user_id, absolute_expires_at from app.begin_session($1::text, $2::bytea, $3::uuid, $4::bytea, $5::text, $6::bytea)',
         [
           input.subject,
           digest(input.tokenHash),
@@ -156,29 +151,28 @@ export function createIdentityStore(pool: Pool): IdentityStore {
           input.providerTokensSealed,
           input.keyId,
           input.replacedHash === undefined ? null : digest(input.replacedHash),
-          input.now,
         ],
       );
       return grant(result.rows[0]);
     },
 
-    async rotateSession(tokenHash, newTokenHash, newSessionId, reason, now) {
+    async rotateSession(tokenHash, newTokenHash, newSessionId, reason) {
       const result = await pool.query<GrantRow>(
-        'select session_id, user_id, absolute_expires_at from app.rotate_session($1::bytea, $2::bytea, $3::uuid, $4::text, $5::timestamptz)',
-        [digest(tokenHash), digest(newTokenHash), newSessionId, reason, now],
+        'select session_id, user_id, absolute_expires_at from app.rotate_session($1::bytea, $2::bytea, $3::uuid, $4::text)',
+        [digest(tokenHash), digest(newTokenHash), newSessionId, reason],
       );
       return grant(result.rows[0]);
     },
 
-    async resolveSession(tokenHash, now) {
+    async resolveSession(tokenHash) {
       const result = await pool.query<{
         session_id: string;
         user_id: string;
         idle_expires_at: Date;
         absolute_expires_at: Date;
       }>(
-        'select session_id, user_id, idle_expires_at, absolute_expires_at from app.resolve_session($1::bytea, $2::timestamptz)',
-        [digest(tokenHash), now],
+        'select session_id, user_id, idle_expires_at, absolute_expires_at from app.resolve_session($1::bytea)',
+        [digest(tokenHash)],
       );
       const row = result.rows[0];
       return row === undefined
@@ -191,10 +185,10 @@ export function createIdentityStore(pool: Pool): IdentityStore {
           };
     },
 
-    async revokeSession(tokenHash, now) {
+    async revokeSession(tokenHash) {
       const result = await pool.query<{ revoked: boolean }>(
-        'select app.revoke_session($1::bytea, $2::timestamptz) as revoked',
-        [digest(tokenHash), now],
+        'select app.revoke_session($1::bytea) as revoked',
+        [digest(tokenHash)],
       );
       return result.rows[0]?.revoked === true;
     },

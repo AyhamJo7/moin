@@ -60,15 +60,11 @@ describe('verifying the identity pool before the store exists', () => {
 
   evidenceTest('refuses moin_identity once it loses a session function', async () => {
     const admin = database.fixturePool();
-    await admin.query(
-      'revoke execute on function app.revoke_session(bytea, timestamptz) from moin_identity',
-    );
+    await admin.query('revoke execute on function app.revoke_session(bytea) from moin_identity');
     try {
       expect(await verify(database.identityUrl ?? '')).toBeInstanceOf(ConfigurationError);
     } finally {
-      await admin.query(
-        'grant execute on function app.revoke_session(bytea, timestamptz) to moin_identity',
-      );
+      await admin.query('grant execute on function app.revoke_session(bytea) to moin_identity');
     }
   });
 });

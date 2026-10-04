@@ -125,7 +125,7 @@ export class SignInService {
   }
 
   async start(returnTo: string | undefined): Promise<StartedSignIn> {
-    const { provider, cipher, store, clock } = this.#deps;
+    const { provider, cipher, store } = this.#deps;
     const target = returnTo === undefined ? DEFAULT_RETURN_PATH : safeReturnPath(returnTo);
     if (target === undefined) {
       throw this.#fail('return_path_rejected', 'return_path_not_internal');
@@ -157,7 +157,6 @@ export class SignInService {
       verifierSealed: sealedVerifier.sealed,
       keyId: sealedVerifier.keyId,
       returnTo: target,
-      now: clock.now(),
     });
     this.#deps.logger.info(
       { outcome: 'sign-in started', provider: this.#deps.config.provider },
@@ -188,7 +187,6 @@ export class SignInService {
     const pending = await store.consumeAuthTransaction(
       stateHash,
       digestOf(isSecretValue(binding) ? binding : randomSecret()),
-      clock.now(),
     );
 
     if (parameters.error !== undefined) {
@@ -257,7 +255,6 @@ export class SignInService {
       providerTokensSealed: sealedTokens.sealed,
       keyId: sealedTokens.keyId,
       replacedHash: isSecretValue(presentedSession) ? digestOf(presentedSession) : undefined,
-      now,
     });
     if (granted === undefined) {
       throw this.#fail('identity_unavailable', 'no_active_user_for_subject');

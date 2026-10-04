@@ -146,9 +146,6 @@ function sessions(): SessionService {
 beforeAll(async () => {
   database = await createTestDatabase('signin');
   admin = database.fixturePool();
-  // The expiry tests move the application clock past the database's; this private database
-  // widens the bound the migration sets (five minutes), which `identity-store` tests at its value.
-  await admin.query("update session_clock_policy set max_skew = interval '1 day'");
   provider = await startFakeOidcProvider(clock);
   app = await build();
 });
@@ -348,6 +345,15 @@ describe('a callback that must fail closed', () => {
   evidenceTest('expired state', async () => {
     const started = await login();
     const { code, state } = provider.authorize(started.location, await person());
+    await admin.query(
+      `with t as (select clock_timestamp() - interval '11 minutes' as c)
+       update auth_transactions set
+         created_at = t.c,
+         expires_at = t.c + interval '10 minutes'
+       from t
+       where state_hash = $1`,
+      [digestOf(state)],
+    );
     clock.advance(10 * 60_000);
     await refused(400, () => callback({ code, state }, `__Host-moin_signin=${started.binding}`));
   });

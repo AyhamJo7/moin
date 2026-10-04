@@ -34,7 +34,7 @@ export class SessionService {
 
   async resolve(presented: string | undefined): Promise<ResolvedSession | undefined> {
     if (!isSecretValue(presented)) return undefined;
-    return this.#store.resolveSession(digestOf(presented), this.#clock.now());
+    return this.#store.resolveSession(digestOf(presented));
   }
 
   async rotate(
@@ -49,13 +49,12 @@ export class SessionService {
       digestOf(sessionToken),
       uuidv7({ now: () => now }),
       reason,
-      now,
     );
     return grant === undefined ? undefined : { sessionToken, grant };
   }
 
   async revoke(presented: string | undefined): Promise<boolean> {
     if (!isSecretValue(presented)) return false;
-    return this.#store.revokeSession(digestOf(presented), this.#clock.now());
+    return this.#store.revokeSession(digestOf(presented));
   }
 }

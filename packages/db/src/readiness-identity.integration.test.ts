@@ -42,18 +42,14 @@ describe('the identity pool readiness probe', () => {
 
   evidenceTest('is not ready once moin_app can execute a session function', async () => {
     const admin = database.fixturePool();
-    await admin.query(
-      'grant execute on function app.resolve_session(bytea, timestamptz) to moin_app',
-    );
+    await admin.query('grant execute on function app.resolve_session(bytea) to moin_app');
     try {
       expect(await probe(database.identityUrl ?? '')).toMatchObject({
         ready: false,
         reason: 'role_mismatch',
       });
     } finally {
-      await admin.query(
-        'revoke execute on function app.resolve_session(bytea, timestamptz) from moin_app',
-      );
+      await admin.query('revoke execute on function app.resolve_session(bytea) from moin_app');
     }
   });
 });

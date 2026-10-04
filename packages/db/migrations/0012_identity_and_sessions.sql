@@ -36,12 +36,12 @@
 -- provider tokens are AES-256-GCM ciphertext whose key is never in the database. The application
 -- supplies both; this file only enforces their shape.
 --
--- ## Time comes from the caller, within the database's own clock
+-- ## PostgreSQL's DB clock is the sole authoritative clock
 --
--- Every function takes `p_now`, the application's injectable clock (ADR-0036), and refuses it unless
--- it agrees with `clock_timestamp()` within `session_clock_policy.max_skew`. The lifetimes are not
--- parameters: they are fixed here and enforced again by CHECK constraints, so a caller can neither
--- choose how long a session lives nor move "now" to revive or stretch one.
+-- The database clock (clock_timestamp()) is authoritative for all security lifetimes and authorization
+-- checks: auth transaction expiry, session idle expiry, session absolute expiry, rotation
+-- eligibility, and revocation. Caller-supplied time is never accepted for authorization decisions.
+-- Lifetimes are fixed here and enforced again by CHECK constraints.
 
 -- ---------------------------------------------------------------------------------------------
 -- moin_identity exists and can do nothing on its own.
@@ -194,59 +194,9 @@ COMMENT ON TABLE sessions IS
   'Server-side sessions (ADR-0005). Keyed by SHA-256 of the cookie token; provider tokens sealed with a key that is not in the database, and wiped at revocation. Identity only: no tenant, no role.';
 
 -- ---------------------------------------------------------------------------------------------
--- The clock the functions accept.
--- ---------------------------------------------------------------------------------------------
---
--- Every function takes `p_now` from the application's injectable clock (ADR-0036), so lifetimes
--- are testable at the millisecond. Unbounded, that would let whoever can call them — `moin_identity`,
--- so the api — revive an expired session by passing an earlier time, or issue one whose 7 days start
--- a year from now. So the time a caller supplies must agree with the database's own clock within
--- `max_skew`, and a disagreement raises.
---
--- One row, changed only by a reviewed migration; no runtime role can read or write it. A test
--- database that exercises exact lifetime boundaries widens it through the admin connection, which
--- no deployed process holds.
-CREATE TABLE session_clock_policy (
-  id       boolean  NOT NULL PRIMARY KEY DEFAULT true CHECK (id),
-  max_skew interval NOT NULL CHECK (max_skew > interval '0'),
-  reason   text     NOT NULL CHECK (length(btrim(reason)) > 0)
-);
-
-INSERT INTO session_clock_policy (max_skew, reason)
-VALUES (interval '5 minutes',
-        'P06.06.02: application time may differ from the database clock by NTP-scale skew only.');
-
-COMMENT ON TABLE session_clock_policy IS
-  'How far a caller-supplied p_now may be from the database clock. One row, migration-controlled, no runtime grant.';
-
--- `p_now`, if it is a time the database agrees with; otherwise an exception. Runs inside the
--- SECURITY DEFINER functions below, as their owner; nothing else may call it.
-CREATE FUNCTION app.session_clock(p_now timestamptz) RETURNS timestamptz
-  LANGUAGE plpgsql
-  STABLE
-  SET search_path = pg_catalog, public, app, pg_temp
-AS $$
-DECLARE
-  v_skew interval;
-BEGIN
-  IF p_now IS NULL THEN
-    RAISE EXCEPTION 'p_now is required' USING ERRCODE = 'null_value_not_allowed';
-  END IF;
-  SELECT c.max_skew INTO STRICT v_skew FROM public.session_clock_policy c;
-  IF p_now > clock_timestamp() + v_skew OR p_now < clock_timestamp() - v_skew THEN
-    RAISE EXCEPTION 'p_now disagrees with the database clock'
-      USING ERRCODE = 'invalid_parameter_value';
-  END IF;
-  RETURN p_now;
-END
-$$;
-
-REVOKE ALL ON FUNCTION app.session_clock(timestamptz) FROM PUBLIC;
-
--- ---------------------------------------------------------------------------------------------
 -- Grants: none. 0003's default privileges would have given moin_app DML on all of these.
 -- ---------------------------------------------------------------------------------------------
-REVOKE ALL ON TABLE users, auth_transactions, sessions, session_clock_policy
+REVOKE ALL ON TABLE users, auth_transactions, sessions
   FROM PUBLIC, moin_app, moin_identity, moin_provisioner, moin_dispatcher, moin_support_ro,
        moin_reporting;
 
@@ -312,15 +262,14 @@ CREATE FUNCTION app.begin_sign_in(
   p_nonce_hash bytea,
   p_verifier_sealed bytea,
   p_key_id text,
-  p_return_to text,
-  p_now timestamptz
+  p_return_to text
 ) RETURNS void
   LANGUAGE plpgsql
   SECURITY DEFINER
   SET search_path = pg_catalog, public, app, pg_temp
 AS $$
 DECLARE
-  v_now timestamptz := app.session_clock(p_now);
+  v_now timestamptz := clock_timestamp();
 BEGIN
   DELETE FROM public.auth_transactions
   WHERE ctid IN (
@@ -348,15 +297,14 @@ $$;
 -- the trade PLAN prefers over a replay window.
 CREATE FUNCTION app.consume_sign_in(
   p_state_hash bytea,
-  p_binding_hash bytea,
-  p_now timestamptz
+  p_binding_hash bytea
 ) RETURNS TABLE (nonce_hash bytea, verifier_sealed bytea, key_id text, return_to text)
   LANGUAGE plpgsql
   SECURITY DEFINER
   SET search_path = pg_catalog, public, app, pg_temp
 AS $$
 DECLARE
-  v_now timestamptz := app.session_clock(p_now);
+  v_now timestamptz := clock_timestamp();
 BEGIN
   RETURN QUERY
   WITH claimed AS (
@@ -389,15 +337,14 @@ CREATE FUNCTION app.begin_session(
   p_session_id uuid,
   p_provider_tokens_sealed bytea,
   p_key_id text,
-  p_replaced_hash bytea,
-  p_now timestamptz
+  p_replaced_hash bytea
 ) RETURNS TABLE (session_id uuid, user_id uuid, absolute_expires_at timestamptz)
   LANGUAGE plpgsql
   SECURITY DEFINER
   SET search_path = pg_catalog, public, app, pg_temp
 AS $$
 DECLARE
-  v_now timestamptz := app.session_clock(p_now);
+  v_now timestamptz;
   v_user uuid;
   v_family uuid;
 BEGIN
@@ -418,12 +365,15 @@ BEGIN
     SELECT s.family_id INTO v_family FROM public.sessions s WHERE s.token_hash = p_replaced_hash;
     IF v_family IS NOT NULL THEN
       PERFORM 1 FROM public.sessions f WHERE f.id = v_family FOR UPDATE;
+      v_now := clock_timestamp();
       UPDATE public.sessions s
       SET revoked_at = v_now, revocation_reason = 'superseded',
           provider_tokens_sealed = NULL, provider_tokens_key_id = NULL
       WHERE s.family_id = v_family AND s.revoked_at IS NULL;
     END IF;
   END IF;
+
+  v_now := clock_timestamp();
 
   RETURN QUERY
   INSERT INTO public.sessions AS s
@@ -453,15 +403,14 @@ CREATE FUNCTION app.rotate_session(
   p_token_hash bytea,
   p_new_token_hash bytea,
   p_new_session_id uuid,
-  p_reason text,
-  p_now timestamptz
+  p_reason text
 ) RETURNS TABLE (session_id uuid, user_id uuid, absolute_expires_at timestamptz)
   LANGUAGE plpgsql
   SECURITY DEFINER
   SET search_path = pg_catalog, public, app, pg_temp
 AS $$
 DECLARE
-  v_now timestamptz := app.session_clock(p_now);
+  v_now timestamptz := clock_timestamp();
   v_family uuid;
 BEGIN
   IF p_reason IS NULL OR p_reason NOT IN ('step_up', 'privilege_change') THEN
@@ -476,6 +425,12 @@ BEGIN
   END IF;
   PERFORM 1 FROM public.sessions f WHERE f.id = v_family FOR UPDATE;
 
+  -- Lock predecessor row before evaluating validity
+  PERFORM 1 FROM public.sessions s WHERE s.token_hash = p_token_hash FOR UPDATE;
+
+  -- Fresh DB clock obtained after acquiring the locks
+  v_now := clock_timestamp();
+
   RETURN QUERY
   WITH predecessor AS (
     SELECT s.token_hash, s.id, s.family_id, s.user_id, s.created_at, s.absolute_expires_at,
@@ -487,7 +442,6 @@ BEGIN
       AND s.idle_expires_at > v_now
       AND s.absolute_expires_at > v_now
       AND u.status = 'active'
-    FOR UPDATE OF s
   ), retired AS (
     UPDATE public.sessions s
     SET revoked_at = v_now, revocation_reason = 'rotated',
@@ -521,8 +475,7 @@ $$;
 -- *earlier* than the ideal, by under a minute — never later — so the 12-hour guarantee holds
 -- exactly, with no unaccounted grace.
 CREATE FUNCTION app.resolve_session(
-  p_token_hash bytea,
-  p_now timestamptz
+  p_token_hash bytea
 ) RETURNS TABLE (session_id uuid, user_id uuid, idle_expires_at timestamptz,
                  absolute_expires_at timestamptz)
   LANGUAGE plpgsql
@@ -530,7 +483,7 @@ CREATE FUNCTION app.resolve_session(
   SET search_path = pg_catalog, public, app, pg_temp
 AS $$
 DECLARE
-  v_now timestamptz := app.session_clock(p_now);
+  v_now timestamptz := clock_timestamp();
 BEGIN
   RETURN QUERY
   UPDATE public.sessions s
@@ -566,15 +519,14 @@ $$;
 -- 6. Sign out: revoke the presented session and erase its provider tokens.
 -- ---------------------------------------------------------------------------------------------
 CREATE FUNCTION app.revoke_session(
-  p_token_hash bytea,
-  p_now timestamptz
+  p_token_hash bytea
 ) RETURNS boolean
   LANGUAGE plpgsql
   SECURITY DEFINER
   SET search_path = pg_catalog, public, app, pg_temp
 AS $$
 DECLARE
-  v_now timestamptz := app.session_clock(p_now);
+  v_now timestamptz := clock_timestamp();
 BEGIN
   UPDATE public.sessions s
   SET revoked_at = v_now, revocation_reason = 'signed_out',
@@ -588,16 +540,16 @@ $$;
 -- Execution: moin_identity only, each by exact signature. moin_app — the voice and worker role as
 -- well as api's tenant pool — is revoked explicitly, so no default or earlier grant can survive.
 -- ---------------------------------------------------------------------------------------------
-REVOKE ALL ON FUNCTION app.begin_sign_in(bytea, bytea, bytea, bytea, text, text, timestamptz) FROM PUBLIC, moin_app;
-REVOKE ALL ON FUNCTION app.consume_sign_in(bytea, bytea, timestamptz) FROM PUBLIC, moin_app;
-REVOKE ALL ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea, timestamptz) FROM PUBLIC, moin_app;
-REVOKE ALL ON FUNCTION app.rotate_session(bytea, bytea, uuid, text, timestamptz) FROM PUBLIC, moin_app;
-REVOKE ALL ON FUNCTION app.resolve_session(bytea, timestamptz) FROM PUBLIC, moin_app;
-REVOKE ALL ON FUNCTION app.revoke_session(bytea, timestamptz) FROM PUBLIC, moin_app;
+REVOKE ALL ON FUNCTION app.begin_sign_in(bytea, bytea, bytea, bytea, text, text) FROM PUBLIC, moin_app;
+REVOKE ALL ON FUNCTION app.consume_sign_in(bytea, bytea) FROM PUBLIC, moin_app;
+REVOKE ALL ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea) FROM PUBLIC, moin_app;
+REVOKE ALL ON FUNCTION app.rotate_session(bytea, bytea, uuid, text) FROM PUBLIC, moin_app;
+REVOKE ALL ON FUNCTION app.resolve_session(bytea) FROM PUBLIC, moin_app;
+REVOKE ALL ON FUNCTION app.revoke_session(bytea) FROM PUBLIC, moin_app;
 
-GRANT EXECUTE ON FUNCTION app.begin_sign_in(bytea, bytea, bytea, bytea, text, text, timestamptz) TO moin_identity;
-GRANT EXECUTE ON FUNCTION app.consume_sign_in(bytea, bytea, timestamptz) TO moin_identity;
-GRANT EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea, timestamptz) TO moin_identity;
-GRANT EXECUTE ON FUNCTION app.rotate_session(bytea, bytea, uuid, text, timestamptz) TO moin_identity;
-GRANT EXECUTE ON FUNCTION app.resolve_session(bytea, timestamptz) TO moin_identity;
-GRANT EXECUTE ON FUNCTION app.revoke_session(bytea, timestamptz) TO moin_identity;
+GRANT EXECUTE ON FUNCTION app.begin_sign_in(bytea, bytea, bytea, bytea, text, text) TO moin_identity;
+GRANT EXECUTE ON FUNCTION app.consume_sign_in(bytea, bytea) TO moin_identity;
+GRANT EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea) TO moin_identity;
+GRANT EXECUTE ON FUNCTION app.rotate_session(bytea, bytea, uuid, text) TO moin_identity;
+GRANT EXECUTE ON FUNCTION app.resolve_session(bytea) TO moin_identity;
+GRANT EXECUTE ON FUNCTION app.revoke_session(bytea) TO moin_identity;

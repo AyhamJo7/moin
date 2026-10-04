@@ -476,7 +476,7 @@ describe('the identity role boundary (P06.06, ADR-0003)', () => {
   // never mutated here.
   evidenceTest('rejects moin_app regaining EXECUTE on a session function', async () => {
     await ddl(
-      'GRANT EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea, timestamptz) TO moin_app',
+      'GRANT EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea) TO moin_app',
     );
     try {
       expect(rulesFor(await findings(), 'app.begin_session')).toContain(
@@ -484,7 +484,7 @@ describe('the identity role boundary (P06.06, ADR-0003)', () => {
       );
     } finally {
       await ddl(
-        'REVOKE EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea, timestamptz) FROM moin_app',
+        'REVOKE EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea) FROM moin_app',
       );
     }
   });
@@ -552,8 +552,8 @@ describe('the identity role boundary (P06.06, ADR-0003)', () => {
         'identity-role-table-privilege',
       );
       await fires(
-        'GRANT EXECUTE ON FUNCTION app.resolve_session(bytea, timestamptz) TO moin_identity WITH GRANT OPTION',
-        'REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION app.resolve_session(bytea, timestamptz) FROM moin_identity',
+        'GRANT EXECUTE ON FUNCTION app.resolve_session(bytea) TO moin_identity WITH GRANT OPTION',
+        'REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION app.resolve_session(bytea) FROM moin_identity',
         'moin_identity',
         'identity-role-grant-option',
       );
@@ -618,46 +618,80 @@ describe('the identity role boundary (P06.06, ADR-0003)', () => {
         'session-table-privilege',
       );
       await fires(
-        'GRANT UPDATE (max_skew) ON TABLE session_clock_policy TO moin_dispatcher',
-        'REVOKE UPDATE (max_skew) ON TABLE session_clock_policy FROM moin_dispatcher',
-        'session_clock_policy',
+        'GRANT INSERT ON TABLE auth_transactions TO moin_dispatcher',
+        'REVOKE INSERT ON TABLE auth_transactions FROM moin_dispatcher',
+        'auth_transactions',
         'session-table-privilege',
       );
     },
   );
 
-  evidenceTest('tolerates reading a view an extension owns, and nothing more', async () => {
-    // RDS installs extensions such as pg_stat_statements whose views are granted to PUBLIC. Reading
-    // one is the extension's ACL; the same view outside an extension, or a write to it, is a grant.
+  evidenceTest('rejects an extension-owned view exposing sensitive session columns', async () => {
+    // Codex regression: an extension-owned view exposing sessions.id, user_id, provider_tokens_sealed
+    // must not be exempted by the catalog checker.
     await ddl(
-      'CREATE VIEW zz_extension_probe AS SELECT 1 AS x; GRANT SELECT ON zz_extension_probe TO PUBLIC',
+      'CREATE VIEW zz_extension_leak_probe AS SELECT id, user_id, provider_tokens_sealed FROM sessions; GRANT SELECT ON zz_extension_leak_probe TO PUBLIC',
     );
+    const pool = createPool({ connectionString: database.migrationUrl, max: 1 });
     try {
       expect(rulesFor(await findings(), 'moin_identity')).toContain(
         'identity-role-table-privilege',
       );
-      await ddl('ALTER EXTENSION pgcrypto ADD VIEW zz_extension_probe');
-      expect(rulesFor(await findings(), 'moin_identity')).not.toContain(
-        'identity-role-table-privilege',
-      );
-      await ddl('GRANT INSERT ON zz_extension_probe TO PUBLIC');
+      await ddl('ALTER EXTENSION pgcrypto ADD VIEW zz_extension_leak_probe');
+      // Must still be flagged! Extension ownership does NOT grant a blanket exemption.
       expect(rulesFor(await findings(), 'moin_identity')).toContain(
         'identity-role-table-privilege',
       );
-      await ddl('ALTER EXTENSION pgcrypto DROP VIEW zz_extension_probe');
+      // Even if explicitly submitted to allowedExtensionViews, it must be rejected due to sensitive table dependency:
+      const allowlistedAttempt = await inspectIdentityRole(pool, 'moin_identity', {
+        allowedExtensionViews: [
+          { schema: 'public', name: 'zz_extension_leak_probe', extension: 'pgcrypto' },
+        ],
+      });
+      expect(allowlistedAttempt.some((f) => f.rule === 'identity-role-table-privilege')).toBe(true);
+      await ddl('ALTER EXTENSION pgcrypto DROP VIEW zz_extension_leak_probe');
     } finally {
-      await ddl('DROP VIEW IF EXISTS zz_extension_probe');
+      await pool.end();
+      await ddl('DROP VIEW IF EXISTS zz_extension_leak_probe');
     }
   });
 
-  evidenceTest('rejects a widened clock bound', async () => {
-    await fires(
-      "UPDATE session_clock_policy SET max_skew = interval '1 day'",
-      "UPDATE session_clock_policy SET max_skew = interval '5 minutes'",
-      'session_clock_policy',
-      'session-clock-skew-widened',
-    );
-  });
+  evidenceTest(
+    'tolerates only an explicitly reviewed safe extension view with no sensitive dependencies',
+    async () => {
+      await ddl(
+        'CREATE VIEW zz_safe_extension_probe AS SELECT 1 AS x; GRANT SELECT ON zz_safe_extension_probe TO PUBLIC',
+      );
+      const pool = createPool({ connectionString: database.migrationUrl, max: 1 });
+      try {
+        await ddl('ALTER EXTENSION pgcrypto ADD VIEW zz_safe_extension_probe');
+        // Unallowlisted: fails
+        const unallowlisted = await inspectIdentityRole(pool, 'moin_identity');
+        expect(unallowlisted.some((f) => f.rule === 'identity-role-table-privilege')).toBe(true);
+
+        // Explicitly allowlisted with no sensitive dependencies: passes
+        const allowlisted = await inspectIdentityRole(pool, 'moin_identity', {
+          allowedExtensionViews: [
+            { schema: 'public', name: 'zz_safe_extension_probe', extension: 'pgcrypto' },
+          ],
+        });
+        expect(allowlisted.some((f) => f.rule === 'identity-role-table-privilege')).toBe(false);
+
+        // If write privilege is added: fails even if allowlisted
+        await ddl('GRANT INSERT ON zz_safe_extension_probe TO PUBLIC');
+        const writable = await inspectIdentityRole(pool, 'moin_identity', {
+          allowedExtensionViews: [
+            { schema: 'public', name: 'zz_safe_extension_probe', extension: 'pgcrypto' },
+          ],
+        });
+        expect(writable.some((f) => f.rule === 'identity-role-table-privilege')).toBe(true);
+        await ddl('ALTER EXTENSION pgcrypto DROP VIEW zz_safe_extension_probe');
+      } finally {
+        await pool.end();
+        await ddl('DROP VIEW IF EXISTS zz_safe_extension_probe');
+      }
+    },
+  );
 
   /* eslint-disable no-restricted-syntax -- role DDL cannot be parameterised; the names are built in this test from a literal prefix and generated hex, and `SET FALSE` is a GRANT option, not a session-level SET. */
   evidenceTest(
