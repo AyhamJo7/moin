@@ -878,10 +878,9 @@ describe('two callers holding the same row', () => {
       if (attempt.status === 'rejected') throw attempt.reason;
     }
     // Exactly one wins the family: either the rotation's successor or the sign-in's session lives.
-    const live = [
-      await store.resolveSession(successor),
-      await store.resolveSession(next),
-    ].filter((session) => session !== undefined);
+    const live = [await store.resolveSession(successor), await store.resolveSession(next)].filter(
+      (session) => session !== undefined,
+    );
     expect(live.length).toBeGreaterThanOrEqual(1);
   });
 
