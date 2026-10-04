@@ -5,8 +5,8 @@ mode: autonomous
 phase: P06
 tier: PILOT
 plan: docs/phases/P06-plan.md
-next: founder — review the P06.06.01/.02 draft PR (EV-P06-041) and decide the identity DB role; then P06.06.03 membership re-check; P06.10.03 writer adoption and EXT-09 for P06.10.05 still open
-updated: 2026-10-02
+next: founder — review P06.06.01/.02 draft PR #35 updated with dedicated moin_identity database role closing QG-09 I1 (EV-P06-042 supersedes EV-P06-041; 43/43 mutations killed); then P06.06.03 membership re-check; P06.10.03 writer adoption and EXT-09 for P06.10.05 still open
+updated: 2026-10-04
 ---
 
 # PROGRESS — moin
@@ -657,3 +657,13 @@ true, ok: false }` — is serialized by Vitest with none of the `constructor`/`t
   ADR-0017 is **ACCEPTED** (P06.10.06); P06.10.07 is **VERIFIED**. Still open: P06.10.03 (including
   `locations`) and P06.10.05 (`WAITING_FOR_EXTERNAL`, EXT-09). P06.10 and P06 remain `IN_PROGRESS`.
   Governance-only commit; no implementation change.
+
+- 2026-10-04 — **P06.06.01/.02 updated with dedicated moin_identity role (EV-P06-042).** Closed QG-09
+  invariant I1 by introducing dedicated `moin_identity` database role for the api's session pool.
+  `moin_app` retains zero EXECUTE on session functions. `moin_identity` holds NOBYPASSRLS, executes
+  exactly the six session functions, holds zero table/column privileges, owns nothing, creates
+  nothing, and has CONNECT on `moin` alone (CONNECT revoked on `postgres` and `template1`). Startup
+  assertion in api verifies role, attributes and function set before exposing store. Family-root row
+  lock serialises concurrent sign-in and rotation. 43/43 session mutations killed (KILLED_ASSERTION: 43).
+  14/14 full gates and 20x stress pass. EV-P06-042 recorded at candidate HEAD `74a579d`, superseding
+  EV-P06-041. P06.01.06 unticked; P06.06.01/.02 remain READY_FOR_REVIEW; P06 remains IN_PROGRESS.
