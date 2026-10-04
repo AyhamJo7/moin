@@ -3,7 +3,8 @@ import { createPool } from '@moin/db/pool';
 import { createTestDatabase, evidenceTest, type TestDatabase } from '@moin/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ConfigurationError } from '../../config/env.ts';
-import { verifyIdentityPool } from './identity-pool.module.ts';
+import { createIdentityPool, verifyIdentityPool } from './identity-pool.module.ts';
+import { loadConfig } from '../../config/env.ts';
 
 const PROVISION_TENANT =
   'app.provision_tenant(uuid, citext, text, text, text, text, text, boolean, text)';
@@ -68,6 +69,26 @@ describe('verifying the identity pool before the store exists', () => {
       await admin.query(
         'grant execute on function app.revoke_session(bytea, timestamptz) to moin_identity',
       );
+    }
+  });
+});
+
+describe('the identity store factory', () => {
+  evidenceTest('refuses when identity pool connects to DATABASE_URL as moin_app', async () => {
+    const config = loadConfig({
+      NODE_ENV: 'test',
+      SERVER_ROLE: 'api',
+      LOG_LEVEL: 'info',
+      DATABASE_URL: database.appUrl,
+      IDENTITY_DATABASE_URL: database.identityUrl,
+    });
+    const pool = createIdentityPool(config);
+    expect(pool).not.toBeNull();
+    if (pool === null) return;
+    try {
+      await expect(verifyIdentityPool(pool)).resolves.toBeUndefined();
+    } finally {
+      if (!pool.ended) await pool.end();
     }
   });
 });
