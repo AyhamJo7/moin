@@ -403,10 +403,7 @@ describe('issuing a session', () => {
     if (s === undefined) throw new Error('session row not found');
     expect(s.rotation_reason).toBe('login');
     expect(s.idle_expires_at.getTime() - s.created_at.getTime()).toBeCloseTo(IDLE_MS, -3);
-    expect(s.absolute_expires_at.getTime() - s.created_at.getTime()).toBeCloseTo(
-      ABSOLUTE_MS,
-      -3,
-    );
+    expect(s.absolute_expires_at.getTime() - s.created_at.getTime()).toBeCloseTo(ABSOLUTE_MS, -3);
   });
 
   evidenceTest('revokes the session the browser already held', async () => {
@@ -769,7 +766,7 @@ describe('two callers holding the same row', () => {
       // resumes: the post-lock recheck is the only thing that can refuse it. pg_sleep runs
       // server-side while a holds the family lock, so the sleep interval and the expiry it must
       // outlast share one clock.
-      await a.query("select pg_sleep(1.5)");
+      await a.query('select pg_sleep(1.5)');
 
       // While b is blocked on the family lock, a updates the predecessor session to be expired:
       await a.query(

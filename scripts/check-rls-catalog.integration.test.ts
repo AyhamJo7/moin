@@ -657,28 +657,25 @@ describe('the identity role boundary (P06.06, ADR-0003)', () => {
     }
   });
 
-  evidenceTest(
-    'an unreviewed extension view is never silently tolerated',
-    async () => {
-      await ddl(
-        'CREATE VIEW zz_safe_extension_probe AS SELECT 1 AS x; GRANT SELECT ON zz_safe_extension_probe TO PUBLIC',
-      );
-      const pool = createPool({ connectionString: database.migrationUrl, max: 1 });
+  evidenceTest('an unreviewed extension view is never silently tolerated', async () => {
+    await ddl(
+      'CREATE VIEW zz_safe_extension_probe AS SELECT 1 AS x; GRANT SELECT ON zz_safe_extension_probe TO PUBLIC',
+    );
+    const pool = createPool({ connectionString: database.migrationUrl, max: 1 });
+    try {
+      await ddl('ALTER EXTENSION pgcrypto ADD VIEW zz_safe_extension_probe');
       try {
-        await ddl('ALTER EXTENSION pgcrypto ADD VIEW zz_safe_extension_probe');
-        try {
-          // Unallowlisted: fails — no blanket exemption for extension-owned views.
-          const unallowlisted = await inspectIdentityRole(pool, 'moin_identity');
-          expect(unallowlisted.some((f) => f.rule === 'identity-role-table-privilege')).toBe(true);
-        } finally {
-          await ddl('ALTER EXTENSION pgcrypto DROP VIEW zz_safe_extension_probe');
-        }
+        // Unallowlisted: fails — no blanket exemption for extension-owned views.
+        const unallowlisted = await inspectIdentityRole(pool, 'moin_identity');
+        expect(unallowlisted.some((f) => f.rule === 'identity-role-table-privilege')).toBe(true);
       } finally {
-        await pool.end();
-        await ddl('DROP VIEW IF EXISTS zz_safe_extension_probe');
+        await ddl('ALTER EXTENSION pgcrypto DROP VIEW zz_safe_extension_probe');
       }
-    },
-  );
+    } finally {
+      await pool.end();
+      await ddl('DROP VIEW IF EXISTS zz_safe_extension_probe');
+    }
+  });
 
   evidenceTest(
     'tolerates only an explicitly reviewed safe extension view with no sensitive dependencies',
