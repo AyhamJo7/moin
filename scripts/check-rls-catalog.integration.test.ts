@@ -634,27 +634,51 @@ describe('the identity role boundary (P06.06, ADR-0003)', () => {
     );
     const pool = createPool({ connectionString: database.migrationUrl, max: 1 });
     try {
-      expect(rulesFor(await findings(), 'moin_identity')).toContain(
-        'identity-role-table-privilege',
-      );
       await ddl('ALTER EXTENSION pgcrypto ADD VIEW zz_extension_leak_probe');
-      // Must still be flagged! Extension ownership does NOT grant a blanket exemption.
-      expect(rulesFor(await findings(), 'moin_identity')).toContain(
-        'identity-role-table-privilege',
-      );
-      // Even if explicitly submitted to allowedExtensionViews, it must be rejected due to sensitive table dependency:
-      const allowlistedAttempt = await inspectIdentityRole(pool, 'moin_identity', {
-        allowedExtensionViews: [
-          { schema: 'public', name: 'zz_extension_leak_probe', extension: 'pgcrypto' },
-        ],
-      });
-      expect(allowlistedAttempt.some((f) => f.rule === 'identity-role-table-privilege')).toBe(true);
-      await ddl('ALTER EXTENSION pgcrypto DROP VIEW zz_extension_leak_probe');
+      try {
+        expect(rulesFor(await findings(), 'moin_identity')).toContain(
+          'identity-role-table-privilege',
+        );
+        // Even if explicitly submitted to allowedExtensionViews, it must be rejected due to sensitive table dependency:
+        const allowlistedAttempt = await inspectIdentityRole(pool, 'moin_identity', {
+          allowedExtensionViews: [
+            { schema: 'public', name: 'zz_extension_leak_probe', extension: 'pgcrypto' },
+          ],
+        });
+        expect(allowlistedAttempt.some((f) => f.rule === 'identity-role-table-privilege')).toBe(
+          true,
+        );
+      } finally {
+        await ddl('ALTER EXTENSION pgcrypto DROP VIEW zz_extension_leak_probe');
+      }
     } finally {
       await pool.end();
       await ddl('DROP VIEW IF EXISTS zz_extension_leak_probe');
     }
   });
+
+  evidenceTest(
+    'an unreviewed extension view is never silently tolerated',
+    async () => {
+      await ddl(
+        'CREATE VIEW zz_safe_extension_probe AS SELECT 1 AS x; GRANT SELECT ON zz_safe_extension_probe TO PUBLIC',
+      );
+      const pool = createPool({ connectionString: database.migrationUrl, max: 1 });
+      try {
+        await ddl('ALTER EXTENSION pgcrypto ADD VIEW zz_safe_extension_probe');
+        try {
+          // Unallowlisted: fails — no blanket exemption for extension-owned views.
+          const unallowlisted = await inspectIdentityRole(pool, 'moin_identity');
+          expect(unallowlisted.some((f) => f.rule === 'identity-role-table-privilege')).toBe(true);
+        } finally {
+          await ddl('ALTER EXTENSION pgcrypto DROP VIEW zz_safe_extension_probe');
+        }
+      } finally {
+        await pool.end();
+        await ddl('DROP VIEW IF EXISTS zz_safe_extension_probe');
+      }
+    },
+  );
 
   evidenceTest(
     'tolerates only an explicitly reviewed safe extension view with no sensitive dependencies',
@@ -665,27 +689,26 @@ describe('the identity role boundary (P06.06, ADR-0003)', () => {
       const pool = createPool({ connectionString: database.migrationUrl, max: 1 });
       try {
         await ddl('ALTER EXTENSION pgcrypto ADD VIEW zz_safe_extension_probe');
-        // Unallowlisted: fails
-        const unallowlisted = await inspectIdentityRole(pool, 'moin_identity');
-        expect(unallowlisted.some((f) => f.rule === 'identity-role-table-privilege')).toBe(true);
+        try {
+          // Explicitly allowlisted with no sensitive dependencies: passes
+          const allowlisted = await inspectIdentityRole(pool, 'moin_identity', {
+            allowedExtensionViews: [
+              { schema: 'public', name: 'zz_safe_extension_probe', extension: 'pgcrypto' },
+            ],
+          });
+          expect(allowlisted.some((f) => f.rule === 'identity-role-table-privilege')).toBe(false);
 
-        // Explicitly allowlisted with no sensitive dependencies: passes
-        const allowlisted = await inspectIdentityRole(pool, 'moin_identity', {
-          allowedExtensionViews: [
-            { schema: 'public', name: 'zz_safe_extension_probe', extension: 'pgcrypto' },
-          ],
-        });
-        expect(allowlisted.some((f) => f.rule === 'identity-role-table-privilege')).toBe(false);
-
-        // If write privilege is added: fails even if allowlisted
-        await ddl('GRANT INSERT ON zz_safe_extension_probe TO PUBLIC');
-        const writable = await inspectIdentityRole(pool, 'moin_identity', {
-          allowedExtensionViews: [
-            { schema: 'public', name: 'zz_safe_extension_probe', extension: 'pgcrypto' },
-          ],
-        });
-        expect(writable.some((f) => f.rule === 'identity-role-table-privilege')).toBe(true);
-        await ddl('ALTER EXTENSION pgcrypto DROP VIEW zz_safe_extension_probe');
+          // If write privilege is added: fails even if allowlisted
+          await ddl('GRANT INSERT ON zz_safe_extension_probe TO PUBLIC');
+          const writable = await inspectIdentityRole(pool, 'moin_identity', {
+            allowedExtensionViews: [
+              { schema: 'public', name: 'zz_safe_extension_probe', extension: 'pgcrypto' },
+            ],
+          });
+          expect(writable.some((f) => f.rule === 'identity-role-table-privilege')).toBe(true);
+        } finally {
+          await ddl('ALTER EXTENSION pgcrypto DROP VIEW zz_safe_extension_probe');
+        }
       } finally {
         await pool.end();
         await ddl('DROP VIEW IF EXISTS zz_safe_extension_probe');

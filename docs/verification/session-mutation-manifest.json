@@ -528,7 +528,7 @@
     "replace": "    const isAllowlisted =\n      rel.kind === 'v' ||\n      allowedViews.some(\n        (a) =>\n          a.schema === rel.schema &&\n          a.name === rel.name &&\n          a.extension === rel.extension &&\n          rel.kind === 'v',\n      );\n",
     "killingTest": {
       "file": "scripts/check-rls-catalog.integration.test.ts",
-      "fullName": "the identity role boundary (P06.06, ADR-0003) > tolerates only an explicitly reviewed safe extension view with no sensitive dependencies"
+      "fullName": "the identity role boundary (P06.06, ADR-0003) > an unreviewed extension view is never silently tolerated"
     },
     "project": "integration"
   },
