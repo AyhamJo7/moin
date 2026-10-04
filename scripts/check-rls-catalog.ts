@@ -119,8 +119,8 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.count_audit_chains': 'e3cd033e0ea860c723977f7c9e28068a',
   'app.audit_chain_high_water': '0af3ae3c87f468ecd845b318be7efb52',
   'app.provision_tenant': '187d4a4589e54a39cdadc6f3726cce26',
-  // Sign-in and sessions (P06.06.01/.02): the guard that fixes a session's lifetime, and the six
-  // functions that are the runtime role's only access to users, auth_transactions and sessions.
+  // Sign-in and sessions (P06.06.01/.02): the trigger that fixes a session's lifetime, and the
+  // six functions that are the runtime role's only access to users, auth_transactions and sessions.
   'app.reject_session_rewrite': '1b7209a5119fd835537b390fcbd558e0',
   'app.begin_sign_in': '46d951fb285c7fe09aac5cdabbc24aa3',
   'app.consume_sign_in': 'bffb11e6e64f3896571948320dede4e3',
@@ -486,22 +486,36 @@ const IDENTITY_ROLE_QUERY = `
                'has_write', (
                  has_table_privilege(r.oid, c.oid, 'INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN')
                  OR (c.relkind <> 'S' AND has_any_column_privilege(r.oid, c.oid, 'INSERT, UPDATE, REFERENCES'))
-                 OR (c.relkind = 'S' AND has_sequence_privilege(r.oid, c.oid, 'USAGE, UPDATE'))
+                 OR (c.relkind = 'S' AND has_sequence_privilege(r.oid, c.oid, 'USAGE, SELECT, UPDATE'))
                ),
                'extension', (
                  SELECT e.extname::text FROM pg_depend dep JOIN pg_extension e ON e.oid = dep.refobjid
                  WHERE dep.classid = 'pg_class'::regclass AND dep.objid = c.oid AND dep.deptype = 'e'
                  LIMIT 1
                ),
+               -- Transitive closure over view dependencies: a view that reaches a sensitive
+               -- relation through any number of intermediate views still reaches it. One pg_rewrite
+               -- join sees only direct deps; the recursion below walks the whole chain.
                'dependencies', COALESCE((
+                 WITH RECURSIVE chain(obj) AS (
+                   SELECT d.refobjid
+                   FROM pg_depend d
+                   JOIN pg_rewrite rw ON rw.oid = d.objid
+                   WHERE rw.ev_class = c.oid AND d.classid = 'pg_rewrite'::regclass
+                     AND d.refclassid = 'pg_class'::regclass AND d.refobjid <> c.oid
+                   UNION
+                   SELECT d.refobjid
+                   FROM pg_depend d
+                   JOIN pg_rewrite rw ON rw.oid = d.objid
+                   JOIN chain ON chain.obj = rw.ev_class
+                   WHERE d.classid = 'pg_rewrite'::regclass
+                     AND d.refclassid = 'pg_class'::regclass AND d.refobjid <> c.oid
+                 )
                  SELECT array_agg(DISTINCT dn.nspname || '.' || dc.relname)
-                 FROM pg_depend d
-                 JOIN pg_rewrite rw ON rw.oid = d.objid
-                 JOIN pg_class dc ON dc.oid = d.refobjid
+                 FROM chain
+                 JOIN pg_class dc ON dc.oid = chain.obj
                  JOIN pg_namespace dn ON dn.oid = dc.relnamespace
-                 WHERE rw.ev_class = c.oid AND d.classid = 'pg_rewrite'::regclass
-                   AND d.refclassid = 'pg_class'::regclass AND dc.oid <> c.oid
-                   AND dn.nspname NOT IN ('pg_catalog', 'information_schema')
+                 WHERE dn.nspname NOT IN ('pg_catalog', 'information_schema')
                ), '{}'::text[])
              )::text
              ORDER BY n.nspname || '.' || c.relname
@@ -892,19 +906,26 @@ export interface ReviewedExtensionView {
 export const REVIEWED_EXTENSION_VIEWS: readonly ReviewedExtensionView[] = [];
 
 /**
- * Tables that must never be reachable, directly or indirectly through any view.
+ * Relations that must never be reachable, directly or through any depth of view nesting.
+ * Fully qualified `schema.name`: a bare table name would collide across schemas in either
+ * direction (false pass on `evil.sessions`, false alarm on an unrelated `sessions` elsewhere).
  */
-export const SENSITIVE_TABLE_NAMES: ReadonlySet<string> = new Set([
-  'sessions',
-  'auth_transactions',
-  'users',
-  'organisations',
-  'locations',
-  'audit_events',
-  'audit_heads',
-  'audit_chain_registry',
-  'provisioning_requests',
+export const SENSITIVE_RELATIONS: ReadonlySet<string> = new Set([
+  'public.sessions',
+  'public.auth_transactions',
+  'public.users',
+  'public.organisations',
+  'public.locations',
+  'public.audit_events',
+  'public.audit_heads',
+  'public.audit_chain_registry',
+  'public.provisioning_requests',
 ]);
+
+/** Backwards-compatible alias for the bare table names. */
+export const SENSITIVE_TABLE_NAMES: ReadonlySet<string> = new Set(
+  [...SENSITIVE_RELATIONS].map((relation) => relation.split('.').pop() ?? relation),
+);
 
 interface RelationPrivilegeInfo {
   readonly relation: string;
@@ -1031,8 +1052,7 @@ export async function inspectIdentityRole(
       );
     }
     for (const dep of rel.dependencies) {
-      const depName = dep.split('.').pop() ?? '';
-      if (SENSITIVE_TABLE_NAMES.has(depName)) {
+      if (SENSITIVE_RELATIONS.has(dep)) {
         push(
           'identity-role-table-privilege',
           `extension view ${rel.relation} depends on sensitive relation ${dep}; forbidden.`,

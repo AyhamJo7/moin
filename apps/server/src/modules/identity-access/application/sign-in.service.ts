@@ -103,6 +103,12 @@ export interface SignInDependencies {
   readonly provider: OidcProviderClient;
   readonly cipher: TokenCipher;
   readonly store: IdentityStore;
+  /**
+   * Identifier clock only: `uuidv7` timestamps and the sealed-tokens `expiresIn` arithmetic.
+   * Never a security clock — session lifetimes and auth-transaction expiry are judged by the
+   * database clock inside the functions. (The jose `currentDate` below is the OIDC library's
+   * token-age check against the provider's clock, outside the DB-clock rule's scope.)
+   */
   readonly clock: Clock;
   readonly logger: Pick<Logger, 'info' | 'warn'>;
 }
@@ -269,6 +275,8 @@ export class SignInService {
       },
       'signed in',
     );
+    // The cookie never outlives the session: resolve_session re-judges by the DB clock anyway,
+    // so app-clock skew here can only shorten the cookie or present an already-dead one.
     return {
       location: pending.returnTo,
       sessionToken,

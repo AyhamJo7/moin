@@ -42,14 +42,29 @@ describe('the identity pool readiness probe', () => {
 
   evidenceTest('is not ready once moin_app can execute a session function', async () => {
     const admin = database.fixturePool();
-    await admin.query('grant execute on function app.resolve_session(bytea) to moin_app');
-    try {
-      expect(await probe(database.identityUrl ?? '')).toMatchObject({
-        ready: false,
-        reason: 'role_mismatch',
-      });
-    } finally {
-      await admin.query('revoke execute on function app.resolve_session(bytea) from moin_app');
+    // Every one of the six: readiness must shut out moin_app from the whole session surface,
+    // not just one probe function.
+    const grants = [
+      'grant execute on function app.begin_sign_in(bytea, bytea, bytea, bytea, text, text) to moin_app',
+      'grant execute on function app.consume_sign_in(bytea, bytea) to moin_app',
+      'grant execute on function app.begin_session(text, bytea, uuid, bytea, text, bytea) to moin_app',
+      'grant execute on function app.rotate_session(bytea, bytea, uuid, text) to moin_app',
+      'grant execute on function app.resolve_session(bytea) to moin_app',
+      'grant execute on function app.revoke_session(bytea) to moin_app',
+    ];
+    const revokes = grants.map((grant) =>
+      grant.replace('grant execute', 'revoke execute').replace(' to moin_app', ' from moin_app'),
+    );
+    for (const [index, grant] of grants.entries()) {
+      await admin.query(grant);
+      try {
+        expect(await probe(database.identityUrl ?? '')).toMatchObject({
+          ready: false,
+          reason: 'role_mismatch',
+        });
+      } finally {
+        await admin.query(revokes[index] ?? '');
+      }
     }
   });
 });

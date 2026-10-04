@@ -385,6 +385,44 @@ describe('issuing a session', () => {
     expect((await signIn(disabled.sub)).granted).toBeUndefined();
   });
 
+  evidenceTest('a disable racing sign-in mints no live session', async () => {
+    const person = await user();
+    // Hold the user row the way begin_session's FOR SHARE does, so the disable below provably
+    // waits on this sign-in rather than racing it by luck.
+    const gate = await admin.connect();
+    try {
+      await gate.query('begin');
+      await gate.query('select 1 from users where id = $1 for update', [person.id]);
+
+      const pending = store.beginSession({
+        subject: person.sub,
+        tokenHash: hash(),
+        sessionId: randomUUID(),
+        providerTokensSealed: sealed(),
+        keyId: 'test-v1',
+      });
+
+      const deadline = Date.now() + LOCK_WAIT_DEADLINE_MS;
+      let waiting = '0';
+      while (waiting !== '1' && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT_POLL_MS));
+        const result = await admin.query<{ n: string }>(
+          "select count(*)::text as n from pg_stat_activity where wait_event_type = 'Lock' and datname = $1",
+          [database.name],
+        );
+        waiting = result.rows[0]?.n ?? '0';
+      }
+      expect(waiting, 'sign-in waits on the user lock').toBe('1');
+
+      await gate.query("update users set status = 'disabled' where id = $1", [person.id]);
+      await gate.query('commit');
+
+      expect(await pending).toBeUndefined();
+    } finally {
+      gate.release();
+    }
+  });
+
   evidenceTest('stores the token digest and a 7-day absolute, 12-hour idle lifetime', async () => {
     const person = await user();
     const { tokenHash, granted } = await signIn(person.sub);
@@ -568,6 +606,53 @@ describe('rotation', () => {
         'login',
       ]),
     ).rejects.toMatchObject({ code: '22023' });
+  });
+
+  evidenceTest('a disable racing rotation extends nothing', async () => {
+    const person = await user();
+    const { tokenHash } = await signIn(person.sub);
+    const successor = hash();
+
+    const a = await admin.connect();
+    const b = await identity.connect();
+    try {
+      // Hold the user row the way rotate_session's FOR SHARE OF u does, so the disable below
+      // provably waits on this rotation rather than racing it by luck.
+      await a.query('begin');
+      await a.query('select 1 from users where id = $1 for update', [person.id]);
+
+      await b.query('begin');
+      const pending = b.query('select * from app.rotate_session($1, $2, $3, $4)', [
+        tokenHash,
+        successor,
+        randomUUID(),
+        'step_up',
+      ]);
+
+      const deadline = Date.now() + LOCK_WAIT_DEADLINE_MS;
+      let waiting = '0';
+      while (waiting !== '1' && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT_POLL_MS));
+        const result = await admin.query<{ n: string }>(
+          "select count(*)::text as n from pg_stat_activity where wait_event_type = 'Lock' and datname = $1",
+          [database.name],
+        );
+        waiting = result.rows[0]?.n ?? '0';
+      }
+      expect(waiting, 'rotation waits on the user lock').toBe('1');
+
+      await a.query("update users set status = 'disabled' where id = $1", [person.id]);
+      await a.query('commit');
+
+      const secondResult = await pending;
+      await b.query('commit');
+
+      expect(secondResult.rowCount, 'rotation after disable returned 0 rows').toBe(0);
+      expect(await store.resolveSession(successor)).toBeUndefined();
+    } finally {
+      a.release();
+      b.release();
+    }
   });
 });
 

@@ -173,11 +173,37 @@
     "invariant": "ADR-0005: a session is issued only to an active user",
     "expected": "A disabled person who still authenticates at the provider would get a session.",
     "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "  WHERE u.cognito_sub = p_subject AND u.status = 'active';\n",
+    "find": "  WHERE u.cognito_sub = p_subject AND u.status = 'active'\n  FOR SHARE;\n",
     "replace": "  WHERE u.cognito_sub = p_subject;\n",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "issuing a session > refuses a disabled user"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "U2-disable-racing-sign-in-mints-session",
+    "invariant": "ADR-0005: a disable racing sign-in mints no live session (user row locked FOR SHARE)",
+    "expected": "Disabling a user while their sign-in is in flight would mint a live 7-day session.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "  WHERE u.cognito_sub = p_subject AND u.status = 'active'\n  FOR SHARE;\n",
+    "replace": "  WHERE u.cognito_sub = p_subject AND u.status = 'active';\n",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "issuing a session > a disable racing sign-in mints no live session"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "U3-disable-racing-rotation-extends-session",
+    "invariant": "P06.06.02: a disable racing rotation extends nothing (user row locked FOR SHARE OF u)",
+    "expected": "Disabling a user while their rotation is in flight would issue a live successor.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "  WHERE s.token_hash = p_token_hash FOR SHARE OF u;\n",
+    "replace": "  -- User-row lock removed: a racing disable no longer serialises here\n",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "rotation > a disable racing rotation extends nothing"
     },
     "project": "integration"
   },
@@ -607,6 +633,32 @@
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "temporal authorization and expiration (authoritative database clock) > activity on expired session cannot move last_seen_at or extend idle expiry"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "D1-stale-caller-clock-overloads-survive",
+    "invariant": "P06.06.02 / QG-09 review: no stale caller-time overload survives on an upgraded database",
+    "expected": "A database migrated at an earlier revision would keep callable p_now overloads honouring caller-supplied time.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "DROP FUNCTION IF EXISTS app.revoke_session(bytea, timestamptz);\n",
+    "replace": "DROP FUNCTION IF EXISTS app.revoke_session(bytea, timestamptz);\nDROP FUNCTION IF EXISTS app.never_existed(bytea);\n",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "temporal authorization and expiration (authoritative database clock) > obsolete caller-time overloads do not exist in the database"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "D2-two-hop-extension-view-bypass",
+    "invariant": "ADR-0003 amendment: no extension view reaches a sensitive relation through intermediate views",
+    "expected": "An allowlisted extension view reaching sessions through an intermediate view would pass the single-hop check.",
+    "file": "scripts/check-rls-catalog.ts",
+    "find": "                 WITH RECURSIVE chain(obj) AS (\n",
+    "replace": "                 WITH chain(obj) AS (\n",
+    "killingTest": {
+      "file": "scripts/check-rls-catalog.integration.test.ts",
+      "fullName": "the identity role boundary (P06.06, ADR-0003) > rejects an extension view reaching a sensitive relation through an intermediate view"
     },
     "project": "integration"
   }

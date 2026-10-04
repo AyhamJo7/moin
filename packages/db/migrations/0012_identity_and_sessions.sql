@@ -348,9 +348,14 @@ DECLARE
   v_user uuid;
   v_family uuid;
 BEGIN
+  -- The user row is locked now (FOR SHARE conflicts with a concurrent disable's UPDATE), so a
+  -- disable racing this sign-in serialises here: either it commits first and v_user is NULL, or
+  -- this insert commits first and the disable revokes the session afterwards. Either way no live
+  -- session exists for a disabled user.
   SELECT u.id INTO v_user
   FROM public.users u
-  WHERE u.cognito_sub = p_subject AND u.status = 'active';
+  WHERE u.cognito_sub = p_subject AND u.status = 'active'
+  FOR SHARE;
   IF v_user IS NULL THEN
     RETURN;
   END IF;
@@ -410,7 +415,7 @@ CREATE FUNCTION app.rotate_session(
   SET search_path = pg_catalog, public, app, pg_temp
 AS $$
 DECLARE
-  v_now timestamptz := clock_timestamp();
+  v_now timestamptz;
   v_family uuid;
 BEGIN
   IF p_reason IS NULL OR p_reason NOT IN ('step_up', 'privilege_change') THEN
@@ -427,6 +432,12 @@ BEGIN
 
   -- Lock predecessor row before evaluating validity
   PERFORM 1 FROM public.sessions s WHERE s.token_hash = p_token_hash FOR UPDATE;
+
+  -- Lock the owning user row (FOR SHARE conflicts with a concurrent disable's UPDATE), so a
+  -- disable racing this rotation serialises here rather than extending a session that should die.
+  PERFORM 1
+  FROM public.sessions s JOIN public.users u ON u.id = s.user_id
+  WHERE s.token_hash = p_token_hash FOR SHARE OF u;
 
   -- Fresh DB clock obtained after acquiring the locks
   v_now := clock_timestamp();
@@ -535,6 +546,22 @@ BEGIN
   RETURN FOUND;
 END
 $$;
+
+-- ---------------------------------------------------------------------------------------------
+-- Convergent cleanup: databases migrated at an earlier revision of this file still contain the
+-- caller-clock overloads (`p_now timestamptz`), `app.session_clock` and `session_clock_policy`.
+-- PostgreSQL treats the new signatures as additional overloads, so without these drops the old
+-- callable paths — and their caller-supplied-time primitive — would survive on upgraded databases.
+-- All no-ops on a fresh build.
+-- ---------------------------------------------------------------------------------------------
+DROP FUNCTION IF EXISTS app.begin_sign_in(bytea, bytea, bytea, bytea, text, text, timestamptz);
+DROP FUNCTION IF EXISTS app.consume_sign_in(bytea, bytea, timestamptz);
+DROP FUNCTION IF EXISTS app.begin_session(text, bytea, uuid, bytea, text, bytea, timestamptz);
+DROP FUNCTION IF EXISTS app.rotate_session(bytea, bytea, uuid, text, timestamptz);
+DROP FUNCTION IF EXISTS app.resolve_session(bytea, timestamptz);
+DROP FUNCTION IF EXISTS app.revoke_session(bytea, timestamptz);
+DROP FUNCTION IF EXISTS app.session_clock(timestamptz);
+DROP TABLE IF EXISTS session_clock_policy;
 
 -- ---------------------------------------------------------------------------------------------
 -- Execution: moin_identity only, each by exact signature. moin_app — the voice and worker role as

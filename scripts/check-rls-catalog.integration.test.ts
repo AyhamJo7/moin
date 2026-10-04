@@ -626,6 +626,34 @@ describe('the identity role boundary (P06.06, ADR-0003)', () => {
     },
   );
 
+  evidenceTest(
+    'rejects an extension view reaching a sensitive relation through an intermediate view',
+    async () => {
+      await ddl(
+        'CREATE VIEW zz_inner_probe AS SELECT id FROM sessions; CREATE VIEW zz_outer_probe AS SELECT id FROM zz_inner_probe; GRANT SELECT ON zz_outer_probe TO PUBLIC',
+      );
+      const pool = createPool({ connectionString: database.migrationUrl, max: 1 });
+      try {
+        await ddl('ALTER EXTENSION pgcrypto ADD VIEW zz_outer_probe');
+        try {
+          // Single-hop logic would see only zz_inner_probe (not sensitive) and pass; the
+          // transitive closure must still fire, even when explicitly allowlisted.
+          const allowlisted = await inspectIdentityRole(pool, 'moin_identity', {
+            allowedExtensionViews: [
+              { schema: 'public', name: 'zz_outer_probe', extension: 'pgcrypto' },
+            ],
+          });
+          expect(allowlisted.some((f) => f.rule === 'identity-role-table-privilege')).toBe(true);
+        } finally {
+          await ddl('ALTER EXTENSION pgcrypto DROP VIEW zz_outer_probe');
+        }
+      } finally {
+        await pool.end();
+        await ddl('DROP VIEW IF EXISTS zz_outer_probe; DROP VIEW IF EXISTS zz_inner_probe');
+      }
+    },
+  );
+
   evidenceTest('rejects an extension-owned view exposing sensitive session columns', async () => {
     // Codex regression: an extension-owned view exposing sessions.id, user_id, provider_tokens_sealed
     // must not be exempted by the catalog checker.

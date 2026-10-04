@@ -25,11 +25,15 @@ export interface RotatedSession {
 
 export class SessionService {
   readonly #store: IdentityStore;
-  readonly #clock: Clock;
+  /**
+   * Identifier clock only: mints `uuidv7` timestamps for the successor token id. Never a
+   * security clock — session validity is judged by the database clock inside the functions.
+   */
+  readonly #idClock: Clock;
 
-  constructor(store: IdentityStore, clock: Clock) {
+  constructor(store: IdentityStore, idClock: Clock) {
     this.#store = store;
-    this.#clock = clock;
+    this.#idClock = idClock;
   }
 
   async resolve(presented: string | undefined): Promise<ResolvedSession | undefined> {
@@ -43,7 +47,7 @@ export class SessionService {
   ): Promise<RotatedSession | undefined> {
     if (!isSecretValue(presented)) return undefined;
     const sessionToken = randomSecret();
-    const now = this.#clock.now();
+    const now = this.#idClock.now();
     const grant = await this.#store.rotateSession(
       digestOf(presented),
       digestOf(sessionToken),
