@@ -199,7 +199,7 @@
     "invariant": "P06.06.02: a disable racing rotation extends nothing (user row locked FOR SHARE OF u)",
     "expected": "Disabling a user while their rotation is in flight would issue a live successor.",
     "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "  PERFORM 1\n  FROM public.sessions s JOIN public.users u ON u.id = s.user_id\n  WHERE s.token_hash = p_token_hash FOR SHARE OF u;\n",
+    "find": "  -- Lock the owning user row (FOR SHARE conflicts with a concurrent disable's UPDATE), so a\n  -- disable racing this rotation serialises here rather than extending a session that should die.\n  PERFORM 1\n  FROM public.sessions s JOIN public.users u ON u.id = s.user_id\n  WHERE s.token_hash = p_token_hash FOR SHARE OF u;\n",
     "replace": "  PERFORM 1;\n",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
@@ -667,8 +667,8 @@
     "invariant": "P06.06.02: a disable racing resolution blocks it (user row locked FOR SHARE OF u)",
     "expected": "A disable committing mid-resolution would let one stale read through.",
     "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "  -- Lock the owning user row (FOR SHARE conflicts with a concurrent disable's UPDATE), mirroring\n  -- `rotate_session`: without it a disable committing mid-call lets one stale resolution through.\n  PERFORM 1\n  FROM public.sessions s JOIN public.users u ON u.id = s.user_id\n  WHERE s.token_hash = p_token_hash FOR SHARE OF u;\n\n  -- Fresh DB clock obtained after acquiring the lock\n  v_now := clock_timestamp();\n\n  RETURN QUERY\n  UPDATE public.sessions s\n",
-    "replace": "  -- Fresh DB clock obtained without the user-row lock\n  v_now := clock_timestamp();\n\n  RETURN QUERY\n  UPDATE public.sessions s\n",
+    "find": "  -- Lock the owning user row (FOR SHARE conflicts with a concurrent disable's UPDATE), mirroring\n  -- `rotate_session`: without it a disable committing mid-call lets one stale resolution through.\n  PERFORM 1\n  FROM public.sessions s JOIN public.users u ON u.id = s.user_id\n  WHERE s.token_hash = p_token_hash FOR SHARE OF u;\n",
+    "replace": "  PERFORM 1;\n",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "a session over time > a disable racing resolution blocks it, not one stale read"
