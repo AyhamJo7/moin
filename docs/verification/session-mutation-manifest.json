@@ -641,8 +641,8 @@
     "invariant": "P06.06.02 / QG-09 review: no stale caller-time overload survives on an upgraded database",
     "expected": "A database migrated at an earlier revision would keep callable p_now overloads honouring caller-supplied time.",
     "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "DROP FUNCTION IF EXISTS app.revoke_session(bytea, timestamptz);\n",
-    "replace": "DROP FUNCTION IF EXISTS app.revoke_session(bytea, timestamptz);\nDROP FUNCTION IF EXISTS app.never_existed(bytea);\n",
+    "find": "DROP FUNCTION IF EXISTS app.session_clock(timestamptz);\nDROP TABLE IF EXISTS session_clock_policy;\n",
+    "replace": "DROP TABLE IF EXISTS session_clock_policy;\n",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "temporal authorization and expiration (authoritative database clock) > obsolete caller-time overloads do not exist in the database"
@@ -654,8 +654,8 @@
     "invariant": "ADR-0003 amendment: no extension view reaches a sensitive relation through intermediate views",
     "expected": "An allowlisted extension view reaching sessions through an intermediate view would pass the single-hop check.",
     "file": "scripts/check-rls-catalog.ts",
-    "find": "                 WITH RECURSIVE chain(obj) AS (\n",
-    "replace": "                 WITH chain(obj) AS (\n",
+    "find": "    for (const dep of rel.dependencies) {\n      if (SENSITIVE_RELATIONS.has(dep)) {\n",
+    "replace": "    for (const dep of rel.dependencies.slice(0, 1)) {\n      if (SENSITIVE_RELATIONS.has(dep)) {\n",
     "killingTest": {
       "file": "scripts/check-rls-catalog.integration.test.ts",
       "fullName": "the identity role boundary (P06.06, ADR-0003) > rejects an extension view reaching a sensitive relation through an intermediate view"

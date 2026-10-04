@@ -1037,6 +1037,11 @@ describe('temporal authorization and expiration (authoritative database clock)',
       [[...SESSION_FUNCTIONS]],
     );
     expect(overloads.rows).toHaveLength(0);
+    const clock = await admin.query(
+      `select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = 'app' and p.proname = 'session_clock'`,
+    );
+    expect(clock.rowCount).toBe(0);
   });
 });
 
