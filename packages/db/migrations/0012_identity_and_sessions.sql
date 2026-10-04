@@ -1,5 +1,6 @@
 -- 0012 — users, sign-in transactions and server-side sessions (P06.06.01, P06.06.02, ADR-0005).
 -- migration-check: allow create-index-blocking because every index here is on a table created earlier in this same migration, so it is new and empty.
+-- migration-check: allow drop-table because session_clock_policy exists only in pre-merge revisions of this same unreleased migration (never on main), and the DROP is IF EXISTS guarded, so it is a no-op everywhere except a dirty dev/CI database migrated mid-review.
 --
 -- ## Identity, not tenancy
 --
