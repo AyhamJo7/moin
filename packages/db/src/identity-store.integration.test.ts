@@ -764,6 +764,13 @@ describe('two callers holding the same row', () => {
       }
       expect(waiting, 'second caller waits on the lock').toBe('1');
 
+      // Hold the lock until the predecessor's idle expiry has provably passed on the database
+      // clock, so a stale pre-lock reading of "now" is already expired when the blocked rotation
+      // resumes: the post-lock recheck is the only thing that can refuse it. pg_sleep runs
+      // server-side while a holds the family lock, so the sleep interval and the expiry it must
+      // outlast share one clock.
+      await a.query("select pg_sleep(1.5)");
+
       // While b is blocked on the family lock, a updates the predecessor session to be expired:
       await a.query(
         "update public.sessions set idle_expires_at = clock_timestamp() - interval '1 second' where token_hash = $1",

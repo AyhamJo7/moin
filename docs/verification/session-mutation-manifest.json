@@ -525,10 +525,10 @@
     "expected": "An extension table with write privileges granted to PUBLIC would be ignored by the catalog check, violating the no-table-privilege rule.",
     "file": "scripts/check-rls-catalog.ts",
     "find": "    const isAllowlisted = allowedViews.some(\n      (a) =>\n        a.schema === rel.schema &&\n        a.name === rel.name &&\n        a.extension === rel.extension &&\n        rel.kind === 'v',\n    );\n",
-    "replace": "    const isAllowlisted = rel.kind === 'v';\n",
+    "replace": "    const isAllowlisted =\n      rel.kind === 'v' ||\n      allowedViews.some(\n        (a) =>\n          a.schema === rel.schema &&\n          a.name === rel.name &&\n          a.extension === rel.extension &&\n          rel.kind === 'v',\n      );\n",
     "killingTest": {
       "file": "scripts/check-rls-catalog.integration.test.ts",
-      "fullName": "the identity role boundary (P06.06, ADR-0003) > rejects an extension-owned view exposing sensitive session columns"
+      "fullName": "the identity role boundary (P06.06, ADR-0003) > tolerates only an explicitly reviewed safe extension view with no sensitive dependencies"
     },
     "project": "integration"
   },
