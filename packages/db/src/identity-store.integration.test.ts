@@ -1630,25 +1630,50 @@ describe('the request-context membership lock (MWAIT)', () => {
           tokenHash,
         ]);
         // Prove the lookup holds the membership row before racing the disable: a NOWAIT
-        // update on the same row must fail immediately with 55P03 while the lookup's
-        // transaction is open (no sleep, no pg_locks-rule coupling, no flake budget).
+        // locker must raise 55P03 while the lookup's transaction is open. Polled, not
+        // slept: on a slow scheduler the lookup may not have acquired FOR SHARE OF m yet
+        // when the probe first runs — a premature success would red the suite (fail-loud,
+        // never fail-open). Retry until 55P03 or deadline.
         {
-          const probe = await admin.connect();
-          try {
-            await probe.query('begin');
-            await probe.query("select set_config('app.organisation_id', $1, true)", [org]);
-            // Codex's own reproduction shape: a racing locker must NOT acquire the row
-            // while the lookup holds it (raises 55P03 immediately instead of returning it).
-            await expect(
-              probe.query('select 1 from memberships where user_id = $1 for update nowait', [
+          const deadline = Date.now() + LOCK_WAIT_DEADLINE_MS;
+          let lastError: unknown = new Error('probe never ran');
+          let proven = false;
+          while (Date.now() < deadline) {
+            const probe = await admin.connect();
+            try {
+              await probe.query('begin');
+              await probe.query("select set_config('app.organisation_id', $1, true)", [org]);
+              // Codex's own reproduction shape: a racing locker must NOT acquire the row
+              // while the lookup holds it (raises 55P03 immediately instead of returning it).
+              await probe.query('select 1 from memberships where user_id = $1 for update nowait', [
                 person.id,
-              ]),
-              'racing disable blocked by the held membership lock',
-            ).rejects.toMatchObject({ code: '55P03' });
-            await probe.query('rollback');
-          } finally {
-            probe.release();
+              ]);
+              await probe.query('rollback');
+            } catch (error) {
+              if (
+                typeof error === 'object' &&
+                error !== null &&
+                'code' in error &&
+                error.code === '55P03'
+              ) {
+                proven = true;
+                break;
+              }
+              lastError = error;
+            } finally {
+              try {
+                await probe.query('rollback');
+              } catch {
+                // ignore
+              }
+              probe.release(true);
+            }
+            await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT_POLL_MS));
           }
+          expect(
+            proven,
+            `racing locker blocked by the held membership lock: ${String(lastError)}`,
+          ).toBe(true);
         }
         await writer.query('begin');
         await writer.query("select set_config('app.organisation_id', $1, true)", [org]);
