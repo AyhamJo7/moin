@@ -5,8 +5,8 @@ mode: autonomous
 phase: P06
 tier: PILOT
 plan: docs/phases/P06-plan.md
-next: implement P06.06.03 per-request session validity and membership status re-check (branch feat/p06-06-membership-recheck); P06.06.01/.02 VERIFIED at merge 1b94476 (EV-P06-047); then P06.10.03 writer adoption and EXT-09 for P06.10.05 still open
-updated: 2026-10-04
+next: implement P06.06.04 step-up MFA (≤ 15 min) for sensitive actions; P06.06.01/.02/.03 VERIFIED at merge d92f82b (EV-P06-048); then P06.10.03 writer adoption and EXT-09 for P06.10.05 still open
+updated: 2026-10-05
 ---
 
 # PROGRESS — moin
@@ -186,6 +186,7 @@ Rules
 | P06.09.03 | VERIFIED | 15433fb | EV-P06-040 | Founder-authorized on independent verdict `READY_FOR_FOUNDER_P06_09_03` for reviewed runbook HEAD `15433fb`; runbook evidence EV-P06-039. Existing sessions and fresh access both blocked for containment; verified replacement MFA and mandatory audit precede ordinary access. Documentation only; P06.09.01/.02/.04 open and P06.09 incomplete |
 | P06.06.01 | VERIFIED | 1b94476 | EV-P06-047 | Authorization Code + PKCE S256 callback in `api`: single-use, browser-bound, 10-minute `state`; nonce-bound ID token verified with `jose`; code exchanged server-side; provider tokens AES-256-GCM sealed and wiped at revocation; internal return paths only. Real `moin-web` code flow proven against local Keycloak. Founder-accepted on independent verdict `READY FOR FOUNDER ACCEPTANCE` at candidate `195a6bd` (implementation `316caa6`); PR #35 squash-merged as `1b94476`. Not Cognito (P06.05.05); deployed environments refuse sign-in until the KMS key exists (P05.08.01) |
 | P06.06.02 | VERIFIED | 1b94476 | EV-P06-047 | `users` and `sessions` (global, no runtime table grant, six pinned `SECURITY DEFINER` functions, dedicated `moin_identity` role closing QG-09 I1); SHA-256 of a 256-bit token in `__Host-moin_sid` (HttpOnly, Secure, SameSite=Lax, Path=/, no Domain); 12 h idle / 7 d absolute enforced by functions, CHECKs and a guard trigger; lock-wait expiry races closed (RWAIT/CWAIT, 54/54 sweep); rotation primitive (login wired; step-up and privilege-change callers are P06.06.04/P06.07). Founder-accepted on independent verdict `READY FOR FOUNDER ACCEPTANCE` at candidate `195a6bd` (implementation `316caa6`); PR #35 squash-merged as `1b94476`. P06.06.03–.07 open |
+| P06.06.03 | VERIFIED | d92f82b | EV-P06-048 | Per-request session validity and membership status re-check via single atomic `resolve_request_context` DEFINER query. Scoped `moin_app` row lock via FOR UPDATE companion policy with tenant WITH CHECK under FORCE RLS; slide folded into single query with single database timestamp; read-only GET caching bounded by min(30 s, idle, absolute) with triple-deadline hit checks; mutating requests bypass cache; Cache-Control: private, no-store on authenticated 200 responses. Proven by 55/55 mutation sweep, deterministic MWAIT1/MWAIT2/MWAIT3 concurrency regressions, and 20/20 stress runs. Founder-accepted on independent verdict `READY FOR FOUNDER ACCEPTANCE` at candidate `ac2b3e2` (implementation `dfdece5`); PR #36 squash-merged as `d92f82b`. P06.06.04–.07 open |
 
 ## External waits
 
@@ -751,3 +752,5 @@ true, ok: false }` — is serialized by Vitest with none of the `constructor`/`t
 - 2026-10-05 — **Founder full gate 14/14 PASS at dfdece5 (evidence 20261005T142032Z-full.json).** Run by the founder with ephemeral local-development fixture env. Implementation frozen at dfdece5; test hardening at 91488cc. All 14 gates pass cleanly. Ready for push and PR #36 CI verification. P06.06.03 stays READY_FOR_REVIEW.
 
 - 2026-10-05 — **Codex re-review at ac2b3e2: READY FOR FOUNDER ACCEPTANCE.** Independent verification confirmed membership row-lock retention under FORCE RLS (55P03 on concurrent writer, wait until context commit), tenant WITH CHECK preservation, 156 focused tests PASS, and 20/20 affected stress runs PASS. All scenarios A through I PASS; 14/14 full gates PASS. P06.06.03 cleared for founder acceptance and merge.
+
+- 2026-10-05 — **PR #36 squash-merged as d92f82b; P06.06.03 VERIFIED on main.** Migrations 0013 and 0014 applied on main; RLS catalog check passes with all 21 pinned DEFINER digests matching freshly migrated md5(prosrc); full test suite green. P06.06.01/.02/.03 VERIFIED; P06.06.04-.07 open.
