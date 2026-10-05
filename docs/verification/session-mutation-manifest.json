@@ -121,8 +121,8 @@
     "invariant": "P06.06.07 precondition / P06.06.02: the post-login token is never caller-chosen",
     "expected": "An attacker who plants `__Host-moin_sid=X` before the victim signs in would own the victim's session afterwards.",
     "file": "apps/server/src/modules/identity-access/application/sign-in.service.ts",
-    "find": "    const sessionToken = randomSecret();\n",
-    "replace": "    const sessionToken = isSecretValue(presentedSession) ? presentedSession : randomSecret();\n",
+    "find": "    const now = clock.now();\n    const sessionToken = randomSecret();\n    // One reading of the clock per operation, so the session id's timestamp is its creation time.",
+    "replace": "    const now = clock.now();\n    const sessionToken = isSecretValue(presentedSession) ? presentedSession : randomSecret();\n    // One reading of the clock per operation, so the session id's timestamp is its creation time.",
     "killingTest": {
       "file": "apps/server/src/modules/identity-access/sign-in.integration.test.ts",
       "fullName": "session fixation > an attacker-chosen cookie never becomes the session"
