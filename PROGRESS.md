@@ -748,4 +748,6 @@ true, ok: false }` — is serialized by Vitest with none of the `constructor`/`t
 
 - 2026-10-05 — **MWAIT2 NOWAIT probe hardened with retry loop and pool cleanup at 91488cc.** Probe client rolls back cleanly and is destroyed on error so test pool cannot be contaminated by aborted transaction; full identity suite 64/64 PASS; fast gates 7/7 PASS.
 
-- 2026-10-05 — **Founder full gate 14/14 PASS at 91488cc (evidence 20261005T142032Z-full.json).** Run by the founder with ephemeral local-development fixture env. Implementation frozen at dfdece5; test hardening at 91488cc. All 14 gates pass cleanly. Ready for push and PR #36 CI verification. P06.06.03 stays READY_FOR_REVIEW.
+- 2026-10-05 — **Founder full gate 14/14 PASS at dfdece5 (evidence 20261005T142032Z-full.json).** Run by the founder with ephemeral local-development fixture env. Implementation frozen at dfdece5; test hardening at 91488cc. All 14 gates pass cleanly. Ready for push and PR #36 CI verification. P06.06.03 stays READY_FOR_REVIEW.
+
+- 2026-10-05 — **Codex re-review at ac2b3e2: READY FOR FOUNDER ACCEPTANCE.** Independent verification confirmed membership row-lock retention under FORCE RLS (55P03 on concurrent writer, wait until context commit), tenant WITH CHECK preservation, 156 focused tests PASS, and 20/20 affected stress runs PASS. All scenarios A through I PASS; 14/14 full gates PASS. P06.06.03 cleared for founder acceptance and merge.
