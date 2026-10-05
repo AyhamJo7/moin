@@ -713,5 +713,83 @@
       "fullName": "the request-context membership lock (MWAIT) > MWAIT1: idle expiry during a membership-lock wait returns nothing and slides nothing"
     },
     "project": "integration"
+  },
+  {
+    "id": "SU1-login-omits-step-up-stamp",
+    "invariant": "P06.06.04: a fresh sign-in counts as stepped-up (login is MFA)",
+    "expected": "Sessions minted without step_up_at would fail every step-up check until re-verified, including the just-signed-in browser.",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
+    "find": "    (p_token_hash, p_session_id, p_session_id, v_user, 'login', NULL, v_now, v_now,\n     v_now + interval '12 hours', v_now + interval '7 days', v_now, p_provider_tokens_sealed, p_key_id)",
+    "replace": "    (p_token_hash, p_session_id, p_session_id, v_user, 'login', NULL, v_now, v_now,\n     v_now + interval '12 hours', v_now + interval '7 days', NULL, p_provider_tokens_sealed, p_key_id)",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "the step-up stamp (P06.06.04) > stamps the sign-in time as the first step-up proof"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "SU2-step-up-inherits-instead-of-refreshing",
+    "invariant": "P06.06.04: a step_up rotation refreshes the stamp to the rotation time",
+    "expected": "A step-up rotation that inherited the old stamp would never advance proof: re-verifying would change nothing and the window would lapse from the original sign-in.",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
+    "find": "         CASE WHEN p_reason = 'step_up' THEN v_now ELSE p.step_up_at END,",
+    "replace": "         p.step_up_at,",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "the step-up stamp (P06.06.04) > a step-up rotation refreshes the stamp, a privilege change inherits it"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "SU3-privilege-change-refreshes-instead-of-inheriting",
+    "invariant": "P06.06.04: a privilege_change rotation inherits the stamp (no fresh proof)",
+    "expected": "A role change that refreshed the stamp would mint fresh MFA proof from no human act: privilege change would silently extend step-up.",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
+    "find": "         CASE WHEN p_reason = 'step_up' THEN v_now ELSE p.step_up_at END,",
+    "replace": "         v_now,",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "the step-up stamp (P06.06.04) > a step-up rotation refreshes the stamp, a privilege change inherits it"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "SU4-context-drops-step-up-stamp",
+    "invariant": "P06.06.04: the per-request lookup returns the step-up stamp",
+    "expected": "A verdict that omitted step_up_at would leave every session unstamped at the guard: all sensitive actions would 403, including fresh sign-ins.",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
+    "find": "    SELECT s.id, s.user_id, m.organisation_id, m.role, m.permissions,\n           s.idle_expires_at, s.absolute_expires_at, s.step_up_at",
+    "replace": "    SELECT s.id, s.user_id, m.organisation_id, m.role, m.permissions,\n           s.idle_expires_at, s.absolute_expires_at, NULL",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "the request-context lookup (P06.06.03) > returns the active membership of a valid session"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "SU5-guard-accepts-stale-stamp",
+    "invariant": "P06.06.04: a stamp older than 15 minutes is refused",
+    "expected": "A guard without the window check would admit a session stepped up hours ago: the 15-minute ceiling would be advisory.",
+    "file": "apps/server/src/modules/identity-access/http/require-step-up.guard.ts",
+    "find": "    const stepUpAt = outcome.context.stepUpAt;\n    if (\n      stepUpAt === null ||\n      Date.now() - stepUpAt.getTime() > STEP_UP_WINDOW_MS\n    ) {",
+    "replace": "    const stepUpAt = outcome.context.stepUpAt;\n    if (stepUpAt === null) {",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/http/require-step-up.guard.test.ts",
+      "fullName": "RequireStepUpGuard > rejects a stamp older than 15 minutes with the step-up problem"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "SU6-step-up-skips-auth-time",
+    "invariant": "P06.06.04: step-up requires a fresh auth_time from the provider",
+    "expected": "Skipping the auth_time check would accept a provider round-trip answered from an SSO cookie: no fresh human proof, still stepped up.",
+    "file": "apps/server/src/modules/identity-access/infrastructure/oidc-provider.ts",
+    "find": "    if (stepUp) {",
+    "replace": "    if (false) {",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/infrastructure/oidc-provider.test.ts",
+      "fullName": "ID-token verification > step-up refuses a missing auth_time"
+    },
+    "project": "unit"
   }
 ]
