@@ -20,7 +20,8 @@
 | Required container scan | `ignore-unfixed: true`, severity HIGH,CRITICAL on `moin-server:ci`: PASS (0 fixable findings) |
 | Raw unfiltered Trivy | 52 HIGH + 4 CRITICAL, all with empty FixedVersion (no supported fix). Grouped: util-linux family 40 (bsdutils/libblkid1/libmount1/libsmartcols1/libuuid1/mount/util-linux/util-linux-extra 5 each, 2.38.1-5+deb12u3), perl-base 8 (5.36.0-7+deb12u3, incl. 3 CRITICAL CVE-2026-13221/42496/8376), zlib1g 1 (CRITICAL CVE-2023-45853, 1:1.2.13.dfsg-1), gzip/libacl1/libsystemd0/libtinfo6/libudev1/ncurses-base/ncurses-bin 1 each. `CVE-2026-103111` (libpcre2-8-0 >= 10.42-1+deb12u2): ABSENT — previously remediated, remains fixed. |
 | LG-P06 | OPEN — raw unfixed upstream findings remain visible and are not represented as zero; this record is a scope/acceptance decision for PR #35, not a production-launch waiver; it does not declare the image vulnerability-free. |
-| CI run / artifact | pending |
-| Reviewer | pending |
+| Gates | Founder-run `gates.py full` 14/14 PASS at `8b2eb3c53ea24675e7a94606d9027841be0c7472` (evidence `.git/claude-evidence/20261005T014318Z-full.json`, 2026-10-05T01:43–01:44Z; run by the founder with ephemeral local-development fixture env, not by Claude). Post-review delta `043cd28..8b2eb3c` is evidence/governance/reporting only — no SQL, runtime, test, catalog, manifest, Docker or config change. |
+| CI run / artifact | pending (pushed after this record; see PROGRESS ledger) |
+| Reviewer | pending (independent Codex re-review) |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).
