@@ -123,10 +123,10 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   // six functions that are the runtime role's only access to users, auth_transactions and sessions.
   'app.reject_session_rewrite': '1b7209a5119fd835537b390fcbd558e0',
   'app.begin_sign_in': '46d951fb285c7fe09aac5cdabbc24aa3',
-  'app.consume_sign_in': 'bffb11e6e64f3896571948320dede4e3',
-  'app.begin_session': 'ccdbc158957df2561fd12588f5110744',
+  'app.consume_sign_in': '65c3f6a7df85974ff5e8aa9854c4d48d',
+  'app.begin_session': '23034ecb67b830beaaed19822118456a',
   'app.rotate_session': 'fe4a2f4e30221e87d1249a425838a102',
-  'app.resolve_session': '492a95689300b47f3f5f20ef92767d8a',
+  'app.resolve_session': 'cfab5a739c28a8e8f99b664803a5412b',
   'app.revoke_session': 'a4a30b649c5abf56fab3563d20576aa8',
 };
 
