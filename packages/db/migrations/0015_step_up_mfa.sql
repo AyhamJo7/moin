@@ -34,6 +34,17 @@ ALTER TABLE auth_transactions ADD COLUMN step_up_session_id uuid;
 COMMENT ON COLUMN auth_transactions.step_up_session_id IS
   'NULL for a plain login; the session id being re-verified for a step-up round-trip. The callback rotates exactly this session when the subject matches.';
 
+-- The old sign-in arities are superseded, not overloaded: a caller pinned to an old arity
+-- must fail loudly at migration time rather than silently bind a step-up round-trip as a
+-- plain login. The drops come first: PostgreSQL refuses CREATE OR REPLACE when the
+-- OUT-record type changes (42P13), so drop-then-CREATE is the only order that applies —
+-- hence plain CREATE below, not OR REPLACE. (A defaulted parameter would not help either:
+-- defaults live in the caller's expression, not the function identity, so
+-- `begin_sign_in(..., NULL)` would still bind the old form.)
+DROP FUNCTION IF EXISTS app.begin_sign_in(bytea, bytea, bytea, bytea, text, text);
+DROP FUNCTION IF EXISTS app.consume_sign_in(bytea, bytea);
+DROP FUNCTION IF EXISTS app.resolve_request_context(bytea);
+
 -- ---------------------------------------------------------------------------------------------
 -- begin_session: a fresh sign-in is MFA'd, so it is stepped-up from creation.
 -- ---------------------------------------------------------------------------------------------
@@ -186,22 +197,15 @@ BEGIN
 END
 $$;
 
--- ---------------------------------------------------------------------------------------------
--- begin_sign_in: carry the step-up binding (NULL for a plain login).
---
--- A new signature, not an overload with a default: PostgreSQL treats defaults as part of the
--- caller's expression, not the function's identity, so `begin_sign_in(..., NULL)` would bind
--- the old 6-argument form if it still existed — silently recording a step-up round-trip as a
--- plain login. The old form is dropped below, so only the 7-argument shape exists.
--- ---------------------------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION app.begin_sign_in(
+-- (Drops ran at the top of this migration — see above.)
+CREATE FUNCTION app.begin_sign_in(
   p_state_hash bytea,
   p_binding_hash bytea,
   p_nonce_hash bytea,
   p_verifier_sealed bytea,
   p_key_id text,
   p_return_to text,
-  p_step_up_session_id uuid DEFAULT NULL
+  p_step_up_session_id uuid
 ) RETURNS void
   LANGUAGE plpgsql
   SECURITY DEFINER
@@ -227,9 +231,10 @@ END
 $$;
 
 -- ---------------------------------------------------------------------------------------------
--- consume_sign_in: return the step-up binding with the transaction.
+-- consume_sign_in: return the step-up binding with the transaction (new OUT-record shape,
+-- so plain CREATE after the drop above — OR REPLACE would hit 42P13 the other way round).
 -- ---------------------------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION app.consume_sign_in(
+CREATE FUNCTION app.consume_sign_in(
   p_state_hash bytea,
   p_binding_hash bytea
 ) RETURNS TABLE (nonce_hash bytea, verifier_sealed bytea, key_id text, return_to text,
@@ -278,28 +283,18 @@ BEGIN
 END
 $$;
 
--- The old signatures are superseded, not overloaded (see the begin_sign_in note above):
--- a caller pinned to the old arity must fail loudly at migration time rather than silently
--- bind a step-up round-trip as a plain login.
-DROP FUNCTION IF EXISTS app.begin_sign_in(bytea, bytea, bytea, bytea, text, text);
-DROP FUNCTION IF EXISTS app.consume_sign_in(bytea, bytea);
-
--- The new signatures keep the catalog contract (same owners, search_path, moin_identity-only
--- grants — the argument lists below are what `APPROVED_DEFINERS` must name):
-REVOKE ALL ON FUNCTION app.begin_sign_in(bytea, bytea, bytea, bytea, text, text, uuid) FROM PUBLIC, moin_app;
-REVOKE ALL ON FUNCTION app.consume_sign_in(bytea, bytea) FROM PUBLIC, moin_app;
-
-GRANT EXECUTE ON FUNCTION app.begin_sign_in(bytea, bytea, bytea, bytea, text, text, uuid) TO moin_identity;
-GRANT EXECUTE ON FUNCTION app.consume_sign_in(bytea, bytea) TO moin_identity;
+-- (Drops ran at the top of this migration — see above. Grants are re-asserted once, at the
+-- end of this file after every CREATE, because DROP resets the ACL to defaults.)
 
 -- ---------------------------------------------------------------------------------------------
--- resolve_request_context: expose the step-up stamp alongside the existing fields.
+-- resolve_request_context: expose the step-up stamp alongside the existing fields
+-- (new OUT-record shape — plain CREATE, same 42P13 ordering as above).
 -- ---------------------------------------------------------------------------------------------
 --
 -- The slide UPDATE is untouched; only the verdict SELECT gains the column. The guard judges
 -- freshness against its own clock (15-minute window), so the function returns the stamp raw —
 -- no expiry comparison here, and no new lock: the membership lock already held covers it.
-CREATE OR REPLACE FUNCTION app.resolve_request_context(
+CREATE FUNCTION app.resolve_request_context(
   p_token_hash bytea
 ) RETURNS TABLE (session_id uuid, user_id uuid, organisation_id uuid, role text,
                  permissions text[], idle_expires_at timestamptz,
@@ -381,3 +376,13 @@ BEGIN
   RETURN;
 END
 $$;
+
+-- The DROPs above reset the ACLs to defaults, so re-assert the catalog contract (same
+-- owners, search_path, moin_identity-only grants — the catalog names these exact signatures):
+REVOKE ALL ON FUNCTION app.begin_sign_in(bytea, bytea, bytea, bytea, text, text, uuid) FROM PUBLIC, moin_app;
+REVOKE ALL ON FUNCTION app.consume_sign_in(bytea, bytea) FROM PUBLIC, moin_app;
+REVOKE ALL ON FUNCTION app.resolve_request_context(bytea) FROM PUBLIC, moin_app;
+
+GRANT EXECUTE ON FUNCTION app.begin_sign_in(bytea, bytea, bytea, bytea, text, text, uuid) TO moin_identity;
+GRANT EXECUTE ON FUNCTION app.consume_sign_in(bytea, bytea) TO moin_identity;
+GRANT EXECUTE ON FUNCTION app.resolve_request_context(bytea) TO moin_identity;
