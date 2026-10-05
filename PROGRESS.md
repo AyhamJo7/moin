@@ -754,4 +754,3 @@ true, ok: false }` — is serialized by Vitest with none of the `constructor`/`t
 - 2026-10-05 — **Codex re-review at ac2b3e2: READY FOR FOUNDER ACCEPTANCE.** Independent verification confirmed membership row-lock retention under FORCE RLS (55P03 on concurrent writer, wait until context commit), tenant WITH CHECK preservation, 156 focused tests PASS, and 20/20 affected stress runs PASS. All scenarios A through I PASS; 14/14 full gates PASS. P06.06.03 cleared for founder acceptance and merge.
 
 - 2026-10-05 — **PR #36 squash-merged as d92f82b; P06.06.03 VERIFIED on main.** Migrations 0013 and 0014 applied on main; RLS catalog check passes with all 21 pinned DEFINER digests matching freshly migrated md5(prosrc); full test suite green. P06.06.01/.02/.03 VERIFIED; P06.06.04-.07 open.
-
