@@ -24,7 +24,12 @@
 | Security-reviewer (membership lock) | exact `0eed7adb2737419243dce702babce0a6cb5d9f7b`, OK TO MERGE (2 LOWs). Artifact: `docs/evidence/P06/reviews/security-reviewer-0eed7ad.md` |
 | Architecture-reviewer (membership lock) | exact `0eed7adb2737419243dce702babce0a6cb5d9f7b`, OK TO MERGE. Artifact: `docs/evidence/P06/reviews/architecture-reviewer-0eed7ad.md` |
 | Invariant-reviewer (membership lock) | exact `0eed7adb2737419243dce702babce0a6cb5d9f7b`, OK TO MERGE, no bypass. Artifact: `docs/evidence/P06/reviews/invariant-reviewer-0eed7ad.md` |
+| Codex BLOCK_MERGE repair (RLS FOR UPDATE policy & row-lock retention) | `memberships_request_lookup_lock` policy `FOR UPDATE` added with scoped `USING` and tenant `WITH CHECK`; PostgreSQL evaluates UPDATE policies for `SELECT ... FOR SHARE`, retaining real row locks under FORCE RLS; MWAIT1 row-level gate restored; MWAIT2 (open lookup blocks racing disable via NOWAIT probe) + MWAIT3 (disable landing mid-wait observed) verified |
+| Security-reviewer (row lock repair) | exact `dfdece53e1984218776856424b9426f1da3a0595`, OK TO MERGE. Artifact: `docs/evidence/P06/reviews/security-reviewer-dfdece5.md` |
+| Architecture-reviewer (row lock repair) | exact `dfdece53e1984218776856424b9426f1da3a0595`, OK TO MERGE. Artifact: `docs/evidence/P06/reviews/architecture-reviewer-dfdece5.md` |
+| Invariant-reviewer (row lock repair) | exact `dfdece53e1984218776856424b9426f1da3a0595`, OK TO MERGE, no bypass. Artifact: `docs/evidence/P06/reviews/invariant-reviewer-dfdece5.md` |
+| Founder Full Quality Gate | 14/14 PASS at `91488cc` (evidence `20261005T142032Z-full.json`) |
 | Residuals (P06.07+ backlog, non-blocking) | Guarded-200 Cache-Control header; global guard / route-inventory test; atomic slide+membership DEFINER call |
-| Reviewer | pending (founder review) |
+| Reviewer | pending (Codex re-review) |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).

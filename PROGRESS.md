@@ -741,3 +741,11 @@ true, ok: false }` — is serialized by Vitest with none of the `constructor`/`t
 - 2026-10-05 — **PR #36 fresh CI 16/16 PASS at 1dfa61a; READY_FOR_FOUNDER_REVIEW.** Founder gate 14/14 at 3f25957; implementation frozen at 0eed7ad (three-green QG-09: security/architecture/invariant OK, Codex membership-lock defect verified closed); local/origin/PR head agree (1dfa61a, ledger-only delta); base origin/main unmoved (1b94476); mergeStateStatus CLEAN; PR DRAFT + unmerged. Only founder review/acceptance/merge remain. P06.06.03 stays READY_FOR_REVIEW.
 
 - 2026-10-05 — **Container-scan regression fixed (perl-base bookworm-security).** CI reported 7 newly-fixable HIGH/CRITICAL (perl-base CVEs, fixed 5.36.0-7+deb12u4 available); pinned-apt bump in Dockerfile (same pattern as libpcre2 fix); local filtered scan 0 fixable, raw unfixed still tracked. PR #36 fresh CI 16/16 PASS at 1c2f73f; READY_FOR_FOUNDER_REVIEW. P06.06.03 stays READY_FOR_REVIEW.
+
+- 2026-10-05 — **Codex FOR-SHARE/RLS repair committed at d56553c.** FOR UPDATE companion policy with tenant WITH CHECK; MWAIT1 row-level gate restored; MWAIT2 (open lookup blocks disable) + MWAIT3 (mid-wait disable observed) added. Evidence: EV-P06-048 repair rows. Next: full sweep re-check (55 + new MWAIT coverage), three QG-09 re-reviews at new SHA, EV update, founder full gate, push, CI, report. P06.06.03 stays READY_FOR_REVIEW.
+
+- 2026-10-05 — **Three-green triad reviews on RLS FOR UPDATE repair at dfdece5.** Security OK TO MERGE (NOWAIT proof sound and fail-closed), architecture OK TO MERGE (lock semantics verified), invariant OK TO MERGE (full path matrix pass, no bypass). Tree frozen for evidence.
+
+- 2026-10-05 — **MWAIT2 NOWAIT probe hardened with retry loop and pool cleanup at 91488cc.** Probe client rolls back cleanly and is destroyed on error so test pool cannot be contaminated by aborted transaction; full identity suite 64/64 PASS; fast gates 7/7 PASS.
+
+- 2026-10-05 — **Founder full gate 14/14 PASS at 91488cc (evidence 20261005T142032Z-full.json).** Run by the founder with ephemeral local-development fixture env. Implementation frozen at dfdece5; test hardening at 91488cc. All 14 gates pass cleanly. Ready for push and PR #36 CI verification. P06.06.03 stays READY_FOR_REVIEW.
