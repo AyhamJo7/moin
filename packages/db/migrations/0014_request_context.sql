@@ -14,6 +14,13 @@
 -- or suspended one is refused — either way the next request finds nothing (FS-16) without any
 -- session sweep, because no request trusts a session without calling here first.
 --
+-- Activity is recorded in the same call through the same capped slide `resolve_session`
+-- performs: `last_seen_at` moves to now, `idle_expires_at` to `now + 12 h` capped by the
+-- absolute expiry, skipped when the advance would be under a minute (one write per burst, never
+-- later than ideal). A read-only re-check therefore keeps the 12-hour idle contract exactly as
+-- `resolve_session` does — there is no second call whose result could be discarded, and no
+-- expiry that can lapse between a read and a separate write (single query, single `v_now`).
+--
 -- ## Why the membership read needs a scoped policy exception
 --
 -- `memberships` is under FORCE RLS, and this lookup runs before any tenant is known — setting one
@@ -66,6 +73,24 @@ BEGIN
   -- the inner block resets the marker before re-raising, so no error path can leak it into the
   -- caller's transaction where a later read as the function owner would inherit the exception.
   BEGIN
+    -- The capped activity slide, folded in so validity and write share one v_now: a session that
+    -- lapses between a separate read and write could be admitted-then-slid; here the write IS the
+    -- verdict. Skipped under a minute like resolve_session — never later than ideal. Runs before
+    -- the marker is set: sessions/users are global, so the write needs no exemption, and the
+    -- exemption window covers exactly the membership join below.
+    UPDATE public.sessions s
+    SET last_seen_at = GREATEST(s.last_seen_at, v_now),
+        idle_expires_at = LEAST(v_now + interval '12 hours', s.absolute_expires_at)
+    FROM public.users u
+    WHERE s.token_hash = p_token_hash
+      AND s.revoked_at IS NULL
+      AND s.idle_expires_at > v_now
+      AND s.absolute_expires_at > v_now
+      AND u.id = s.user_id
+      AND u.status = 'active'
+      AND LEAST(v_now + interval '12 hours', s.absolute_expires_at) - s.idle_expires_at
+          >= interval '60 seconds';
+
     PERFORM set_config('app.request_lookup', 'resolve_request_context', true);
 
     RETURN QUERY

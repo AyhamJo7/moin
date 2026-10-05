@@ -129,7 +129,7 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.rotate_session': 'fe4a2f4e30221e87d1249a425838a102',
   'app.resolve_session': 'cfab5a739c28a8e8f99b664803a5412b',
   'app.revoke_session': 'a4a30b649c5abf56fab3563d20576aa8',
-  'app.resolve_request_context': '81b501f8b96f155eabd82a76661c8bcd',
+  'app.resolve_request_context': '184b9783dd14c46da8d4ce81914915ab',
 };
 
 /** Reviewed QG-09 contract. Documentation registration alone cannot change privileges. */

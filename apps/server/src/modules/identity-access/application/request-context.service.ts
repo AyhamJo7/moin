@@ -12,11 +12,10 @@
  * means the caller holds sessions in more than one organisation and must choose (P06.07 org
  * selection), and guessing one for them would act for the wrong tenant.
  *
- * Activity recording reuses the existing `resolve_session` write path: after a successful
- * re-check the service records activity through it (capped idle slide, absolute never moves), so
- * an active session keeps its 12-hour idle contract on guarded routes exactly as on unguarded
- * ones. The write re-validates before touching state, so an expiry racing the two calls still
- * refuses rather than revives.
+ * Activity is recorded by the DEFINER call itself (capped slide folded in): validity, write
+ * and memberships share one `v_now`, so no expiry can lapse between a read and a separate
+ * write. An active session keeps its 12-hour idle contract on guarded routes exactly as on
+ * unguarded ones.
  *
  * Cache: read-only GETs may reuse a resolution for at most 30 seconds; every mutation
  * (POST/PUT/PATCH/DELETE and anything else) resolves fresh. A stale membership therefore costs
@@ -54,6 +53,8 @@ export const MAX_CACHE_ENTRIES = 10_000;
 
 interface CachedEntry {
   readonly expiresAtMs: number;
+  readonly idleExpiresAtMs: number;
+  readonly absoluteExpiresAtMs: number;
   readonly context: SessionContext;
 }
 
@@ -105,23 +106,27 @@ export class RequestContextService {
   ): Promise<{ context: SessionContext } | { failure: Exclude<ContextFailure, 'no_session'> }> {
     const useCache = mode === 'read';
     const key = tokenHash.toString('hex');
+    const nowMs = this.#clock.now().getTime();
     if (useCache) {
       const hit = this.#cache.get(key);
-      if (hit !== undefined && hit.expiresAtMs > this.#clock.now().getTime()) {
+      // All three deadlines must still be future: the TTL, and the session's own expiries the
+      // DEFINER call returned. A session that lapsed inside the cache window refuses on next read.
+      if (
+        hit !== undefined &&
+        hit.expiresAtMs > nowMs &&
+        hit.idleExpiresAtMs > nowMs &&
+        hit.absoluteExpiresAtMs > nowMs
+      ) {
         return { context: hit.context };
       }
       this.#cache.delete(key);
     }
     this.#lookups += 1;
+    // Single DEFINER call: validity, memberships and the capped activity slide share one v_now.
     const resolved = await this.#store.resolveRequestContext(tokenHash);
     if (resolved === undefined) return { failure: 'invalid' };
     const context = toSessionContext(resolved);
     if (context === undefined) return { failure: 'ambiguous_organisation' };
-    // Record activity through the pinned resolve_session write path (capped slide, re-validated).
-    // Awaited and CHECKED: an expiry, revocation or disable racing the re-check must refuse the
-    // request rather than admit-then-slide. Nothing is cached on this path.
-    const slid = await this.#store.resolveSession(tokenHash);
-    if (slid === undefined) return { failure: 'invalid' };
     if (useCache) {
       if (this.#cache.size >= MAX_CACHE_ENTRIES) {
         let oldest = this.#cache.keys().next();
@@ -131,7 +136,14 @@ export class RequestContextService {
         }
       }
       this.#cache.set(key, {
-        expiresAtMs: this.#clock.now().getTime() + CONTEXT_CACHE_TTL_MS,
+        // The TTL is bounded by the session's own expiries: authority never outlives either.
+        expiresAtMs: Math.min(
+          nowMs + CONTEXT_CACHE_TTL_MS,
+          resolved.idleExpiresAt.getTime(),
+          resolved.absoluteExpiresAt.getTime(),
+        ),
+        idleExpiresAtMs: resolved.idleExpiresAt.getTime(),
+        absoluteExpiresAtMs: resolved.absoluteExpiresAt.getTime(),
         context,
       });
     }
