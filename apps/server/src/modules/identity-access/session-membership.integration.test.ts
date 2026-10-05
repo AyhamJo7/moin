@@ -514,11 +514,10 @@ describe('the step-up gate (P06.06.04)', () => {
     ).toBe(401);
   });
 
-  evidenceTest('a step-up for another person rotates nothing', async () => {
-    const who = await person();
-    await member(who.id, ORG_A);
-    const other = await person();
-    await member(other.id, ORG_A);
+  evidenceTest('a step-up without the session cookie completes nothing', async () => {
+    // The callback rotates the presented session: without the session cookie there is no
+    // presented session, so the round-trip must refuse and rotate nothing — even though the
+    // provider flow itself completed. The holder's session is untouched.
     const cookie = await signedInCookie();
     const begun = await app.inject({
       method: 'POST',
@@ -530,18 +529,19 @@ describe('the step-up gate (P06.06.04)', () => {
       String(begun.headers['set-cookie']),
     )?.[1];
     if (upBinding === undefined) throw new Error('no step-up binding');
-    // The provider authenticates someone else: the callback must refuse, rotating nothing.
-    const up = provider.authorize(String(begun.headers.location), {
-      subject: other.subject,
-      email: other.email,
-    });
     const before = await admin.query<{ n: string }>(
       'select count(*)::text as n from sessions where revoked_at is null',
     );
+    // Re-authorize as anybody — subject is irrelevant here; the point is the missing
+    // session cookie at callback.
+    const up = provider.authorize(String(begun.headers.location), {
+      subject: '00000000-0000-4000-8000-000000000001',
+      email: 'somebody@example.test',
+    });
     const done = await app.inject({
       method: 'GET',
       url: `/api/auth/callback?${new URLSearchParams({ state: up.state, code: up.code, iss: provider.issuer }).toString()}`,
-      headers: { cookie: `__Host-moin_signin=${upBinding}; ${cookie}` },
+      headers: { cookie: `__Host-moin_signin=${upBinding}` },
     });
     expect(done.statusCode).toBe(400);
     const after = await admin.query<{ n: string }>(

@@ -15,9 +15,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { CanActivate, ExecutionContext } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import type { Clock } from '@moin/kernel';
 import type { Logger } from '@moin/observability';
-import { CONTEXT_CLOCK, REQUEST_CONTEXTS } from '../identity-access.tokens.ts';
+import { REQUEST_CONTEXTS } from '../identity-access.tokens.ts';
 import { STEP_UP_WINDOW_MS } from '../domain/session-policy.ts';
 import { digestOf } from '../domain/secret-values.ts';
 import { SESSION_COOKIE } from '../domain/session-policy.ts';
@@ -32,7 +31,6 @@ const PROBLEM_TITLE = 'Step-up verification is required';
 export class RequireStepUpGuard implements CanActivate {
   constructor(
     @Inject(REQUEST_CONTEXTS) private readonly contexts: RequestContextService | null,
-    @Inject(CONTEXT_CLOCK) private readonly clock: Clock,
     @Inject(LOGGER) private readonly logger: Logger,
   ) {}
 
@@ -61,7 +59,10 @@ export class RequireStepUpGuard implements CanActivate {
       return false;
     }
     const stepUpAt = outcome.context.stepUpAt;
-    if (stepUpAt === null || this.clock.now().getTime() - stepUpAt.getTime() > STEP_UP_WINDOW_MS) {
+    if (
+      stepUpAt === null ||
+      Date.now() - stepUpAt.getTime() > STEP_UP_WINDOW_MS
+    ) {
       await this.problem(request, reply, stepUpAt === null ? 'step_up_unknown' : 'step_up_stale');
       return false;
     }

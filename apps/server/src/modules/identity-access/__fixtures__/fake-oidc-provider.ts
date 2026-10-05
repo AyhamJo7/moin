@@ -136,6 +136,9 @@ export async function startFakeOidcProvider(clock: Clock): Promise<FakeOidcProvi
       email: issued.email,
       email_verified: true,
       nonce: issued.nonce,
+      // A real provider answering max_age=0 reports when it authenticated the human; tests
+      // delete it per-case via `provider.claims = { auth_time: undefined }` to prove refusal.
+      auth_time: nowSeconds,
       iat: nowSeconds,
       exp: nowSeconds + 300,
       azp: FAKE_CLIENT_ID,

@@ -54,7 +54,7 @@ function harness(stepUpAt: Date | null, method = 'POST') {
   const backend = store(stepUpAt);
   const service = new RequestContextService(backend, clock);
   const logger = { error: vi.fn(), warn: vi.fn(), info: vi.fn() };
-  const guard = new RequireStepUpGuard(service, clock, logger as never);
+  const guard = new RequireStepUpGuard(service, logger as never);
   const sent: Sent = { status: 0, body: undefined, headers: {} };
   const reply = {
     header: (name: string, value: string) => {
@@ -82,7 +82,7 @@ function harness(stepUpAt: Date | null, method = 'POST') {
     },
     clock,
   );
-  const spied = new RequireStepUpGuard(resolving, clock, logger as never);
+  const spied = new RequireStepUpGuard(resolving, logger as never);
   const context = (cookie: string = COOKIE) =>
     ({
       switchToHttp: () => ({
@@ -145,7 +145,7 @@ describe('RequireStepUpGuard', () => {
     };
     const service = new RequestContextService(failing, clock);
     const sent: Sent = { status: 0, body: undefined, headers: {} };
-    const guard = new RequireStepUpGuard(service, clock, {
+    const guard = new RequireStepUpGuard(service, {
       error: vi.fn(),
       warn: vi.fn(),
     } as never);
