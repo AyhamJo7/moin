@@ -211,10 +211,9 @@ describe('memberships isolation (P06.06.03)', () => {
 
   it('tenant A cannot see tenant B’s membership even by exact user', async () => {
     const count = await asTenant(ORG_A, async (query) => {
-      const result = await query(
-        'select count(*)::int as n from memberships where user_id = $1',
-        [USER_B],
-      );
+      const result = await query('select count(*)::int as n from memberships where user_id = $1', [
+        USER_B,
+      ]);
       return (result.rows[0] as { n: number }).n;
     });
     expect(count).toBe(0);

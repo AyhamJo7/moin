@@ -53,6 +53,29 @@ COMMENT ON TABLE memberships IS
 SELECT app.apply_tenant_rls('memberships');
 
 -- ---------------------------------------------------------------------------------------------
+-- Scoped lookup exception for the per-request re-check (P06.06.03, 0014).
+-- ---------------------------------------------------------------------------------------------
+--
+-- The single-policy helper above is the rule for every ordinary reader: tenant set, same tenant
+-- visible. The per-request lookup runs before any tenant is known, so it needs one narrow
+-- additional USING disjunct, and only under two simultaneous conditions: the transaction-local
+-- marker `app.request_lookup = 'resolve_request_context'` — set solely by that pinned function
+-- around its own membership read and reset before return — AND `current_user = 'moin_migrator'`,
+-- which holds only inside code running as that DEFINER's owner. No runtime role can satisfy
+-- both: `moin_identity` has no table grant at all, and `moin_app` never runs as the migrator.
+-- WITH CHECK stays the tenant rule, so the exception can never write across tenants: the
+-- function that sets the marker performs no write.
+CREATE POLICY memberships_request_lookup ON memberships FOR ALL
+  USING (
+    organisation_id = app.current_org()
+    OR (
+      current_setting('app.request_lookup', true) = 'resolve_request_context'
+      AND current_user = 'moin_migrator'
+    )
+  )
+  WITH CHECK (organisation_id = app.current_org());
+
+-- ---------------------------------------------------------------------------------------------
 -- Grants: moin_app reads and writes inside withTenant; nothing else touches this table.
 -- ---------------------------------------------------------------------------------------------
 --

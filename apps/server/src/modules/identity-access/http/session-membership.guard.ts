@@ -12,9 +12,9 @@
  * `no-store`: a cached rejection would turn a later-valid session into a mystery.
  */
 
-import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import type { CanActivate, ExecutionContext } from '@nestjs/common';
-import type { FastifyRequest } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from '@moin/observability';
 import { digestOf } from '../domain/secret-values.ts';
 import { SESSION_COOKIE } from '../domain/session-policy.ts';
@@ -42,25 +42,36 @@ export class SessionMembershipGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<FastifyRequest>();
+    const reply = context.switchToHttp().getResponse<FastifyReply>();
     const presented = readCookie(request.headers.cookie, SESSION_COOKIE);
     if (presented === undefined) {
-      this.reject(request, 'no_session');
-      throw new UnauthorizedException({ type: PROBLEM_TYPE, title: PROBLEM_TITLE, status: 401 });
+      await this.problem(request, reply, 'no_session');
+      return false;
     }
     if (this.contexts === null) {
-      this.reject(request, 'unavailable');
-      throw new UnauthorizedException({ type: PROBLEM_TYPE, title: PROBLEM_TITLE, status: 401 });
+      await this.problem(request, reply, 'unavailable');
+      return false;
     }
-    const outcome = await this.contexts.resolve(
-      digestOf(presented),
-      isReadOnlyGet(request),
-    );
+    const outcome = await this.contexts.resolve(digestOf(presented), isReadOnlyGet(request));
     if ('failure' in outcome) {
-      this.reject(request, outcome.failure);
-      throw new UnauthorizedException({ type: PROBLEM_TYPE, title: PROBLEM_TITLE, status: 401 });
+      await this.problem(request, reply, outcome.failure);
+      return false;
     }
     request.sessionContext = outcome.context;
     return true;
+  }
+
+  private async problem(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    reason: ContextFailure | 'unavailable',
+  ): Promise<void> {
+    this.reject(request, reason);
+    void reply.header('cache-control', 'no-store');
+    await reply
+      .code(401)
+      .header('content-type', 'application/problem+json')
+      .send({ type: PROBLEM_TYPE, title: PROBLEM_TITLE, status: 401 });
   }
 
   private reject(request: FastifyRequest, reason: ContextFailure | 'unavailable'): void {

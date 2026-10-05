@@ -14,6 +14,19 @@
 -- or suspended one is refused — either way the next request finds nothing (FS-16) without any
 -- session sweep, because no request trusts a session without calling here first.
 --
+-- ## Why the membership read needs a scoped policy exception
+--
+-- `memberships` is under FORCE RLS, and this lookup runs before any tenant is known — setting one
+-- tenant inside would defeat the multi-membership fail-closed rule the guard enforces, and
+-- `SET row_security = off` on the function is refused by the planner for a FORCE table. So the
+-- memberships policy carries one additional USING disjunct: the function sets a transaction-local
+-- marker (`app.request_lookup = 'resolve_request_context'`) around its own membership read, and
+-- the disjunct additionally requires `current_user = 'moin_migrator'` — which holds only inside
+-- code running as this DEFINER's owner. No runtime role can use it: `moin_identity` has no table
+-- grant at all, and `moin_app` never runs as the migrator. The marker is reset before every
+-- RETURN, so it cannot leak into the caller's transaction. The whole exemption — marker set,
+-- read, reset — is visible in the body the `REVIEWED_BODIES` digest pins.
+--
 -- ## Lock order follows the canonical graph
 --
 -- Family, then target session, then owning user — the same order as `begin_session`,
@@ -49,6 +62,10 @@ BEGIN
   -- Fresh DB clock obtained only after all locks above are held.
   v_now := clock_timestamp();
 
+  -- Scoped read marker for the membership join below; reset before return so it cannot leak
+  -- into the caller's transaction.
+  PERFORM set_config('app.request_lookup', 'resolve_request_context', true);
+
   RETURN QUERY
   SELECT s.id, s.user_id, m.organisation_id, m.role, m.permissions,
          s.idle_expires_at, s.absolute_expires_at
@@ -61,6 +78,9 @@ BEGIN
     AND s.absolute_expires_at > v_now
     AND u.status = 'active'
     AND m.status = 'active';
+
+  PERFORM set_config('app.request_lookup', '', true);
+  RETURN;
 END
 $$;
 

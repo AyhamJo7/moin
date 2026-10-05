@@ -31,11 +31,7 @@ export interface SessionContext {
   readonly permissions: readonly string[];
 }
 
-export type ContextFailure =
-  | 'no_session'
-  | 'invalid'
-  | 'ambiguous_organisation'
-  | 'unavailable';
+export type ContextFailure = 'no_session' | 'invalid' | 'ambiguous_organisation' | 'unavailable';
 
 /** 30 seconds: the PLAN ceiling for read-only GET reuse. */
 export const CONTEXT_CACHE_TTL_MS = 30_000;
