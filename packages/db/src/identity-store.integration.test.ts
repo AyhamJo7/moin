@@ -342,11 +342,12 @@ describe('a sign-in transaction', () => {
   concurrentDuplicate();
 
   describe('waiting on the transaction lock past expiry (CWAIT)', () => {
-    /** Hold the transaction row the way consume's DELETE does, so the consume provably waits. */
-    async function consumeAfterExpiryPasses(
-      tx: ReturnType<typeof transaction>,
-      makeExpired: (gate: PoolClient) => Promise<void>,
-    ): Promise<{ rowCount: number | null }> {
+    evidenceTest('CWAIT1: expiry during the wait returns nothing and stays consumed', async () => {
+      // Seed a genuinely live transaction (10-minute lifetime from now): the gate holds its
+      // row past the real expiry instant, so a consume that authorized against a stale
+      // pre-claim clock would return secret material while the post-claim clock refuses it.
+      const tx = transaction();
+      await store.beginAuthTransaction(tx);
       const gate = await admin.connect();
       const waiter = await identity.connect();
       try {
@@ -373,32 +374,22 @@ describe('a sign-in transaction', () => {
         }
         expect(waiting, 'consume waits on the transaction lock').toBe('1');
 
-        await makeExpired(gate);
+        // Rewrite the deadline relative to the DB clock while the waiter is blocked, then hold
+        // the lock until that instant has provably passed: expiry lapses during the lock wait.
+        await gate.query(
+          `update auth_transactions set expires_at = clock_timestamp() + interval '2 seconds' where state_hash = $1`,
+          [tx.stateHash],
+        );
+        await gate.query('select pg_sleep(2.5)');
         await gate.query('commit');
 
         const consumed = await pending;
         await waiter.query('commit');
-        return { rowCount: consumed.rowCount };
+        expect(consumed.rowCount, 'consume after expiry returned 0 rows').toBe(0);
       } finally {
         gate.release();
         waiter.release();
       }
-    }
-
-    evidenceTest('CWAIT1: expiry during the wait returns nothing and stays consumed', async () => {
-      const tx = transaction();
-      await store.beginAuthTransaction(tx);
-      const { rowCount } = await consumeAfterExpiryPasses(tx, (gate) =>
-        gate
-          .query(
-            `with t as (select clock_timestamp() - interval '11 minutes' as c)
-             update auth_transactions set created_at = t.c, expires_at = t.c + interval '10 minutes'
-             from t where state_hash = $1`,
-            [tx.stateHash],
-          )
-          .then(() => undefined),
-      );
-      expect(rowCount, 'consume after expiry returned 0 rows').toBe(0);
       const left = await admin.query('select 1 from auth_transactions where state_hash = $1', [
         tx.stateHash,
       ]);
@@ -1249,17 +1240,18 @@ describe('temporal authorization and expiration (authoritative database clock)',
         const tokenHash = hash();
         const id = randomUUID();
         await admin.query(
-          `with t as (select clock_timestamp() + interval '2 seconds' as idle)
-         insert into sessions (
-           token_hash, id, family_id, user_id, rotation_reason,
-           created_at, last_seen_at, idle_expires_at, absolute_expires_at,
-           provider_tokens_sealed, provider_tokens_key_id
-         ) select
-           $1, $2, $2, $3, 'login',
-           clock_timestamp(), clock_timestamp(),
-           t.idle, clock_timestamp() + interval '7 days',
-           $4, 'test-v1'
-         from t`,
+          `with t as materialized (select clock_timestamp() + interval '2 seconds' as idle,
+                                          clock_timestamp() as now)
+           insert into sessions (
+             token_hash, id, family_id, user_id, rotation_reason,
+             created_at, last_seen_at, idle_expires_at, absolute_expires_at,
+             provider_tokens_sealed, provider_tokens_key_id
+           ) select
+             $1, $2, $2, $3, 'login',
+             t.now, t.now,
+             t.idle, t.now + interval '7 days',
+             $4, 'test-v1'
+           from t`,
           [tokenHash, id, person.id, sealed()],
         );
         const gate = await admin.connect();
@@ -1307,27 +1299,31 @@ describe('temporal authorization and expiration (authoritative database clock)',
 
     evidenceTest('RWAIT2: absolute expiry during the wait returns nothing', async () => {
       // absolute_expires_at is immutable (the table guard rejects any rewrite), so the wait
-      // must outlast the real 7-day lifetime: seed a session created ~7 days ago whose absolute
-      // expiry lapses while resolve waits on its row lock.
+      // must outlast the real 7-day lifetime. Seed creation ~7 days ago from ONE authoritative
+      // timestamp (a single materialized CTE row: separate clock calls could violate
+      // sessions_absolute_ceiling), with a recent last_seen_at and idle pinned to the absolute
+      // deadline ~2s out — an otherwise valid session whose absolute expiry lapses mid-wait.
       const person = await user();
       const tokenHash = hash();
       const id = randomUUID();
       await admin.query(
-        `with t as (select clock_timestamp() - interval '7 days' + interval '2 seconds' as created)
+        `with t as materialized (select clock_timestamp() as now)
          insert into sessions (
            token_hash, id, family_id, user_id, rotation_reason,
            created_at, last_seen_at, idle_expires_at, absolute_expires_at,
            provider_tokens_sealed, provider_tokens_key_id
          ) select
            $1, $2, $2, $3, 'login',
-           t.created,
-           t.created,
-           t.created + interval '12 hours',
-           t.created + interval '7 days',
+           t.now - interval '7 days' + interval '2 seconds',
+           t.now,
+           t.now - interval '7 days' + interval '7 days' + interval '2 seconds',
+           t.now - interval '7 days' + interval '7 days' + interval '2 seconds',
            $4, 'test-v1'
          from t`,
         [tokenHash, id, person.id, sealed()],
       );
+      // Sanity: the session is genuinely valid before the race starts.
+      expect(await store.resolveSession(tokenHash)).toBeDefined();
       const gate = await admin.connect();
       const waiter = await identity.connect();
       try {

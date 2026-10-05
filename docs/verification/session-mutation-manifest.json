@@ -615,8 +615,8 @@
     "invariant": "P06.06.01: consume reads the clock only after the transaction claim",
     "expected": "A consume that reads the clock before winning the transaction row would return secret material for a transaction that expired during the wait.",
     "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "  -- Fresh DB clock obtained only after the claim's lock wait completes.\n  v_now := clock_timestamp();",
-    "replace": "  -- Fresh DB clock obtained only after the claim's lock wait completes.\n  v_now := clock_timestamp() - interval '1 hour';",
+    "find": "  DELETE FROM public.auth_transactions t\n  WHERE t.state_hash = p_state_hash\n  RETURNING t.binding_hash, t.nonce_hash, t.verifier_sealed, t.key_id, t.return_to, t.expires_at\n  INTO v_claimed_binding, v_claimed_nonce, v_claimed_verifier, v_claimed_key,\n       v_claimed_return, v_claimed_expires;\n  IF NOT FOUND THEN\n    RETURN;\n  END IF;\n\n  -- Fresh DB clock obtained only after the claim's lock wait completes.\n  v_now := clock_timestamp();",
+    "replace": "  -- Stale pre-claim clock: expiry evaluated against a time captured before the row lock.\n  v_now := clock_timestamp();\n\n  DELETE FROM public.auth_transactions t\n  WHERE t.state_hash = p_state_hash\n  RETURNING t.binding_hash, t.nonce_hash, t.verifier_sealed, t.key_id, t.return_to, t.expires_at\n  INTO v_claimed_binding, v_claimed_nonce, v_claimed_verifier, v_claimed_key,\n       v_claimed_return, v_claimed_expires;\n  IF NOT FOUND THEN\n    RETURN;\n  END IF;",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "a sign-in transaction > waiting on the transaction lock past expiry (CWAIT) > CWAIT1: expiry during the wait returns nothing and stays consumed"
