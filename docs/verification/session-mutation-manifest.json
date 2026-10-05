@@ -368,7 +368,7 @@
     "invariant": "P06.06.02 (QG-09 review): a sign-in leaves no live session of the family it supersedes",
     "expected": "A rotation racing the sign-in would leave its successor alive beside the new session.",
     "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "    WHERE s.family_id = v_family AND s.revoked_at IS NULL;\n",
+    "find": "    WHERE s.family_id = v_family AND s.user_id = v_user AND s.revoked_at IS NULL;",
     "replace": "      WHERE s.token_hash = p_replaced_hash AND s.revoked_at IS NULL;\n",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
@@ -685,6 +685,19 @@
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "a sign-in transaction > expires exactly 10 minutes after it starts"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "M1-cross-user-supersede-scoped",
+    "invariant": "P06.06.02: re-login supersedes only the authenticated user's family sessions",
+    "expected": "A presented token from another person's family would revoke the victim's live sessions on the attacker's login.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "    WHERE s.family_id = v_family AND s.user_id = v_user AND s.revoked_at IS NULL;",
+    "replace": "    WHERE s.family_id = v_family AND s.revoked_at IS NULL;",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "issuing a session > a presented token from another family revokes nothing"
     },
     "project": "integration"
   }

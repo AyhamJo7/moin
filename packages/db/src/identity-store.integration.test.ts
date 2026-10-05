@@ -575,6 +575,17 @@ describe('issuing a session', () => {
     expect(await store.resolveSession(previous.tokenHash)).toBeUndefined();
     expect(await store.resolveSession(next.tokenHash)).toBeDefined();
   });
+
+  evidenceTest('a presented token from another family revokes nothing', async () => {
+    const victim = await user();
+    const attacker = await user();
+    const planted = await signIn(victim.sub);
+    const login = await signIn(attacker.sub, planted.tokenHash);
+    expect(login.granted).toBeDefined();
+    // The victim's session survives: the supersede is scoped to the authenticated user.
+    expect(await store.resolveSession(planted.tokenHash)).toBeDefined();
+    expect(await store.resolveSession(login.tokenHash)).toBeDefined();
+  });
 });
 
 describe('a session over time', () => {

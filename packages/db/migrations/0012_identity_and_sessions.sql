@@ -399,13 +399,16 @@ BEGIN
   END IF;
 
   -- The family lock above is held across the user-row lock: family first, then user, matching
-  -- `rotate_session`. The supersede below re-uses the already-held family lock.
+  -- `rotate_session`. The supersede below re-uses the already-held family lock. It is scoped to
+  -- the just-authenticated user: a presented token from another person's family matches nothing
+  -- and revokes nothing, so a stolen-but-valid cookie can never become a weapon that signs the
+  -- victim out of all their devices.
   IF v_family IS NOT NULL THEN
     v_now := clock_timestamp();
     UPDATE public.sessions s
     SET revoked_at = v_now, revocation_reason = 'superseded',
         provider_tokens_sealed = NULL, provider_tokens_key_id = NULL
-    WHERE s.family_id = v_family AND s.revoked_at IS NULL;
+    WHERE s.family_id = v_family AND s.user_id = v_user AND s.revoked_at IS NULL;
   END IF;
 
   v_now := clock_timestamp();
@@ -589,6 +592,12 @@ $$;
 -- ---------------------------------------------------------------------------------------------
 -- 6. Sign out: revoke the presented session and erase its provider tokens.
 -- ---------------------------------------------------------------------------------------------
+--
+-- Intentionally lock-free and outside the canonical family → session → user order: a single-row
+-- UPDATE taking no other lock cannot participate in an AB-BA cycle. A family pin here would add
+-- a lock for no authorized state (revocation is checked, never authorized, after the wait) and
+-- would widen the next revocation-adjacent function's lock set without cause. The next function
+-- that revokes-then-checks takes family first like the other three.
 CREATE FUNCTION app.revoke_session(
   p_token_hash bytea
 ) RETURNS boolean
