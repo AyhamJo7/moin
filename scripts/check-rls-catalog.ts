@@ -119,8 +119,9 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.count_audit_chains': 'e3cd033e0ea860c723977f7c9e28068a',
   'app.audit_chain_high_water': '0af3ae3c87f468ecd845b318be7efb52',
   'app.provision_tenant': '187d4a4589e54a39cdadc6f3726cce26',
-  // Sign-in and sessions (P06.06.01/.02): the trigger that fixes a session's lifetime, and the
-  // six functions that are the runtime role's only access to users, auth_transactions and sessions.
+  // Sign-in and sessions (P06.06.01/.02/.03): the trigger that fixes a session's lifetime, and
+  // the seven functions that are the runtime role's only access to users, auth_transactions,
+  // sessions and membership reads. resolve_request_context is the per-request re-check (P06.06.03).
   'app.reject_session_rewrite': '1b7209a5119fd835537b390fcbd558e0',
   'app.begin_sign_in': '46d951fb285c7fe09aac5cdabbc24aa3',
   'app.consume_sign_in': '65c3f6a7df85974ff5e8aa9854c4d48d',
@@ -128,6 +129,7 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.rotate_session': 'fe4a2f4e30221e87d1249a425838a102',
   'app.resolve_session': 'cfab5a739c28a8e8f99b664803a5412b',
   'app.revoke_session': 'a4a30b649c5abf56fab3563d20576aa8',
+  'app.resolve_request_context': '2788872476e2f595bd747cf145f4a3e9',
 };
 
 /** Reviewed QG-09 contract. Documentation registration alone cannot change privileges. */
@@ -210,6 +212,12 @@ const APPROVED_DEFINERS: Readonly<
     executeGrantees: ['moin_identity'],
   },
   'app.revoke_session': {
+    arguments: 'bytea',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: ['moin_identity'],
+  },
+  'app.resolve_request_context': {
     arguments: 'bytea',
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
@@ -419,13 +427,14 @@ const ROLE_QUERY = `SELECT rolname::text, rolbypassrls, rolsuper FROM pg_roles W
  * worker hold too — can execute none of these: a session function reachable from the voice role is
  * a session a compromised voice process could mint (QG-09 finding I1). The role is useful only as
  * long as it can do nothing else, so its whole ACL is asserted here rather than assumed. That
- * `moin_app` executes none of the six follows from `APPROVED_DEFINERS`, whose grantee lists are exact.
+ * `moin_app` executes none of the seven follows from `APPROVED_DEFINERS`, whose grantee lists are exact.
  */
 const IDENTITY_ROLE = 'moin_identity';
 const IDENTITY_FUNCTIONS: readonly string[] = [
   'app.begin_session',
   'app.begin_sign_in',
   'app.consume_sign_in',
+  'app.resolve_request_context',
   'app.resolve_session',
   'app.revoke_session',
   'app.rotate_session',
@@ -583,7 +592,7 @@ const SESSION_TABLE_ACCESS_QUERY = `
   ORDER BY 1, 2
 `;
 
-/** Effective EXECUTE, by any route — grant, PUBLIC or membership — on the six, per runtime role. */
+/** Effective EXECUTE, by any route — grant, PUBLIC or membership — on the seven, per runtime role. */
 const SESSION_FUNCTION_REACH_QUERY = `
   SELECT r.rolname::text AS role, n.nspname || '.' || p.proname AS function_name
   FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace, pg_roles r
@@ -599,7 +608,7 @@ const REACHING_ROLES: readonly string[] = [...RUNTIME_ROLES, 'moin_readonly'];
  * Membership of any kind — INHERIT, SET or ADMIN, direct or through another role — in the identity
  * role or in the owner of a session function. `has_function_privilege` follows inherited
  * membership only; a role that can `SET ROLE` to the owner, or grant itself the identity role, can
- * still execute the six.
+ * still execute the seven.
  */
 const SESSION_ROLE_REACH_QUERY = `
   SELECT r.rolname::text AS role, t.rolname::text AS target
@@ -1063,7 +1072,7 @@ export async function inspectIdentityRole(
   }
   // Invoker functions any role may run (extension helpers, `app.current_org`) execute with the
   // caller's own privileges, so they give this role nothing. What could give it something is a
-  // definer function, or a grant by name: both must be exactly the six.
+  // definer function, or a grant by name: both must be exactly the seven.
   for (const [kind, functions] of [
     ['SECURITY DEFINER functions it can execute', row.executable_definers],
     ['functions granted to it', row.granted_functions],

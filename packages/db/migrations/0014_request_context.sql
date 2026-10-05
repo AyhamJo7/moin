@@ -1,0 +1,74 @@
+-- 0014 — the per-request session + membership lookup (P06.06.03, FS-16, INV-02).
+--
+-- ## One query, one clock, no caller trust
+--
+-- Every request re-checks session validity and membership status in a single call. The function
+-- takes only the session token digest the browser presented — never an organisation id, user id,
+-- role or permission — and returns the active memberships it finds. Tenant resolution therefore
+-- stays server-side (INV-02): the organisation the request acts for comes out of this function,
+-- never out of a body, query string or header.
+--
+-- Validity is the same conjunction `resolve_session` enforces: unrevoked, idle and absolute
+-- expiry both future against the database clock read after the locks, owning user active. A
+-- membership row counts only when `status = 'active'`: a removed member has no row, a disabled
+-- or suspended one is refused — either way the next request finds nothing (FS-16) without any
+-- session sweep, because no request trusts a session without calling here first.
+--
+-- ## Lock order follows the canonical graph
+--
+-- Family, then target session, then owning user — the same order as `begin_session`,
+-- `rotate_session` and `resolve_session` — so a re-check racing a rotation, re-login or disable
+-- serialises instead of deadlocking. Membership rows need no lock: they are read, never written,
+-- by this function, and a concurrent disable commits either before the read (row refused) or
+-- after (next request refuses). Either way no live request outlives its membership.
+
+CREATE FUNCTION app.resolve_request_context(
+  p_token_hash bytea
+) RETURNS TABLE (session_id uuid, user_id uuid, organisation_id uuid, role text,
+                 permissions text[], idle_expires_at timestamptz,
+                 absolute_expires_at timestamptz)
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path = pg_catalog, public, app, pg_temp
+AS $$
+DECLARE
+  v_now timestamptz;
+  v_family uuid;
+BEGIN
+  SELECT s.family_id INTO v_family FROM public.sessions s WHERE s.token_hash = p_token_hash;
+  IF v_family IS NOT NULL THEN
+    PERFORM 1 FROM public.sessions f WHERE f.id = v_family FOR UPDATE;
+  END IF;
+
+  PERFORM 1 FROM public.sessions s WHERE s.token_hash = p_token_hash FOR UPDATE;
+
+  PERFORM 1
+  FROM public.sessions s JOIN public.users u ON u.id = s.user_id
+  WHERE s.token_hash = p_token_hash FOR SHARE OF u;
+
+  -- Fresh DB clock obtained only after all locks above are held.
+  v_now := clock_timestamp();
+
+  RETURN QUERY
+  SELECT s.id, s.user_id, m.organisation_id, m.role, m.permissions,
+         s.idle_expires_at, s.absolute_expires_at
+  FROM public.sessions s
+  JOIN public.users u ON u.id = s.user_id
+  JOIN public.memberships m ON m.user_id = s.user_id
+  WHERE s.token_hash = p_token_hash
+    AND s.revoked_at IS NULL
+    AND s.idle_expires_at > v_now
+    AND s.absolute_expires_at > v_now
+    AND u.status = 'active'
+    AND m.status = 'active';
+END
+$$;
+
+-- ---------------------------------------------------------------------------------------------
+-- Execution: moin_identity only, by exact signature — the seventh session function (QG-09 I1).
+-- moin_app is revoked explicitly, so the voice/worker role can neither resolve a request context
+-- nor reach around the guard.
+-- ---------------------------------------------------------------------------------------------
+REVOKE ALL ON FUNCTION app.resolve_request_context(bytea) FROM PUBLIC, moin_app;
+
+GRANT EXECUTE ON FUNCTION app.resolve_request_context(bytea) TO moin_identity;
