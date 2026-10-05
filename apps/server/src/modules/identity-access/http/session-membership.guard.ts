@@ -9,7 +9,9 @@
  * It fails closed with an RFC 9457 401 that names the coarse outcome and nothing else: whether the
  * cookie was absent, the session expired or revoked, the user inactive, the membership gone, or
  * several organisations matched, is a reason code in the log, never in the response. Every 401 is
- * `no-store`: a cached rejection would turn a later-valid session into a mystery.
+ * `no-store`: a cached rejection would turn a later-valid session into a mystery. A thrown
+ * transport error — timeout, refusal, pool exhaustion — is a 503, never a 401: an outage must not
+ * read as bad credentials to clients that would otherwise not retry or alert.
  */
 
 import { Inject, Injectable } from '@nestjs/common';
@@ -29,8 +31,9 @@ import { readCookie } from './cookies.ts';
 const PROBLEM_TYPE = '/problems/unauthenticated';
 const PROBLEM_TITLE = 'Authentication is required';
 
-function isReadOnlyGet(request: FastifyRequest): boolean {
-  return request.method === 'GET';
+function resolveMode(request: FastifyRequest): 'read' | 'mutate' {
+  // GET and HEAD are safe and idempotent; everything else resolves fresh.
+  return request.method === 'GET' || request.method === 'HEAD' ? 'read' : 'mutate';
 }
 
 @Injectable()
@@ -52,13 +55,32 @@ export class SessionMembershipGuard implements CanActivate {
       await this.problem(request, reply, 'unavailable');
       return false;
     }
-    const outcome = await this.contexts.resolve(digestOf(presented), isReadOnlyGet(request));
+    let outcome: Awaited<ReturnType<RequestContextService['resolve']>>;
+    try {
+      outcome = await this.contexts.resolve(digestOf(presented), resolveMode(request));
+    } catch {
+      this.logger.error(
+        { route: request.routeOptions.url, method: request.method, reason: 'identity-unavailable' },
+        'request-context lookup failed',
+      );
+      await this.unavailable(request, reply);
+      return false;
+    }
     if ('failure' in outcome) {
       await this.problem(request, reply, outcome.failure);
       return false;
     }
     request.sessionContext = outcome.context;
     return true;
+  }
+
+  private async unavailable(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+    void reply.header('cache-control', 'no-store');
+    await reply.code(503).header('content-type', 'application/problem+json').send({
+      type: '/problems/identity-unavailable',
+      title: 'Identity is unavailable',
+      status: 503,
+    });
   }
 
   private async problem(

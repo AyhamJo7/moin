@@ -20,7 +20,7 @@ import type { CallHandler, ExecutionContext, NestInterceptor } from '@nestjs/com
 import type { FastifyRequest } from 'fastify';
 import { type Observable, defer, firstValueFrom } from 'rxjs';
 import type { Logger } from '@moin/observability';
-import { type TenantScope, runInTenantScope } from './tenant-scope.ts';
+import { type TenantScope, runInTenantScope } from '../../platform/tenant-scope.ts';
 import { LOGGER } from '../../../observability/logger.module.ts';
 
 @Injectable()

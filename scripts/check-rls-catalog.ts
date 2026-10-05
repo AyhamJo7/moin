@@ -129,7 +129,7 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.rotate_session': 'fe4a2f4e30221e87d1249a425838a102',
   'app.resolve_session': 'cfab5a739c28a8e8f99b664803a5412b',
   'app.revoke_session': 'a4a30b649c5abf56fab3563d20576aa8',
-  'app.resolve_request_context': '524216e444b23d4e1b58e6062da898ac',
+  'app.resolve_request_context': '81b501f8b96f155eabd82a76661c8bcd',
 };
 
 /** Reviewed QG-09 contract. Documentation registration alone cannot change privileges. */
@@ -579,7 +579,9 @@ interface IdentityRoleRow {
 /**
  * The tables only the session functions may touch. No runtime role — `moin_identity` included —
  * may hold a table or column privilege on them: a direct INSERT into `sessions` is a minted
- * session.
+ * session. `memberships` is here too: the session credential reaches tenant rows only through
+ * the pinned `resolve_request_context` join, never by grant — a later `GRANT ... ON memberships
+ * TO moin_identity` for convenience would silently open that direct path.
  */
 const SESSION_TABLES: readonly string[] = ['auth_transactions', 'sessions', 'users'];
 
@@ -1123,6 +1125,25 @@ async function inspectSessionBoundary(pool: ReturnType<typeof createPool>): Prom
       rule: 'session-table-privilege',
       subject: row.table_name,
       detail: `${row.role} holds a table or column privilege on it; only the session functions may touch it.`,
+    });
+  }
+  // `memberships` is intentionally NOT in SESSION_TABLES: it needs `moin_app` DML by design
+  // (reads on every request, writes on disable/remove). What must never happen is the session
+  // credential holding a direct grant on it — the DEFINER join is the only path. Assert that
+  // narrowly: any table or column privilege for `moin_identity` on `memberships` fails.
+  const identityAccess = await pool.query<{ table_name: string }>(
+    `SELECT c.relname::text AS table_name
+     FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = 'public' AND c.relname = 'memberships'
+       AND (has_table_privilege('moin_identity', c.oid, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN')
+            OR has_any_column_privilege('moin_identity', c.oid, 'SELECT, INSERT, UPDATE, REFERENCES'))`,
+  );
+  for (const row of identityAccess.rows) {
+    findings.push({
+      rule: 'identity-role-membership-privilege',
+      subject: row.table_name,
+      detail:
+        'moin_identity holds a table or column privilege on it; the session credential reaches tenant rows only through the pinned resolve_request_context join, never by grant.',
     });
   }
   return findings;

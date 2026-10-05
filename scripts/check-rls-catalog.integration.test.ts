@@ -560,6 +560,17 @@ describe('the identity role boundary (P06.06, ADR-0003)', () => {
     },
   );
 
+  evidenceTest('rejects moin_identity holding any grant on memberships', async () => {
+    // The session credential reaches tenant rows only through the pinned DEFINER join; a direct
+    // grant would silently open that path (M1 drift guard).
+    await fires(
+      'GRANT SELECT ON TABLE memberships TO moin_identity',
+      'REVOKE SELECT ON TABLE memberships FROM moin_identity',
+      'memberships',
+      'identity-role-membership-privilege',
+    );
+  });
+
   evidenceTest('rejects moin_identity being able to create anything', async () => {
     await fires(
       'GRANT CREATE ON SCHEMA app TO moin_identity',

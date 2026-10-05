@@ -1461,3 +1461,57 @@ describe('the session table guard', () => {
     },
   );
 });
+
+describe('the request-context lookup (P06.06.03)', () => {
+  evidenceTest('returns the active membership of a valid session', async () => {
+    const person = await user();
+    const { tokenHash } = await signIn(person.sub);
+    const org = randomUUID();
+    await admin.query('insert into organisations (id, slug, name) values ($1, $2, $3)', [
+      org,
+      `rc-${org.slice(0, 8)}`,
+      'RC Org',
+    ]);
+    await admin.query(
+      'insert into memberships (organisation_id, id, user_id, role, status) values ($1, $2, $3, $4, $5)',
+      [org, randomUUID(), person.id, 'admin', 'active'],
+    );
+    const resolved = await store.resolveRequestContext(tokenHash);
+    expect(resolved?.sessionId).toBeDefined();
+    expect(resolved?.userId).toBe(person.id);
+    expect(resolved?.memberships).toStrictEqual([
+      { organisationId: org, role: 'admin', permissions: [] },
+    ]);
+  });
+
+  evidenceTest('refuses a disabled membership without touching the session', async () => {
+    const person = await user();
+    const { tokenHash } = await signIn(person.sub);
+    const org = randomUUID();
+    await admin.query('insert into organisations (id, slug, name) values ($1, $2, $3)', [
+      org,
+      `rc-${org.slice(0, 8)}`,
+      'RC Org',
+    ]);
+    await admin.query(
+      'insert into memberships (organisation_id, id, user_id, role, status) values ($1, $2, $3, $4, $5)',
+      [org, randomUUID(), person.id, 'staff', 'disabled'],
+    );
+    expect(await store.resolveRequestContext(tokenHash)).toBeUndefined();
+    // The session itself is untouched and still valid: the refusal came from membership status.
+    expect(await store.resolveSession(tokenHash)).toBeDefined();
+  });
+
+  evidenceTest('leaves no lookup marker on the caller connection', async () => {
+    const client = await identity.connect();
+    try {
+      await client.query('select * from app.resolve_request_context($1::bytea)', [hash()]);
+      const marker = await client.query<{ v: string }>(
+        "select current_setting('app.request_lookup', true) as v",
+      );
+      expect(marker.rows[0]?.v ?? '').toBe('');
+    } finally {
+      client.release();
+    }
+  });
+});

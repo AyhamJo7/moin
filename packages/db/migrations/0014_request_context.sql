@@ -62,24 +62,30 @@ BEGIN
   -- Fresh DB clock obtained only after all locks above are held.
   v_now := clock_timestamp();
 
-  -- Scoped read marker for the membership join below; reset before return so it cannot leak
-  -- into the caller's transaction.
-  PERFORM set_config('app.request_lookup', 'resolve_request_context', true);
+  -- Scoped read marker for the membership join below. Set and read inside one subtransaction:
+  -- the inner block resets the marker before re-raising, so no error path can leak it into the
+  -- caller's transaction where a later read as the function owner would inherit the exception.
+  BEGIN
+    PERFORM set_config('app.request_lookup', 'resolve_request_context', true);
 
-  RETURN QUERY
-  SELECT s.id, s.user_id, m.organisation_id, m.role, m.permissions,
-         s.idle_expires_at, s.absolute_expires_at
-  FROM public.sessions s
-  JOIN public.users u ON u.id = s.user_id
-  JOIN public.memberships m ON m.user_id = s.user_id
-  WHERE s.token_hash = p_token_hash
-    AND s.revoked_at IS NULL
-    AND s.idle_expires_at > v_now
-    AND s.absolute_expires_at > v_now
-    AND u.status = 'active'
-    AND m.status = 'active';
+    RETURN QUERY
+    SELECT s.id, s.user_id, m.organisation_id, m.role, m.permissions,
+           s.idle_expires_at, s.absolute_expires_at
+    FROM public.sessions s
+    JOIN public.users u ON u.id = s.user_id
+    JOIN public.memberships m ON m.user_id = s.user_id
+    WHERE s.token_hash = p_token_hash
+      AND s.revoked_at IS NULL
+      AND s.idle_expires_at > v_now
+      AND s.absolute_expires_at > v_now
+      AND u.status = 'active'
+      AND m.status = 'active';
 
-  PERFORM set_config('app.request_lookup', '', true);
+    PERFORM set_config('app.request_lookup', '', true);
+  EXCEPTION WHEN OTHERS THEN
+    PERFORM set_config('app.request_lookup', '', true);
+    RAISE;
+  END;
   RETURN;
 END
 $$;

@@ -44,8 +44,10 @@ CREATE TABLE memberships (
   UNIQUE (organisation_id, user_id)
 );
 
-CREATE INDEX memberships_organisation_idx ON memberships (organisation_id);
 CREATE INDEX memberships_user_idx ON memberships (organisation_id, user_id);
+-- The per-request lookup joins on user_id with no organisation bound (pre-tenant): it needs a
+-- user-led index, which the composite above cannot serve.
+CREATE INDEX memberships_active_user_idx ON memberships (user_id) WHERE status = 'active';
 
 COMMENT ON TABLE memberships IS
   'Who may act for which organisation (P06.06.03, FS-16). Tenant rows: re-checked on every request; a removed member has no row, a disabled or suspended one is refused. Roles and permissions are ours, never provider claims.';
@@ -60,20 +62,21 @@ SELECT app.apply_tenant_rls('memberships');
 -- visible. The per-request lookup runs before any tenant is known, so it needs one narrow
 -- additional USING disjunct, and only under two simultaneous conditions: the transaction-local
 -- marker `app.request_lookup = 'resolve_request_context'` — set solely by that pinned function
--- around its own membership read and reset before return — AND `current_user = 'moin_migrator'`,
--- which holds only inside code running as that DEFINER's owner. No runtime role can satisfy
--- both: `moin_identity` has no table grant at all, and `moin_app` never runs as the migrator.
--- WITH CHECK stays the tenant rule, so the exception can never write across tenants: the
--- function that sets the marker performs no write.
-CREATE POLICY memberships_request_lookup ON memberships FOR ALL
+-- around its own membership read and reset before return — AND `current_user` being the
+-- migration owner that owns the pinned function (`moin_migrator`, or `moin_owner` on SET ROLE
+-- deployments), which holds only inside code running as that DEFINER's owner. No runtime role
+-- can satisfy both: `moin_identity` has no table grant at all, and `moin_app` never runs as the
+-- function owner. FOR SELECT only, so the exception can never write: a future DEFINER that set
+-- the marker and then wrote would still face the tenant WITH CHECK on the base policy path, and
+-- this policy grants no write command at all.
+CREATE POLICY memberships_request_lookup ON memberships FOR SELECT
   USING (
     organisation_id = app.current_org()
     OR (
       current_setting('app.request_lookup', true) = 'resolve_request_context'
-      AND current_user = 'moin_migrator'
+      AND current_user IN ('moin_migrator', 'moin_owner')
     )
-  )
-  WITH CHECK (organisation_id = app.current_org());
+  );
 
 -- ---------------------------------------------------------------------------------------------
 -- Grants: moin_app reads and writes inside withTenant; nothing else touches this table.

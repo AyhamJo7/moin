@@ -14,8 +14,8 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
-import type { Pool } from '@moin/db/pool';
 import { type TenantClient, withTenant } from '@moin/db';
+import type { Pool } from '@moin/db/pool';
 
 export interface TenantScope {
   readonly organisationId: string;

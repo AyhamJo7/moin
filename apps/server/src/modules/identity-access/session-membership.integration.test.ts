@@ -11,6 +11,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { Controller, Get, Post, UseGuards, UseInterceptors } from '@nestjs/common';
+import type { Pool } from '@moin/db/pool';
 import { Test } from '@nestjs/testing';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { createTestDatabase, evidenceTest, type TestDatabase } from '@moin/testing';
@@ -19,7 +20,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect } from 'vitest';
 import { ConfigModule } from '../../config/config.module.ts';
 import { loadConfig } from '../../config/env.ts';
 import { LoggerModule } from '../../observability/logger.module.ts';
-import { TenantPoolModule } from '../platform/tenant-pool.module.ts';
+import { TENANT_POOL, TenantPoolModule } from '../platform/tenant-pool.module.ts';
+import { currentTenantScope, withRequestTenant } from '../platform/tenant-scope.ts';
 import { IdentityAccessModule } from './identity-access.module.ts';
 import { CONTEXT_CLOCK, IDENTITY_CLOCK, REQUEST_CONTEXTS } from './identity-access.tokens.ts';
 import { SessionMembershipGuard } from './http/session-membership.guard.ts';
@@ -51,13 +53,29 @@ function identityUrl(): string {
 @UseInterceptors(TenantContextInterceptor)
 class ProbeController {
   @Get()
-  read(): { organisation: string } {
-    return { organisation: 'read-ok' };
+  async read(): Promise<{ organisation: string; memberships: number }> {
+    const scope = currentTenantScope();
+    if (scope === undefined) throw new Error('no tenant scope');
+    const pool = tenantPoolOf();
+    const rows = await withRequestTenant(pool, (client) =>
+      client
+        .query<{ n: string }>('select count(*)::text as n from memberships')
+        .then((r) => r.rows),
+    );
+    return { organisation: scope.organisationId, memberships: Number(rows[0]?.n ?? 0) };
   }
 
   @Post()
-  write(): { organisation: string } {
-    return { organisation: 'write-ok' };
+  async write(): Promise<{ organisation: string; memberships: number }> {
+    const scope = currentTenantScope();
+    if (scope === undefined) throw new Error('no tenant scope');
+    const pool = tenantPoolOf();
+    const rows = await withRequestTenant(pool, (client) =>
+      client
+        .query<{ n: string }>('select count(*)::text as n from memberships')
+        .then((r) => r.rows),
+    );
+    return { organisation: scope.organisationId, memberships: Number(rows[0]?.n ?? 0) };
   }
 }
 
@@ -162,6 +180,12 @@ function contexts(): RequestContextService {
   return app.get<RequestContextService>(REQUEST_CONTEXTS);
 }
 
+function tenantPoolOf(): Pool {
+  const pool = app.get<Pool | null>(TENANT_POOL);
+  if (pool === null) throw new Error('no tenant pool');
+  return pool;
+}
+
 beforeAll(async () => {
   database = await createTestDatabase('session-membership');
   admin = database.fixturePool();
@@ -223,7 +247,7 @@ describe('the session + membership gate', () => {
     ).toBe(1);
     const response = await app.inject({ method: 'GET', url: '/probe', headers: { cookie } });
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toStrictEqual({ organisation: 'read-ok' });
+    expect(response.json()).toStrictEqual({ organisation: ORG_A, memberships: 1 });
   });
 
   evidenceTest('rejects an expired session on the next request', async () => {
