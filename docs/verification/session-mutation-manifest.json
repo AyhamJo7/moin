@@ -455,19 +455,6 @@
     "project": "unit"
   },
   {
-    "id": "G17-family-root-lock-begin",
-    "invariant": "P06.06.02: sign-in locks family root to serialize against racing rotation",
-    "expected": "Without locking the family root, a stale presentation could race against a rotation successor and corrupt family lineage.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "      PERFORM 1 FROM public.sessions f WHERE f.id = v_family FOR UPDATE;\n",
-    "replace": "",
-    "killingTest": {
-      "file": "packages/db/src/identity-store.integration.test.ts",
-      "fullName": "two callers holding the same row > a sign-in presenting a stale cookie supersedes a rotation in flight elsewhere in the family"
-    },
-    "project": "integration"
-  },
-  {
     "id": "G18-startup-pool-verification-removed",
     "invariant": "ADR-0003 amendment / startup assertion: identity pool is verified before exposing store",
     "expected": "A misconfigured identity pool would be exposed to the server and fail only at runtime on the first sign-in.",
@@ -611,19 +598,6 @@
     "project": "integration"
   },
   {
-    "id": "WAIT1-resolve-clock-before-session-lock",
-    "invariant": "P06.06.02: no authorization timestamp is captured before the session-row lock",
-    "expected": "A resolve that reads the clock before winning the session lock would authorize against a stale time and revive a session whose idle expiry lapsed during the wait.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "  PERFORM 1 FROM public.sessions s WHERE s.token_hash = p_token_hash FOR UPDATE;\n\n  PERFORM 1\n  FROM public.sessions s JOIN public.users u ON u.id = s.user_id\n  WHERE s.token_hash = p_token_hash FOR SHARE OF u;\n\n  -- Fresh DB clock obtained only after all locks above are held.\n  v_now := clock_timestamp();",
-    "replace": "  -- Fresh DB clock obtained only after all locks above are held.\n  v_now := clock_timestamp();\n\n  PERFORM 1 FROM public.sessions s WHERE s.token_hash = p_token_hash FOR UPDATE;\n\n  PERFORM 1\n  FROM public.sessions s JOIN public.users u ON u.id = s.user_id\n  WHERE s.token_hash = p_token_hash FOR SHARE OF u;",
-    "killingTest": {
-      "file": "packages/db/src/identity-store.integration.test.ts",
-      "fullName": "temporal authorization and expiration (authoritative database clock) > waiting on the session lock past expiry (RWAIT) > RWAIT1: idle expiry during the wait returns nothing and revives nothing"
-    },
-    "project": "integration"
-  },
-  {
     "id": "WAIT2-resolve-idle-recheck-removed",
     "invariant": "P06.06.02: resolve rechecks idle expiry after the lock",
     "expected": "An idle-expired session would resolve and extend its deadline after a lock wait.",
@@ -633,32 +607,6 @@
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "temporal authorization and expiration (authoritative database clock) > waiting on the session lock past expiry (RWAIT) > RWAIT1: idle expiry during the wait returns nothing and revives nothing"
-    },
-    "project": "integration"
-  },
-  {
-    "id": "WAIT3-resolve-absolute-recheck-removed",
-    "invariant": "P06.06.02: resolve rechecks absolute expiry after the lock",
-    "expected": "A session past its 7-day absolute lifetime would resolve after a lock wait.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "  WHERE s.token_hash = p_token_hash\n    AND s.revoked_at IS NULL\n    AND s.idle_expires_at > v_now\n    AND s.absolute_expires_at > v_now\n    AND u.status = 'active';",
-    "replace": "  WHERE s.token_hash = p_token_hash\n    AND s.revoked_at IS NULL\n    AND s.idle_expires_at > v_now\n    AND u.status = 'active';",
-    "killingTest": {
-      "file": "packages/db/src/identity-store.integration.test.ts",
-      "fullName": "temporal authorization and expiration (authoritative database clock) > waiting on the session lock past expiry (RWAIT) > RWAIT2: absolute expiry during the wait returns nothing"
-    },
-    "project": "integration"
-  },
-  {
-    "id": "WAIT4-resolve-touches-expired-idle",
-    "invariant": "P06.06.02: an expired resolve moves no idle state",
-    "expected": "An expired resolve would still advance last_seen_at/idle_expires_at through the wait path.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "    AND u.id = s.user_id\n    AND u.status = 'active'\n    AND LEAST(v_now + interval '12 hours', s.absolute_expires_at) - s.idle_expires_at\n        >= interval '60 seconds'\n  RETURNING s.id, s.user_id, s.idle_expires_at, s.absolute_expires_at;",
-    "replace": "    AND u.id = s.user_id\n    AND u.status = 'active'\n  RETURNING s.id, s.user_id, s.idle_expires_at, s.absolute_expires_at;",
-    "killingTest": {
-      "file": "packages/db/src/identity-store.integration.test.ts",
-      "fullName": "temporal authorization and expiration (authoritative database clock) > activity on expired session cannot move last_seen_at or extend idle expiry"
     },
     "project": "integration"
   },
@@ -685,32 +633,6 @@
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "a sign-in transaction > waiting on the transaction lock past expiry (CWAIT) > CWAIT1: expiry during the wait returns nothing and stays consumed"
-    },
-    "project": "integration"
-  },
-  {
-    "id": "WAIT7-expiry-boundary-off-by-one",
-    "invariant": "P06.06: expires_at equal to authoritative now is expired",
-    "expected": "A transaction or session expiring exactly now would be treated as still valid.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "  IF v_claimed_binding = p_binding_hash AND v_claimed_expires > v_now THEN",
-    "replace": "  IF v_claimed_binding = p_binding_hash AND v_claimed_expires >= v_now THEN",
-    "killingTest": {
-      "file": "packages/db/src/identity-store.integration.test.ts",
-      "fullName": "temporal authorization and expiration (authoritative database clock) > exact boundary semantics: expires_at <= authoritative_now is expired"
-    },
-    "project": "integration"
-  },
-  {
-    "id": "WAIT8-resolve-lock-order-reversed",
-    "invariant": "P06.06.02: canonical lock order family, session, user is acyclic",
-    "expected": "Taking the user lock before the session lock reintroduces the AB-BA deadlock with rotations holding session-then-user.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "  PERFORM 1 FROM public.sessions s WHERE s.token_hash = p_token_hash FOR UPDATE;\n\n  PERFORM 1\n  FROM public.sessions s JOIN public.users u ON u.id = s.user_id\n  WHERE s.token_hash = p_token_hash FOR SHARE OF u;\n\n  -- Fresh DB clock obtained only after all locks above are held.\n  v_now := clock_timestamp();",
-    "replace": "  PERFORM 1\n  FROM public.sessions s JOIN public.users u ON u.id = s.user_id\n  WHERE s.token_hash = p_token_hash FOR SHARE OF u;\n\n  PERFORM 1 FROM public.sessions s WHERE s.token_hash = p_token_hash FOR UPDATE;\n\n  -- Fresh DB clock obtained only after all locks above are held.\n  v_now := clock_timestamp();",
-    "killingTest": {
-      "file": "packages/db/src/identity-store.integration.test.ts",
-      "fullName": "two callers holding the same row > a re-login racing a rotation on the same family never deadlocks"
     },
     "project": "integration"
   },

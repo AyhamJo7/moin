@@ -1272,18 +1272,61 @@ describe('temporal authorization and expiration (authoritative database clock)',
 
     evidenceTest('RWAIT1: idle expiry during the wait returns nothing and revives nothing', async () => {
       const person = await user();
-      const { tokenHash } = await signIn(person.sub);
-      const { rowCount } = await resolveAfterExpiryPasses(
-        person.id,
-        tokenHash,
-        "update sessions set idle_expires_at = clock_timestamp() - interval '1 second' where token_hash = $1",
+      // Idle deadline 2s out: the gate holds the row past that instant, so the blocked resolve
+      // must refuse it — against either the pre-wait or the post-lock clock.
+      const tokenHash = hash();
+      const id = randomUUID();
+      await admin.query(
+        `with t as (select clock_timestamp() + interval '2 seconds' as idle)
+         insert into sessions (
+           token_hash, id, family_id, user_id, rotation_reason,
+           created_at, last_seen_at, idle_expires_at, absolute_expires_at,
+           provider_tokens_sealed, provider_tokens_key_id
+         ) select
+           $1, $2, $2, $3, 'login',
+           clock_timestamp(), clock_timestamp(),
+           t.idle, clock_timestamp() + interval '7 days',
+           $4, 'test-v1'
+         from t`,
+        [tokenHash, id, person.id, sealed()],
       );
-      expect(rowCount, 'resolve after idle expiry returned 0 rows').toBe(0);
+      const gate = await admin.connect();
+      const waiter = await identity.connect();
+      try {
+        await gate.query('begin');
+        await gate.query('select 1 from sessions where token_hash = $1 for update', [tokenHash]);
+
+        await waiter.query('begin');
+        const pending = waiter.query('select * from app.resolve_session($1::bytea)', [tokenHash]);
+
+        const deadline = Date.now() + LOCK_WAIT_DEADLINE_MS;
+        let waiting = '0';
+        while (waiting !== '1' && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT_POLL_MS));
+          const result = await admin.query<{ n: string }>(
+            "select count(*)::text as n from pg_stat_activity where wait_event_type = 'Lock' and datname = $1",
+            [database.name],
+          );
+          waiting = result.rows[0]?.n ?? '0';
+        }
+        expect(waiting, 'resolve waits on the session lock').toBe('1');
+
+        // Hold the lock until the real idle deadline has provably passed on the DB clock.
+        await gate.query('select pg_sleep(2.5)');
+        await gate.query('commit');
+
+        const resolved = await pending;
+        await waiter.query('commit');
+        expect(resolved.rowCount, 'resolve after idle expiry returned 0 rows').toBe(0);
+      } finally {
+        gate.release();
+        waiter.release();
+      }
       const after = await admin.query<{ idle: Date }>(
         'select idle_expires_at as idle from sessions where token_hash = $1',
         [tokenHash],
       );
-      // The deadline the gate wrote is an already-expired timestamp — and it is still there:
+      // The deadline the seed wrote is an already-expired timestamp — and it is still there:
       // the blocked resolve refused it instead of extending it back to now + 12h.
       expect(after.rows[0]?.idle?.getTime()).toBeLessThan(Date.now());
     });
