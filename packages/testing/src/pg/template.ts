@@ -44,9 +44,22 @@ export interface TestDatabase {
   readonly appUrl: string;
   /** Connection string for the migration role. */
   readonly migrationUrl: string;
+  /**
+   * Connection string for `moin_identity`, the api-only role that alone may execute the session
+   * functions (P06.06, ADR-0003). Undefined when `TEST_DATABASE_IDENTITY_URL` is not set.
+   */
+  readonly identityUrl: string | undefined;
   readonly name: string;
   /** A pool as the application role. Closed by `drop()`. */
   pool(): Pool;
+  /** A pool as `moin_identity`. Throws, naming the variable, when it is not configured. */
+  identityPool(): Pool;
+  /**
+   * A pool on `migrationUrl`, for fixtures and for reading rows back. It is the admin connection
+   * and bypasses row-level security, so it must never drive the behaviour under test — only set
+   * the stage and inspect the result. Closed by `drop()`.
+   */
+  fixturePool(): Pool;
   drop(): Promise<void>;
 }
 
@@ -68,6 +81,17 @@ export async function createTestDatabase(label = 'test'): Promise<TestDatabase> 
     // this module generated — never from anything a test supplies verbatim.
     // eslint-disable-next-line no-restricted-syntax -- database identifier. `name` is built in this module from a sanitised label plus hex generated here; nothing a caller supplies reaches it verbatim.
     await adminPool.query(`create database "${name}" template "${TEMPLATE_DATABASE}"`);
+    // A database's ACL is not copied from its template, and PostgreSQL grants CONNECT and
+    // TEMPORARY to PUBLIC on every new one. moin_identity may create nothing (ADR-0003) and may
+    // connect to its own database alone, so each test database is provisioned as the cluster init
+    // does: CONNECT and TEMPORARY moved from PUBLIC to the roles that need them.
+    /* eslint-disable no-restricted-syntax -- same generated database identifier as above. */
+    await adminPool.query(`revoke connect, temporary on database "${name}" from public`);
+    await adminPool.query(
+      `grant connect, temporary on database "${name}" to moin_app, moin_migrator, moin_readonly, moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting`,
+    );
+    await adminPool.query(`grant connect on database "${name}" to moin_identity`);
+    /* eslint-enable no-restricted-syntax */
   } finally {
     await adminPool.end();
   }
@@ -86,19 +110,50 @@ export async function createTestDatabase(label = 'test'): Promise<TestDatabase> 
     );
   }
   const appUrl = urlForDatabase(appBase, name);
+  const migrationUrl = urlForDatabase(admin, name);
+  const identityBase = process.env['TEST_DATABASE_IDENTITY_URL'];
+  const identityUrl =
+    identityBase === undefined || identityBase.length === 0
+      ? undefined
+      : urlForDatabase(identityBase, name);
+  let fixtures: Pool | undefined;
+  let identity: Pool | undefined;
 
   return {
     name,
     appUrl,
-    migrationUrl: urlForDatabase(admin, name),
+    migrationUrl,
+    identityUrl,
     pool(): Pool {
       appPool ??= createPool({ connectionString: appUrl, max: 4 });
       return appPool;
+    },
+    fixturePool(): Pool {
+      fixtures ??= createPool({ connectionString: migrationUrl, max: 2 });
+      return fixtures;
+    },
+    identityPool(): Pool {
+      if (identityUrl === undefined) {
+        throw new Error(
+          'TEST_DATABASE_IDENTITY_URL is not set. The session functions are executable by ' +
+            'moin_identity alone, so their tests connect as it; the example environment file has it.',
+        );
+      }
+      identity ??= createPool({ connectionString: identityUrl, max: 4 });
+      return identity;
     },
     async drop(): Promise<void> {
       if (appPool !== undefined) {
         await appPool.end();
         appPool = undefined;
+      }
+      if (fixtures !== undefined) {
+        await fixtures.end();
+        fixtures = undefined;
+      }
+      if (identity !== undefined) {
+        await identity.end();
+        identity = undefined;
       }
       const cleanup = createPool({ connectionString: admin, max: 1 });
       try {

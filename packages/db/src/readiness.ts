@@ -52,7 +52,48 @@ export interface PostgresReadinessOptions {
   readonly connectionString: string;
   readonly timeoutMs?: number;
   readonly cacheTtlMs?: number;
+  /** Reported name; `postgres` by default. */
+  readonly name?: string;
+  /**
+   * A query returning one row with a boolean `ok`, run instead of `select 1`. Not ready unless it is
+   * true — so a probe can confirm *who* it is connected as, not only that it is connected.
+   */
+  readonly assertion?: string;
 }
+
+/**
+ * The identity pool's own credential (P06.06, ADR-0003): connected as `moin_identity` and nothing
+ * else, without a privileged attribute or a role membership, able to execute exactly the six
+ * `SECURITY DEFINER` session functions, and `moin_app` unable to. The api checks it once before the
+ * identity store exists and `/readyz` keeps checking it, so a rotated or mistyped credential, a
+ * missing or extra grant, or a URL naming the wrong role stops the rollout instead of failing — or
+ * silently widening — every sign-in afterwards. The full ACL is the catalog check's job.
+ *
+ * Compared as a set with a count, not a sorted array: the database collation decides sort order.
+ */
+export const IDENTITY_POOL_ASSERTION = `
+  select session_user = 'moin_identity' and current_user = 'moin_identity'
+     and not (r.rolsuper or r.rolbypassrls or r.rolcreaterole or r.rolcreatedb or r.rolreplication)
+     and not exists (select 1 from pg_auth_members m where m.member = r.oid)
+     and not has_function_privilege('moin_app', 'app.begin_sign_in(bytea, bytea, bytea, bytea, text, text)', 'EXECUTE')
+     and not has_function_privilege('moin_app', 'app.consume_sign_in(bytea, bytea)', 'EXECUTE')
+     and not has_function_privilege('moin_app', 'app.begin_session(text, bytea, uuid, bytea, text, bytea)', 'EXECUTE')
+     and not has_function_privilege('moin_app', 'app.rotate_session(bytea, bytea, uuid, text)', 'EXECUTE')
+     and not has_function_privilege('moin_app', 'app.resolve_session(bytea)', 'EXECUTE')
+     and not has_function_privilege('moin_app', 'app.revoke_session(bytea)', 'EXECUTE')
+     and d.functions @> d.expected and d.functions <@ d.expected and d.total = 6
+     as ok
+    from pg_roles r,
+         lateral (
+           select coalesce(array_agg(n.nspname || '.' || p.proname), '{}') as functions,
+                  count(*) as total,
+                  array['app.begin_sign_in', 'app.consume_sign_in', 'app.begin_session',
+                        'app.rotate_session', 'app.resolve_session', 'app.revoke_session'] as expected
+             from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+            where p.prosecdef and has_function_privilege(p.oid, 'EXECUTE')
+         ) d
+   where r.rolname = current_user
+`;
 
 /**
  * A readiness check over its own tiny pool (max one connection).
@@ -78,21 +119,37 @@ export function postgresReadiness(options: PostgresReadinessOptions): ReadinessC
   });
 
   const cacheTtlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
+  const name = options.name ?? 'postgres';
   let cached: { at: number; result: ReadinessResult } | undefined;
   let inFlight: Promise<ReadinessResult> | undefined;
 
   async function probe(): Promise<ReadinessResult> {
     const started = performance.now();
     try {
-      await withTimeout(pool.query('select 1'), outerTimeoutMs);
+      if (options.assertion === undefined) {
+        await withTimeout(pool.query('select 1'), outerTimeoutMs);
+      } else {
+        const result = await withTimeout(
+          pool.query<{ ok: boolean }>(options.assertion),
+          outerTimeoutMs,
+        );
+        if (result.rows[0]?.ok !== true) {
+          return {
+            name,
+            ready: false,
+            durationMs: Math.round(performance.now() - started),
+            reason: 'role_mismatch',
+          };
+        }
+      }
       return {
-        name: 'postgres',
+        name,
         ready: true,
         durationMs: Math.round(performance.now() - started),
       };
     } catch (error) {
       return {
-        name: 'postgres',
+        name,
         ready: false,
         durationMs: Math.round(performance.now() - started),
         reason: classify(error),
@@ -101,7 +158,7 @@ export function postgresReadiness(options: PostgresReadinessOptions): ReadinessC
   }
 
   return {
-    name: 'postgres',
+    name,
 
     /**
      * Single-flight, plus a short cache.

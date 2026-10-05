@@ -83,12 +83,39 @@ const baseSchema = z.object({
 
   DATABASE_URL: secret('DATABASE_URL', z.url({ protocol: /^postgres(ql)?$/ })),
 
+  /**
+   * The api role's second pool: `moin_identity`, the only role that may execute the sign-in and
+   * session functions (P06.06, ADR-0003). It exists so that `moin_app` — which voice and worker
+   * hold too — can mint no session. So it is refused for every other role here; an api that signs
+   * people in without it refuses to start (`buildSignInGate`). Holds the resolved credential; the
+   * task definition references the ARN.
+   */
+  IDENTITY_DATABASE_URL: secret(
+    'IDENTITY_DATABASE_URL',
+    z.url({ protocol: /^postgres(ql)?$/ }).optional(),
+  ),
+
   /** P06.05.04: one OIDC contract, selected by deployment rather than by business logic. */
   OIDC_PROVIDER: z.enum(OIDC_PROVIDERS).optional(),
   OIDC_ISSUER_URL: secret('OIDC_ISSUER_URL', z.url({ protocol: /^https?$/ }).optional()),
   OIDC_CLIENT_ID: z.string().min(1).optional(),
   OIDC_CLIENT_SECRET: secret('OIDC_CLIENT_SECRET', z.string().min(1).optional()),
   OIDC_REDIRECT_URI: z.url({ protocol: /^https?$/ }).optional(),
+
+  /**
+   * Development and test only: `<key id>:<seed>`, from which the local provider-token key is
+   * derived (P06.06.01). Deployed environments seal provider tokens with a KMS data key (ADR-0033,
+   * P05.08.01), never a key in the environment (ADR-0020 records why), so the refinement below
+   * refuses it outside development and test, and sign-in refuses to start there until the KMS
+   * source exists.
+   */
+  AUTH_LOCAL_TOKEN_KEY: secret(
+    'AUTH_LOCAL_TOKEN_KEY',
+    z
+      .string()
+      .regex(/^[A-Za-z0-9._-]{1,64}:\S{16,}$/, 'must be <key id>:<seed of at least 16 characters>')
+      .optional(),
+  ),
 
   /**
    * Twilio account auth token, used to validate `X-Twilio-Signature` (P04.04.03). Optional in the
@@ -233,6 +260,57 @@ const schema = baseSchema.superRefine((value, ctx) => {
       }
     }
   }
+  if (value.IDENTITY_DATABASE_URL !== undefined && value.SERVER_ROLE !== 'api') {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['IDENTITY_DATABASE_URL'],
+      message:
+        "is the api role's session credential and must not reach any other role: a voice or " +
+        'worker process holding it could mint sessions (ADR-0003)',
+    });
+  }
+  // Exactly the identity role: a URL naming moin_app could execute nothing, and one naming the
+  // owner or the migrator would run sign-in with every privilege the session functions bound.
+  // node-postgres lets a `user` query parameter override the URL's user, and `options` can carry
+  // `-c role=…`; either would connect as someone the username check never saw.
+  if (
+    value.IDENTITY_DATABASE_URL !== undefined &&
+    [...new URL(value.IDENTITY_DATABASE_URL).searchParams.keys()].some((key) =>
+      ['user', 'options', 'role'].includes(key.toLowerCase()),
+    )
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['IDENTITY_DATABASE_URL'],
+      message: 'must not carry user, options or role query parameters, which override its role',
+    });
+  }
+  if (
+    value.IDENTITY_DATABASE_URL !== undefined &&
+    new URL(value.IDENTITY_DATABASE_URL).username !== 'moin_identity'
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['IDENTITY_DATABASE_URL'],
+      message:
+        'must connect as moin_identity, the only role that may execute the session functions',
+    });
+  }
+
+  if (
+    value.AUTH_LOCAL_TOKEN_KEY !== undefined &&
+    value.NODE_ENV !== 'development' &&
+    value.NODE_ENV !== 'test'
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['AUTH_LOCAL_TOKEN_KEY'],
+      message:
+        'is development-only: deployed environments seal provider tokens with a KMS data key ' +
+        '(ADR-0033), never a key carried in the environment',
+    });
+  }
+
   // The voice role answers the telephone. Starting it without the three values that make signature
   // validation possible would produce a service that either rejects every call or, worse, is
   // written later to skip validation "because the token is not set in this environment".

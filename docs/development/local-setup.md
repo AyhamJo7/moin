@@ -60,6 +60,17 @@ one mattered would be in staging with real data.
 
 `moin_migrator` is the only role permitted to run DDL. `pnpm db:migrate` uses it.
 
+The api also connects as **`moin_identity`** (`IDENTITY_DATABASE_URL`), the only role that may
+execute the sign-in and session functions; voice and worker must never be given it (ADR-0003). It is
+created by `docker/postgres/init/00-roles.sql`, which also moves `TEMPORARY` from `PUBLIC` to the
+other roles. Init scripts run only on an empty volume, so a database volume created before this role
+existed fails migration 0012 with "missing database role moin_identity". Either `pnpm dev:reset`, or
+run the role and privilege-hardening statements from that script once as `moin_owner` before
+applying 0012. If an earlier version of this unmerged branch's 0012 was already applied, these
+statements are not enough: its checksum has changed. Use a fresh, isolated Compose project or reset
+only this checkout's disposable development volume; never edit the migration checksum or reset a
+volume shared with another worktree.
+
 ## Running things
 
 ```bash

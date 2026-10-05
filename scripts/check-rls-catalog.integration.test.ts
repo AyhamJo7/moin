@@ -10,7 +10,13 @@
 import { createTestDatabase, type TestDatabase } from '@moin/testing';
 import { createPool } from '@moin/db/pool';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { inspect, allowlistedDefiners, type Finding } from './check-rls-catalog.ts';
+import { randomBytes } from 'node:crypto';
+import {
+  inspect,
+  inspectIdentityRole,
+  allowlistedDefiners,
+  type Finding,
+} from './check-rls-catalog.ts';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -461,6 +467,371 @@ $$;
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+});
+
+describe('the identity role boundary (P06.06, ADR-0003)', () => {
+  // Grants here are per-database objects, so they cannot leak into another test file's database.
+  // Role membership is cluster-wide and is therefore asserted by the migration and the role tests,
+  // never mutated here.
+  evidenceTest('rejects moin_app regaining EXECUTE on a session function', async () => {
+    await ddl(
+      'GRANT EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea) TO moin_app',
+    );
+    try {
+      expect(rulesFor(await findings(), 'app.begin_session')).toContain(
+        'security-definer-unexpected-execute-grant',
+      );
+    } finally {
+      await ddl(
+        'REVOKE EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea) FROM moin_app',
+      );
+    }
+  });
+
+  evidenceTest('rejects moin_identity holding a table privilege, session or tenant', async () => {
+    for (const table of ['sessions', 'organisations']) {
+      // eslint-disable-next-line no-restricted-syntax -- table name from a two-entry literal list in this test.
+      await ddl(`GRANT SELECT ON TABLE ${table} TO moin_identity`);
+      try {
+        expect(rulesFor(await findings(), 'moin_identity'), table).toContain(
+          'identity-role-table-privilege',
+        );
+      } finally {
+        // eslint-disable-next-line no-restricted-syntax -- same literal list.
+        await ddl(`REVOKE SELECT ON TABLE ${table} FROM moin_identity`);
+      }
+    }
+  });
+
+  evidenceTest('rejects moin_identity executing any other privileged function', async () => {
+    const signature =
+      'app.provision_tenant(uuid, citext, text, text, text, text, text, boolean, text)';
+    // eslint-disable-next-line no-restricted-syntax -- signature is a literal in this test.
+    await ddl(`GRANT EXECUTE ON FUNCTION ${signature} TO moin_identity`);
+    try {
+      const list = await findings();
+      expect(rulesFor(list, 'moin_identity')).toContain('identity-role-unexpected-execute');
+      expect(rulesFor(list, 'app.provision_tenant')).toContain(
+        'security-definer-unexpected-execute-grant',
+      );
+    } finally {
+      // eslint-disable-next-line no-restricted-syntax -- same literal.
+      await ddl(`REVOKE EXECUTE ON FUNCTION ${signature} FROM moin_identity`);
+    }
+  });
+
+  /** Applies `grant`, asserts `rule` is reported for `subject`, and always applies `revoke`. */
+  async function fires(
+    grant: string,
+    revoke: string,
+    subject: string,
+    rule: string,
+  ): Promise<void> {
+    await ddl(grant);
+    try {
+      expect(rulesFor(await findings(), subject), grant).toContain(rule);
+    } finally {
+      await ddl(revoke);
+    }
+  }
+
+  evidenceTest(
+    'rejects a column privilege, MAINTAIN or a grant option held by moin_identity',
+    async () => {
+      await fires(
+        'GRANT SELECT (cognito_sub, email) ON TABLE users TO moin_identity',
+        'REVOKE SELECT (cognito_sub, email) ON TABLE users FROM moin_identity',
+        'moin_identity',
+        'identity-role-table-privilege',
+      );
+      await fires(
+        'GRANT MAINTAIN ON TABLE sessions TO moin_identity',
+        'REVOKE MAINTAIN ON TABLE sessions FROM moin_identity',
+        'moin_identity',
+        'identity-role-table-privilege',
+      );
+      await fires(
+        'GRANT EXECUTE ON FUNCTION app.resolve_session(bytea) TO moin_identity WITH GRANT OPTION',
+        'REVOKE GRANT OPTION FOR EXECUTE ON FUNCTION app.resolve_session(bytea) FROM moin_identity',
+        'moin_identity',
+        'identity-role-grant-option',
+      );
+    },
+  );
+
+  evidenceTest('rejects moin_identity being able to create anything', async () => {
+    await fires(
+      'GRANT CREATE ON SCHEMA app TO moin_identity',
+      'REVOKE CREATE ON SCHEMA app FROM moin_identity',
+      'moin_identity',
+      'identity-role-schema-create',
+    );
+    const database_ = `"${database.name}"`;
+    await fires(
+      // eslint-disable-next-line no-restricted-syntax -- the harness-generated database name, never input.
+      `GRANT TEMPORARY ON DATABASE ${database_} TO moin_identity`,
+      // eslint-disable-next-line no-restricted-syntax -- the harness-generated database name, never input.
+      `REVOKE TEMPORARY ON DATABASE ${database_} FROM moin_identity`,
+      'moin_identity',
+      'identity-role-temporary',
+    );
+    await fires(
+      // eslint-disable-next-line no-restricted-syntax -- the harness-generated database name, never input.
+      `GRANT CREATE ON DATABASE ${database_} TO moin_identity`,
+      // eslint-disable-next-line no-restricted-syntax -- the harness-generated database name, never input.
+      `REVOKE CREATE ON DATABASE ${database_} FROM moin_identity`,
+      'moin_identity',
+      'identity-role-database-create',
+    );
+  });
+
+  evidenceTest('rejects moin_identity being able to connect to another database', async () => {
+    // A throwaway database, so no database another test or worktree uses is touched. Other
+    // databases on a shared test cluster may already be reachable, so the assertion is about this
+    // one by name.
+    const other = `zz_identity_db_${randomBytes(4).toString('hex')}`;
+    const reaches = async (): Promise<boolean> =>
+      (await findings()).some(
+        (f) => f.rule === 'identity-role-other-database' && f.detail.includes(other),
+      );
+    /* eslint-disable no-restricted-syntax -- database DDL cannot be parameterised; the name is a literal prefix and generated hex. */
+    await ddl(`CREATE DATABASE ${other}`);
+    try {
+      await ddl(`REVOKE CONNECT ON DATABASE ${other} FROM PUBLIC`);
+      expect(await reaches()).toBe(false);
+      await ddl(`GRANT CONNECT ON DATABASE ${other} TO moin_identity`);
+      expect(await reaches()).toBe(true);
+    } finally {
+      await ddl(`DROP DATABASE IF EXISTS ${other} WITH (FORCE)`);
+    }
+    /* eslint-enable no-restricted-syntax */
+  });
+
+  evidenceTest(
+    'rejects any other runtime role holding a privilege on a session table',
+    async () => {
+      await fires(
+        'GRANT INSERT ON TABLE sessions TO moin_app',
+        'REVOKE INSERT ON TABLE sessions FROM moin_app',
+        'sessions',
+        'session-table-privilege',
+      );
+      await fires(
+        'GRANT INSERT ON TABLE auth_transactions TO moin_dispatcher',
+        'REVOKE INSERT ON TABLE auth_transactions FROM moin_dispatcher',
+        'auth_transactions',
+        'session-table-privilege',
+      );
+    },
+  );
+
+  evidenceTest(
+    'rejects an extension view reaching a sensitive relation through an intermediate view',
+    async () => {
+      await ddl(
+        'CREATE VIEW zz_inner_probe AS SELECT id FROM sessions; CREATE VIEW zz_outer_probe AS SELECT id FROM zz_inner_probe; GRANT SELECT ON zz_outer_probe TO PUBLIC',
+      );
+      const pool = createPool({ connectionString: database.migrationUrl, max: 1 });
+      try {
+        await ddl('ALTER EXTENSION pgcrypto ADD VIEW zz_outer_probe');
+        try {
+          // Single-hop logic would see only zz_inner_probe (not sensitive) and pass; the
+          // transitive closure must still fire, even when explicitly allowlisted.
+          const allowlisted = await inspectIdentityRole(pool, 'moin_identity', {
+            allowedExtensionViews: [
+              { schema: 'public', name: 'zz_outer_probe', extension: 'pgcrypto' },
+            ],
+          });
+          expect(allowlisted.some((f) => f.rule === 'identity-role-table-privilege')).toBe(true);
+        } finally {
+          await ddl('ALTER EXTENSION pgcrypto DROP VIEW zz_outer_probe');
+        }
+      } finally {
+        await pool.end();
+        await ddl('DROP VIEW IF EXISTS zz_outer_probe; DROP VIEW IF EXISTS zz_inner_probe');
+      }
+    },
+  );
+
+  evidenceTest('rejects an extension-owned view exposing sensitive session columns', async () => {
+    // Codex regression: an extension-owned view exposing sessions.id, user_id, provider_tokens_sealed
+    // must not be exempted by the catalog checker.
+    await ddl(
+      'CREATE VIEW zz_extension_leak_probe AS SELECT id, user_id, provider_tokens_sealed FROM sessions; GRANT SELECT ON zz_extension_leak_probe TO PUBLIC',
+    );
+    const pool = createPool({ connectionString: database.migrationUrl, max: 1 });
+    try {
+      await ddl('ALTER EXTENSION pgcrypto ADD VIEW zz_extension_leak_probe');
+      try {
+        expect(rulesFor(await findings(), 'moin_identity')).toContain(
+          'identity-role-table-privilege',
+        );
+        // Even if explicitly submitted to allowedExtensionViews, it must be rejected due to sensitive table dependency:
+        const allowlistedAttempt = await inspectIdentityRole(pool, 'moin_identity', {
+          allowedExtensionViews: [
+            { schema: 'public', name: 'zz_extension_leak_probe', extension: 'pgcrypto' },
+          ],
+        });
+        expect(allowlistedAttempt.some((f) => f.rule === 'identity-role-table-privilege')).toBe(
+          true,
+        );
+      } finally {
+        await ddl('ALTER EXTENSION pgcrypto DROP VIEW zz_extension_leak_probe');
+      }
+    } finally {
+      await pool.end();
+      await ddl('DROP VIEW IF EXISTS zz_extension_leak_probe');
+    }
+  });
+
+  evidenceTest('an unreviewed extension view is never silently tolerated', async () => {
+    await ddl(
+      'CREATE VIEW zz_safe_extension_probe AS SELECT 1 AS x; GRANT SELECT ON zz_safe_extension_probe TO PUBLIC',
+    );
+    const pool = createPool({ connectionString: database.migrationUrl, max: 1 });
+    try {
+      await ddl('ALTER EXTENSION pgcrypto ADD VIEW zz_safe_extension_probe');
+      try {
+        // Unallowlisted: fails — no blanket exemption for extension-owned views.
+        const unallowlisted = await inspectIdentityRole(pool, 'moin_identity');
+        expect(unallowlisted.some((f) => f.rule === 'identity-role-table-privilege')).toBe(true);
+      } finally {
+        await ddl('ALTER EXTENSION pgcrypto DROP VIEW zz_safe_extension_probe');
+      }
+    } finally {
+      await pool.end();
+      await ddl('DROP VIEW IF EXISTS zz_safe_extension_probe');
+    }
+  });
+
+  evidenceTest(
+    'tolerates only an explicitly reviewed safe extension view with no sensitive dependencies',
+    async () => {
+      await ddl(
+        'CREATE VIEW zz_safe_extension_probe AS SELECT 1 AS x; GRANT SELECT ON zz_safe_extension_probe TO PUBLIC',
+      );
+      const pool = createPool({ connectionString: database.migrationUrl, max: 1 });
+      try {
+        await ddl('ALTER EXTENSION pgcrypto ADD VIEW zz_safe_extension_probe');
+        try {
+          // Explicitly allowlisted with no sensitive dependencies: passes
+          const allowlisted = await inspectIdentityRole(pool, 'moin_identity', {
+            allowedExtensionViews: [
+              { schema: 'public', name: 'zz_safe_extension_probe', extension: 'pgcrypto' },
+            ],
+          });
+          expect(allowlisted.some((f) => f.rule === 'identity-role-table-privilege')).toBe(false);
+
+          // If write privilege is added: fails even if allowlisted
+          await ddl('GRANT INSERT ON zz_safe_extension_probe TO PUBLIC');
+          const writable = await inspectIdentityRole(pool, 'moin_identity', {
+            allowedExtensionViews: [
+              { schema: 'public', name: 'zz_safe_extension_probe', extension: 'pgcrypto' },
+            ],
+          });
+          expect(writable.some((f) => f.rule === 'identity-role-table-privilege')).toBe(true);
+        } finally {
+          await ddl('ALTER EXTENSION pgcrypto DROP VIEW zz_safe_extension_probe');
+        }
+      } finally {
+        await pool.end();
+        await ddl('DROP VIEW IF EXISTS zz_safe_extension_probe');
+      }
+    },
+  );
+
+  /* eslint-disable no-restricted-syntax -- role DDL cannot be parameterised; the names are built in this test from a literal prefix and generated hex, and `SET FALSE` is a GRANT option, not a session-level SET. */
+  evidenceTest(
+    'tolerates only an ADMIN-only grant to the role that created it (RDS, PostgreSQL 16+)',
+    async () => {
+      // Throwaway roles: membership is cluster-wide, so moin_identity itself is never touched here.
+      const suffix = randomBytes(4).toString('hex');
+      const probe = `zz_identity_probe_${suffix}`;
+      const creator = `zz_identity_creator_${suffix}`;
+      const plain = `zz_identity_plain_${suffix}`;
+      await ddl(
+        `CREATE ROLE ${probe} NOLOGIN; CREATE ROLE ${creator} NOLOGIN CREATEROLE; CREATE ROLE ${plain} NOLOGIN`,
+      );
+      const pool = createPool({ connectionString: database.migrationUrl, max: 1 });
+      const membership = async (): Promise<boolean> =>
+        (await inspectIdentityRole(pool, probe)).some((f) => f.rule === 'identity-role-membership');
+      const adminOnly = (holder: string) =>
+        ddl(`GRANT ${probe} TO ${holder} WITH ADMIN TRUE, INHERIT FALSE, SET FALSE`);
+      try {
+        expect(await membership(), 'no members').toBe(false);
+
+        await adminOnly(creator);
+        expect(await membership(), 'ADMIN-only grant to its CREATEROLE creator').toBe(false);
+        // A runtime role that can reach the creator could grant itself the role through it.
+        await ddl(`GRANT ${creator} TO moin_reporting WITH INHERIT FALSE, SET FALSE`);
+        try {
+          expect(await membership(), 'creator reachable from a runtime role').toBe(true);
+        } finally {
+          await ddl(`REVOKE ${creator} FROM moin_reporting`);
+        }
+        await ddl(`REVOKE ${probe} FROM ${creator}`);
+
+        await adminOnly(plain);
+        expect(await membership(), 'ADMIN-only grant to a role without CREATEROLE').toBe(true);
+        await ddl(`REVOKE ${probe} FROM ${plain}`);
+
+        await adminOnly('moin_dispatcher');
+        expect(await membership(), 'ADMIN-only grant to one of our runtime roles').toBe(true);
+        await ddl(`REVOKE ${probe} FROM moin_dispatcher`);
+
+        await ddl(`GRANT ${probe} TO ${creator} WITH ADMIN TRUE, INHERIT TRUE, SET FALSE`);
+        expect(await membership(), 'a member that inherits').toBe(true);
+        await ddl(`REVOKE ${probe} FROM ${creator}`);
+        await ddl(`GRANT ${probe} TO ${creator} WITH ADMIN FALSE, INHERIT FALSE, SET TRUE`);
+        expect(await membership(), 'a member that can SET ROLE').toBe(true);
+        await ddl(`REVOKE ${probe} FROM ${creator}`);
+        await ddl(`GRANT ${creator} TO ${probe} WITH INHERIT FALSE, SET FALSE`);
+        expect(await membership(), 'a member of another role').toBe(true);
+      } finally {
+        await pool.end();
+        await ddl(
+          `REVOKE ${probe} FROM moin_dispatcher; REVOKE ${creator} FROM moin_reporting; DROP ROLE IF EXISTS ${probe}; DROP ROLE IF EXISTS ${creator}; DROP ROLE IF EXISTS ${plain}`,
+        );
+      }
+    },
+  );
+
+  evidenceTest(
+    "rejects a runtime role that can reach the identity role or the functions' owner",
+    async () => {
+      // Throwaway intermediary: a runtime role made a SET-only member of the owner could SET ROLE to
+      // it and execute the six, which has_function_privilege alone would not show.
+      const owner = (
+        await database
+          .fixturePool()
+          .query<{ owner: string }>(
+            "select pg_get_userbyid(proowner)::text as owner from pg_proc where proname = 'begin_session'",
+          )
+      ).rows[0]?.owner;
+      expect(owner).toBeDefined();
+      await ddl(`GRANT ${owner ?? ''} TO moin_reporting WITH INHERIT FALSE, SET TRUE`);
+      try {
+        expect(rulesFor(await findings(), owner ?? '')).toContain('session-role-reachable');
+      } finally {
+        await ddl(`REVOKE ${owner ?? ''} FROM moin_reporting`);
+      }
+    },
+  );
+  /* eslint-enable no-restricted-syntax */
+
+  it('reports nothing about the identity boundary once the fixtures are revoked', async () => {
+    // Scoped to its own subjects: earlier cases in this file leave their own fixtures behind.
+    const subjects = new Set([
+      'moin_identity',
+      'app.begin_session',
+      'app.begin_sign_in',
+      'app.consume_sign_in',
+      'app.resolve_session',
+      'app.revoke_session',
+      'app.rotate_session',
+    ]);
+    expect((await findings()).filter((finding) => subjects.has(finding.subject))).toStrictEqual([]);
   });
 });
 

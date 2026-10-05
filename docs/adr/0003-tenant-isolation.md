@@ -30,7 +30,8 @@ sight. `app.current_org()` returns `NULL` when unset or empty, and policies comp
 
 **4. Role separation.** The runtime role `moin_app` is `NOBYPASSRLS`, owns no tables and cannot run
 DDL. `moin_migrator` runs DDL and nothing else. Application-level SQL injection therefore cannot
-disable a policy, because the role it runs as cannot.
+disable a policy, because the role it runs as cannot. Sign-in and sessions sit behind a further,
+api-only role, `moin_identity` (amendment below).
 
 **5. Composite keys.** `UNIQUE (organisation_id, id)` and composite foreign keys, so a reference
 cannot point across tenants even if a policy were somehow absent. A plain `FOREIGN KEY (contact_id)`
@@ -41,6 +42,49 @@ opens a transaction.
 
 **Tenant context is derived server-side** from the authenticated session or the routing that
 selected the tenant — never from a request parameter, a header or a body field (INV-02).
+
+## Amendment — 2026-10-02: `moin_identity`, the api-only session role
+
+- **Status:** ACCEPTED by founder decision (2026-10-02), closing QG-09 invariant finding I1 on the
+  P06.06 sign-in and session change · **Related:** ADR-0005, P06.06.01, P06.06.02
+
+**Context.** The session functions (`app.begin_sign_in`, `app.consume_sign_in`, `app.begin_session`,
+`app.rotate_session`, `app.resolve_session`, `app.revoke_session`) were first granted to `moin_app`.
+`moin_app` is also the voice and worker role, so a compromised voice or worker process could call
+`begin_session` for any active subject and obtain a valid 7-day session — a capability only the api,
+which holds the OIDC client secret, should have. The time bound added in the same change stopped
+revival and stretching, not minting.
+
+**Decision.** A dedicated login role, **`moin_identity`**, is the only role that may execute those
+six functions.
+
+- `NOSUPERUSER NOBYPASSRLS NOCREATEROLE NOCREATEDB NOREPLICATION`; a member of no role. Members
+  are forbidden except a trusted `CREATEROLE` provisioning role with `ADMIN` only (neither
+  `INHERIT` nor `SET`), no `moin_` prefix, and no runtime membership path to it. PostgreSQL 16+
+  records that grant for a non-superuser creator such as the RDS master user. ADMIN can self-grant
+  SET or INHERIT, so the exception trusts the provisioning administrator, not an inert grant; owns
+  nothing; `USAGE` on `public` and `app`, `CREATE` nowhere and no `TEMPORARY` (moved off `PUBLIC`
+  where roles are provisioned); **no** privilege on any table — session or tenant — and no other
+  `SECURITY DEFINER` function.
+- `moin_app` has **zero** `EXECUTE` on the six.
+- Only the `api` task holds its credential (`IDENTITY_DATABASE_URL`, which must name
+  `moin_identity`), in a pool of its own beside its `moin_app` pool; `/readyz` fails unless that pool
+  connects as `moin_identity` and `moin_app` cannot execute the session functions. The configuration loader refuses the credential for `voice`, `worker` and
+  `migrate`; `identity-is-api-only` in `.dependency-cruiser.cjs` keeps the identity module and its
+  pool out of those graphs.
+- Provisioning follows the other login roles: `docker/postgres/init/00-roles.sql` locally, the CI
+  role step, Terraform and a Secrets Manager entry injected into the `api` task definition only in
+  P05 (P05.08.02/.03; no Terraform exists yet), which must also move `TEMPORARY` off `PUBLIC`. Migration 0012 asserts the role's attributes and
+  membership and fails the apply otherwise.
+
+| Role            | Holds it                 | May execute                             | Table privileges                    |
+| --------------- | ------------------------ | --------------------------------------- | ----------------------------------- |
+| `moin_identity` | `api` only               | the six session functions, nothing else | none                                |
+| `moin_app`      | `api`, `voice`, `worker` | none of the six                         | unchanged (tenant tables under RLS) |
+
+**Consequences.** One more credential to provision and rotate, and a second pool in `api`. In
+exchange, a compromise of voice or worker — the most exposed process, answering Twilio — cannot
+create, extend, rotate or revoke a session.
 
 ## Alternatives considered
 
@@ -66,12 +110,14 @@ selected the tenant — never from a request parameter, a header or a body field
 
 ## Verification
 
-| Enforcement                                                                                  | Where                                                                                                          |
-| -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| Every `organisation_id` table has RLS enabled **and** forced, with policies for all commands | `scripts/check-rls-catalog.ts` in CI (P06.02.04); the reserved job already fails if the script appears unwired |
-| `moin_app` has no `BYPASSRLS` and owns no tables                                             | Catalog check; asserted by the test harness on every integration run                                           |
-| Cross-tenant `SELECT`/`INSERT`/`UPDATE`/`DELETE` blocked per tenant table                    | Adversarial cross-tenant suite (P06.02.06), release-blocking                                                   |
-| No context returns zero rows, not all rows                                                   | Same suite: the no-GUC case is an explicit test                                                                |
-| No session-level `SET`, no string-built SQL                                                  | ESLint `no-restricted-syntax` (P02.02.04)                                                                      |
-| Only the platform module opens transactions or holds a raw handle                            | `only-platform-opens-transactions` in `.dependency-cruiser.cjs`, with fixtures                                 |
-| Real PostgreSQL for every isolation test                                                     | The harness refuses a superuser connection; embedded Postgres bypasses RLS silently                            |
+| Enforcement                                                                                                                                  | Where                                                                                                                      |
+| -------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Every `organisation_id` table has RLS enabled **and** forced, with policies for all commands                                                 | `scripts/check-rls-catalog.ts` in CI (P06.02.04); the reserved job already fails if the script appears unwired             |
+| `moin_app` has no `BYPASSRLS` and owns no tables                                                                                             | Catalog check; asserted by the test harness on every integration run                                                       |
+| `moin_identity` executes exactly the six session functions, holds no table privilege, membership or object; `moin_app` executes none of them | Catalog check (`identity-role-*`, exact `executeGrantees`); `identity-store.integration.test.ts`; migration 0012 assertion |
+| The identity credential reaches only `api`                                                                                                   | Configuration loader (`IDENTITY_DATABASE_URL` refused for other roles); `identity-is-api-only` boundary rule               |
+| Cross-tenant `SELECT`/`INSERT`/`UPDATE`/`DELETE` blocked per tenant table                                                                    | Adversarial cross-tenant suite (P06.02.06), release-blocking                                                               |
+| No context returns zero rows, not all rows                                                                                                   | Same suite: the no-GUC case is an explicit test                                                                            |
+| No session-level `SET`, no string-built SQL                                                                                                  | ESLint `no-restricted-syntax` (P02.02.04)                                                                                  |
+| Only the platform module opens transactions or holds a raw handle                                                                            | `only-platform-opens-transactions` in `.dependency-cruiser.cjs`, with fixtures                                             |
+| Real PostgreSQL for every isolation test                                                                                                     | The harness refuses a superuser connection; embedded Postgres bypasses RLS silently                                        |

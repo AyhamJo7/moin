@@ -45,6 +45,7 @@ const DEFINER_ALLOWLIST = join(REPO_ROOT, 'docs', 'architecture', 'security-defi
 /** Roles that serve traffic. None of them may ever see past a policy. */
 const RUNTIME_ROLES = [
   'moin_app',
+  'moin_identity',
   'moin_provisioner',
   'moin_dispatcher',
   'moin_support_ro',
@@ -118,6 +119,15 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.count_audit_chains': 'e3cd033e0ea860c723977f7c9e28068a',
   'app.audit_chain_high_water': '0af3ae3c87f468ecd845b318be7efb52',
   'app.provision_tenant': '187d4a4589e54a39cdadc6f3726cce26',
+  // Sign-in and sessions (P06.06.01/.02): the trigger that fixes a session's lifetime, and the
+  // six functions that are the runtime role's only access to users, auth_transactions and sessions.
+  'app.reject_session_rewrite': '1b7209a5119fd835537b390fcbd558e0',
+  'app.begin_sign_in': '46d951fb285c7fe09aac5cdabbc24aa3',
+  'app.consume_sign_in': '65c3f6a7df85974ff5e8aa9854c4d48d',
+  'app.begin_session': '23034ecb67b830beaaed19822118456a',
+  'app.rotate_session': 'fe4a2f4e30221e87d1249a425838a102',
+  'app.resolve_session': 'cfab5a739c28a8e8f99b664803a5412b',
+  'app.revoke_session': 'a4a30b649c5abf56fab3563d20576aa8',
 };
 
 /** Reviewed QG-09 contract. Documentation registration alone cannot change privileges. */
@@ -168,6 +178,42 @@ const APPROVED_DEFINERS: Readonly<
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
     executeGrantees: ['moin_app'],
+  },
+  'app.begin_sign_in': {
+    arguments: 'bytea, bytea, bytea, bytea, text, text',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: ['moin_identity'],
+  },
+  'app.consume_sign_in': {
+    arguments: 'bytea, bytea',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: ['moin_identity'],
+  },
+  'app.begin_session': {
+    arguments: 'text, bytea, uuid, bytea, text, bytea',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: ['moin_identity'],
+  },
+  'app.rotate_session': {
+    arguments: 'bytea, bytea, uuid, text',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: ['moin_identity'],
+  },
+  'app.resolve_session': {
+    arguments: 'bytea',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: ['moin_identity'],
+  },
+  'app.revoke_session': {
+    arguments: 'bytea',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: ['moin_identity'],
   },
 };
 
@@ -365,6 +411,206 @@ const REGISTRY_TRIGGER = {
 } as const;
 
 const ROLE_QUERY = `SELECT rolname::text, rolbypassrls, rolsuper FROM pg_roles WHERE rolname = ANY($1)`;
+
+/**
+ * The sign-in and session functions, and the one role that may execute them (P06.06, ADR-0003).
+ *
+ * `moin_identity` is the api task's second pool. It exists so that `moin_app` — which voice and
+ * worker hold too — can execute none of these: a session function reachable from the voice role is
+ * a session a compromised voice process could mint (QG-09 finding I1). The role is useful only as
+ * long as it can do nothing else, so its whole ACL is asserted here rather than assumed. That
+ * `moin_app` executes none of the six follows from `APPROVED_DEFINERS`, whose grantee lists are exact.
+ */
+const IDENTITY_ROLE = 'moin_identity';
+const IDENTITY_FUNCTIONS: readonly string[] = [
+  'app.begin_session',
+  'app.begin_sign_in',
+  'app.consume_sign_in',
+  'app.resolve_session',
+  'app.revoke_session',
+  'app.rotate_session',
+];
+
+// Every schema but PostgreSQL's own (catalog, information schema, toast and temporary schemas) is
+// checked, so a grant in a schema added later cannot hide.
+const IDENTITY_ROLE_QUERY = `
+  SELECT r.rolsuper, r.rolbypassrls, r.rolcreaterole, r.rolcreatedb, r.rolreplication,
+         (SELECT count(*) FROM pg_auth_members m WHERE m.member = r.oid)::int AS member_of,
+         -- PostgreSQL 16+ records an ADMIN-only grant to the CREATEROLE role that created this one
+         -- (the RDS master user). ADMIN still lets its holder grant the role onward, itself included,
+         -- so the row is tolerated only when the holder is exactly that: CREATEROLE, not one of ours,
+         -- and reachable from none of our runtime roles. Any other member is a finding.
+         (SELECT count(*) FROM pg_auth_members m JOIN pg_roles h ON h.oid = m.member
+          WHERE m.roleid = r.oid
+            AND NOT (m.admin_option AND NOT m.inherit_option AND NOT m.set_option
+                     AND h.rolcreaterole AND h.rolname NOT LIKE 'moin\\_%'
+                     AND NOT EXISTS (SELECT 1 FROM pg_roles rr
+                                     WHERE rr.rolname = ANY($2) AND pg_has_role(rr.oid, h.oid, 'MEMBER'))))::int
+           AS usable_members,
+         (SELECT count(*) FROM pg_class c WHERE c.relowner = r.oid)::int
+           + (SELECT count(*) FROM pg_proc p WHERE p.proowner = r.oid)::int
+           + (SELECT count(*) FROM pg_namespace n WHERE n.nspowner = r.oid)::int
+           + (SELECT count(*) FROM pg_type t WHERE t.typowner = r.oid)::int
+           + (SELECT count(*) FROM pg_database d WHERE d.datdba = r.oid)::int
+           + (SELECT count(*) FROM pg_largeobject_metadata l WHERE l.lomowner = r.oid)::int AS owned,
+         has_database_privilege(r.oid, current_database(), 'TEMPORARY') AS can_create_temporary,
+         -- CREATE on the database is CREATE SCHEMA, after which the role owns what it makes.
+         has_database_privilege(r.oid, current_database(), 'CREATE') AS can_create_schema,
+         -- Every other database it could open a session in. Everything here is checked in this
+         -- database only, so a second one would be an unchecked place to create objects. PUBLIC
+         -- holds CONNECT on every database by default; provisioning revokes it.
+         COALESCE((
+           SELECT array_agg(d.datname::text ORDER BY d.datname) FROM pg_database d
+           WHERE d.datallowconn AND d.datname NOT IN (current_database(), 'moin')
+             AND d.datname NOT LIKE 'moin_t_%'
+             AND has_database_privilege(r.oid, d.oid, 'CONNECT')
+         ), '{}'::text[]) AS other_databases,
+         -- Creating a large object needs no privilege beyond EXECUTE on these, which PUBLIC holds
+         -- by default; provisioning revokes it.
+         (has_function_privilege(r.oid, 'pg_catalog.lo_create(oid)', 'EXECUTE')
+          OR has_function_privilege(r.oid, 'pg_catalog.lo_creat(integer)', 'EXECUTE')
+          OR has_function_privilege(r.oid, 'pg_catalog.lo_from_bytea(oid, bytea)', 'EXECUTE'))
+           AS can_create_large_objects,
+         COALESCE((
+           SELECT array_agg(n.nspname::text ORDER BY n.nspname) FROM pg_namespace n
+           WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg\\_toast%' AND n.nspname NOT LIKE 'pg\\_temp\\_%'
+             AND has_schema_privilege(r.oid, n.oid, 'CREATE')
+         ), '{}'::text[]) AS creatable_schemas,
+         COALESCE((
+           SELECT array_agg(
+             json_build_object(
+               'relation', n.nspname || '.' || c.relname,
+               'schema', n.nspname::text,
+               'name', c.relname::text,
+               'kind', c.relkind::text,
+               'has_write', (
+                 has_table_privilege(r.oid, c.oid, 'INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN')
+                 OR (c.relkind <> 'S' AND has_any_column_privilege(r.oid, c.oid, 'INSERT, UPDATE, REFERENCES'))
+                 OR (c.relkind = 'S' AND has_sequence_privilege(r.oid, c.oid, 'USAGE, SELECT, UPDATE'))
+               ),
+               'extension', (
+                 SELECT e.extname::text FROM pg_depend dep JOIN pg_extension e ON e.oid = dep.refobjid
+                 WHERE dep.classid = 'pg_class'::regclass AND dep.objid = c.oid AND dep.deptype = 'e'
+                 LIMIT 1
+               ),
+               -- Transitive closure over view dependencies: a view that reaches a sensitive
+               -- relation through any number of intermediate views still reaches it. One pg_rewrite
+               -- join sees only direct deps; the recursion below walks the whole chain.
+               'dependencies', COALESCE((
+                 WITH RECURSIVE chain(obj) AS (
+                   SELECT d.refobjid
+                   FROM pg_depend d
+                   JOIN pg_rewrite rw ON rw.oid = d.objid
+                   WHERE rw.ev_class = c.oid AND d.classid = 'pg_rewrite'::regclass
+                     AND d.refclassid = 'pg_class'::regclass AND d.refobjid <> c.oid
+                   UNION
+                   SELECT d.refobjid
+                   FROM pg_depend d
+                   JOIN pg_rewrite rw ON rw.oid = d.objid
+                   JOIN chain ON chain.obj = rw.ev_class
+                   WHERE d.classid = 'pg_rewrite'::regclass
+                     AND d.refclassid = 'pg_class'::regclass AND d.refobjid <> c.oid
+                 )
+                 SELECT array_agg(DISTINCT dn.nspname || '.' || dc.relname)
+                 FROM chain
+                 JOIN pg_class dc ON dc.oid = chain.obj
+                 JOIN pg_namespace dn ON dn.oid = dc.relnamespace
+                 WHERE dn.nspname NOT IN ('pg_catalog', 'information_schema')
+               ), '{}'::text[])
+             )::text
+             ORDER BY n.nspname || '.' || c.relname
+           )
+           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+           WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg\\_toast%' AND n.nspname NOT LIKE 'pg\\_temp\\_%'
+             AND c.relkind IN ('r', 'v', 'm', 'p', 'f', 'S')
+             AND (has_table_privilege(r.oid, c.oid, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN')
+                  OR (c.relkind <> 'S' AND has_any_column_privilege(r.oid, c.oid, 'SELECT, INSERT, UPDATE, REFERENCES'))
+                  OR (c.relkind = 'S' AND has_sequence_privilege(r.oid, c.oid, 'USAGE, SELECT, UPDATE')))
+         ), '{}') AS table_privileges,
+         COALESCE((
+           SELECT array_agg(DISTINCT n.nspname || '.' || p.proname ORDER BY n.nspname || '.' || p.proname)
+           FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+           WHERE p.prosecdef AND has_function_privilege(r.oid, p.oid, 'EXECUTE')
+         ), '{}') AS executable_definers,
+         COALESCE((
+           SELECT array_agg(DISTINCT n.nspname || '.' || p.proname ORDER BY n.nspname || '.' || p.proname)
+           FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace,
+                aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a
+           WHERE a.grantee = r.oid
+         ), '{}') AS granted_functions,
+         (SELECT count(*) FROM pg_proc p, aclexplode(p.proacl) a
+          WHERE a.grantee = r.oid AND a.is_grantable)::int
+           + (SELECT count(*) FROM pg_class c, aclexplode(c.relacl) a
+              WHERE a.grantee = r.oid AND a.is_grantable)::int AS grant_options
+  FROM pg_roles r WHERE r.rolname = $1
+`;
+
+interface IdentityRoleRow {
+  readonly rolsuper: boolean;
+  readonly rolbypassrls: boolean;
+  readonly rolcreaterole: boolean;
+  readonly rolcreatedb: boolean;
+  readonly rolreplication: boolean;
+  readonly member_of: number;
+  readonly usable_members: number;
+  readonly owned: number;
+  readonly can_create_temporary: boolean;
+  readonly can_create_schema: boolean;
+  readonly other_databases: string[];
+  readonly can_create_large_objects: boolean;
+  readonly creatable_schemas: string[];
+  readonly table_privileges: string[];
+  /** Every SECURITY DEFINER function it can execute, by any route (explicit grant or PUBLIC). */
+  readonly executable_definers: string[];
+  /** Every function granted to it by name. */
+  readonly granted_functions: string[];
+  readonly grant_options: number;
+}
+
+/**
+ * The tables only the session functions may touch. No runtime role — `moin_identity` included —
+ * may hold a table or column privilege on them: a direct INSERT into `sessions` is a minted
+ * session.
+ */
+const SESSION_TABLES: readonly string[] = ['auth_transactions', 'sessions', 'users'];
+
+const SESSION_TABLE_ACCESS_QUERY = `
+  SELECT r.rolname::text AS role, c.relname::text AS table_name
+  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace, pg_roles r
+  WHERE n.nspname = 'public' AND c.relname = ANY($1) AND r.rolname = ANY($2)
+    AND (has_table_privilege(r.oid, c.oid, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN')
+         OR has_any_column_privilege(r.oid, c.oid, 'SELECT, INSERT, UPDATE, REFERENCES'))
+  ORDER BY 1, 2
+`;
+
+/** Effective EXECUTE, by any route — grant, PUBLIC or membership — on the six, per runtime role. */
+const SESSION_FUNCTION_REACH_QUERY = `
+  SELECT r.rolname::text AS role, n.nspname || '.' || p.proname AS function_name
+  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace, pg_roles r
+  WHERE n.nspname || '.' || p.proname = ANY($1) AND r.rolname = ANY($2)
+    AND has_function_privilege(r.oid, p.oid, 'EXECUTE')
+  ORDER BY 1, 2
+`;
+
+/** Our roles that must not reach the identity role, or the owner of the session functions. */
+const REACHING_ROLES: readonly string[] = [...RUNTIME_ROLES, 'moin_readonly'];
+
+/**
+ * Membership of any kind — INHERIT, SET or ADMIN, direct or through another role — in the identity
+ * role or in the owner of a session function. `has_function_privilege` follows inherited
+ * membership only; a role that can `SET ROLE` to the owner, or grant itself the identity role, can
+ * still execute the six.
+ */
+const SESSION_ROLE_REACH_QUERY = `
+  SELECT r.rolname::text AS role, t.rolname::text AS target
+  FROM pg_roles r, pg_roles t
+  WHERE r.rolname = ANY($1) AND r.rolname <> $3
+    AND (t.rolname = $3 OR t.oid IN (
+      SELECT p.proowner FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname || '.' || p.proname = ANY($2)))
+    AND pg_has_role(r.oid, t.oid, 'MEMBER')
+  ORDER BY 1, 2
+`;
 
 export async function inspect(
   url: string,
@@ -639,8 +885,236 @@ export async function inspect(
         });
       }
     }
+
+    findings.push(...(await inspectIdentityRole(pool)), ...(await inspectSessionBoundary(pool)));
   } finally {
     await pool.end();
+  }
+  return findings;
+}
+
+export interface ReviewedExtensionView {
+  readonly schema: string;
+  readonly name: string;
+  readonly extension: string;
+}
+
+/**
+ * Reviewed extension views that moin_identity is permitted to read.
+ * Default is zero: moin_identity needs no direct relation access of any kind.
+ */
+export const REVIEWED_EXTENSION_VIEWS: readonly ReviewedExtensionView[] = [];
+
+/**
+ * Relations that must never be reachable, directly or through any depth of view nesting.
+ * Fully qualified `schema.name`: a bare table name would collide across schemas in either
+ * direction (false pass on `evil.sessions`, false alarm on an unrelated `sessions` elsewhere).
+ */
+export const SENSITIVE_RELATIONS: ReadonlySet<string> = new Set([
+  'public.sessions',
+  'public.auth_transactions',
+  'public.users',
+  'public.organisations',
+  'public.locations',
+  'public.audit_events',
+  'public.audit_heads',
+  'public.audit_chain_registry',
+  'public.provisioning_requests',
+]);
+
+interface RelationPrivilegeInfo {
+  readonly relation: string;
+  readonly schema: string;
+  readonly name: string;
+  readonly kind: string;
+  readonly has_write: boolean;
+  readonly extension: string | null;
+  readonly dependencies: readonly string[];
+}
+
+/**
+ * The whole ACL of the identity role. Exported with the role as a parameter so the membership rule
+ * can be exercised on throwaway roles: membership is cluster-wide, so it is never mutated on the
+ * shared `moin_identity` in a test.
+ */
+export async function inspectIdentityRole(
+  pool: ReturnType<typeof createPool>,
+  role: string = IDENTITY_ROLE,
+  options?: { readonly allowedExtensionViews?: readonly ReviewedExtensionView[] },
+): Promise<Finding[]> {
+  const findings: Finding[] = [];
+  const row = (await pool.query<IdentityRoleRow>(IDENTITY_ROLE_QUERY, [role, REACHING_ROLES]))
+    .rows[0];
+  if (row === undefined) {
+    return [
+      {
+        rule: 'identity-role-missing',
+        subject: role,
+        detail: 'the role that alone may execute the session functions does not exist.',
+      },
+    ];
+  }
+  const push = (rule: string, detail: string): void => {
+    findings.push({ rule, subject: role, detail });
+  };
+  if (
+    row.rolsuper ||
+    row.rolbypassrls ||
+    row.rolcreaterole ||
+    row.rolcreatedb ||
+    row.rolreplication
+  ) {
+    push(
+      'identity-role-privileged',
+      'has a role attribute (SUPERUSER, BYPASSRLS, CREATEROLE, CREATEDB or REPLICATION).',
+    );
+  }
+  if (row.member_of > 0 || row.usable_members > 0) {
+    push(
+      'identity-role-membership',
+      'is a member of a role, or has a member other than an ADMIN-only grant to the CREATEROLE role that created it (not one of ours, reachable from none of our runtime roles): either extends or shares what it may do.',
+    );
+  }
+  if (row.owned > 0) {
+    push(
+      'identity-role-owns-objects',
+      'owns a table, function, type, schema, database or large object; an owner holds every privilege on what it owns.',
+    );
+  }
+  if (row.can_create_large_objects) {
+    push(
+      'identity-role-large-object',
+      'may create large objects (lo_create, lo_creat, lo_from_bytea); it may create nothing.',
+    );
+  }
+  if (row.can_create_temporary) {
+    push(
+      'identity-role-temporary',
+      'may create temporary objects in this database; it may create nothing.',
+    );
+  }
+  if (row.can_create_schema) {
+    push(
+      'identity-role-database-create',
+      'holds CREATE on this database, so it may create a schema and own what it puts there.',
+    );
+  }
+  if (row.other_databases.length > 0) {
+    push(
+      'identity-role-other-database',
+      `may connect to ${row.other_databases.join(', ')}; it may connect to this database alone, where its privileges are checked.`,
+    );
+  }
+  if (row.creatable_schemas.length > 0) {
+    push(
+      'identity-role-schema-create',
+      `may create objects in ${row.creatable_schemas.join(', ')}.`,
+    );
+  }
+  const allowedViews = options?.allowedExtensionViews ?? REVIEWED_EXTENSION_VIEWS;
+  for (const raw of row.table_privileges) {
+    const rel = (
+      typeof raw === 'string' && raw.startsWith('{')
+        ? JSON.parse(raw)
+        : {
+            relation: raw,
+            schema: '',
+            name: raw,
+            kind: 'r',
+            has_write: true,
+            extension: null,
+            dependencies: [],
+          }
+    ) as RelationPrivilegeInfo;
+    const isAllowlisted = allowedViews.some(
+      (a) =>
+        a.schema === rel.schema &&
+        a.name === rel.name &&
+        a.extension === rel.extension &&
+        rel.kind === 'v',
+    );
+    if (!isAllowlisted) {
+      push(
+        'identity-role-table-privilege',
+        `holds a table or column privilege on ${rel.relation}; it may reach data only through the session functions.`,
+      );
+      continue;
+    }
+    if (rel.has_write) {
+      push(
+        'identity-role-table-privilege',
+        `holds a write privilege on allowlisted extension view ${rel.relation}; extension views must be strictly read-only.`,
+      );
+    }
+    for (const dep of rel.dependencies) {
+      if (SENSITIVE_RELATIONS.has(dep)) {
+        push(
+          'identity-role-table-privilege',
+          `extension view ${rel.relation} depends on sensitive relation ${dep}; forbidden.`,
+        );
+      }
+    }
+  }
+  if (row.grant_options > 0) {
+    push(
+      'identity-role-grant-option',
+      'holds a privilege WITH GRANT OPTION, so it could hand the session functions to another role.',
+    );
+  }
+  // Invoker functions any role may run (extension helpers, `app.current_org`) execute with the
+  // caller's own privileges, so they give this role nothing. What could give it something is a
+  // definer function, or a grant by name: both must be exactly the six.
+  for (const [kind, functions] of [
+    ['SECURITY DEFINER functions it can execute', row.executable_definers],
+    ['functions granted to it', row.granted_functions],
+  ] as const) {
+    if (functions.join(',') !== IDENTITY_FUNCTIONS.join(',')) {
+      push(
+        'identity-role-unexpected-execute',
+        `${kind}: ${functions.join(', ') || 'none'}; must be exactly ${IDENTITY_FUNCTIONS.join(', ')}.`,
+      );
+    }
+  }
+  return findings;
+}
+
+/** No other runtime role reaches the session functions or tables. */
+async function inspectSessionBoundary(pool: ReturnType<typeof createPool>): Promise<Finding[]> {
+  const findings: Finding[] = [];
+  const others = RUNTIME_ROLES.filter((role) => role !== IDENTITY_ROLE);
+  const reach = await pool.query<{ role: string; function_name: string }>(
+    SESSION_FUNCTION_REACH_QUERY,
+    [IDENTITY_FUNCTIONS, others],
+  );
+  for (const row of reach.rows) {
+    findings.push({
+      rule: 'session-function-reachable',
+      subject: row.function_name,
+      detail: `${row.role} can execute it — by grant, PUBLIC or membership; only ${IDENTITY_ROLE} may.`,
+    });
+  }
+  const reachable = await pool.query<{ role: string; target: string }>(SESSION_ROLE_REACH_QUERY, [
+    REACHING_ROLES,
+    IDENTITY_FUNCTIONS,
+    IDENTITY_ROLE,
+  ]);
+  for (const row of reachable.rows) {
+    findings.push({
+      rule: 'session-role-reachable',
+      subject: row.target,
+      detail: `${row.role} is a member of ${row.target} (by INHERIT, SET or ADMIN, directly or not), so it could act with its privileges over the session functions.`,
+    });
+  }
+  const access = await pool.query<{ role: string; table_name: string }>(
+    SESSION_TABLE_ACCESS_QUERY,
+    [SESSION_TABLES, RUNTIME_ROLES],
+  );
+  for (const row of access.rows) {
+    findings.push({
+      rule: 'session-table-privilege',
+      subject: row.table_name,
+      detail: `${row.role} holds a table or column privilege on it; only the session functions may touch it.`,
+    });
   }
   return findings;
 }

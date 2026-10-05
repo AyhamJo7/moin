@@ -1,3 +1,4 @@
+import { evidenceTest } from '@moin/testing';
 import { describe, expect, it } from 'vitest';
 import { ConfigurationError, configKeys, describeConfig, loadConfig, secretKeys } from './env.ts';
 
@@ -226,5 +227,78 @@ describe('configuration loader (P02.03.03)', () => {
         expect(described[key], `${key} must be redacted`).toBe('[redacted]');
       }
     }
+  });
+});
+
+describe('the identity database credential (P06.06, ADR-0003)', () => {
+  const IDENTITY = 'postgres://moin_identity:s3cr3t-identity@localhost:5432/moin';
+
+  it('is accepted for the api role', () => {
+    expect(loadConfig({ ...VALID, IDENTITY_DATABASE_URL: IDENTITY }).IDENTITY_DATABASE_URL).toBe(
+      IDENTITY,
+    );
+  });
+
+  evidenceTest('is refused for voice, worker and migrate, so no other process can hold it', () => {
+    const voice = {
+      TWILIO_AUTH_TOKEN: 'local-development-only',
+      VOICE_PUBLIC_ORIGIN: 'https://voice.example.de',
+      VOICE_WEBSOCKET_ORIGIN: 'wss://voice.example.de',
+    };
+    for (const SERVER_ROLE of ['voice', 'worker', 'migrate']) {
+      let problems: readonly string[] = [];
+      try {
+        loadConfig({ ...VALID, ...voice, SERVER_ROLE, IDENTITY_DATABASE_URL: IDENTITY });
+      } catch (error) {
+        problems = error instanceof ConfigurationError ? error.problems : [];
+      }
+      expect(
+        problems.some((problem) => problem.startsWith('IDENTITY_DATABASE_URL:')),
+        SERVER_ROLE,
+      ).toBe(true);
+      expect(problems.join('\n')).not.toContain('s3cr3t-identity');
+    }
+  });
+
+  evidenceTest('must connect as moin_identity, never moin_app, the owner or the migrator', () => {
+    for (const user of ['moin_app', 'moin_owner', 'moin_migrator']) {
+      expect(
+        () =>
+          loadConfig({
+            ...VALID,
+            IDENTITY_DATABASE_URL: `postgres://${user}:x@localhost:5432/moin`,
+          }),
+        user,
+      ).toThrow(ConfigurationError);
+    }
+  });
+
+  evidenceTest('refuses query parameters that would connect as another role', () => {
+    for (const query of [
+      '?user=moin_migrator',
+      '?USER=moin_owner',
+      '?options=-c%20role%3Dmoin_owner',
+      '?role=moin_app',
+    ]) {
+      expect(
+        () =>
+          loadConfig({
+            ...VALID,
+            IDENTITY_DATABASE_URL: `postgres://moin_identity:x@localhost:5432/moin${query}`,
+          }),
+        query,
+      ).toThrow(ConfigurationError);
+    }
+    expect(
+      loadConfig({
+        ...VALID,
+        IDENTITY_DATABASE_URL: 'postgres://moin_identity:x@db:5432/moin?sslmode=verify-full',
+      }).IDENTITY_DATABASE_URL,
+    ).toContain('sslmode=verify-full');
+  });
+
+  it('is secret-bearing, so describeConfig never prints it', () => {
+    const described = describeConfig(loadConfig({ ...VALID, IDENTITY_DATABASE_URL: IDENTITY }));
+    expect(described['IDENTITY_DATABASE_URL']).toBe('[redacted]');
   });
 });

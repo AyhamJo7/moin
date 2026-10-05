@@ -1,6 +1,6 @@
 import { Module, type OnApplicationShutdown } from '@nestjs/common';
 import { Inject, Injectable } from '@nestjs/common';
-import { postgresReadiness, type ReadinessCheck } from '@moin/db';
+import { IDENTITY_POOL_ASSERTION, postgresReadiness, type ReadinessCheck } from '@moin/db';
 import { HealthController } from './health.controller.ts';
 import { READINESS_CHECKS, SHUTDOWN_STATE } from './health.tokens.ts';
 import { ShutdownState } from './shutdown-state.ts';
@@ -38,6 +38,17 @@ export class ReadinessLifecycle implements OnApplicationShutdown {
       inject: [CONFIG],
       useFactory: (config: Config): readonly ReadinessCheck[] => [
         postgresReadiness({ connectionString: config.DATABASE_URL }),
+        // The api's identity pool, when it has one: ready only if it really is moin_identity and
+        // moin_app really cannot execute the session functions (P06.06, ADR-0003).
+        ...(config.IDENTITY_DATABASE_URL === undefined
+          ? []
+          : [
+              postgresReadiness({
+                connectionString: config.IDENTITY_DATABASE_URL,
+                name: 'postgres-identity',
+                assertion: IDENTITY_POOL_ASSERTION,
+              }),
+            ]),
       ],
     },
     { provide: SHUTDOWN_STATE, useClass: ShutdownState },

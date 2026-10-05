@@ -1,0 +1,704 @@
+[
+  {
+    "id": "N1-nonce-check-removed",
+    "invariant": "P06.06.01: the ID token is bound to this sign-in's nonce",
+    "expected": "An ID token minted for another sign-in (a replayed or injected token) would be accepted for this one.",
+    "file": "apps/server/src/modules/identity-access/infrastructure/oidc-provider.ts",
+    "find": "    if (typeof nonce !== 'string' || !digestsEqual(digestOf(nonce), expectedNonceHash)) {\n",
+    "replace": "    if (typeof nonce !== 'string') {\n",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/infrastructure/oidc-provider.test.ts",
+      "fullName": "ID-token verification > refuses the wrong nonce"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "P1-pkce-downgraded-to-plain",
+    "invariant": "P06.06.01: PKCE uses S256 only",
+    "expected": "The authorization request would announce `plain`, so an intercepted code plus the challenge in the URL would be enough to redeem it.",
+    "file": "apps/server/src/modules/identity-access/infrastructure/oidc-provider.ts",
+    "find": "    url.searchParams.set('code_challenge_method', 'S256');\n",
+    "replace": "    url.searchParams.set('code_challenge_method', 'plain');\n",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/infrastructure/oidc-provider.test.ts",
+      "fullName": "the authorization request > asks for code + PKCE S256 with exactly the contract scopes"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "P2-pkce-verifier-dropped",
+    "invariant": "P06.06.01: the code is redeemed with its PKCE verifier",
+    "expected": "The exchange would omit the verifier; a provider that enforces PKCE refuses it, so sign-in breaks \u2014 and one that does not would redeem a stolen code.",
+    "file": "apps/server/src/modules/identity-access/infrastructure/oidc-provider.ts",
+    "find": "          code_verifier: codeVerifier,\n",
+    "replace": "",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/sign-in.integration.test.ts",
+      "fullName": "signing in > issues one opaque session cookie and redirects to the stored path"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "I1-wrong-issuer-accepted",
+    "invariant": "P06.06.01: `iss` must equal the configured issuer exactly",
+    "expected": "A token signed by a key the JWKS serves but naming another issuer would be accepted.",
+    "file": "apps/server/src/modules/identity-access/infrastructure/oidc-provider.ts",
+    "find": "        issuer: this.#config.issuer,\n",
+    "replace": "",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/infrastructure/oidc-provider.test.ts",
+      "fullName": "ID-token verification > refuses the wrong issuer"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "A1-wrong-audience-accepted",
+    "invariant": "P06.06.01: `aud` must name this client",
+    "expected": "A token issued to another client of the same provider (e.g. the fixture client) would sign a person in here.",
+    "file": "apps/server/src/modules/identity-access/infrastructure/oidc-provider.ts",
+    "find": "        audience: this.#config.clientId,\n",
+    "replace": "",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/infrastructure/oidc-provider.test.ts",
+      "fullName": "ID-token verification > refuses a token for another client"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "E1-provider-tokens-stored-plaintext",
+    "invariant": "P06.06.01: provider tokens are encrypted server-side",
+    "expected": "The ID, access and refresh tokens would be written to `sessions` in clear, readable by anyone with a backup or a dump.",
+    "file": "apps/server/src/modules/identity-access/application/sign-in.service.ts",
+    "find": "      providerTokensSealed: sealedTokens.sealed,\n",
+    "replace": "      providerTokensSealed: Buffer.from(JSON.stringify(tokens)),\n",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/sign-in.integration.test.ts",
+      "fullName": "signing in > stores only the token digest and sealed provider tokens"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "T1-raw-session-token-persisted",
+    "invariant": "P06.06.02: only the SHA-256 of the session token is stored",
+    "expected": "The session key column would hold the raw cookie value, so reading the table would yield usable sessions.",
+    "file": "apps/server/src/modules/identity-access/application/sign-in.service.ts",
+    "find": "      tokenHash: digestOf(sessionToken),\n",
+    "replace": "      tokenHash: Buffer.from(sessionToken, 'base64url'),\n",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/sign-in.integration.test.ts",
+      "fullName": "signing in > stores only the token digest and sealed provider tokens"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "R1-rotation-leaves-predecessor-valid",
+    "invariant": "P06.06.02: rotation invalidates the predecessor",
+    "expected": "After step-up or a privilege change the old token would keep working beside the new one.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "    SET revoked_at = v_now, revocation_reason = 'rotated',\n        provider_tokens_sealed = NULL, provider_tokens_key_id = NULL\n",
+    "replace": "    SET last_seen_at = s.last_seen_at\n",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "rotation > issues a successor and leaves the predecessor unusable"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "F1-relogin-leaves-old-session",
+    "invariant": "P06.06.02: login rotates \u2014 the session the browser held does not survive as a parallel login",
+    "expected": "Signing in again would leave the previous session valid and unnoticed.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "    SET revoked_at = v_now, revocation_reason = 'superseded',\n        provider_tokens_sealed = NULL, provider_tokens_key_id = NULL\n",
+    "replace": "      SET last_seen_at = s.last_seen_at\n",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/sign-in.integration.test.ts",
+      "fullName": "session fixation > signing in again revokes the session the browser held"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "X1-presented-cookie-becomes-session",
+    "invariant": "P06.06.07 precondition / P06.06.02: the post-login token is never caller-chosen",
+    "expected": "An attacker who plants `__Host-moin_sid=X` before the victim signs in would own the victim's session afterwards.",
+    "file": "apps/server/src/modules/identity-access/application/sign-in.service.ts",
+    "find": "    const sessionToken = randomSecret();\n",
+    "replace": "    const sessionToken = isSecretValue(presentedSession) ? presentedSession : randomSecret();\n",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/sign-in.integration.test.ts",
+      "fullName": "session fixation > an attacker-chosen cookie never becomes the session"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "U1-disabled-user-signs-in",
+    "invariant": "ADR-0005: a session is issued only to an active user",
+    "expected": "A disabled person who still authenticates at the provider would get a session.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "  WHERE u.cognito_sub = p_subject AND u.status = 'active'\n  FOR SHARE;\n",
+    "replace": "  WHERE u.cognito_sub = p_subject;\n",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "issuing a session > refuses a disabled user"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "U2-disable-racing-sign-in-mints-session",
+    "invariant": "ADR-0005: a disable racing sign-in mints no live session (user row locked FOR SHARE)",
+    "expected": "Disabling a user while their sign-in is in flight would mint a live 7-day session.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "  WHERE u.cognito_sub = p_subject AND u.status = 'active'\n  FOR SHARE;\n",
+    "replace": "  WHERE u.cognito_sub = p_subject AND u.status = 'active';\n",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "issuing a session > a disable racing sign-in mints no live session"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "U3-disable-racing-rotation-extends-session",
+    "invariant": "P06.06.02: a disable racing rotation extends nothing (user row locked FOR SHARE OF u)",
+    "expected": "Disabling a user while their rotation is in flight would issue a live successor.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "  -- Lock the owning user row (FOR SHARE conflicts with a concurrent disable's UPDATE), so a\n  -- disable racing this rotation serialises here rather than extending a session that should die.\n  PERFORM 1\n  FROM public.sessions s JOIN public.users u ON u.id = s.user_id\n  WHERE s.token_hash = p_token_hash FOR SHARE OF u;\n",
+    "replace": "  PERFORM 1;\n",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "rotation > a disable racing rotation extends nothing"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "C1-cookie-without-httponly",
+    "invariant": "Security Architecture: `__Host-moin_sid` is HttpOnly",
+    "expected": "Script on the page \u2014 any XSS \u2014 could read the session token.",
+    "file": "apps/server/src/modules/identity-access/http/cookies.ts",
+    "find": "const ATTRIBUTES = 'Path=/; HttpOnly; Secure; SameSite=Lax';\n",
+    "replace": "const ATTRIBUTES = 'Path=/; Secure; SameSite=Lax';\n",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/http/cookies.test.ts",
+      "fullName": "the session cookie > is exactly __Host-moin_sid, HttpOnly, Secure, SameSite=Lax, Path=/, no Domain"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "C2-cookie-without-secure",
+    "invariant": "Security Architecture: `__Host-moin_sid` is Secure",
+    "expected": "The token could travel over plain HTTP, and browsers would refuse the `__Host-` cookie anyway.",
+    "file": "apps/server/src/modules/identity-access/http/cookies.ts",
+    "find": "const ATTRIBUTES = 'Path=/; HttpOnly; Secure; SameSite=Lax';\n",
+    "replace": "const ATTRIBUTES = 'Path=/; HttpOnly; SameSite=Lax';\n",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/http/cookies.test.ts",
+      "fullName": "the session cookie > is exactly __Host-moin_sid, HttpOnly, Secure, SameSite=Lax, Path=/, no Domain"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "O1-external-return-target-accepted",
+    "invariant": "P06.06.01: redirect only to an approved internal destination",
+    "expected": "`returnTo=//evil.example` or a backslash variant would turn a successful sign-in into an open redirect.",
+    "file": "apps/server/src/modules/identity-access/application/sign-in.service.ts",
+    "find": "    const target = returnTo === undefined ? DEFAULT_RETURN_PATH : safeReturnPath(returnTo);\n",
+    "replace": "    const target = returnTo ?? DEFAULT_RETURN_PATH;\n",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/sign-in.integration.test.ts",
+      "fullName": "starting a sign-in > refuses an external return target and writes nothing"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "K1-local-key-in-deployed-environment",
+    "invariant": "ADR-0033 / INV-15: deployed environments never seal with an environment key",
+    "expected": "Staging or production would seal provider tokens with a key derived from an environment variable instead of refusing until KMS custody exists.",
+    "file": "apps/server/src/modules/identity-access/infrastructure/token-cipher.ts",
+    "find": "  if (config.NODE_ENV !== 'development' && config.NODE_ENV !== 'test') {\n",
+    "replace": "  if (config.NODE_ENV === 'development' && config.NODE_ENV === 'test') {\n",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/infrastructure/token-cipher.test.ts",
+      "fullName": "where the key comes from > refuses staging and production until the KMS key source exists"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "W1-revocation-keeps-provider-tokens",
+    "invariant": "P06.06.01 / data minimisation (QG-09 finding M4): sealed provider tokens do not outlive their session",
+    "expected": "A signed-out session would keep its sealed refresh token for the whole retention period.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "  SET revoked_at = v_now, revocation_reason = 'signed_out',\n      provider_tokens_sealed = NULL, provider_tokens_key_id = NULL\n",
+    "replace": "  SET revoked_at = v_now, revocation_reason = 'signed_out'\n",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "provider tokens at rest > are erased when the session is revoked"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "O2-return-path-normalised-into-auth-routes",
+    "invariant": "P06.06.01 (QG-09 finding L1/C3): the return path never leads back into the sign-in routes",
+    "expected": "`/api/./auth/login` would normalise into the login route, so a crafted link could loop a signed-in browser through sign-in after sign-in.",
+    "file": "apps/server/src/modules/identity-access/domain/return-path.ts",
+    "find": "  if (parsed.pathname.toLowerCase().startsWith(AUTH_ROUTES)) return undefined;\n",
+    "replace": "",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/domain/return-path.test.ts",
+      "fullName": "the post-sign-in return path > refuses paths that only normalise into the sign-in routes"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "G1-moin-app-executes-session-function",
+    "invariant": "ADR-0003 amendment / QG-09 I1: moin_app (voice, worker) executes no session function",
+    "expected": "Any voice or worker process could call begin_session for an active subject and obtain a valid seven-day session.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "GRANT EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea) TO moin_identity;\n",
+    "replace": "GRANT EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea) TO moin_identity, moin_app;\n",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "moin_app \u2014 the voice and worker role \u2014 and sessions > cannot mint, resolve, rotate or revoke a session by calling the functions"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "G2-identity-role-session-table-dml",
+    "invariant": "ADR-0003 amendment: moin_identity reaches sessions only through the reviewed functions",
+    "expected": "The api's identity credential could rewrite or read session rows directly, around every lifetime and revocation rule the functions enforce.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "GRANT EXECUTE ON FUNCTION app.revoke_session(bytea) TO moin_identity;\n",
+    "replace": "GRANT EXECUTE ON FUNCTION app.revoke_session(bytea) TO moin_identity;\nGRANT SELECT, INSERT, UPDATE, DELETE ON TABLE sessions TO moin_identity;\n",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "moin_identity \u2014 the api-only session role > has no table privilege anywhere, tenant table or session table"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "G3-identity-role-tenant-table",
+    "invariant": "ADR-0003 amendment / INV-01: moin_identity has no tenant-table access",
+    "expected": "The session credential would become a second, unreviewed path to tenant data.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "GRANT USAGE ON SCHEMA public, app TO moin_identity;\n",
+    "replace": "GRANT USAGE ON SCHEMA public, app TO moin_identity;\nGRANT SELECT ON TABLE organisations TO moin_identity;\n",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "moin_identity \u2014 the api-only session role > has no table privilege anywhere, tenant table or session table"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "G6-identity-role-other-definer",
+    "invariant": "ADR-0003 amendment: moin_identity executes exactly the six session functions",
+    "expected": "The session credential could drive another privileged function, here part of the audit sweep.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "GRANT EXECUTE ON FUNCTION app.revoke_session(bytea) TO moin_identity;\n",
+    "replace": "GRANT EXECUTE ON FUNCTION app.revoke_session(bytea) TO moin_identity;\nGRANT EXECUTE ON FUNCTION app.audit_chain_high_water() TO moin_identity;\n",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "moin_identity \u2014 the api-only session role > cannot execute any other privileged function"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "G4-identity-credential-in-voice",
+    "invariant": "ADR-0003 amendment: the identity credential reaches the api role only",
+    "expected": "A voice or worker process could be started holding the session credential, reopening I1 through configuration.",
+    "file": "apps/server/src/config/env.ts",
+    "find": "  if (value.IDENTITY_DATABASE_URL !== undefined && value.SERVER_ROLE !== 'api') {\n",
+    "replace": "  if (value.IDENTITY_DATABASE_URL !== undefined && value.SERVER_ROLE === 'never') {\n",
+    "killingTest": {
+      "file": "apps/server/src/config/env.test.ts",
+      "fullName": "the identity database credential (P06.06, ADR-0003) > is refused for voice, worker and migrate, so no other process can hold it"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "G5-identity-store-on-moin-app-pool",
+    "invariant": "ADR-0003 amendment: the api's identity store connects as moin_identity",
+    "expected": "Wiring the store to DATABASE_URL would only work if moin_app could execute the session functions, which is the grant I1 removed.",
+    "file": "apps/server/src/modules/platform/identity-pool.module.ts",
+    "find": "    connectionString: config.IDENTITY_DATABASE_URL,\n",
+    "replace": "    connectionString: config.DATABASE_URL,\n",
+    "killingTest": {
+      "file": "apps/server/src/modules/platform/identity-pool.integration.test.ts",
+      "fullName": "the identity store factory > refuses when identity pool connects to DATABASE_URL as moin_app"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "G7-sign-in-without-identity-pool",
+    "invariant": "ADR-0003 amendment: an api that signs people in must have the identity pool",
+    "expected": "Sign-in would be built with no store and fail per request instead of refusing to start.",
+    "file": "apps/server/src/modules/identity-access/identity-access.module.ts",
+    "find": "  if (store === null) {\n",
+    "replace": "  if (store === null && config.NODE_ENV === 'never') {\n",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/identity-access.module.test.ts",
+      "fullName": "building sign-in > refuses to sign anyone in without the moin_identity pool"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "G8-identity-boundary-rule-blind",
+    "invariant": "ADR-0003 amendment: the voice, worker and migrate graphs cannot reach the identity module",
+    "expected": "A future import from the voice module into identity-access would pass CI unnoticed.",
+    "file": ".dependency-cruiser.cjs",
+    "find": "        path: '^apps/server/src/(main-(voice|worker|migrate)\\\\.ts|roots/(voice|worker|migrate)-root\\\\.module\\\\.ts)$',\n",
+    "replace": "        path: '^apps/server/never/(main-(voice|worker|migrate)\\\\.ts|roots/(voice|worker|migrate)-root\\\\.module\\\\.ts)$',\n",
+    "killingTest": {
+      "file": "scripts/identity-boundary.test.ts",
+      "fullName": "identity is api-only > rejects the voice role reaching the identity module through another module"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "G9-catalog-ignores-identity-role",
+    "invariant": "ADR-0003 amendment: the catalog check asserts moin_identity's whole ACL",
+    "expected": "A grant to moin_identity on a session or tenant table would pass the release-blocking catalog check.",
+    "file": "scripts/check-rls-catalog.ts",
+    "find": "    findings.push(...(await inspectIdentityRole(pool)), ...(await inspectSessionBoundary(pool)));\n",
+    "replace": "    findings.push(...(await inspectSessionBoundary(pool)));\n",
+    "killingTest": {
+      "file": "scripts/check-rls-catalog.integration.test.ts",
+      "fullName": "the identity role boundary (P06.06, ADR-0003) > rejects moin_identity holding a table privilege, session or tenant"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "G10-sign-in-supersedes-only-presented-token",
+    "invariant": "P06.06.02 (QG-09 review): a sign-in leaves no live session of the family it supersedes",
+    "expected": "A rotation racing the sign-in would leave its successor alive beside the new session.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "    WHERE s.family_id = v_family AND s.user_id = v_user AND s.revoked_at IS NULL;",
+    "replace": "      WHERE s.token_hash = p_replaced_hash AND s.revoked_at IS NULL;\n",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "two callers holding the same row > a sign-in waiting behind a rotation of the session it supersedes revokes the successor too"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "G11-identity-membership-tolerance-too-broad",
+    "invariant": "ADR-0003 amendment: only the creator's ADMIN-only grant is tolerated",
+    "expected": "A member that inherits moin_identity or can SET ROLE to it would share its EXECUTE on the session functions, unflagged.",
+    "file": "scripts/check-rls-catalog.ts",
+    "find": "            AND NOT (m.admin_option AND NOT m.inherit_option AND NOT m.set_option\n",
+    "replace": "            AND NOT (m.admin_option\n",
+    "killingTest": {
+      "file": "scripts/check-rls-catalog.integration.test.ts",
+      "fullName": "the identity role boundary (P06.06, ADR-0003) > tolerates only an ADMIN-only grant to the role that created it (RDS, PostgreSQL 16+)"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "G12-temporary-left-on-public",
+    "invariant": "ADR-0003 amendment: moin_identity can create nothing",
+    "expected": "Every database would again grant TEMPORARY to PUBLIC, so the session role could create temporary tables and functions.",
+    "file": "packages/testing/src/pg/template.ts",
+    "find": "    await adminPool.query(`revoke connect, temporary on database \"${name}\" from public`);\n",
+    "replace": "",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "moin_identity \u2014 the api-only session role > is unprivileged, a member of nothing, and owns nothing"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "G13-catalog-ignores-session-boundary",
+    "invariant": "ADR-0003 amendment / QG-09 review: no other runtime role reaches the session functions or tables",
+    "expected": "A later GRANT INSERT ON sessions TO moin_app would re-open I1 and pass the release-blocking catalog check.",
+    "file": "scripts/check-rls-catalog.ts",
+    "find": "    findings.push(...(await inspectIdentityRole(pool)), ...(await inspectSessionBoundary(pool)));\n",
+    "replace": "    findings.push(...(await inspectIdentityRole(pool)));\n",
+    "killingTest": {
+      "file": "scripts/check-rls-catalog.integration.test.ts",
+      "fullName": "the identity role boundary (P06.06, ADR-0003) > rejects any other runtime role holding a privilege on a session table"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "G14-readiness-ignores-identity-assertion",
+    "invariant": "ADR-0003 amendment: /readyz fails unless the identity pool is moin_identity and moin_app is shut out",
+    "expected": "A wrong or rotated credential, or a moin_app grant, would pass readiness and fail every sign-in after rollout.",
+    "file": "packages/db/src/readiness.ts",
+    "find": "        if (result.rows[0]?.ok !== true) {\n",
+    "replace": "        if (result.rows.length < 0) {\n",
+    "killingTest": {
+      "file": "packages/db/src/readiness-identity.integration.test.ts",
+      "fullName": "the identity pool readiness probe > is not ready when the credential names another role"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "G15-identity-url-any-role",
+    "invariant": "ADR-0003 amendment: IDENTITY_DATABASE_URL names moin_identity",
+    "expected": "The api's identity pool could be pointed at the owner or migrator and run sign-in with every privilege.",
+    "file": "apps/server/src/config/env.ts",
+    "find": "    new URL(value.IDENTITY_DATABASE_URL).username !== 'moin_identity'\n",
+    "replace": "    new URL(value.IDENTITY_DATABASE_URL).username === 'never'\n",
+    "killingTest": {
+      "file": "apps/server/src/config/env.test.ts",
+      "fullName": "the identity database credential (P06.06, ADR-0003) > must connect as moin_identity, never moin_app, the owner or the migrator"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "G16-url-query-override",
+    "invariant": "ADR-0003 amendment / I2: IDENTITY_DATABASE_URL query parameters cannot override role",
+    "expected": "A query parameter like ?user=moin_migrator or ?options=-c%20role%3Dmoin_owner would connect as an elevated role, bypassing identity isolation.",
+    "file": "apps/server/src/config/env.ts",
+    "find": "      ['user', 'options', 'role'].includes(key.toLowerCase()),\n",
+    "replace": "      false,\n",
+    "killingTest": {
+      "file": "apps/server/src/config/env.test.ts",
+      "fullName": "the identity database credential (P06.06, ADR-0003) > refuses query parameters that would connect as another role"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "G18-startup-pool-verification-removed",
+    "invariant": "ADR-0003 amendment / startup assertion: identity pool is verified before exposing store",
+    "expected": "A misconfigured identity pool would be exposed to the server and fail only at runtime on the first sign-in.",
+    "file": "apps/server/src/modules/platform/identity-pool.module.ts",
+    "find": "  if (ok) return;\n",
+    "replace": "  if (true) return;\n",
+    "killingTest": {
+      "file": "apps/server/src/modules/platform/identity-pool.integration.test.ts",
+      "fullName": "verifying the identity pool before the store exists > refuses a credential for another role, without echoing it"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "G19-catalog-database-create-unflagged",
+    "invariant": "ADR-0003 amendment: moin_identity has no database-level CREATE privilege",
+    "expected": "moin_identity holding CREATE on the database would allow schema creation and object ownership, unflagged by catalog check.",
+    "file": "scripts/check-rls-catalog.ts",
+    "find": "  if (row.can_create_schema) {\n    push(\n      'identity-role-database-create',\n      'holds CREATE on this database, so it may create a schema and own what it puts there.',\n    );\n  }\n",
+    "replace": "",
+    "killingTest": {
+      "file": "scripts/check-rls-catalog.integration.test.ts",
+      "fullName": "the identity role boundary (P06.06, ADR-0003) > rejects moin_identity being able to create anything"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "G20-catalog-cross-database-connect-unflagged",
+    "invariant": "ADR-0003 amendment: moin_identity may connect to moin database alone",
+    "expected": "moin_identity holding CONNECT on another database would permit opening an unchecked session, unflagged by catalog check.",
+    "file": "scripts/check-rls-catalog.ts",
+    "find": "  if (row.other_databases.length > 0) {\n    push(\n      'identity-role-other-database',\n      `may connect to ${row.other_databases.join(', ')}; it may connect to this database alone, where its privileges are checked.`,\n    );\n  }\n",
+    "replace": "",
+    "killingTest": {
+      "file": "scripts/check-rls-catalog.integration.test.ts",
+      "fullName": "the identity role boundary (P06.06, ADR-0003) > rejects moin_identity being able to connect to another database"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "G21-extension-exemption-unrestricted",
+    "invariant": "ADR-0003 amendment: extension exemption is strictly limited to read-only views",
+    "expected": "An extension table with write privileges granted to PUBLIC would be ignored by the catalog check, violating the no-table-privilege rule.",
+    "file": "scripts/check-rls-catalog.ts",
+    "find": "    const isAllowlisted = allowedViews.some(\n      (a) =>\n        a.schema === rel.schema &&\n        a.name === rel.name &&\n        a.extension === rel.extension &&\n        rel.kind === 'v',\n    );\n",
+    "replace": "    const isAllowlisted =\n      rel.kind === 'v' ||\n      allowedViews.some(\n        (a) =>\n          a.schema === rel.schema &&\n          a.name === rel.name &&\n          a.extension === rel.extension &&\n          rel.kind === 'v',\n      );\n",
+    "killingTest": {
+      "file": "scripts/check-rls-catalog.integration.test.ts",
+      "fullName": "the identity role boundary (P06.06, ADR-0003) > an unreviewed extension view is never silently tolerated"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "G22-large-object-creators-left-on-public",
+    "invariant": "ADR-0003 amendment: large-object creation functions are revoked from PUBLIC",
+    "expected": "PUBLIC retaining lo_create/lo_creat/lo_from_bytea EXECUTE would allow moin_identity to create large objects in the database.",
+    "file": "packages/testing/src/pg/global-setup.ts",
+    "find": "    await template.query(\n      'revoke execute on function lo_create(oid), lo_creat(integer), lo_from_bytea(oid, bytea) from public',\n    );\n",
+    "replace": "",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "moin_identity \u2014 the api-only session role > is unprivileged, a member of nothing, and owns nothing"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "CLK1-resolve-idle-expiry-bypassed",
+    "invariant": "P06.06.02: authoritative DB time governs session resolution; idle-expired sessions cannot resolve",
+    "expected": "A session whose idle timeout expired in the database would be resolved if the idle expiry check is relaxed.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "  SELECT s.id, s.user_id, s.idle_expires_at, s.absolute_expires_at\n  FROM public.sessions s\n  JOIN public.users u ON u.id = s.user_id\n  WHERE s.token_hash = p_token_hash\n    AND s.revoked_at IS NULL\n    AND s.idle_expires_at > v_now\n    AND s.absolute_expires_at > v_now\n    AND u.status = 'active';\n",
+    "replace": "  SELECT s.id, s.user_id, s.idle_expires_at, s.absolute_expires_at\n  FROM public.sessions s\n  JOIN public.users u ON u.id = s.user_id\n  WHERE s.token_hash = p_token_hash\n    AND s.revoked_at IS NULL\n    AND s.absolute_expires_at > v_now\n    AND u.status = 'active';\n",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "temporal authorization and expiration (authoritative database clock) > idle expired 1 ms ago cannot resolve"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "CLK2-rotate-idle-expiry-bypassed",
+    "invariant": "P06.06.02: authoritative DB time governs session rotation; expired sessions cannot rotate",
+    "expected": "An expired session would be rotated and a new successor issued if rotation ignored idle expiry.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "  WITH predecessor AS (\n    SELECT s.token_hash, s.id, s.family_id, s.user_id, s.created_at, s.absolute_expires_at,\n           s.provider_tokens_sealed, s.provider_tokens_key_id\n    FROM public.sessions s\n    JOIN public.users u ON u.id = s.user_id\n    WHERE s.token_hash = p_token_hash\n      AND s.revoked_at IS NULL\n      AND s.idle_expires_at > v_now\n      AND s.absolute_expires_at > v_now\n      AND u.status = 'active'\n  )",
+    "replace": "  WITH predecessor AS (\n    SELECT s.token_hash, s.id, s.family_id, s.user_id, s.created_at, s.absolute_expires_at,\n           s.provider_tokens_sealed, s.provider_tokens_key_id\n    FROM public.sessions s\n    JOIN public.users u ON u.id = s.user_id\n    WHERE s.token_hash = p_token_hash\n      AND s.revoked_at IS NULL\n      AND s.absolute_expires_at > v_now\n      AND u.status = 'active'\n  )",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "temporal authorization and expiration (authoritative database clock) > expired session cannot rotate"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "CLK4-rotate-expiry-before-lock-only",
+    "invariant": "P06.06.02: session rotation rechecks authoritative DB time after acquiring family and row locks",
+    "expected": "A session expiring while waiting on a family lock would rotate if expiration is not rechecked post-lock.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "  -- Fresh DB clock obtained after acquiring the locks\n  v_now := clock_timestamp();\n",
+    "replace": "  -- Stale clock an hour behind the post-lock time: expiry evaluated against the wrong time\n  v_now := clock_timestamp() - interval '1 hour';\n",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "two callers holding the same row > waiting on a lock until expiration rechecks after lock and fails"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "CLK5-resolve-expired-session-updates-last-seen",
+    "invariant": "P06.06.02: activity on an expired session cannot update last_seen_at or extend idle expiry",
+    "expected": "An expired session would update last_seen_at and extend idle expiry if the UPDATE omitted the idle expiry condition.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "  UPDATE public.sessions s\n  SET last_seen_at = GREATEST(s.last_seen_at, v_now),\n      idle_expires_at = LEAST(v_now + interval '12 hours', s.absolute_expires_at)\n  FROM public.users u\n  WHERE s.token_hash = p_token_hash\n    AND s.revoked_at IS NULL\n    AND s.idle_expires_at > v_now\n",
+    "replace": "  UPDATE public.sessions s\n  SET last_seen_at = GREATEST(s.last_seen_at, v_now),\n      idle_expires_at = LEAST(v_now + interval '12 hours', s.absolute_expires_at)\n  FROM public.users u\n  WHERE s.token_hash = p_token_hash\n    AND s.revoked_at IS NULL\n",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "temporal authorization and expiration (authoritative database clock) > activity on expired session cannot move last_seen_at or extend idle expiry"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "D2-two-hop-extension-view-bypass",
+    "invariant": "ADR-0003 amendment: no extension view reaches a sensitive relation through intermediate views",
+    "expected": "An allowlisted extension view reaching sessions through an intermediate view would pass a direct-only check.",
+    "file": "scripts/check-rls-catalog.ts",
+    "find": "                   SELECT d.refobjid\n                   FROM pg_depend d\n                   JOIN pg_rewrite rw ON rw.oid = d.objid\n                   JOIN chain ON chain.obj = rw.ev_class\n                   WHERE d.classid = 'pg_rewrite'::regclass\n                     AND d.refclassid = 'pg_class'::regclass AND d.refobjid <> c.oid\n",
+    "replace": "                   SELECT d.refobjid\n                   FROM pg_depend d\n                   JOIN pg_rewrite rw ON rw.oid = d.objid\n                   JOIN chain ON chain.obj = rw.ev_class AND false\n                   WHERE d.classid = 'pg_rewrite'::regclass\n                     AND d.refclassid = 'pg_class'::regclass AND d.refobjid <> c.oid\n",
+    "killingTest": {
+      "file": "scripts/check-rls-catalog.integration.test.ts",
+      "fullName": "the identity role boundary (P06.06, ADR-0003) > rejects an extension view reaching a sensitive relation through an intermediate view"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "U4-disable-racing-resolve-leaks-read",
+    "invariant": "P06.06.02: a disable racing resolution blocks it (user row locked FOR SHARE OF u)",
+    "expected": "A disable committing mid-resolution would let one stale read through.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "  PERFORM 1 FROM public.sessions s WHERE s.token_hash = p_token_hash FOR UPDATE;\n\n  PERFORM 1\n  FROM public.sessions s JOIN public.users u ON u.id = s.user_id\n  WHERE s.token_hash = p_token_hash FOR SHARE OF u;\n\n  -- Fresh DB clock obtained only after all locks above are held.\n  v_now := clock_timestamp();",
+    "replace": "  PERFORM 1;",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "a session over time > a disable racing resolution blocks it, not one stale read"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "WAIT2-resolve-idle-recheck-removed",
+    "invariant": "P06.06.02: resolve rechecks idle expiry after the lock",
+    "expected": "An idle-expired session would resolve and extend its deadline after a lock wait.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "    AND s.idle_expires_at > v_now\n    AND s.absolute_expires_at > v_now\n    AND u.id = s.user_id\n    AND u.status = 'active'\n    AND LEAST(v_now + interval '12 hours', s.absolute_expires_at) - s.idle_expires_at\n        >= interval '60 seconds'\n  RETURNING s.id, s.user_id, s.idle_expires_at, s.absolute_expires_at;",
+    "replace": "    AND s.absolute_expires_at > v_now\n    AND u.id = s.user_id\n    AND u.status = 'active'\n    AND LEAST(v_now + interval '12 hours', s.absolute_expires_at) - s.idle_expires_at\n        >= interval '60 seconds'\n  RETURNING s.id, s.user_id, s.idle_expires_at, s.absolute_expires_at;",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "temporal authorization and expiration (authoritative database clock) > waiting on the session lock past expiry (RWAIT) > RWAIT1: idle expiry during the wait returns nothing and revives nothing"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "WAIT5-consume-clock-before-claim",
+    "invariant": "P06.06.01: consume reads the clock only after the transaction claim",
+    "expected": "A consume that reads the clock before winning the transaction row would return secret material for a transaction that expired during the wait.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "  DELETE FROM public.auth_transactions t\n  WHERE t.state_hash = p_state_hash\n  RETURNING t.binding_hash, t.nonce_hash, t.verifier_sealed, t.key_id, t.return_to, t.expires_at\n  INTO v_claimed_binding, v_claimed_nonce, v_claimed_verifier, v_claimed_key,\n       v_claimed_return, v_claimed_expires;\n  IF NOT FOUND THEN\n    RETURN;\n  END IF;\n\n  -- Fresh DB clock obtained only after the claim's lock wait completes.\n  v_now := clock_timestamp();",
+    "replace": "  -- Stale pre-claim clock: expiry evaluated against a time captured before the row lock.\n  v_now := clock_timestamp();\n\n  DELETE FROM public.auth_transactions t\n  WHERE t.state_hash = p_state_hash\n  RETURNING t.binding_hash, t.nonce_hash, t.verifier_sealed, t.key_id, t.return_to, t.expires_at\n  INTO v_claimed_binding, v_claimed_nonce, v_claimed_verifier, v_claimed_key,\n       v_claimed_return, v_claimed_expires;\n  IF NOT FOUND THEN\n    RETURN;\n  END IF;",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "a sign-in transaction > waiting on the transaction lock past expiry (CWAIT) > CWAIT1: expiry during the wait returns nothing and stays consumed"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "WAIT6-consume-returns-without-expiry-check",
+    "invariant": "P06.06.01: consume returns claimed material only when still usable",
+    "expected": "An expired or wrong-browser transaction would still return its nonce, verifier and return path after the claim.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "  IF v_claimed_binding = p_binding_hash AND v_claimed_expires > v_now THEN",
+    "replace": "  IF v_claimed_binding IS NOT NULL THEN",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "a sign-in transaction > waiting on the transaction lock past expiry (CWAIT) > CWAIT1: expiry during the wait returns nothing and stays consumed"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "S1-state-reusable",
+    "invariant": "P06.06.01: `state` is single-use",
+    "expected": "Consuming a sign-in would leave its row in place, so the same `state` could be presented again and complete a second sign-in.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "  DELETE FROM public.auth_transactions t\n  WHERE t.state_hash = p_state_hash\n  RETURNING t.binding_hash, t.nonce_hash, t.verifier_sealed, t.key_id, t.return_to, t.expires_at\n  INTO v_claimed_binding, v_claimed_nonce, v_claimed_verifier, v_claimed_key,\n       v_claimed_return, v_claimed_expires;",
+    "replace": "  SELECT t.binding_hash, t.nonce_hash, t.verifier_sealed, t.key_id, t.return_to, t.expires_at\n  INTO v_claimed_binding, v_claimed_nonce, v_claimed_verifier, v_claimed_key,\n       v_claimed_return, v_claimed_expires\n  FROM public.auth_transactions t\n  WHERE t.state_hash = p_state_hash;",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "a sign-in transaction > is consumed exactly once"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "S2-state-validation-bypassed",
+    "invariant": "P06.06.01: a callback completes only from the browser that started it, before expiry",
+    "expected": "Any browser holding a victim's `state` \u2014 the login-CSRF case \u2014 could complete the sign-in, at any time.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "  IF v_claimed_binding = p_binding_hash AND v_claimed_expires > v_now THEN",
+    "replace": "  IF v_claimed_binding IS NOT NULL THEN",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/sign-in.integration.test.ts",
+      "fullName": "a callback that must fail closed > another browser presenting a valid state"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "S3-expired-state-accepted",
+    "invariant": "P06.06.01: a pending sign-in expires after 10 minutes",
+    "expected": "A stale `state` from a forgotten tab would still complete a sign-in.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "  IF v_claimed_binding = p_binding_hash AND v_claimed_expires > v_now THEN",
+    "replace": "  IF v_claimed_binding = p_binding_hash THEN",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/sign-in.integration.test.ts",
+      "fullName": "a callback that must fail closed > expired state"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "CLK3-auth-transaction-expiry-bypassed",
+    "invariant": "P06.06.01: a pending sign-in expires after 10 minutes (DB clock)",
+    "expected": "An expired transaction would return its secrets after the claim.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "  IF v_claimed_binding = p_binding_hash AND v_claimed_expires > v_now THEN",
+    "replace": "  IF v_claimed_binding = p_binding_hash AND v_claimed_expires > v_claimed_expires THEN",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "a sign-in transaction > expires exactly 10 minutes after it starts"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "M1-cross-user-supersede-scoped",
+    "invariant": "P06.06.02: re-login supersedes only the authenticated user's family sessions",
+    "expected": "A presented token from another person's family would revoke the victim's live sessions on the attacker's login.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "    WHERE s.family_id = v_family AND s.user_id = v_user AND s.revoked_at IS NULL;",
+    "replace": "    WHERE s.family_id = v_family AND s.revoked_at IS NULL;",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "issuing a session > a presented token from another family revokes nothing"
+    },
+    "project": "integration"
+  }
+]

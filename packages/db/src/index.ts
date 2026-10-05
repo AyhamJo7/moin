@@ -5,7 +5,7 @@
 // `withTenant` is the only sanctioned way to reach tenant data, and `@moin/db/pool` is a separate
 // entry point so that a boundary rule can see — and forbid — anyone reaching around it.
 
-export { postgresReadiness } from './readiness.ts';
+export { postgresReadiness, IDENTITY_POOL_ASSERTION } from './readiness.ts';
 export {
   withTenant,
   withSystemWork,
@@ -31,3 +31,13 @@ export type {
   AuditVerificationReport,
   VerifyAuditChainsOptions,
 } from './audit-verification.ts';
+export { createIdentityStore } from './identity-store.ts';
+export type {
+  IdentityStore,
+  NewAuthTransaction,
+  ConsumedAuthTransaction,
+  NewSession,
+  SessionGrant,
+  ResolvedSession,
+  RotationReason,
+} from './identity-store.ts';
