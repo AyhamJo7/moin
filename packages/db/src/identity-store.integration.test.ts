@@ -1593,7 +1593,6 @@ describe('the request-context membership lock (MWAIT)', () => {
       } finally {
         gate.release();
         waiter.release();
-        await appGate.end();
       }
       // The deadline the seed wrote is still there: the blocked lookup refused it instead of
       // sliding it back to now + 12 h.
