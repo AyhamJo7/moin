@@ -341,6 +341,129 @@ describe('a sign-in transaction', () => {
 
   concurrentDuplicate();
 
+  describe('waiting on the transaction lock past expiry (CWAIT)', () => {
+    /** Hold the transaction row the way consume's DELETE does, so the consume provably waits. */
+    async function consumeAfterExpiryPasses(
+      tx: ReturnType<typeof transaction>,
+      makeExpired: (gate: PoolClient) => Promise<void>,
+    ): Promise<{ rowCount: number | null }> {
+      const gate = await admin.connect();
+      const waiter = await identity.connect();
+      try {
+        await gate.query('begin');
+        await gate.query('select 1 from auth_transactions where state_hash = $1 for update', [
+          tx.stateHash,
+        ]);
+
+        await waiter.query('begin');
+        const pending = waiter.query('select * from app.consume_sign_in($1::bytea, $2::bytea)', [
+          tx.stateHash,
+          tx.bindingHash,
+        ]);
+
+        const deadline = Date.now() + LOCK_WAIT_DEADLINE_MS;
+        let waiting = '0';
+        while (waiting !== '1' && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT_POLL_MS));
+          const result = await admin.query<{ n: string }>(
+            "select count(*)::text as n from pg_stat_activity where wait_event_type = 'Lock' and datname = $1",
+            [database.name],
+          );
+          waiting = result.rows[0]?.n ?? '0';
+        }
+        expect(waiting, 'consume waits on the transaction lock').toBe('1');
+
+        await makeExpired(gate);
+        await gate.query('commit');
+
+        const consumed = await pending;
+        await waiter.query('commit');
+        return { rowCount: consumed.rowCount };
+      } finally {
+        gate.release();
+        waiter.release();
+      }
+    }
+
+    evidenceTest('CWAIT1: expiry during the wait returns nothing and stays consumed', async () => {
+      const tx = transaction();
+      await store.beginAuthTransaction(tx);
+      const { rowCount } = await consumeAfterExpiryPasses(tx, (gate) =>
+        gate
+          .query(
+            `with t as (select clock_timestamp() - interval '11 minutes' as c)
+             update auth_transactions set created_at = t.c, expires_at = t.c + interval '10 minutes'
+             from t where state_hash = $1`,
+            [tx.stateHash],
+          )
+          .then(() => undefined),
+      );
+      expect(rowCount, 'consume after expiry returned 0 rows').toBe(0);
+      const left = await admin.query('select 1 from auth_transactions where state_hash = $1', [
+        tx.stateHash,
+      ]);
+      expect(left.rowCount, 'expired transaction stays consumed').toBe(0);
+      // A provider retry after the expired consume cannot resurrect it (CWAIT5).
+      expect(await store.consumeAuthTransaction(tx.stateHash, tx.bindingHash)).toBeUndefined();
+    });
+
+    evidenceTest('CWAIT3: a wrong browser waiting on the lock burns the transaction', async () => {
+      const tx = transaction();
+      await store.beginAuthTransaction(tx);
+      const gate = await admin.connect();
+      const waiter = await identity.connect();
+      try {
+        await gate.query('begin');
+        await gate.query('select 1 from auth_transactions where state_hash = $1 for update', [
+          tx.stateHash,
+        ]);
+
+        await waiter.query('begin');
+        const wrongBinding = hash();
+        const pending = waiter.query(
+          'select * from app.consume_sign_in($1::bytea, $2::bytea)',
+          [tx.stateHash, wrongBinding],
+        );
+
+        const deadline = Date.now() + LOCK_WAIT_DEADLINE_MS;
+        let waiting = '0';
+        while (waiting !== '1' && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT_POLL_MS));
+          const result = await admin.query<{ n: string }>(
+            "select count(*)::text as n from pg_stat_activity where wait_event_type = 'Lock' and datname = $1",
+            [database.name],
+          );
+          waiting = result.rows[0]?.n ?? '0';
+        }
+        expect(waiting, 'consume waits on the transaction lock').toBe('1');
+        await gate.query('commit');
+
+        const consumed = await pending;
+        await waiter.query('commit');
+        expect(consumed.rowCount, 'wrong-browser consume returned 0 rows').toBe(0);
+      } finally {
+        gate.release();
+        waiter.release();
+      }
+      // Single-use survives the wait: the right browser cannot use it afterwards.
+      expect(await store.consumeAuthTransaction(tx.stateHash, tx.bindingHash)).toBeUndefined();
+    });
+
+    evidenceTest('CWAIT4: concurrent duplicate consumes grant at most one', async () => {
+      const tx = transaction();
+      await store.beginAuthTransaction(tx);
+      const attempts = await Promise.all(
+        Array.from({ length: 8 }, () =>
+          identity.query('select * from app.consume_sign_in($1::bytea, $2::bytea)', [
+            tx.stateHash,
+            tx.bindingHash,
+          ]),
+        ),
+      );
+      expect(attempts.filter((attempt) => attempt.rowCount === 1)).toHaveLength(1);
+    });
+  });
+
   it('removes expired transactions when the next sign-in starts', async () => {
     const stale = transaction();
     await store.beginAuthTransaction(stale);
@@ -1104,6 +1227,161 @@ describe('temporal authorization and expiration (authoritative database clock)',
       expect(after.rows[0]?.idle_expires_at).toStrictEqual(before.rows[0]?.idle_expires_at);
     },
   );
+
+  describe('waiting on the session lock past expiry (RWAIT)', () => {
+    /** Hold the target session row so the resolve provably waits on it, then expire it. */
+    async function resolveAfterExpiryPasses(
+      personId: string,
+      tokenHash: Buffer,
+      expireSql: string,
+      expireParams: unknown[] = [],
+    ): Promise<{ rowCount: number | null }> {
+      const gate = await admin.connect();
+      const waiter = await identity.connect();
+      try {
+        await gate.query('begin');
+        await gate.query('select 1 from sessions where token_hash = $1 for update', [tokenHash]);
+
+        await waiter.query('begin');
+        const pending = waiter.query('select * from app.resolve_session($1::bytea)', [tokenHash]);
+
+        const deadline = Date.now() + LOCK_WAIT_DEADLINE_MS;
+        let waiting = '0';
+        while (waiting !== '1' && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT_POLL_MS));
+          const result = await admin.query<{ n: string }>(
+            "select count(*)::text as n from pg_stat_activity where wait_event_type = 'Lock' and datname = $1",
+            [database.name],
+          );
+          waiting = result.rows[0]?.n ?? '0';
+        }
+        expect(waiting, 'resolve waits on the session lock').toBe('1');
+
+        await gate.query(expireSql, [tokenHash, ...expireParams]);
+        await gate.query('commit');
+
+        const resolved = await pending;
+        await waiter.query('commit');
+
+        return { rowCount: resolved.rowCount };
+      } finally {
+        gate.release();
+        waiter.release();
+      }
+    }
+
+    evidenceTest('RWAIT1: idle expiry during the wait returns nothing and revives nothing', async () => {
+      const person = await user();
+      const { tokenHash } = await signIn(person.sub);
+      const { rowCount } = await resolveAfterExpiryPasses(
+        person.id,
+        tokenHash,
+        "update sessions set idle_expires_at = clock_timestamp() - interval '1 second' where token_hash = $1",
+      );
+      expect(rowCount, 'resolve after idle expiry returned 0 rows').toBe(0);
+      const after = await admin.query<{ idle: Date }>(
+        'select idle_expires_at as idle from sessions where token_hash = $1',
+        [tokenHash],
+      );
+      // The deadline the gate wrote is an already-expired timestamp — and it is still there:
+      // the blocked resolve refused it instead of extending it back to now + 12h.
+      expect(after.rows[0]?.idle?.getTime()).toBeLessThan(Date.now());
+    });
+
+    evidenceTest('RWAIT2: absolute expiry during the wait returns nothing', async () => {
+      // absolute_expires_at is immutable (the table guard rejects any rewrite), so the wait
+      // must outlast the real 7-day lifetime: seed a session created ~7 days ago whose absolute
+      // expiry lapses while resolve waits on its row lock.
+      const person = await user();
+      const tokenHash = hash();
+      const id = randomUUID();
+      await admin.query(
+        `with t as (select clock_timestamp() - interval '7 days' + interval '2 seconds' as created)
+         insert into sessions (
+           token_hash, id, family_id, user_id, rotation_reason,
+           created_at, last_seen_at, idle_expires_at, absolute_expires_at,
+           provider_tokens_sealed, provider_tokens_key_id
+         ) select
+           $1, $2, $2, $3, 'login',
+           t.created,
+           t.created,
+           t.created + interval '12 hours',
+           t.created + interval '7 days',
+           $4, 'test-v1'
+         from t`,
+        [tokenHash, id, person.id, sealed()],
+      );
+      const gate = await admin.connect();
+      const waiter = await identity.connect();
+      try {
+        await gate.query('begin');
+        await gate.query('select 1 from sessions where token_hash = $1 for update', [tokenHash]);
+
+        await waiter.query('begin');
+        const pending = waiter.query('select * from app.resolve_session($1::bytea)', [tokenHash]);
+
+        const deadline = Date.now() + LOCK_WAIT_DEADLINE_MS;
+        let waiting = '0';
+        while (waiting !== '1' && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT_POLL_MS));
+          const result = await admin.query<{ n: string }>(
+            "select count(*)::text as n from pg_stat_activity where wait_event_type = 'Lock' and datname = $1",
+            [database.name],
+          );
+          waiting = result.rows[0]?.n ?? '0';
+        }
+        expect(waiting, 'resolve waits on the session lock').toBe('1');
+
+        // Hold the lock until the real absolute expiry has provably passed on the DB clock.
+        await gate.query('select pg_sleep(2.5)');
+        await gate.query('commit');
+
+        const resolved = await pending;
+        await waiter.query('commit');
+        expect(resolved.rowCount, 'resolve after absolute expiry returned 0 rows').toBe(0);
+      } finally {
+        gate.release();
+        waiter.release();
+      }
+    });
+
+    evidenceTest('RWAIT3: a disable landing during the wait resolves nothing', async () => {
+      const person = await user();
+      const { tokenHash } = await signIn(person.sub);
+      const gate = await admin.connect();
+      const waiter = await identity.connect();
+      try {
+        await gate.query('begin');
+        await gate.query('select 1 from sessions where token_hash = $1 for update', [tokenHash]);
+
+        await waiter.query('begin');
+        const pending = waiter.query('select * from app.resolve_session($1::bytea)', [tokenHash]);
+
+        const deadline = Date.now() + LOCK_WAIT_DEADLINE_MS;
+        let waiting = '0';
+        while (waiting !== '1' && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT_POLL_MS));
+          const result = await admin.query<{ n: string }>(
+            "select count(*)::text as n from pg_stat_activity where wait_event_type = 'Lock' and datname = $1",
+            [database.name],
+          );
+          waiting = result.rows[0]?.n ?? '0';
+        }
+        expect(waiting, 'resolve waits on the session lock').toBe('1');
+
+        await gate.query("update sessions set revoked_at = null where token_hash = $1", [tokenHash]);
+        await gate.query('update users set status = $1 where id = $2', ['disabled', person.id]);
+        await gate.query('commit');
+
+        const resolved = await pending;
+        await waiter.query('commit');
+        expect(resolved.rowCount, 'resolve after disable returned 0 rows').toBe(0);
+      } finally {
+        gate.release();
+        waiter.release();
+      }
+    });
+  });
 
   evidenceTest('exact boundary semantics: expires_at <= authoritative_now is expired', async () => {
     const person = await user();

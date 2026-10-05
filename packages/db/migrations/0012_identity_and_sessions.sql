@@ -292,8 +292,10 @@ $$;
 -- ---------------------------------------------------------------------------------------------
 --
 -- The row is deleted on **any** presentation of its `state`, and only then are the binding and the
--- expiry compared. So a replay finds nothing, a wrong browser burns the transaction instead of
--- probing it, and an expired one is gone. A concurrent duplicate blocks on the row lock and, once
+-- expiry compared against the database clock read after the claim's lock wait completes. So a
+-- replay finds nothing, a wrong browser burns the transaction instead of probing it, an expired
+-- one is gone, and an expiry that lapses while this call waits on the transaction row is already
+-- expired when the check runs (CWAIT). A concurrent duplicate blocks on the row lock and, once
 -- the first commits, deletes nothing. Retry after a failed exchange means a fresh sign-in, which is
 -- the trade PLAN prefers over a replay window.
 CREATE FUNCTION app.consume_sign_in(
@@ -305,18 +307,40 @@ CREATE FUNCTION app.consume_sign_in(
   SET search_path = pg_catalog, public, app, pg_temp
 AS $$
 DECLARE
-  v_now timestamptz := clock_timestamp();
+  v_claimed_binding bytea;
+  v_claimed_nonce bytea;
+  v_claimed_verifier bytea;
+  v_claimed_key text;
+  v_claimed_return text;
+  v_claimed_expires timestamptz;
+  v_now timestamptz;
 BEGIN
-  RETURN QUERY
-  WITH claimed AS (
-    DELETE FROM public.auth_transactions t
-    WHERE t.state_hash = p_state_hash
-    RETURNING t.binding_hash, t.nonce_hash, t.verifier_sealed, t.key_id, t.return_to, t.expires_at
-  )
-  SELECT c.nonce_hash, c.verifier_sealed, c.key_id, c.return_to
-  FROM claimed c
-  WHERE c.binding_hash = p_binding_hash
-    AND c.expires_at > v_now;
+  -- The DELETE claims the transaction single-use: whichever caller wins the row lock deletes it
+  -- and every other presentation finds nothing. The clock is read only after that claim's lock
+  -- wait completes, so an expiry that lapses while this call blocks is already expired when the
+  -- validation below runs. The claimed material is returned only when it is still usable; an
+  -- expired or wrong-browser transaction stays consumed (burn-on-invalid-presentation) and
+  -- returns nothing — never its nonce, verifier, or return path.
+  DELETE FROM public.auth_transactions t
+  WHERE t.state_hash = p_state_hash
+  RETURNING t.binding_hash, t.nonce_hash, t.verifier_sealed, t.key_id, t.return_to, t.expires_at
+  INTO v_claimed_binding, v_claimed_nonce, v_claimed_verifier, v_claimed_key,
+       v_claimed_return, v_claimed_expires;
+  IF NOT FOUND THEN
+    RETURN;
+  END IF;
+
+  -- Fresh DB clock obtained only after the claim's lock wait completes.
+  v_now := clock_timestamp();
+
+  IF v_claimed_binding = p_binding_hash AND v_claimed_expires > v_now THEN
+    nonce_hash := v_claimed_nonce;
+    verifier_sealed := v_claimed_verifier;
+    key_id := v_claimed_key;
+    return_to := v_claimed_return;
+    RETURN NEXT;
+  END IF;
+  RETURN;
 END
 $$;
 
@@ -349,17 +373,20 @@ DECLARE
   v_user uuid;
   v_family uuid;
 BEGIN
-  -- Lock order is family first, then user, in both this function and `rotate_session`: a re-login
-  -- superseding a family while a rotation of the same family is in flight takes both locks in the
-  -- same order, so the two serialise instead of deadlocking (AB-BA). The user-row FOR SHARE
-  -- conflicts with a concurrent disable's UPDATE: either the disable commits first and v_user is
-  -- NULL, or this insert commits first. Either way no live session exists for a disabled user —
-  -- `resolve_session` re-checks `u.status = 'active'`, so a session minted ahead of a racing
-  -- disable stops resolving rather than living on.
+  -- Lock order is family first, then the presented session, then user, in this function,
+  -- `rotate_session` and `resolve_session`: a re-login superseding a family while a rotation or a
+  -- resolution of the same family is in flight takes all locks in the same order, so the callers
+  -- serialise instead of deadlocking (AB-BA). The presented-session lock (taken below, before
+  -- the user-row lock) means the supersede below runs only after that row's lock is held. The
+  -- user-row FOR SHARE conflicts with a concurrent disable's UPDATE: either the disable commits
+  -- first and v_user is NULL, or this insert commits first. Either way no live session exists
+  -- for a disabled user — `resolve_session` re-checks `u.status = 'active'`, so a session minted
+  -- ahead of a racing disable stops resolving rather than living on.
   IF p_replaced_hash IS NOT NULL THEN
     SELECT s.family_id INTO v_family FROM public.sessions s WHERE s.token_hash = p_replaced_hash;
     IF v_family IS NOT NULL THEN
       PERFORM 1 FROM public.sessions f WHERE f.id = v_family FOR UPDATE;
+      PERFORM 1 FROM public.sessions s WHERE s.token_hash = p_replaced_hash FOR UPDATE;
     END IF;
   END IF;
 
@@ -484,6 +511,13 @@ $$;
 -- Valid means: not revoked, idle and absolute expiry both in the future, user active. Activity
 -- moves the idle expiry to `now + 12 h`, capped by the absolute expiry, which never moves.
 --
+-- Lock order is family, then target session, then owning user — the same canonical order as
+-- `begin_session` and `rotate_session`, so resolution, rotation and re-login serialise instead
+-- of deadlocking. All three locks are held before the clock below is read, so an expiry or a
+-- disable that lands while this call waits on any of them is already visible when the recheck
+-- runs: the stale pre-lock timestamp this comment replaces could have revived an idle-expired
+-- session after a lock wait (RWAIT).
+--
 -- The write is skipped when it would advance the idle expiry by less than a minute, so a burst of
 -- requests is one write rather than one per request. That only ever makes the stored idle expiry
 -- *earlier* than the ideal, by under a minute — never later — so the 12-hour guarantee holds
@@ -498,14 +532,28 @@ CREATE FUNCTION app.resolve_session(
 AS $$
 DECLARE
   v_now timestamptz;
+  v_family uuid;
 BEGIN
-  -- Lock the owning user row (FOR SHARE conflicts with a concurrent disable's UPDATE), mirroring
-  -- `rotate_session`: without it a disable committing mid-call lets one stale resolution through.
+  -- Canonical lock order is family, then target session, then owning user: every function takes
+  -- locks in that order, so concurrent callers serialise instead of deadlocking (AB-BA). The
+  -- family lookup is a key read without a lock; the locks below are taken in canonical order.
+  -- The family-row lock pins the lineage while this call runs, the session-row lock means the
+  -- clock below is read only after the lock protecting the authorized state is held: an idle or
+  -- absolute expiry that lapses while this call waits on either lock is already expired when
+  -- the recheck below runs, and a disable racing this call serialises on the user row rather
+  -- than letting one stale resolution through.
+  SELECT s.family_id INTO v_family FROM public.sessions s WHERE s.token_hash = p_token_hash;
+  IF v_family IS NOT NULL THEN
+    PERFORM 1 FROM public.sessions f WHERE f.id = v_family FOR UPDATE;
+  END IF;
+
+  PERFORM 1 FROM public.sessions s WHERE s.token_hash = p_token_hash FOR UPDATE;
+
   PERFORM 1
   FROM public.sessions s JOIN public.users u ON u.id = s.user_id
   WHERE s.token_hash = p_token_hash FOR SHARE OF u;
 
-  -- Fresh DB clock obtained after acquiring the lock
+  -- Fresh DB clock obtained only after all locks above are held.
   v_now := clock_timestamp();
 
   RETURN QUERY
