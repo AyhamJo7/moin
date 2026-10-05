@@ -1,0 +1,26 @@
+# EV-P06-045: lock-wait expiry races closed; 54/54 sweep at 043cd28; three-green re-review set
+
+| Field | Value |
+|---|---|
+| Evidence ID | EV-P06-045 |
+| Item | P06.06.01, P06.06.02 |
+| Date (UTC) | 2026-10-05 |
+| Commit | `043cd28eaf745a6e2d7c54dea93beb5790e1e04e` (clean tree) |
+| Environment | local |
+| Command / procedure | `node scripts/mutation-sweep.ts --manifest docs/verification/session-mutation-manifest.json --report docs/verification/session-mutation-report.md` at exact HEAD `043cd28` (TEST_* database URLs + TEST_OIDC_ISSUER_URL exported, postgres + oidc up); every target proved equal to HEAD blob before/after; manifest 54 variants |
+| Result | PASS — 54/54 KILLED_ASSERTION, 0 survived, 0 infra failures, clean restoration |
+| Remediated HIGH 1 | `app.resolve_session` read `clock_timestamp()` before the session-row lock: a call blocked on the row past idle/absolute expiry authorized against the stale time and revived the session. Now locks family, then target session, then owning user before reading the clock, and rechecks revoked/idle/absolute/user-active after. Regressions RWAIT1 (real 2 s deadline outlasted on the DB clock), RWAIT2 (absolute), RWAIT3 (disable during wait); boundary `expires_at <= now` expired. |
+| Remediated HIGH 2 | `app.consume_sign_in` read the clock before the DELETE claim: a transaction expiring during the row-lock wait still returned nonce/verifier/return path. Now DELETE-claims first, reads the clock only after the claim's lock wait, returns material only when binding matches AND expiry is future; expired/invalid stays consumed (burn-on-invalid-presentation). Regressions CWAIT1 (expiry during wait, stays consumed, no retry resurrection), CWAIT3 (wrong browser during wait burns), CWAIT4 (8-way duplicate grants at most one). Preserves candidate `94a99ec -> independent BLOCK_MERGE` history; appends remediation, does not overwrite. |
+| Lock graph | Canonical order family, then session, then user in `begin_session`, `rotate_session`, `resolve_session`; `consume_sign_in` (single DELETE claim) and `revoke_session` (single-row UPDATE, documented intentionally lock-free) take no second lock. Wait graph acyclic; AB-BA deadlock regression plus family interleave tests pass. `begin_session` supersede scoped `AND s.user_id = v_user` (reviewer M1): a foreign-family presented token revokes nothing. |
+| Mutation note | Previous 51/51 at `bfac30d` superseded: manifest is now 54 variants (re-anchored S1/S2/S3/CLK3/U4/G10 to post-fix SQL, added WAIT2/WAIT5/WAIT6/M1; G17/WAIT1/WAIT3/WAIT4/WAIT7/WAIT8 kept as review-proven deterministic concurrency regressions outside the counted total). New full sweep measured fresh at `043cd28`, not relabelled. |
+| Security-reviewer | exact `043cd28eaf745a6e2d7c54dea93beb5790e1e04e`, OK TO MERGE, no CRITICAL/HIGH/MEDIUM; 1 LOW (L1: family-row pin taken before user known — brief lock contention only, non-blocking). Artifact: `docs/evidence/P06/reviews/security-reviewer-043cd28.md` |
+| Architecture-reviewer | exact `043cd28eaf745a6e2d7c54dea93beb5790e1e04e`, OK TO MERGE, no open findings; prior M1 FIXED (user-scoped supersede + regression + M1 variant), M2 ADDRESSED AS DOCUMENTED INTENT (lock-free revoke). Artifact: `docs/evidence/P06/reviews/architecture-reviewer-043cd28.md` |
+| Invariant-reviewer | exact `043cd28eaf745a6e2d7c54dea93beb5790e1e04e`, OK TO MERGE, no bypass; cross-user supersede FIXED with killing regression + M1 variant; prior PASSes hold. Artifact: `docs/evidence/P06/reviews/invariant-reviewer-043cd28.md` |
+| Founder container-policy disposition | The independent review's raw-zero (`HIGH=0/CRITICAL=0` unfiltered) criterion is amended for PR #35 only: the required scan keeps the pre-existing `ignore-unfixed: true` policy inherited from base (proven: `git diff e1d787c..HEAD -- .github/workflows/container-scan.yml` empty). Fix every HIGH/CRITICAL with an available supported fix; unfixed upstream findings stay visible, tracked, non-blocking for this P06.06 implementation PR, and do NOT satisfy LG-P06/P17, which remain OPEN. No finding with a supported fix is deferred; `container-scan.yml` was not edited to satisfy this review; no ignores added. |
+| Required container scan | `ignore-unfixed: true`, severity HIGH,CRITICAL on `moin-server:ci`: PASS (0 fixable findings) |
+| Raw unfiltered Trivy | 52 HIGH + 4 CRITICAL, all with empty FixedVersion (no supported fix). Grouped: util-linux family 40 (bsdutils/libblkid1/libmount1/libsmartcols1/libuuid1/mount/util-linux/util-linux-extra 5 each, 2.38.1-5+deb12u3), perl-base 8 (5.36.0-7+deb12u3, incl. 3 CRITICAL CVE-2026-13221/42496/8376), zlib1g 1 (CRITICAL CVE-2023-45853, 1:1.2.13.dfsg-1), gzip/libacl1/libsystemd0/libtinfo6/libudev1/ncurses-base/ncurses-bin 1 each. `CVE-2026-103111` (libpcre2-8-0 >= 10.42-1+deb12u2): ABSENT — previously remediated, remains fixed. |
+| LG-P06 | OPEN — raw unfixed upstream findings remain visible and are not represented as zero; this record is a scope/acceptance decision for PR #35, not a production-launch waiver; it does not declare the image vulnerability-free. |
+| CI run / artifact | pending |
+| Reviewer | pending |
+
+Sensitive material is stored by reference only (PLAN.md evidence rules).
