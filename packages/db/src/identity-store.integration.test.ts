@@ -126,8 +126,8 @@ function directCalls(subject: string, tokenHash: Buffer): [string, string, unkno
     ],
     [
       'begin_sign_in',
-      'select app.begin_sign_in($1::bytea, $2::bytea, $3::bytea, $4::bytea, $5::text, $6::text)',
-      [hash(), hash(), hash(), sealed(), 'test-v1', '/'],
+      'select app.begin_sign_in($1::bytea, $2::bytea, $3::bytea, $4::bytea, $5::text, $6::text, $7::uuid)',
+      [hash(), hash(), hash(), sealed(), 'test-v1', '/', null],
     ],
     [
       'consume_sign_in',
@@ -310,6 +310,7 @@ describe('a sign-in transaction', () => {
       verifierSealed: tx.verifierSealed,
       keyId: 'test-v1',
       returnTo: '/today',
+      stepUpSessionId: undefined,
     });
     expect(await store.consumeAuthTransaction(tx.stateHash, tx.bindingHash)).toBeUndefined();
   });
@@ -1482,8 +1483,109 @@ describe('the request-context lookup (P06.06.03)', () => {
     expect(resolved?.memberships).toStrictEqual([
       { organisationId: org, role: 'admin', permissions: [] },
     ]);
+    expect(resolved?.stepUpAt).toBeInstanceOf(Date);
   });
 
+  evidenceTest('refuses a disabled membership without touching the session', async () => {
+    const person = await user();
+    const { tokenHash } = await signIn(person.sub);
+    const row = await admin.query<{ step_up_at: Date; created_at: Date }>(
+      'select step_up_at, created_at from sessions where token_hash = $1',
+      [tokenHash],
+    );
+    expect(row.rows[0]?.step_up_at).toStrictEqual(row.rows[0]?.created_at);
+  });
+
+  evidenceTest('a step-up rotation refreshes the stamp, a privilege change inherits it', async () => {
+    const person = await user();
+    const { tokenHash } = await signIn(person.sub);
+    const before = await admin.query<{ step_up_at: Date }>(
+      'select step_up_at from sessions where token_hash = $1',
+      [tokenHash],
+    );
+    const stepped = hash();
+    expect(
+      await store.rotateSession(tokenHash, stepped, randomUUID(), 'step_up'),
+    ).toBeDefined();
+    const afterStep = await admin.query<{ step_up_at: Date }>(
+      'select step_up_at from sessions where token_hash = $1',
+      [stepped],
+    );
+    expect(afterStep.rows[0]?.step_up_at.getTime()).toBeGreaterThanOrEqual(
+      before.rows[0]?.step_up_at.getTime() ?? 0,
+    );
+    const changed = hash();
+    expect(
+      await store.rotateSession(stepped, changed, randomUUID(), 'privilege_change'),
+    ).toBeDefined();
+    const afterChange = await admin.query<{ step_up_at: Date }>(
+      'select step_up_at from sessions where token_hash = $1',
+      [changed],
+    );
+    expect(afterChange.rows[0]?.step_up_at).toStrictEqual(afterStep.rows[0]?.step_up_at);
+  });
+
+  evidenceTest('a step-up round-trip carries its session binding through consume', async () => {
+    const person = await user();
+    const { granted } = await signIn(person.sub);
+    const tx = { ...transaction(), stepUpSessionId: granted?.sessionId };
+    await store.beginAuthTransaction(tx);
+    const consumed = await store.consumeAuthTransaction(tx.stateHash, tx.bindingHash);
+    expect(consumed?.stepUpSessionId).toBe(granted?.sessionId);
+  });
+});
+
+describe('the step-up stamp (P06.06.04)', () => {
+  evidenceTest('stamps the sign-in time as the first step-up proof', async () => {
+    const person = await user();
+    const { tokenHash } = await signIn(person.sub);
+    const row = await admin.query<{ step_up_at: Date; created_at: Date }>(
+      'select step_up_at, created_at from sessions where token_hash = $1',
+      [tokenHash],
+    );
+    expect(row.rows[0]?.step_up_at).toStrictEqual(row.rows[0]?.created_at);
+  });
+
+  evidenceTest('a step-up rotation refreshes the stamp, a privilege change inherits it', async () => {
+    const person = await user();
+    const { tokenHash } = await signIn(person.sub);
+    const before = await admin.query<{ step_up_at: Date }>(
+      'select step_up_at from sessions where token_hash = $1',
+      [tokenHash],
+    );
+    const stepped = hash();
+    expect(
+      await store.rotateSession(tokenHash, stepped, randomUUID(), 'step_up'),
+    ).toBeDefined();
+    const afterStep = await admin.query<{ step_up_at: Date }>(
+      'select step_up_at from sessions where token_hash = $1',
+      [stepped],
+    );
+    expect(afterStep.rows[0]?.step_up_at.getTime()).toBeGreaterThanOrEqual(
+      before.rows[0]?.step_up_at.getTime() ?? 0,
+    );
+    const changed = hash();
+    expect(
+      await store.rotateSession(stepped, changed, randomUUID(), 'privilege_change'),
+    ).toBeDefined();
+    const afterChange = await admin.query<{ step_up_at: Date }>(
+      'select step_up_at from sessions where token_hash = $1',
+      [changed],
+    );
+    expect(afterChange.rows[0]?.step_up_at).toStrictEqual(afterStep.rows[0]?.step_up_at);
+  });
+
+  evidenceTest('a step-up round-trip carries its session binding through consume', async () => {
+    const person = await user();
+    const { granted } = await signIn(person.sub);
+    const tx = { ...transaction(), stepUpSessionId: granted?.sessionId };
+    await store.beginAuthTransaction(tx);
+    const consumed = await store.consumeAuthTransaction(tx.stateHash, tx.bindingHash);
+    expect(consumed?.stepUpSessionId).toBe(granted?.sessionId);
+  });
+});
+
+describe('the request-context membership lock (MWAIT)', () => {
   evidenceTest('refuses a disabled membership without touching the session', async () => {
     const person = await user();
     const { tokenHash } = await signIn(person.sub);

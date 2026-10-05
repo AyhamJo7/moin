@@ -19,6 +19,7 @@ function rows(overrides: Partial<RequestContext> = {}): RequestContext {
     memberships: [{ organisationId: 'org-1', role: 'owner', permissions: [] }],
     idleExpiresAt: new Date(Date.now() + 3600_000),
     absoluteExpiresAt: new Date(Date.now() + 86400_000),
+    stepUpAt: new Date(),
     ...overrides,
   };
 }
@@ -121,5 +122,21 @@ describe('RequestContextService', () => {
     await service.resolve(DIGEST, 'mutate');
     expect(backend.calls()).toBe(before + 2);
     expect(service.cached).toBe(0);
+  });
+
+  it('carries the step-up stamp into the session context, including null', async () => {
+    const clock = fixedClock(new Date());
+    const fresh = new RequestContextService(
+      store({ resolveRequestContext: () => Promise.resolve(rows()) }),
+      clock,
+    );
+    const stamped = await fresh.resolve(DIGEST, 'mutate');
+    expect('context' in stamped && stamped.context.stepUpAt).toBeInstanceOf(Date);
+    const bare = new RequestContextService(
+      store({ resolveRequestContext: () => Promise.resolve(rows({ stepUpAt: null })) }),
+      clock,
+    );
+    const unstamped = await bare.resolve(DIGEST, 'mutate');
+    expect('context' in unstamped && unstamped.context.stepUpAt).toBeNull();
   });
 });
