@@ -1,44 +1,5 @@
 [
   {
-    "id": "S1-state-reusable",
-    "invariant": "P06.06.01: `state` is single-use",
-    "expected": "Consuming a sign-in would leave its row in place, so the same `state` could be presented again and complete a second sign-in.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "    DELETE FROM public.auth_transactions t\n    WHERE t.state_hash = p_state_hash\n    RETURNING t.binding_hash, t.nonce_hash, t.verifier_sealed, t.key_id, t.return_to, t.expires_at\n",
-    "replace": "    SELECT t.binding_hash, t.nonce_hash, t.verifier_sealed, t.key_id, t.return_to, t.expires_at\n    FROM public.auth_transactions t\n    WHERE t.state_hash = p_state_hash\n",
-    "killingTest": {
-      "file": "packages/db/src/identity-store.integration.test.ts",
-      "fullName": "a sign-in transaction > is consumed exactly once"
-    },
-    "project": "integration"
-  },
-  {
-    "id": "S2-state-validation-bypassed",
-    "invariant": "P06.06.01: a callback completes only from the browser that started it, before expiry",
-    "expected": "Any browser holding a victim's `state` \u2014 the login-CSRF case \u2014 could complete the sign-in, at any time.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "  WHERE c.binding_hash = p_binding_hash\n    AND c.expires_at > v_now;\n",
-    "replace": "  WHERE v_now IS NOT NULL;\n",
-    "killingTest": {
-      "file": "apps/server/src/modules/identity-access/sign-in.integration.test.ts",
-      "fullName": "a callback that must fail closed > another browser presenting a valid state"
-    },
-    "project": "integration"
-  },
-  {
-    "id": "S3-expired-state-accepted",
-    "invariant": "P06.06.01: a pending sign-in expires after 10 minutes",
-    "expected": "A stale `state` from a forgotten tab would still complete a sign-in.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "    AND c.expires_at > v_now;\n",
-    "replace": ";\n",
-    "killingTest": {
-      "file": "apps/server/src/modules/identity-access/sign-in.integration.test.ts",
-      "fullName": "a callback that must fail closed > expired state"
-    },
-    "project": "integration"
-  },
-  {
     "id": "N1-nonce-check-removed",
     "invariant": "P06.06.01: the ID token is bound to this sign-in's nonce",
     "expected": "An ID token minted for another sign-in (a replayed or injected token) would be accepted for this one.",
@@ -598,19 +559,6 @@
     "project": "integration"
   },
   {
-    "id": "CLK3-auth-transaction-expiry-bypassed",
-    "invariant": "P06.06.01: authoritative DB time governs auth transactions; expired transactions cannot be consumed",
-    "expected": "An expired authorization transaction would be accepted and consumed if its expiry check is bypassed.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "  SELECT c.nonce_hash, c.verifier_sealed, c.key_id, c.return_to\n  FROM claimed c\n  WHERE c.binding_hash = p_binding_hash\n    AND c.expires_at > v_now;\n",
-    "replace": "  SELECT c.nonce_hash, c.verifier_sealed, c.key_id, c.return_to\n  FROM claimed c\n  WHERE c.binding_hash = p_binding_hash\n    AND c.expires_at > (v_now - interval '1 hour');\n",
-    "killingTest": {
-      "file": "packages/db/src/identity-store.integration.test.ts",
-      "fullName": "temporal authorization and expiration (authoritative database clock) > expired auth transaction cannot consume"
-    },
-    "project": "integration"
-  },
-  {
     "id": "CLK4-rotate-expiry-before-lock-only",
     "invariant": "P06.06.02: session rotation rechecks authoritative DB time after acquiring family and row locks",
     "expected": "A session expiring while waiting on a family lock would rotate if expiration is not rechecked post-lock.",
@@ -654,8 +602,8 @@
     "invariant": "P06.06.02: a disable racing resolution blocks it (user row locked FOR SHARE OF u)",
     "expected": "A disable committing mid-resolution would let one stale read through.",
     "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "  -- Lock the owning user row (FOR SHARE conflicts with a concurrent disable's UPDATE), mirroring\n  -- `rotate_session`: without it a disable committing mid-call lets one stale resolution through.\n  PERFORM 1\n  FROM public.sessions s JOIN public.users u ON u.id = s.user_id\n  WHERE s.token_hash = p_token_hash FOR SHARE OF u;\n",
-    "replace": "  PERFORM 1;\n",
+    "find": "  PERFORM 1 FROM public.sessions s WHERE s.token_hash = p_token_hash FOR UPDATE;\n\n  PERFORM 1\n  FROM public.sessions s JOIN public.users u ON u.id = s.user_id\n  WHERE s.token_hash = p_token_hash FOR SHARE OF u;\n\n  -- Fresh DB clock obtained only after all locks above are held.\n  v_now := clock_timestamp();",
+    "replace": "  PERFORM 1;",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "a session over time > a disable racing resolution blocks it, not one stale read"
@@ -671,7 +619,7 @@
     "replace": "  -- Fresh DB clock obtained only after all locks above are held.\n  v_now := clock_timestamp();\n\n  PERFORM 1 FROM public.sessions s WHERE s.token_hash = p_token_hash FOR UPDATE;\n\n  PERFORM 1\n  FROM public.sessions s JOIN public.users u ON u.id = s.user_id\n  WHERE s.token_hash = p_token_hash FOR SHARE OF u;",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
-      "fullName": "a session over time > waiting on the session lock past expiry (RWAIT) > RWAIT1: idle expiry during the wait returns nothing and revives nothing"
+      "fullName": "temporal authorization and expiration (authoritative database clock) > waiting on the session lock past expiry (RWAIT) > RWAIT1: idle expiry during the wait returns nothing and revives nothing"
     },
     "project": "integration"
   },
@@ -684,7 +632,7 @@
     "replace": "    AND s.absolute_expires_at > v_now\n    AND u.id = s.user_id\n    AND u.status = 'active'\n    AND LEAST(v_now + interval '12 hours', s.absolute_expires_at) - s.idle_expires_at\n        >= interval '60 seconds'\n  RETURNING s.id, s.user_id, s.idle_expires_at, s.absolute_expires_at;",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
-      "fullName": "a session over time > waiting on the session lock past expiry (RWAIT) > RWAIT1: idle expiry during the wait returns nothing and revives nothing"
+      "fullName": "temporal authorization and expiration (authoritative database clock) > waiting on the session lock past expiry (RWAIT) > RWAIT1: idle expiry during the wait returns nothing and revives nothing"
     },
     "project": "integration"
   },
@@ -693,11 +641,11 @@
     "invariant": "P06.06.02: resolve rechecks absolute expiry after the lock",
     "expected": "A session past its 7-day absolute lifetime would resolve after a lock wait.",
     "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "    AND s.idle_expires_at > v_now\n    AND s.absolute_expires_at > v_now\n    AND u.id = s.user_id\n    AND u.status = 'active';\nEND\n$$;",
-    "replace": "    AND s.idle_expires_at > v_now\n    AND u.id = s.user_id\n    AND u.status = 'active';\nEND\n$$;",
+    "find": "  WHERE s.token_hash = p_token_hash\n    AND s.revoked_at IS NULL\n    AND s.idle_expires_at > v_now\n    AND s.absolute_expires_at > v_now\n    AND u.status = 'active';",
+    "replace": "  WHERE s.token_hash = p_token_hash\n    AND s.revoked_at IS NULL\n    AND s.idle_expires_at > v_now\n    AND u.status = 'active';",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
-      "fullName": "a session over time > waiting on the session lock past expiry (RWAIT) > RWAIT2: absolute expiry during the wait returns nothing"
+      "fullName": "temporal authorization and expiration (authoritative database clock) > waiting on the session lock past expiry (RWAIT) > RWAIT2: absolute expiry during the wait returns nothing"
     },
     "project": "integration"
   },
@@ -763,6 +711,58 @@
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "two callers holding the same row > a re-login racing a rotation on the same family never deadlocks"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "S1-state-reusable",
+    "invariant": "P06.06.01: `state` is single-use",
+    "expected": "Consuming a sign-in would leave its row in place, so the same `state` could be presented again and complete a second sign-in.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "  DELETE FROM public.auth_transactions t\n  WHERE t.state_hash = p_state_hash\n  RETURNING t.binding_hash, t.nonce_hash, t.verifier_sealed, t.key_id, t.return_to, t.expires_at\n  INTO v_claimed_binding, v_claimed_nonce, v_claimed_verifier, v_claimed_key,\n       v_claimed_return, v_claimed_expires;",
+    "replace": "  SELECT t.binding_hash, t.nonce_hash, t.verifier_sealed, t.key_id, t.return_to, t.expires_at\n  INTO v_claimed_binding, v_claimed_nonce, v_claimed_verifier, v_claimed_key,\n       v_claimed_return, v_claimed_expires\n  FROM public.auth_transactions t\n  WHERE t.state_hash = p_state_hash;",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "a sign-in transaction > is consumed exactly once"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "S2-state-validation-bypassed",
+    "invariant": "P06.06.01: a callback completes only from the browser that started it, before expiry",
+    "expected": "Any browser holding a victim's `state` \u2014 the login-CSRF case \u2014 could complete the sign-in, at any time.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "  IF v_claimed_binding = p_binding_hash AND v_claimed_expires > v_now THEN",
+    "replace": "  IF v_claimed_binding IS NOT NULL THEN",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/sign-in.integration.test.ts",
+      "fullName": "a callback that must fail closed > another browser presenting a valid state"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "S3-expired-state-accepted",
+    "invariant": "P06.06.01: a pending sign-in expires after 10 minutes",
+    "expected": "A stale `state` from a forgotten tab would still complete a sign-in.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "  IF v_claimed_binding = p_binding_hash AND v_claimed_expires > v_now THEN",
+    "replace": "  IF v_claimed_binding = p_binding_hash THEN",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/sign-in.integration.test.ts",
+      "fullName": "a callback that must fail closed > expired state"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "CLK3-auth-transaction-expiry-bypassed",
+    "invariant": "P06.06.01: a pending sign-in expires after 10 minutes (DB clock)",
+    "expected": "An expired transaction would return its secrets after the claim.",
+    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "find": "  IF v_claimed_binding = p_binding_hash AND v_claimed_expires > v_now THEN",
+    "replace": "  IF v_claimed_binding = p_binding_hash AND v_claimed_expires > v_claimed_expires THEN",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "a sign-in transaction > expires exactly 10 minutes after it starts"
     },
     "project": "integration"
   }
