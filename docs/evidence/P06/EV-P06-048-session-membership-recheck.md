@@ -5,14 +5,17 @@
 | Evidence ID | EV-P06-048 |
 | Item | P06.06.03 |
 | Date (UTC) | 2026-10-05 |
-| Commit | `1169972` (implementation HEAD; governance record follows separately) |
+| Commit | `83e7e42` (implementation HEAD; governance record follows separately) |
 | Environment | local |
 | Command / procedure | Migration `0013` (`memberships` tenant table, FORCE RLS, scoped lookup policy) + `0014` (`app.resolve_request_context` DEFINER, canonical lock order, DB clock, marker GUC set/reset); guard + interceptor + tenant pool (api-only); suites: session-membership 9/9, tenant-isolation, rls-catalog 43/43, identity-store, readiness-identity; `gates.py fast` 7/7 |
 | Result | READY_FOR_REVIEW — every request re-checks session + active membership in one DEFINER call (zero rows → 401; several → 401 ambiguous); GET-only ≤30 s cache (injected clock, lookup-count proven), mutations always fresh; FS-16 disable/remove fails next request; no org id from caller (INV-02); `moin_identity` gains no table grant; voice/worker/migrate graphs untouched |
-| QG-09 | Three-green set at exact `1169972`: security OK TO MERGE (1 carried LOW: guarded-200 Cache-Control), architecture OK TO MERGE (H2 accepted per PLAN 30 s ceiling, M1 P06.07 follow-up), invariant OK TO MERGE (I2 atomic-slide follow-up P06.07+) |
+| QG-09 | Three-green set at exact `1169972`, re-confirmed at `83e7e42` (boundary-fix scope: TenantQueries wrapper + probe DI rewrite, all else byte-identical): security OK TO MERGE (1 carried LOW: guarded-200 Cache-Control), architecture OK TO MERGE (H2 accepted per PLAN 30 s ceiling, M1 P06.07 follow-up), invariant OK TO MERGE (I2 atomic-slide follow-up P06.07+) |
 | Security-reviewer | exact `1169972675554930bfc6aa5df7a6bcfc19dbd083`, OK TO MERGE. Artifact: `docs/evidence/P06/reviews/security-reviewer-1169972.md` |
 | Architecture-reviewer | exact `1169972675554930bfc6aa5df7a6bcfc19dbd083`, OK TO MERGE. Artifact: `docs/evidence/P06/reviews/architecture-reviewer-1169972.md` |
 | Invariant-reviewer | exact `1169972675554930bfc6aa5df7a6bcfc19dbd083`, OK TO MERGE, no bypass. Artifact: `docs/evidence/P06/reviews/invariant-reviewer-1169972.md` |
+| Security-reviewer (boundary fix) | exact `83e7e424f349daea7996bad00015abb61ce9aa73`, OK TO MERGE, no new findings. Artifact: `docs/evidence/P06/reviews/security-reviewer-83e7e42.md` |
+| Architecture-reviewer (boundary fix) | exact `83e7e424f349daea7996bad00015abb61ce9aa73`, OK TO MERGE (2 LOWs at production wiring). Artifact: `docs/evidence/P06/reviews/architecture-reviewer-83e7e42.md` |
+| Invariant-reviewer (boundary fix) | exact `83e7e424f349daea7996bad00015abb61ce9aa73`, OK TO MERGE, no bypass. Artifact: `docs/evidence/P06/reviews/invariant-reviewer-83e7e42.md` |
 | Residuals (P06.07+ backlog, non-blocking) | Guarded-200 Cache-Control header; global guard / route-inventory test; atomic slide+membership DEFINER call |
 | Reviewer | pending (founder review) |
 
