@@ -2,7 +2,7 @@
  * P06.06.01/.02: the sign-in and session functions, exercised as the real NOBYPASSRLS runtime role.
  *
  * Fixtures (users, direct row reads) go through the migration connection. Every behaviour under test
- * goes through `moin_identity`, the api-only role that alone may execute the six functions and that
+ * goes through `moin_identity`, the api-only role that alone may execute the seven functions and that
  * touches none of the tables; `moin_app` — the voice and worker role — is shown to reach none of it.
  *
  * PostgreSQL's own `clock_timestamp()` is the sole authoritative clock for authorization and expiry;
@@ -110,6 +110,7 @@ const SESSION_FUNCTIONS = [
   'begin_session',
   'begin_sign_in',
   'consume_sign_in',
+  'resolve_request_context',
   'resolve_session',
   'revoke_session',
   'rotate_session',
@@ -134,6 +135,11 @@ function directCalls(subject: string, tokenHash: Buffer): [string, string, unkno
       [hash(), hash()],
     ],
     ['resolve_session', 'select * from app.resolve_session($1::bytea)', [tokenHash]],
+    [
+      'resolve_request_context',
+      'select * from app.resolve_request_context($1::bytea)',
+      [tokenHash],
+    ],
     [
       'rotate_session',
       'select * from app.rotate_session($1::bytea, $2::bytea, $3::uuid, $4::text)',

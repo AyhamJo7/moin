@@ -63,7 +63,7 @@ export interface PostgresReadinessOptions {
 
 /**
  * The identity pool's own credential (P06.06, ADR-0003): connected as `moin_identity` and nothing
- * else, without a privileged attribute or a role membership, able to execute exactly the six
+ * else, without a privileged attribute or a role membership, able to execute exactly the seven
  * `SECURITY DEFINER` session functions, and `moin_app` unable to. The api checks it once before the
  * identity store exists and `/readyz` keeps checking it, so a rotated or mistyped credential, a
  * missing or extra grant, or a URL naming the wrong role stops the rollout instead of failing — or
@@ -80,15 +80,17 @@ export const IDENTITY_POOL_ASSERTION = `
      and not has_function_privilege('moin_app', 'app.begin_session(text, bytea, uuid, bytea, text, bytea)', 'EXECUTE')
      and not has_function_privilege('moin_app', 'app.rotate_session(bytea, bytea, uuid, text)', 'EXECUTE')
      and not has_function_privilege('moin_app', 'app.resolve_session(bytea)', 'EXECUTE')
+     and not has_function_privilege('moin_app', 'app.resolve_request_context(bytea)', 'EXECUTE')
      and not has_function_privilege('moin_app', 'app.revoke_session(bytea)', 'EXECUTE')
-     and d.functions @> d.expected and d.functions <@ d.expected and d.total = 6
+     and d.functions @> d.expected and d.functions <@ d.expected and d.total = 7
      as ok
     from pg_roles r,
          lateral (
            select coalesce(array_agg(n.nspname || '.' || p.proname), '{}') as functions,
                   count(*) as total,
                   array['app.begin_sign_in', 'app.consume_sign_in', 'app.begin_session',
-                        'app.rotate_session', 'app.resolve_session', 'app.revoke_session'] as expected
+                        'app.rotate_session', 'app.resolve_session', 'app.revoke_session',
+                        'app.resolve_request_context'] as expected
              from pg_proc p join pg_namespace n on n.oid = p.pronamespace
             where p.prosecdef and has_function_privilege(p.oid, 'EXECUTE')
          ) d

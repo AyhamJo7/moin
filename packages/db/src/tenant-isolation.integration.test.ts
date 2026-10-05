@@ -59,6 +59,17 @@ beforeAll(async () => {
       `insert into locations (organisation_id, id, name) values ($1, $2, 'Alpha Hamburg'), ($3, $4, 'Beta Berlin')`,
       [ORG_A, LOCATION_A, ORG_B, LOCATION_B],
     );
+    await admin.query(
+      `insert into users (id, cognito_sub, email, status) values
+         ('aaaaaaaa-aaaa-4111-8111-aaaaaaaaaaaa', 'isolation-user-a', 'a@isolation.test', 'active'),
+         ('bbbbbbbb-bbbb-4111-8111-bbbbbbbbbbbb', 'isolation-user-b', 'b@isolation.test', 'active')`,
+    );
+    await admin.query(
+      `insert into memberships (organisation_id, id, user_id, role) values
+         ($1, gen_random_uuid(), 'aaaaaaaa-aaaa-4111-8111-aaaaaaaaaaaa', 'owner'),
+         ($2, gen_random_uuid(), 'bbbbbbbb-bbbb-4111-8111-bbbbbbbbbbbb', 'staff')`,
+      [ORG_A, ORG_B],
+    );
   } finally {
     await admin.end();
   }
@@ -82,6 +93,11 @@ describe('with no tenant set', () => {
 
   it('locations is empty rather than unfiltered', async () => {
     const result = await app.query<{ n: number }>('select count(*)::int as n from locations');
+    expect(result.rows[0]?.n).toBe(0);
+  });
+
+  it('memberships is empty rather than unfiltered', async () => {
+    const result = await app.query<{ n: number }>('select count(*)::int as n from memberships');
     expect(result.rows[0]?.n).toBe(0);
   });
 
@@ -183,6 +199,33 @@ describe('as tenant A', () => {
       return result.rows.length;
     });
     expect(inserted).toBe(1);
+  });
+});
+
+describe('memberships isolation (P06.06.03)', () => {
+  // One membership per tenant would need a user row; users is global and writable only by the
+  // migration role, so the fixture creates both users and memberships through the admin
+  // connection and asserts only through the application role.
+  const USER_A = 'aaaaaaaa-aaaa-4111-8111-aaaaaaaaaaaa';
+  const USER_B = 'bbbbbbbb-bbbb-4111-8111-bbbbbbbbbbbb';
+
+  it('tenant A cannot see tenant B’s membership even by exact user', async () => {
+    const count = await asTenant(ORG_A, async (query) => {
+      const result = await query(
+        'select count(*)::int as n from memberships where user_id = $1',
+        [USER_B],
+      );
+      return (result.rows[0] as { n: number }).n;
+    });
+    expect(count).toBe(0);
+  });
+
+  it('tenant A sees only its own memberships', async () => {
+    const roles = await asTenant(ORG_A, async (query) => {
+      const result = await query('select role from memberships order by role');
+      return result.rows.map((row) => (row as { role: string }).role);
+    });
+    expect(roles).toStrictEqual(['owner']);
   });
 });
 

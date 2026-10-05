@@ -39,5 +39,7 @@ export type {
   NewSession,
   SessionGrant,
   ResolvedSession,
+  ActiveMembership,
+  RequestContext,
   RotationReason,
 } from './identity-store.ts';

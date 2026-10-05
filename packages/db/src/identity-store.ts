@@ -1,8 +1,9 @@
 /**
  * The sign-in and session store (P06.06.01, P06.06.02, ADR-0005).
  *
- * The runtime role holds no privilege on `users`, `auth_transactions` or `sessions`; it may only
- * execute the six functions in migration 0012. This module is the only caller of those functions,
+ * The runtime role holds no privilege on `users`, `auth_transactions`, `sessions` or `memberships`;
+ * it may only execute the seven session functions (migrations 0012/0014). This module is the only
+ * caller of those functions,
  * and each method is one call, so what the database guarantees — single-use transactions, a fixed
  * absolute lifetime, final revocation, no session without an active user — is exactly what a
  * caller gets.
@@ -61,6 +62,22 @@ export interface ResolvedSession {
   readonly absoluteExpiresAt: Date;
 }
 
+/** One active membership of a resolved session: the org the request may act for (P06.06.03). */
+export interface ActiveMembership {
+  readonly organisationId: string;
+  readonly role: string;
+  readonly permissions: readonly string[];
+}
+
+/** A valid session plus every active membership of its user (P06.06.03, FS-16). */
+export interface RequestContext {
+  readonly sessionId: string;
+  readonly userId: string;
+  readonly memberships: readonly ActiveMembership[];
+  readonly idleExpiresAt: Date;
+  readonly absoluteExpiresAt: Date;
+}
+
 export interface IdentityStore {
   beginAuthTransaction(input: NewAuthTransaction): Promise<void>;
   /** Deletes the transaction on any presentation of its state; returns it only if it is usable. */
@@ -78,6 +95,12 @@ export interface IdentityStore {
     reason: RotationReason,
   ): Promise<SessionGrant | undefined>;
   resolveSession(tokenHash: Buffer): Promise<ResolvedSession | undefined>;
+  /**
+   * Session validity plus active memberships in one call (P06.06.03): one row per active
+   * membership of a valid session's user, or no rows when the session is expired, revoked, or
+   * its user inactive — or when the user holds no active membership (removed/disabled, FS-16).
+   */
+  resolveRequestContext(tokenHash: Buffer): Promise<RequestContext | undefined>;
   revokeSession(tokenHash: Buffer): Promise<boolean>;
 }
 
@@ -191,6 +214,34 @@ export function createIdentityStore(pool: Pool): IdentityStore {
         [digest(tokenHash)],
       );
       return result.rows[0]?.revoked === true;
+    },
+
+    async resolveRequestContext(tokenHash) {
+      const result = await pool.query<{
+        session_id: string;
+        user_id: string;
+        organisation_id: string;
+        role: string;
+        permissions: string[];
+        idle_expires_at: Date;
+        absolute_expires_at: Date;
+      }>(
+        'select session_id, user_id, organisation_id, role, permissions, idle_expires_at, absolute_expires_at from app.resolve_request_context($1::bytea)',
+        [digest(tokenHash)],
+      );
+      const first = result.rows[0];
+      if (first === undefined) return undefined;
+      return {
+        sessionId: first.session_id,
+        userId: first.user_id,
+        memberships: result.rows.map((row) => ({
+          organisationId: row.organisation_id,
+          role: row.role,
+          permissions: row.permissions,
+        })),
+        idleExpiresAt: first.idle_expires_at,
+        absoluteExpiresAt: first.absolute_expires_at,
+      };
     },
   };
 }
