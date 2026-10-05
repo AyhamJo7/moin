@@ -78,6 +78,21 @@ CREATE POLICY memberships_request_lookup ON memberships FOR SELECT
     )
   );
 
+-- Companion FOR UPDATE exception: PostgreSQL evaluates UPDATE policies for SELECT ... FOR SHARE
+-- and SELECT ... FOR UPDATE as well, so the lookup's membership row lock needs the same scoped
+-- exception or the policy silently filters every membership row and the lock retains nothing.
+-- USING mirrors the SELECT exception; WITH CHECK stays the tenant rule, so the exception can
+-- never write across tenants: only rows already in the caller's tenant pass a write.
+CREATE POLICY memberships_request_lookup_lock ON memberships FOR UPDATE
+  USING (
+    organisation_id = app.current_org()
+    OR (
+      current_setting('app.request_lookup', true) = 'resolve_request_context'
+      AND current_user IN ('moin_migrator', 'moin_owner')
+    )
+  )
+  WITH CHECK (organisation_id = app.current_org());
+
 -- ---------------------------------------------------------------------------------------------
 -- Grants: moin_app reads and writes inside withTenant; nothing else touches this table.
 -- ---------------------------------------------------------------------------------------------
