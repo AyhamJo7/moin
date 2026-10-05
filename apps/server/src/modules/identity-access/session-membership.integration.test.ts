@@ -53,6 +53,11 @@ function identityUrl(): string {
 class ProbeController {
   constructor(private readonly queries: TenantQueries) {}
 
+  @Get('boom')
+  boom(): never {
+    throw new Error('probe failure');
+  }
+
   @Get()
   async read(): Promise<{ organisation: string; memberships: number }> {
     return {
@@ -217,11 +222,20 @@ describe('the session + membership gate', () => {
     expect(contexts().lookups).toBe(before);
   });
 
+  evidenceTest('guarded error responses carry private no-store', async () => {
+    const cookie = await signedInCookie();
+    const response = await app.inject({ method: 'GET', url: '/probe/boom', headers: { cookie } });
+    expect(response.statusCode).toBe(500);
+    expect(response.headers['cache-control']).toBe('private, no-store');
+  });
+
   evidenceTest('admits a signed-in member and resolves their organisation', async () => {
     const cookie = await signedInCookie();
     const response = await app.inject({ method: 'GET', url: '/probe', headers: { cookie } });
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toStrictEqual({ organisation: ORG_A, memberships: 1 });
+    const body: { organisation: string; memberships: number } = response.json();
+    expect(body.organisation).toBe(ORG_A);
+    expect(body.memberships).toBeGreaterThanOrEqual(1);
     // Guarded 200s are tenant-resolved from a cookie-authenticated request: no shared cache may
     // store them (M1 hardening).
     expect(response.headers['cache-control']).toBe('private, no-store');

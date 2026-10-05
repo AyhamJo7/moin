@@ -11,15 +11,15 @@
  * closed: without it there is no organisation to enter, and entering none would read an empty
  * table while pretending to serve one.
  *
- * Every admitted response carries `Cache-Control: private, no-store`: the body is resolved per
- * tenant from a cookie-authenticated request, so no shared cache may store it (the guard's 401s
- * and 503s already send `no-store`; this covers the 200s).
+ * Every response through this interceptor carries `Cache-Control: private, no-store`: any body
+ * resolved under a guard is per-tenant from a cookie-authenticated request — success or error —
+ * so no shared cache may store it (the guard's own 401s and 503s already send `no-store`).
  */
 
 import { Inject, Injectable, InternalServerErrorException } from '@nestjs/common';
 import type { CallHandler, ExecutionContext, NestInterceptor } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { type Observable, defer, firstValueFrom, tap } from 'rxjs';
+import { type Observable, defer, firstValueFrom } from 'rxjs';
 import type { Logger } from '@moin/observability';
 import { type TenantScope, runInTenantScope } from '../../platform/tenant-scope.ts';
 import { LOGGER } from '../../../observability/logger.module.ts';
@@ -43,10 +43,9 @@ export class TenantContextInterceptor implements NestInterceptor {
       organisationId: session.organisationId,
       actorId: session.userId,
     };
-    return defer(() => runInTenantScope(scope, () => firstValueFrom(next.handle()))).pipe(
-      tap(() => {
-        void reply.header('cache-control', 'private, no-store');
-      }),
-    );
+    // Set before delegating so error responses carry it too: any body resolved under a
+    // guard is per-tenant from a cookie-authenticated request, success or error.
+    void reply.header('cache-control', 'private, no-store');
+    return defer(() => runInTenantScope(scope, () => firstValueFrom(next.handle())));
   }
 }
