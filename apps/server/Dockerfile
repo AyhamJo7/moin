@@ -82,10 +82,12 @@ ENV NODE_ENV=production \
     NODE_OPTIONS=--enable-source-maps \
     PORT=3000
 
-# Security update for CVE-2026-103111 (libpcre2-8-0 10.42-1+deb12u2 from bookworm-security).
-# Pins exact Debian security package version (hadolint DL3008).
+# Security updates from bookworm-security (fixed versions available upstream).
+# CVE-2026-103111 (libpcre2-8-0) was fixed the same way before; the perl-base CVEs below
+# (CVE-2026-13221, CVE-2026-42496, CVE-2026-8376 et al.) gained fixed versions since the base
+# image was cut. Pins exact Debian security package versions (hadolint DL3008).
 RUN apt-get update -qq \
- && apt-get install -y --no-install-recommends libpcre2-8-0=10.42-1+deb12u2 \
+ && apt-get install -y --no-install-recommends libpcre2-8-0=10.42-1+deb12u2 perl-base=5.36.0-7+deb12u4 \
  && rm -rf /var/lib/apt/lists/*
 
 # The base image ships npm, npx, corepack and yarn. A review caught the earlier claim that this
