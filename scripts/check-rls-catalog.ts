@@ -123,13 +123,13 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   // the seven functions that are the runtime role's only access to users, auth_transactions,
   // sessions and membership reads. resolve_request_context is the per-request re-check (P06.06.03).
   'app.reject_session_rewrite': '1b7209a5119fd835537b390fcbd558e0',
-  'app.begin_sign_in': '46d951fb285c7fe09aac5cdabbc24aa3',
-  'app.consume_sign_in': '65c3f6a7df85974ff5e8aa9854c4d48d',
-  'app.begin_session': '23034ecb67b830beaaed19822118456a',
-  'app.rotate_session': 'fe4a2f4e30221e87d1249a425838a102',
+  'app.begin_sign_in': '66f0c43b05dce5b3b2a02c9922032376',
+  'app.consume_sign_in': '92e1cbedb2906c3eceaec382b390ed44',
+  'app.begin_session': '99ad79780c4710ec98dce6abbf3a64b6',
+  'app.rotate_session': '7b2b187f330683f408da0c6b82033f4d',
   'app.resolve_session': 'cfab5a739c28a8e8f99b664803a5412b',
   'app.revoke_session': 'a4a30b649c5abf56fab3563d20576aa8',
-  'app.resolve_request_context': '2476c022976e66ba886623f8c688cf98',
+  'app.resolve_request_context': 'a950598fb73197fc90e219d58f330f18',
 };
 
 /** Reviewed QG-09 contract. Documentation registration alone cannot change privileges. */
