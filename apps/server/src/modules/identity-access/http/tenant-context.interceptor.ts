@@ -2,17 +2,14 @@
  * Tenant entry for guarded requests (P06.06.03, INV-01, INV-02).
  *
  * The guard admits the request with `request.sessionContext` — the organisation resolved
- * server-side from the session. This interceptor runs the handler inside
- * `withTenant(appPool, organisationId, …, { actorId: userId })`, so every tenant row the handler
- * touches is filtered by the database policy for exactly that organisation, and the actor is the
- * signed-in user, never a caller claim. A request without a session context fails closed: without
- * it there is no organisation to enter, and entering none would read an empty table while
- * pretending to serve one.
- *
- * Implemented as an `AsyncLocalStorage` carrier rather than by wrapping the handler call: a Nest
- * interceptor cannot hold a `pg` transaction across `next.handle()` without taking ownership of
- * the connection lifecycle, so the tenant setting is established on a dedicated client for the
- * duration of the request and the handler runs inside that scope.
+ * server-side from the session. This interceptor publishes that pair into an AsyncLocalStorage
+ * scope for the duration of the handler: handlers open their own `withTenant(pool,
+ * scope.organisationId, …)` around their queries (see `withRequestTenant`), and the organisation
+ * id they pass is the one the guard resolved, never a caller claim. No database client is held
+ * across `next.handle()` here; each `withTenant` call checks out its own pooled connection and
+ * sets `app.current_org` transaction-locally on it. A request without a session context fails
+ * closed: without it there is no organisation to enter, and entering none would read an empty
+ * table while pretending to serve one.
  */
 
 import { Inject, Injectable, InternalServerErrorException } from '@nestjs/common';

@@ -118,12 +118,17 @@ export class RequestContextService {
     const context = toSessionContext(resolved);
     if (context === undefined) return { failure: 'ambiguous_organisation' };
     // Record activity through the pinned resolve_session write path (capped slide, re-validated).
-    // Awaited: an expiry racing the re-check must refuse before the request proceeds.
-    await this.#store.resolveSession(tokenHash);
+    // Awaited and CHECKED: an expiry, revocation or disable racing the re-check must refuse the
+    // request rather than admit-then-slide. Nothing is cached on this path.
+    const slid = await this.#store.resolveSession(tokenHash);
+    if (slid === undefined) return { failure: 'invalid' };
     if (useCache) {
       if (this.#cache.size >= MAX_CACHE_ENTRIES) {
-        const oldest = this.#cache.keys().next();
-        if (!oldest.done) this.#cache.delete(oldest.value);
+        let oldest = this.#cache.keys().next();
+        while (!oldest.done && this.#cache.size >= MAX_CACHE_ENTRIES) {
+          this.#cache.delete(oldest.value);
+          oldest = this.#cache.keys().next();
+        }
       }
       this.#cache.set(key, {
         expiresAtMs: this.#clock.now().getTime() + CONTEXT_CACHE_TTL_MS,

@@ -52,7 +52,11 @@ export class SessionMembershipGuard implements CanActivate {
       return false;
     }
     if (this.contexts === null) {
-      await this.problem(request, reply, 'unavailable');
+      this.logger.error(
+        { route: request.routeOptions.url, method: request.method, reason: 'identity-unavailable' },
+        'guarded request without a request-context service',
+      );
+      await this.unavailable(request, reply);
       return false;
     }
     let outcome: Awaited<ReturnType<RequestContextService['resolve']>>;
@@ -86,7 +90,7 @@ export class SessionMembershipGuard implements CanActivate {
   private async problem(
     request: FastifyRequest,
     reply: FastifyReply,
-    reason: ContextFailure | 'unavailable',
+    reason: ContextFailure,
   ): Promise<void> {
     this.reject(request, reason);
     void reply.header('cache-control', 'no-store');
@@ -96,7 +100,7 @@ export class SessionMembershipGuard implements CanActivate {
       .send({ type: PROBLEM_TYPE, title: PROBLEM_TITLE, status: 401 });
   }
 
-  private reject(request: FastifyRequest, reason: ContextFailure | 'unavailable'): void {
+  private reject(request: FastifyRequest, reason: ContextFailure): void {
     this.logger.warn(
       { route: request.routeOptions.url, method: request.method, reason },
       'rejected a request without a usable session and membership',
