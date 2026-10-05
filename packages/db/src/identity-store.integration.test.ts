@@ -1629,8 +1629,27 @@ describe('the request-context membership lock (MWAIT)', () => {
         const pending = holder.query('select * from app.resolve_request_context($1::bytea)', [
           tokenHash,
         ]);
-        // Let the lookup acquire its locks (no expiry pressure in this case).
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        // Prove the lookup holds the membership row before racing the disable: a NOWAIT
+        // update on the same row must fail immediately with 55P03 while the lookup's
+        // transaction is open (no sleep, no pg_locks-rule coupling, no flake budget).
+        {
+          const probe = await admin.connect();
+          try {
+            await probe.query('begin');
+            await probe.query("select set_config('app.organisation_id', $1, true)", [org]);
+            // Codex's own reproduction shape: a racing locker must NOT acquire the row
+            // while the lookup holds it (raises 55P03 immediately instead of returning it).
+            await expect(
+              probe.query('select 1 from memberships where user_id = $1 for update nowait', [
+                person.id,
+              ]),
+              'racing disable blocked by the held membership lock',
+            ).rejects.toMatchObject({ code: '55P03' });
+            await probe.query('rollback');
+          } finally {
+            probe.release();
+          }
+        }
         await writer.query('begin');
         await writer.query("select set_config('app.organisation_id', $1, true)", [org]);
         const racing = writer.query(
