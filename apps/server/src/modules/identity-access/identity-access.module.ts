@@ -95,10 +95,7 @@ export function buildSignInGate(
     {
       provide: REQUEST_CONTEXTS,
       inject: [IDENTITY_STORE, CONTEXT_CLOCK],
-      useFactory: (
-        store: IdentityStore | null,
-        clock: Clock,
-      ): RequestContextService | null =>
+      useFactory: (store: IdentityStore | null, clock: Clock): RequestContextService | null =>
         store === null ? null : new RequestContextService(store, clock),
     },
     SessionMembershipGuard,

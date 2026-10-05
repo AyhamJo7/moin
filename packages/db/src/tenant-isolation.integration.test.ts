@@ -206,7 +206,6 @@ describe('memberships isolation (P06.06.03)', () => {
   // One membership per tenant would need a user row; users is global and writable only by the
   // migration role, so the fixture creates both users and memberships through the admin
   // connection and asserts only through the application role.
-  const USER_A = 'aaaaaaaa-aaaa-4111-8111-aaaaaaaaaaaa';
   const USER_B = 'bbbbbbbb-bbbb-4111-8111-bbbbbbbbbbbb';
 
   it('tenant A cannot see tenant B’s membership even by exact user', async () => {
