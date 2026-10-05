@@ -36,6 +36,9 @@ const CLOCK_TOLERANCE_SECONDS = 30;
 /** The ID token was issued for the exchange that just happened, so it is never old. */
 const MAX_ID_TOKEN_AGE_SECONDS = 600;
 
+/** A step-up proof must be minutes old, not merely unexpired (P06.06.04). */
+const MAX_STEP_UP_AUTH_AGE_SECONDS = 300;
+
 /** A provider that does not answer within this is unavailable; the sign-in fails closed. */
 const PROVIDER_TIMEOUT_MS = 10_000;
 
@@ -146,6 +149,8 @@ export class OidcProviderClient {
     readonly state: string;
     readonly nonce: string;
     readonly codeChallenge: string;
+    /** Step-up re-verification: force fresh authentication at the provider (P06.06.04). */
+    readonly stepUp?: boolean;
   }): Promise<string> {
     const { authorizationEndpoint } = await this.metadata();
     const url = new URL(authorizationEndpoint);
@@ -157,6 +162,11 @@ export class OidcProviderClient {
     url.searchParams.set('nonce', input.nonce);
     url.searchParams.set('code_challenge', input.codeChallenge);
     url.searchParams.set('code_challenge_method', 'S256');
+    if (input.stepUp === true) {
+      // No silent SSO, no remembered device: the human proves presence now.
+      url.searchParams.set('max_age', '0');
+      url.searchParams.set('prompt', 'login');
+    }
     return url.toString();
   }
 
@@ -220,9 +230,16 @@ export class OidcProviderClient {
 
   /**
    * Verify an ID token from the exchange and bind it to this sign-in's nonce. Returns the payload
-   * for the identity-claims parser, which decides what of it we keep.
+   * for the identity-claims parser, which decides what of it we keep. With `stepUp`, the token
+   * must also carry a fresh `auth_time`: the provider re-authenticated the human minutes ago,
+   * not hours (P06.06.04).
    */
-  async verifyIdToken(idToken: string, expectedNonceHash: Buffer, now: Date): Promise<JWTPayload> {
+  async verifyIdToken(
+    idToken: string,
+    expectedNonceHash: Buffer,
+    now: Date,
+    stepUp = false,
+  ): Promise<JWTPayload> {
     const { jwksUri } = await this.metadata();
     this.#keys ??= createRemoteJWKSet(jwksUri, { timeoutDuration: PROVIDER_TIMEOUT_MS });
 
@@ -254,6 +271,19 @@ export class OidcProviderClient {
     const nonce = payload['nonce'];
     if (typeof nonce !== 'string' || !digestsEqual(digestOf(nonce), expectedNonceHash)) {
       throw new OidcError('token_invalid', 'nonce_mismatch');
+    }
+    if (stepUp) {
+      // OIDC Core §3.1.2.10: `max_age=0` obliges the provider to have actively authenticated the
+      // human for this round-trip and to say when in `auth_time`. Absent or stale means the
+      // provider answered from an SSO cookie rather than a fresh proof: refused.
+      const authTime = payload['auth_time'];
+      if (typeof authTime !== 'number' || !Number.isFinite(authTime)) {
+        throw new OidcError('token_invalid', 'auth_time_missing');
+      }
+      const ageSeconds = now.getTime() / 1000 - authTime;
+      if (ageSeconds < -CLOCK_TOLERANCE_SECONDS || ageSeconds > MAX_STEP_UP_AUTH_AGE_SECONDS) {
+        throw new OidcError('token_invalid', 'auth_time_stale');
+      }
     }
     return payload;
   }
