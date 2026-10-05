@@ -5,7 +5,7 @@
 | Evidence ID | EV-P06-048 |
 | Item | P06.06.03 |
 | Date (UTC) | 2026-10-05 |
-| Commit | `9f5da5e` (implementation HEAD; governance record follows separately) |
+| Commit | `0eed7ad` (implementation HEAD; governance record follows separately) |
 | Environment | local |
 | Command / procedure | Migration `0013` (`memberships` tenant table, FORCE RLS, scoped lookup policy) + `0014` (`app.resolve_request_context` DEFINER, canonical lock order, DB clock, marker GUC set/reset); guard + interceptor + tenant pool (api-only); suites: session-membership 9/9, tenant-isolation, rls-catalog 43/43, identity-store, readiness-identity; `gates.py fast` 7/7 |
 | Result | READY_FOR_REVIEW — every request re-checks session + active membership in one DEFINER call (zero rows → 401; several → 401 ambiguous); GET-only ≤30 s cache (injected clock, lookup-count proven), mutations always fresh; FS-16 disable/remove fails next request; no org id from caller (INV-02); `moin_identity` gains no table grant; voice/worker/migrate graphs untouched |
@@ -20,6 +20,10 @@
 | Architecture-reviewer (repair) | exact `9f5da5ee58bab4bafcc0274223ad46c7aef23009`, OK TO MERGE, no open findings. Artifact: `docs/evidence/P06/reviews/architecture-reviewer-9f5da5e.md` |
 | Invariant-reviewer (boundary fix) | exact `83e7e424f349daea7996bad00015abb61ce9aa73`, OK TO MERGE, no bypass. Artifact: `docs/evidence/P06/reviews/invariant-reviewer-83e7e42.md` |
 | Invariant-reviewer (repair) | exact `9f5da5ee58bab4bafcc0274223ad46c7aef23009`, OK TO MERGE, no bypass. Artifact: `docs/evidence/P06/reviews/invariant-reviewer-9f5da5e.md` |
+| Codex BLOCK_MERGE repair (membership-lock stale clock) | `v_now` sampled only after family/session/user/membership locks; slide + verdict share post-lock clock; digest re-pinned `2476c022`; MWAIT1 (table-level lock past real deadline, mutation-proven 1-vs-0) + WAIT9 variant; 55/55 sweep at `0eed7ad` |
+| Security-reviewer (membership lock) | exact `0eed7adb2737419243dce702babce0a6cb5d9f7b`, OK TO MERGE (2 LOWs). Artifact: `docs/evidence/P06/reviews/security-reviewer-0eed7ad.md` |
+| Architecture-reviewer (membership lock) | exact `0eed7adb2737419243dce702babce0a6cb5d9f7b`, OK TO MERGE. Artifact: `docs/evidence/P06/reviews/architecture-reviewer-0eed7ad.md` |
+| Invariant-reviewer (membership lock) | exact `0eed7adb2737419243dce702babce0a6cb5d9f7b`, OK TO MERGE, no bypass. Artifact: `docs/evidence/P06/reviews/invariant-reviewer-0eed7ad.md` |
 | Residuals (P06.07+ backlog, non-blocking) | Guarded-200 Cache-Control header; global guard / route-inventory test; atomic slide+membership DEFINER call |
 | Reviewer | pending (founder review) |
 
