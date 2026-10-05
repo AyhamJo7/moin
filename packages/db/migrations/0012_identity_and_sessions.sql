@@ -13,10 +13,10 @@
 --
 -- ## A role of its own, and no table grant
 --
--- The seven functions below (six here, plus `resolve_request_context` in 0014) are executable by **`moin_identity` alone** — the api task's second pool
+-- The six functions below are executable by **`moin_identity` alone** — the api task's second pool
 -- (ADR-0003 amendment, QG-09 finding I1). `moin_app` is also the voice and worker role, and a session
 -- function it could execute is a session any compromised voice or worker process could mint. So
--- `moin_app` gets no EXECUTE here at all, and `moin_identity` gets those six here (seven with 0014) and nothing else: no
+-- `moin_app` gets no EXECUTE here at all, and `moin_identity` gets those six and nothing else: no
 -- table privilege, no tenant table, no membership in any role, no ownership.
 --
 -- Neither role holds a privilege on the tables. The default privileges from 0003 would have given
