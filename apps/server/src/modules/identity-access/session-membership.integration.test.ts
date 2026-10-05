@@ -11,7 +11,6 @@
  */
 import { randomUUID } from 'node:crypto';
 import { Controller, Get, Post, UseGuards, UseInterceptors } from '@nestjs/common';
-import type { Pool } from '@moin/db/pool';
 import { Test } from '@nestjs/testing';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { createTestDatabase, evidenceTest, type TestDatabase } from '@moin/testing';
@@ -20,8 +19,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect } from 'vitest';
 import { ConfigModule } from '../../config/config.module.ts';
 import { loadConfig } from '../../config/env.ts';
 import { LoggerModule } from '../../observability/logger.module.ts';
-import { TENANT_POOL, TenantPoolModule } from '../platform/tenant-pool.module.ts';
-import { currentTenantScope, withRequestTenant } from '../platform/tenant-scope.ts';
+import { TenantPoolModule } from '../platform/tenant-pool.module.ts';
+import { TenantQueries } from '../platform/tenant-queries.ts';
 import { IdentityAccessModule } from './identity-access.module.ts';
 import { CONTEXT_CLOCK, IDENTITY_CLOCK, REQUEST_CONTEXTS } from './identity-access.tokens.ts';
 import { SessionMembershipGuard } from './http/session-membership.guard.ts';
@@ -52,30 +51,22 @@ function identityUrl(): string {
 @UseGuards(SessionMembershipGuard)
 @UseInterceptors(TenantContextInterceptor)
 class ProbeController {
+  constructor(private readonly queries: TenantQueries) {}
+
   @Get()
   async read(): Promise<{ organisation: string; memberships: number }> {
-    const scope = currentTenantScope();
-    if (scope === undefined) throw new Error('no tenant scope');
-    const pool = tenantPoolOf();
-    const rows = await withRequestTenant(pool, (client) =>
-      client
-        .query<{ n: string }>('select count(*)::text as n from memberships')
-        .then((r) => r.rows),
-    );
-    return { organisation: scope.organisationId, memberships: Number(rows[0]?.n ?? 0) };
+    return {
+      organisation: this.queries.organisationId(),
+      memberships: await this.queries.countMemberships(),
+    };
   }
 
   @Post()
   async write(): Promise<{ organisation: string; memberships: number }> {
-    const scope = currentTenantScope();
-    if (scope === undefined) throw new Error('no tenant scope');
-    const pool = tenantPoolOf();
-    const rows = await withRequestTenant(pool, (client) =>
-      client
-        .query<{ n: string }>('select count(*)::text as n from memberships')
-        .then((r) => r.rows),
-    );
-    return { organisation: scope.organisationId, memberships: Number(rows[0]?.n ?? 0) };
+    return {
+      organisation: this.queries.organisationId(),
+      memberships: await this.queries.countMemberships(),
+    };
   }
 }
 
@@ -102,6 +93,7 @@ async function build(): Promise<NestFastifyApplication> {
       TenantPoolModule,
     ],
     controllers: [ProbeController],
+    providers: [TenantQueries],
   })
     .overrideProvider(IDENTITY_CLOCK)
     .useValue(clock)
@@ -178,12 +170,6 @@ async function signedInCookie(): Promise<string> {
 
 function contexts(): RequestContextService {
   return app.get<RequestContextService>(REQUEST_CONTEXTS);
-}
-
-function tenantPoolOf(): Pool {
-  const pool = app.get<Pool | null>(TENANT_POOL);
-  if (pool === null) throw new Error('no tenant pool');
-  return pool;
 }
 
 beforeAll(async () => {
