@@ -45,7 +45,7 @@ describe('the identity pool readiness probe', () => {
     // Every one of the six: readiness must shut out moin_app from the whole session surface,
     // not just one probe function.
     const grants = [
-      'grant execute on function app.begin_sign_in(bytea, bytea, bytea, bytea, text, text) to moin_app',
+      'grant execute on function app.begin_sign_in(bytea, bytea, bytea, bytea, text, text, uuid) to moin_app',
       'grant execute on function app.consume_sign_in(bytea, bytea) to moin_app',
       'grant execute on function app.begin_session(text, bytea, uuid, bytea, text, bytea) to moin_app',
       'grant execute on function app.rotate_session(bytea, bytea, uuid, text) to moin_app',

@@ -21,6 +21,12 @@ export const ABSOLUTE_TIMEOUT_MS = 7 * DAY_MS;
 export const AUTH_TRANSACTION_TTL_MS = 10 * MINUTE_MS;
 
 /**
+ * A sensitive action needs MFA proof within the last 15 minutes (P06.06.04, PLAN Security
+ * Architecture). Judged against the step-up stamp the database returns — never a caller claim.
+ */
+export const STEP_UP_WINDOW_MS = 15 * MINUTE_MS;
+
+/**
  * The application session cookie (Security Architecture: `__Host-moin_sid`, HttpOnly, Secure,
  * SameSite=Lax, Path=/). `__Host-` makes the browser refuse it unless it is Secure, has Path=/ and
  * carries no Domain, so no sibling host can plant or overwrite it.

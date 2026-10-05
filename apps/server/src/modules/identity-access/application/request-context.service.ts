@@ -35,6 +35,8 @@ export interface SessionContext {
   readonly organisationId: string;
   readonly role: string;
   readonly permissions: readonly string[];
+  /** Last MFA proof; null until re-verified. Sensitive actions judge it (P06.06.04). */
+  readonly stepUpAt: Date | null;
 }
 
 export type ContextFailure = 'no_session' | 'invalid' | 'ambiguous_organisation' | 'unavailable';
@@ -71,6 +73,7 @@ function toSessionContext(context: RequestContext): SessionContext | undefined {
     organisationId: membership.organisationId,
     role: membership.role,
     permissions: membership.permissions,
+    stepUpAt: context.stepUpAt,
   };
 }
 

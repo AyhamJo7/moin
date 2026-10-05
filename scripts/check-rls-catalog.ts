@@ -182,7 +182,7 @@ const APPROVED_DEFINERS: Readonly<
     executeGrantees: ['moin_app'],
   },
   'app.begin_sign_in': {
-    arguments: 'bytea, bytea, bytea, bytea, text, text',
+    arguments: 'bytea, bytea, bytea, bytea, text, text, uuid',
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
     executeGrantees: ['moin_identity'],

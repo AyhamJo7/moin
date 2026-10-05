@@ -1,8 +1,8 @@
 /**
- * The sign-in and session store (P06.06.01, P06.06.02, ADR-0005).
+ * The sign-in and session store (P06.06.01, P06.06.02, P06.06.04, ADR-0005).
  *
  * The runtime role holds no privilege on `users`, `auth_transactions`, `sessions` or `memberships`;
- * it may only execute the seven session functions (migrations 0012/0014). This module is the only
+ * it may only execute the seven session functions (migrations 0012/0014/0015). This module is the only
  * caller of those functions,
  * and each method is one call, so what the database guarantees — single-use transactions, a fixed
  * absolute lifetime, final revocation, no session without an active user — is exactly what a
@@ -30,6 +30,8 @@ export interface NewAuthTransaction {
   readonly verifierSealed: Buffer;
   readonly keyId: string;
   readonly returnTo: string;
+  /** The session id being re-verified; absent for a plain login (P06.06.04). */
+  readonly stepUpSessionId?: string | undefined;
 }
 
 export interface ConsumedAuthTransaction {
@@ -37,6 +39,8 @@ export interface ConsumedAuthTransaction {
   readonly verifierSealed: Buffer;
   readonly keyId: string;
   readonly returnTo: string;
+  /** The session id being re-verified; undefined for a plain login (P06.06.04). */
+  readonly stepUpSessionId: string | undefined;
 }
 
 export interface NewSession {
@@ -76,6 +80,8 @@ export interface RequestContext {
   readonly memberships: readonly ActiveMembership[];
   readonly idleExpiresAt: Date;
   readonly absoluteExpiresAt: Date;
+  /** Last MFA proof; null for sessions predating 0015 until re-verified (P06.06.04). */
+  readonly stepUpAt: Date | null;
 }
 
 export interface IdentityStore {
@@ -131,7 +137,7 @@ export function createIdentityStore(pool: Pool): IdentityStore {
   return {
     async beginAuthTransaction(input) {
       await pool.query(
-        'select app.begin_sign_in($1::bytea, $2::bytea, $3::bytea, $4::bytea, $5::text, $6::text)',
+        'select app.begin_sign_in($1::bytea, $2::bytea, $3::bytea, $4::bytea, $5::text, $6::text, $7::uuid)',
         [
           digest(input.stateHash),
           digest(input.bindingHash),
@@ -139,6 +145,7 @@ export function createIdentityStore(pool: Pool): IdentityStore {
           input.verifierSealed,
           input.keyId,
           input.returnTo,
+          input.stepUpSessionId ?? null,
         ],
       );
     },
@@ -149,8 +156,9 @@ export function createIdentityStore(pool: Pool): IdentityStore {
         verifier_sealed: Buffer;
         key_id: string;
         return_to: string;
+        step_up_session_id: string | null;
       }>(
-        'select nonce_hash, verifier_sealed, key_id, return_to from app.consume_sign_in($1::bytea, $2::bytea)',
+        'select nonce_hash, verifier_sealed, key_id, return_to, step_up_session_id from app.consume_sign_in($1::bytea, $2::bytea)',
         [digest(stateHash), digest(bindingHash)],
       );
       const row = result.rows[0];
@@ -161,6 +169,7 @@ export function createIdentityStore(pool: Pool): IdentityStore {
             verifierSealed: row.verifier_sealed,
             keyId: row.key_id,
             returnTo: row.return_to,
+            stepUpSessionId: row.step_up_session_id ?? undefined,
           };
     },
 
@@ -225,8 +234,9 @@ export function createIdentityStore(pool: Pool): IdentityStore {
         permissions: string[];
         idle_expires_at: Date;
         absolute_expires_at: Date;
+        step_up_at: Date | null;
       }>(
-        'select session_id, user_id, organisation_id, role, permissions, idle_expires_at, absolute_expires_at from app.resolve_request_context($1::bytea)',
+        'select session_id, user_id, organisation_id, role, permissions, idle_expires_at, absolute_expires_at, step_up_at from app.resolve_request_context($1::bytea)',
         [digest(tokenHash)],
       );
       const first = result.rows[0];
@@ -241,6 +251,7 @@ export function createIdentityStore(pool: Pool): IdentityStore {
         })),
         idleExpiresAt: first.idle_expires_at,
         absoluteExpiresAt: first.absolute_expires_at,
+        stepUpAt: first.step_up_at,
       };
     },
   };
