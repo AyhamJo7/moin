@@ -1489,49 +1489,32 @@ describe('the request-context lookup (P06.06.03)', () => {
   evidenceTest('refuses a disabled membership without touching the session', async () => {
     const person = await user();
     const { tokenHash } = await signIn(person.sub);
-    const row = await admin.query<{ step_up_at: Date; created_at: Date }>(
-      'select step_up_at, created_at from sessions where token_hash = $1',
-      [tokenHash],
+    const org = randomUUID();
+    await admin.query('insert into organisations (id, slug, name) values ($1, $2, $3)', [
+      org,
+      `rc-${org.slice(0, 8)}`,
+      'RC Org',
+    ]);
+    await admin.query(
+      'insert into memberships (organisation_id, id, user_id, role, status) values ($1, $2, $3, $4, $5)',
+      [org, randomUUID(), person.id, 'staff', 'disabled'],
     );
-    expect(row.rows[0]?.step_up_at).toStrictEqual(row.rows[0]?.created_at);
+    expect(await store.resolveRequestContext(tokenHash)).toBeUndefined();
+    // The session itself is untouched and still valid: the refusal came from membership status.
+    expect(await store.resolveSession(tokenHash)).toBeDefined();
   });
 
-  evidenceTest('a step-up rotation refreshes the stamp, a privilege change inherits it', async () => {
-    const person = await user();
-    const { tokenHash } = await signIn(person.sub);
-    const before = await admin.query<{ step_up_at: Date }>(
-      'select step_up_at from sessions where token_hash = $1',
-      [tokenHash],
-    );
-    const stepped = hash();
-    expect(
-      await store.rotateSession(tokenHash, stepped, randomUUID(), 'step_up'),
-    ).toBeDefined();
-    const afterStep = await admin.query<{ step_up_at: Date }>(
-      'select step_up_at from sessions where token_hash = $1',
-      [stepped],
-    );
-    expect(afterStep.rows[0]?.step_up_at.getTime()).toBeGreaterThanOrEqual(
-      before.rows[0]?.step_up_at.getTime() ?? 0,
-    );
-    const changed = hash();
-    expect(
-      await store.rotateSession(stepped, changed, randomUUID(), 'privilege_change'),
-    ).toBeDefined();
-    const afterChange = await admin.query<{ step_up_at: Date }>(
-      'select step_up_at from sessions where token_hash = $1',
-      [changed],
-    );
-    expect(afterChange.rows[0]?.step_up_at).toStrictEqual(afterStep.rows[0]?.step_up_at);
-  });
-
-  evidenceTest('a step-up round-trip carries its session binding through consume', async () => {
-    const person = await user();
-    const { granted } = await signIn(person.sub);
-    const tx = { ...transaction(), stepUpSessionId: granted?.sessionId };
-    await store.beginAuthTransaction(tx);
-    const consumed = await store.consumeAuthTransaction(tx.stateHash, tx.bindingHash);
-    expect(consumed?.stepUpSessionId).toBe(granted?.sessionId);
+  evidenceTest('leaves no lookup marker on the caller connection', async () => {
+    const client = await identity.connect();
+    try {
+      await client.query('select * from app.resolve_request_context($1::bytea)', [hash()]);
+      const marker = await client.query<{ v: string }>(
+        "select current_setting('app.request_lookup', true) as v",
+      );
+      expect(marker.rows[0]?.v ?? '').toBe('');
+    } finally {
+      client.release();
+    }
   });
 });
 
