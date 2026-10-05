@@ -28,7 +28,7 @@
 -- `SET row_security = off` on the function is refused by the planner for a FORCE table. So the
 -- memberships policy carries one additional USING disjunct: the function sets a transaction-local
 -- marker (`app.request_lookup = 'resolve_request_context'`) around its own membership read, and
--- the disjunct additionally requires `current_user = 'moin_migrator'` — which holds only inside
+-- the disjunct additionally requires `current_user IN ('moin_migrator', 'moin_owner')` — which holds only inside
 -- code running as this DEFINER's owner. No runtime role can use it: `moin_identity` has no table
 -- grant at all, and `moin_app` never runs as the migrator. The marker is reset before every
 -- RETURN, so it cannot leak into the caller's transaction. The whole exemption — marker set,

@@ -102,6 +102,16 @@ describe('RequestContextService', () => {
     expect(spy).toHaveBeenCalledTimes(2);
   });
 
+  it('invalidates the cached entry on the mutate path', async () => {
+    const clock = fixedClock(new Date());
+    const backend = store();
+    const service = new RequestContextService(backend, clock);
+    expect('context' in (await service.resolve(DIGEST, 'read'))).toBe(true);
+    expect(service.cached).toBe(1);
+    await service.resolve(DIGEST, 'mutate');
+    expect(service.cached).toBe(0);
+  });
+
   it('never caches mutations and bounds the cache under churn', async () => {
     const clock = fixedClock(new Date());
     const backend = store();

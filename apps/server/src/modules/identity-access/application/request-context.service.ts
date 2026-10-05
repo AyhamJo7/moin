@@ -107,6 +107,12 @@ export class RequestContextService {
     const useCache = mode === 'read';
     const key = tokenHash.toString('hex');
     const nowMs = this.#clock.now().getTime();
+    if (!useCache) {
+      // A mutation just changed what a cached read would serve (disable, role change,
+      // revocation): drop the entry so the next GET re-resolves instead of serving up to 30 s
+      // of pre-mutation context. Reads keep the PLAN-allowed staleness ceiling.
+      this.#cache.delete(key);
+    }
     if (useCache) {
       const hit = this.#cache.get(key);
       // All three deadlines must still be future: the TTL, and the session's own expiries the

@@ -219,21 +219,12 @@ describe('the session + membership gate', () => {
 
   evidenceTest('admits a signed-in member and resolves their organisation', async () => {
     const cookie = await signedInCookie();
-    const token = /^__Host-moin_sid=([A-Za-z0-9_-]{43})$/.exec(cookie)?.[1];
-    if (token === undefined) throw new Error('no token');
-    const { digestOf } = await import('./domain/secret-values.ts');
-    const parts = await admin.query(
-      'select s.id, s.revoked_at, s.idle_expires_at > clock_timestamp() as idle_ok, s.absolute_expires_at > clock_timestamp() as abs_ok, u.status as ustatus, clock_timestamp() as dbnow from sessions s join users u on u.id = s.user_id where s.token_hash = $1',
-      [digestOf(token)],
-    );
-    const mparts = await admin.query('select organisation_id, role, status from memberships');
-    expect(
-      parts.rowCount,
-      `session=${JSON.stringify(parts.rows)} memberships=${JSON.stringify(mparts.rows)}`,
-    ).toBe(1);
     const response = await app.inject({ method: 'GET', url: '/probe', headers: { cookie } });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toStrictEqual({ organisation: ORG_A, memberships: 1 });
+    // Guarded 200s are tenant-resolved from a cookie-authenticated request: no shared cache may
+    // store them (M1 hardening).
+    expect(response.headers['cache-control']).toBe('private, no-store');
   });
 
   evidenceTest('rejects an expired session on the next request', async () => {

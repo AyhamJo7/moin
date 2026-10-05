@@ -10,12 +10,16 @@
  * sets `app.current_org` transaction-locally on it. A request without a session context fails
  * closed: without it there is no organisation to enter, and entering none would read an empty
  * table while pretending to serve one.
+ *
+ * Every admitted response carries `Cache-Control: private, no-store`: the body is resolved per
+ * tenant from a cookie-authenticated request, so no shared cache may store it (the guard's 401s
+ * and 503s already send `no-store`; this covers the 200s).
  */
 
 import { Inject, Injectable, InternalServerErrorException } from '@nestjs/common';
 import type { CallHandler, ExecutionContext, NestInterceptor } from '@nestjs/common';
-import type { FastifyRequest } from 'fastify';
-import { type Observable, defer, firstValueFrom } from 'rxjs';
+import type { FastifyReply, FastifyRequest } from 'fastify';
+import { type Observable, defer, firstValueFrom, tap } from 'rxjs';
 import type { Logger } from '@moin/observability';
 import { type TenantScope, runInTenantScope } from '../../platform/tenant-scope.ts';
 import { LOGGER } from '../../../observability/logger.module.ts';
@@ -26,6 +30,7 @@ export class TenantContextInterceptor implements NestInterceptor {
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     const request = context.switchToHttp().getRequest<FastifyRequest>();
+    const reply = context.switchToHttp().getResponse<FastifyReply>();
     const session = request.sessionContext;
     if (session === undefined) {
       this.logger.error(
@@ -38,6 +43,10 @@ export class TenantContextInterceptor implements NestInterceptor {
       organisationId: session.organisationId,
       actorId: session.userId,
     };
-    return defer(() => runInTenantScope(scope, () => firstValueFrom(next.handle())));
+    return defer(() => runInTenantScope(scope, () => firstValueFrom(next.handle()))).pipe(
+      tap(() => {
+        void reply.header('cache-control', 'private, no-store');
+      }),
+    );
   }
 }
