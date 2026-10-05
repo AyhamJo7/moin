@@ -5,7 +5,8 @@
  * fresh stamps pass, stale or missing stamps get a 403 with the step-up problem shape, and the
  * check always resolves fresh (mutate mode) whatever the HTTP method.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, vi } from 'vitest';
+import { evidenceTest } from '@moin/testing';
 import type { ExecutionContext } from '@nestjs/common';
 import { fixedClock, type Clock } from '@moin/kernel';
 import type { IdentityStore, RequestContext } from '@moin/db';
@@ -98,7 +99,7 @@ function harness(stepUpAt: Date | null, method = 'POST') {
 }
 
 describe('RequireStepUpGuard', () => {
-  it('passes a stamp inside the window and resolves fresh in mutate mode', async () => {
+  evidenceTest('passes a stamp inside the window and resolves fresh in mutate mode', async () => {
     const at = new Date();
     const { spied, context, requests, sent } = harness(
       new Date(at.getTime() - STEP_UP_WINDOW_MS + 60_000),
@@ -111,7 +112,7 @@ describe('RequireStepUpGuard', () => {
     expect(sent.status).toBe(0);
   });
 
-  it('rejects a stamp older than 15 minutes with the step-up problem', async () => {
+  evidenceTest('rejects a stamp older than 15 minutes with the step-up problem', async () => {
     const { guard, context, sent } = harness(new Date(Date.now() - STEP_UP_WINDOW_MS - 1_000));
     expect(await guard.canActivate(context())).toBe(false);
     expect(sent.status).toBe(403);
@@ -123,7 +124,7 @@ describe('RequireStepUpGuard', () => {
     });
   });
 
-  it('rejects a missing stamp and a missing cookie with the same problem', async () => {
+  evidenceTest('rejects a missing stamp and a missing cookie with the same problem', async () => {
     const bare = harness(null);
     expect(await bare.guard.canActivate(bare.context())).toBe(false);
     expect(bare.sent.status).toBe(403);
@@ -137,7 +138,7 @@ describe('RequireStepUpGuard', () => {
     expect(noCookie.sent.status).toBe(403);
   });
 
-  it('answers 503, never 403, when the lookup throws', async () => {
+  evidenceTest('answers 503, never 403, when the lookup throws', async () => {
     const clock: Clock = fixedClock(new Date());
     const failing: IdentityStore = {
       ...store(new Date()),

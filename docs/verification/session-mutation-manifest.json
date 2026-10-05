@@ -761,8 +761,8 @@
     "find": "    SELECT s.id, s.user_id, m.organisation_id, m.role, m.permissions,\n           s.idle_expires_at, s.absolute_expires_at, s.step_up_at",
     "replace": "    SELECT s.id, s.user_id, m.organisation_id, m.role, m.permissions,\n           s.idle_expires_at, s.absolute_expires_at, NULL",
     "killingTest": {
-      "file": "packages/db/src/identity-store.integration.test.ts",
-      "fullName": "the request-context lookup (P06.06.03) > returns the active membership of a valid session"
+      "file": "apps/server/src/modules/identity-access/session-membership.integration.test.ts",
+      "fullName": "the step-up gate (P06.06.04) > a fresh sign-in passes step-up (login is MFA)"
     },
     "project": "integration"
   },

@@ -1544,7 +1544,10 @@ describe('the step-up stamp (P06.06.04)', () => {
       'select step_up_at from sessions where token_hash = $1',
       [stepped],
     );
-    expect(afterStep.rows[0]?.step_up_at.getTime()).toBeGreaterThanOrEqual(
+    // Refresh means strictly after the predecessor's stamp: the rotation clock runs after
+    // the sign-in clock, so inherit-instead-of-refresh (SU2) fails here rather than hiding
+    // inside a >= that two same-millisecond stamps would satisfy.
+    expect(afterStep.rows[0]?.step_up_at.getTime()).toBeGreaterThan(
       before.rows[0]?.step_up_at.getTime() ?? 0,
     );
     const changed = hash();
