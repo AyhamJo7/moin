@@ -73,7 +73,7 @@ export async function verifyIdentityPool(pool: Pool): Promise<void> {
   if (ok) return;
   await pool.end();
   throw new ConfigurationError([
-    'IDENTITY_DATABASE_URL: the pool is not moin_identity limited to the six session functions, or the database is unreachable',
+    'IDENTITY_DATABASE_URL: the pool is not moin_identity limited to the seven session functions, or the database is unreachable',
   ]);
 }
 

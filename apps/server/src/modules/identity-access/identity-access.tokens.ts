@@ -13,3 +13,5 @@ export interface SignInGate {
 export const SIGN_IN = Symbol('SIGN_IN');
 export const SESSIONS = Symbol('SESSIONS');
 export const IDENTITY_CLOCK = Symbol('IDENTITY_CLOCK');
+export const REQUEST_CONTEXTS = Symbol('REQUEST_CONTEXTS');
+export const CONTEXT_CLOCK = Symbol('CONTEXT_CLOCK');

@@ -21,10 +21,20 @@ import { resolveOidcConfig } from '../../config/oidc.ts';
 import { LOGGER } from '../../observability/logger.module.ts';
 import { IDENTITY_STORE, IdentityPoolModule } from '../platform/identity-pool.module.ts';
 import { SessionService } from './application/session.service.ts';
+import { RequestContextService } from './application/request-context.service.ts';
 import { SignInService } from './application/sign-in.service.ts';
 import { CALLBACK_PATH } from './domain/session-policy.ts';
 import { AuthController } from './http/auth.controller.ts';
-import { IDENTITY_CLOCK, SESSIONS, SIGN_IN, type SignInGate } from './identity-access.tokens.ts';
+import { SessionMembershipGuard } from './http/session-membership.guard.ts';
+import { TenantContextInterceptor } from './http/tenant-context.interceptor.ts';
+import {
+  CONTEXT_CLOCK,
+  IDENTITY_CLOCK,
+  REQUEST_CONTEXTS,
+  SESSIONS,
+  SIGN_IN,
+  type SignInGate,
+} from './identity-access.tokens.ts';
 import { OidcProviderClient } from './infrastructure/oidc-provider.ts';
 import { resolveTokenCipher } from './infrastructure/token-cipher.ts';
 
@@ -78,7 +88,19 @@ export function buildSignInGate(
       useFactory: (store: IdentityStore | null, clock: Clock): SessionService | null =>
         store === null ? null : new SessionService(store, clock),
     },
+    {
+      provide: CONTEXT_CLOCK,
+      useValue: systemClock,
+    },
+    {
+      provide: REQUEST_CONTEXTS,
+      inject: [IDENTITY_STORE, CONTEXT_CLOCK],
+      useFactory: (store: IdentityStore | null, clock: Clock): RequestContextService | null =>
+        store === null ? null : new RequestContextService(store, clock),
+    },
+    SessionMembershipGuard,
+    TenantContextInterceptor,
   ],
-  exports: [SESSIONS],
+  exports: [SESSIONS, REQUEST_CONTEXTS],
 })
 export class IdentityAccessModule {}

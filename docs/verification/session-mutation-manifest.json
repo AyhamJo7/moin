@@ -700,5 +700,18 @@
       "fullName": "issuing a session > a presented token from another family revokes nothing"
     },
     "project": "integration"
+  },
+  {
+    "id": "WAIT9-membership-lock-stale-clock",
+    "invariant": "P06.06.03: no authorization timestamp is captured before the membership-row lock",
+    "expected": "A resolve that reads the clock before winning the membership lock would authorize against a stale time and admit (and slide) a session whose idle expiry lapsed during the wait.",
+    "file": "packages/db/migrations/0014_request_context.sql",
+    "find": "    PERFORM 1\n    FROM public.sessions s JOIN public.users u ON u.id = s.user_id\n    JOIN public.memberships m ON m.user_id = s.user_id\n    WHERE s.token_hash = p_token_hash FOR SHARE OF m;\n\n    -- Fresh DB clock obtained only after all locks above are held.\n    v_now := clock_timestamp();",
+    "replace": "    SELECT clock_timestamp() INTO v_now;\n\n    PERFORM 1\n    FROM public.sessions s JOIN public.users u ON u.id = s.user_id\n    JOIN public.memberships m ON m.user_id = s.user_id\n    WHERE s.token_hash = p_token_hash FOR SHARE OF m;",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "the request-context membership lock (MWAIT) > MWAIT1: idle expiry during a membership-lock wait returns nothing and slides nothing"
+    },
+    "project": "integration"
   }
 ]

@@ -3,6 +3,7 @@ import { ConfigModule } from '../config/config.module.ts';
 import { LoggerModule } from '../observability/logger.module.ts';
 import { HealthModule } from '../health/health.module.ts';
 import { IdentityAccessModule } from '../modules/identity-access/identity-access.module.ts';
+import { TenantPoolModule } from '../modules/platform/tenant-pool.module.ts';
 
 /**
  * The owner-facing HTTP API.
@@ -12,9 +13,16 @@ import { IdentityAccessModule } from '../modules/identity-access/identity-access
  * whole API surface, and the worker must not open an HTTP listener it never serves.
  *
  * The business modules (identity-access, tenancy, audit, contacts, conversations, work, …) are
- * added by the phases that build them, P06 onward. Identity and access (P06.06) is the first.
+ * added by the phases that build them, P06 onward. Identity and access (P06.06) is the first;
+ * its tenant pool (P06.06.03) is wired here so the first guarded business route finds it.
  */
 @Module({
-  imports: [ConfigModule.forFeature(), LoggerModule, HealthModule, IdentityAccessModule],
+  imports: [
+    ConfigModule.forFeature(),
+    LoggerModule,
+    HealthModule,
+    IdentityAccessModule,
+    TenantPoolModule,
+  ],
 })
 export class ApiRootModule {}

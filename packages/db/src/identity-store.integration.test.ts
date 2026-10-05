@@ -2,7 +2,7 @@
  * P06.06.01/.02: the sign-in and session functions, exercised as the real NOBYPASSRLS runtime role.
  *
  * Fixtures (users, direct row reads) go through the migration connection. Every behaviour under test
- * goes through `moin_identity`, the api-only role that alone may execute the six functions and that
+ * goes through `moin_identity`, the api-only role that alone may execute the seven functions and that
  * touches none of the tables; `moin_app` — the voice and worker role — is shown to reach none of it.
  *
  * PostgreSQL's own `clock_timestamp()` is the sole authoritative clock for authorization and expiry;
@@ -110,6 +110,7 @@ const SESSION_FUNCTIONS = [
   'begin_session',
   'begin_sign_in',
   'consume_sign_in',
+  'resolve_request_context',
   'resolve_session',
   'revoke_session',
   'rotate_session',
@@ -134,6 +135,11 @@ function directCalls(subject: string, tokenHash: Buffer): [string, string, unkno
       [hash(), hash()],
     ],
     ['resolve_session', 'select * from app.resolve_session($1::bytea)', [tokenHash]],
+    [
+      'resolve_request_context',
+      'select * from app.resolve_request_context($1::bytea)',
+      [tokenHash],
+    ],
     [
       'rotate_session',
       'select * from app.rotate_session($1::bytea, $2::bytea, $3::uuid, $4::text)',
@@ -1454,4 +1460,320 @@ describe('the session table guard', () => {
       ).rejects.toMatchObject({ code: '23000' });
     },
   );
+});
+
+describe('the request-context lookup (P06.06.03)', () => {
+  evidenceTest('returns the active membership of a valid session', async () => {
+    const person = await user();
+    const { tokenHash } = await signIn(person.sub);
+    const org = randomUUID();
+    await admin.query('insert into organisations (id, slug, name) values ($1, $2, $3)', [
+      org,
+      `rc-${org.slice(0, 8)}`,
+      'RC Org',
+    ]);
+    await admin.query(
+      'insert into memberships (organisation_id, id, user_id, role, status) values ($1, $2, $3, $4, $5)',
+      [org, randomUUID(), person.id, 'admin', 'active'],
+    );
+    const resolved = await store.resolveRequestContext(tokenHash);
+    expect(resolved?.sessionId).toBeDefined();
+    expect(resolved?.userId).toBe(person.id);
+    expect(resolved?.memberships).toStrictEqual([
+      { organisationId: org, role: 'admin', permissions: [] },
+    ]);
+  });
+
+  evidenceTest('refuses a disabled membership without touching the session', async () => {
+    const person = await user();
+    const { tokenHash } = await signIn(person.sub);
+    const org = randomUUID();
+    await admin.query('insert into organisations (id, slug, name) values ($1, $2, $3)', [
+      org,
+      `rc-${org.slice(0, 8)}`,
+      'RC Org',
+    ]);
+    await admin.query(
+      'insert into memberships (organisation_id, id, user_id, role, status) values ($1, $2, $3, $4, $5)',
+      [org, randomUUID(), person.id, 'staff', 'disabled'],
+    );
+    expect(await store.resolveRequestContext(tokenHash)).toBeUndefined();
+    // The session itself is untouched and still valid: the refusal came from membership status.
+    expect(await store.resolveSession(tokenHash)).toBeDefined();
+  });
+
+  evidenceTest('leaves no lookup marker on the caller connection', async () => {
+    const client = await identity.connect();
+    try {
+      await client.query('select * from app.resolve_request_context($1::bytea)', [hash()]);
+      const marker = await client.query<{ v: string }>(
+        "select current_setting('app.request_lookup', true) as v",
+      );
+      expect(marker.rows[0]?.v ?? '').toBe('');
+    } finally {
+      client.release();
+    }
+  });
+});
+
+describe('the request-context membership lock (MWAIT)', () => {
+  evidenceTest(
+    'MWAIT1: idle expiry during a membership-lock wait returns nothing and slides nothing',
+    async () => {
+      const person = await user();
+      // Idle deadline 2 s out from one authoritative timestamp (single materialized CTE row,
+      // like RWAIT1: separate clock calls could violate the absolute ceiling).
+      const tokenHash = hash();
+      const id = randomUUID();
+      await admin.query(
+        `with t as materialized (select clock_timestamp() + interval '2 seconds' as idle,
+                                         clock_timestamp() as now)
+         insert into sessions (
+           token_hash, id, family_id, user_id, rotation_reason,
+           created_at, last_seen_at, idle_expires_at, absolute_expires_at,
+           provider_tokens_sealed, provider_tokens_key_id
+         ) select
+           $1, $2, $2, $3, 'login',
+           t.now, t.now,
+           t.idle, t.now + interval '7 days',
+           $4, 'test-v1'
+         from t`,
+        [tokenHash, id, person.id, sealed()],
+      );
+      const org = randomUUID();
+      await admin.query('insert into organisations (id, slug, name) values ($1, $2, $3)', [
+        org,
+        `mw-${org.slice(0, 8)}`,
+        'MW Org',
+      ]);
+      await admin.query(
+        'insert into memberships (organisation_id, id, user_id, role, status) values ($1, $2, $3, $4, $5)',
+        [org, randomUUID(), person.id, 'owner', 'active'],
+      );
+      const appGate = database.pool();
+      const gate = await appGate.connect();
+      const waiter = await identity.connect();
+      try {
+        await gate.query('begin');
+        // Hold the membership row the way a concurrent disable does: the lookup's FOR SHARE
+        // OF m must block here, after it already holds family/session/user. The gate sets
+        // the tenant first — without it FORCE RLS hides the row even from the table owner
+        // and the lock would match nothing. Row-level waiting works now that the FOR UPDATE
+        // companion policy lets the lookup's FOR SHARE locate (and lock) the row: before
+        // that policy existed the SELECT-only exemption filtered every row from the lock
+        // attempt, which is why this test previously needed a table-level gate.
+        await gate.query("select set_config('app.organisation_id', $1, true)", [org]);
+        await gate.query('select 1 from memberships where user_id = $1 for update', [person.id]);
+
+        await waiter.query('begin');
+        const pending = waiter.query('select * from app.resolve_request_context($1::bytea)', [
+          tokenHash,
+        ]);
+
+        const deadline = Date.now() + LOCK_WAIT_DEADLINE_MS;
+        let waiting = '0';
+        while (waiting !== '1' && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT_POLL_MS));
+          const result = await admin.query<{ n: string }>(
+            "select count(*)::text as n from pg_stat_activity where wait_event_type = 'Lock' and datname = $1",
+            [database.name],
+          );
+          waiting = result.rows[0]?.n ?? '0';
+        }
+        expect(waiting, 'lookup waits on the membership lock').toBe('1');
+
+        // Hold the lock until the real idle deadline has provably passed on the DB clock.
+        await gate.query('select pg_sleep(2.5)');
+        await gate.query('commit');
+
+        const resolved = await pending;
+        await waiter.query('commit');
+        expect(resolved.rowCount, 'lookup after idle expiry returned 0 rows').toBe(0);
+      } finally {
+        gate.release();
+        waiter.release();
+      }
+      // The deadline the seed wrote is still there: the blocked lookup refused it instead of
+      // sliding it back to now + 12 h.
+      const after = await admin.query<{ idle: Date }>(
+        'select idle_expires_at as idle from sessions where token_hash = $1',
+        [tokenHash],
+      );
+      const idleAfter = after.rows[0]!.idle;
+      expect(idleAfter.getTime()).toBeLessThan(Date.now());
+    },
+  );
+
+  evidenceTest(
+    'MWAIT2: an open lookup holds the membership row against a racing disable',
+    async () => {
+      // Inverse direction: the lookup runs first and holds FOR SHARE OF m while a concurrent
+      // disable tries FOR UPDATE on the same row. The disable must block until the lookup
+      // commits — proving the lookup retains a real row lock, not just table access.
+      const person = await user();
+      const { tokenHash } = await signIn(person.sub);
+      const org = randomUUID();
+      await admin.query('insert into organisations (id, slug, name) values ($1, $2, $3)', [
+        org,
+        `mw-${org.slice(0, 8)}`,
+        'MW Org',
+      ]);
+      await admin.query(
+        'insert into memberships (organisation_id, id, user_id, role, status) values ($1, $2, $3, $4, $5)',
+        [org, randomUUID(), person.id, 'owner', 'active'],
+      );
+      const holder = await identity.connect();
+      const writer = await admin.connect();
+      try {
+        await holder.query('begin');
+        const pending = holder.query('select * from app.resolve_request_context($1::bytea)', [
+          tokenHash,
+        ]);
+        // Prove the lookup holds the membership row before racing the disable: a NOWAIT
+        // locker must raise 55P03 while the lookup's transaction is open. Polled, not
+        // slept: on a slow scheduler the lookup may not have acquired FOR SHARE OF m yet
+        // when the probe first runs — a premature success would red the suite (fail-loud,
+        // never fail-open). Retry until 55P03 or deadline.
+        {
+          const deadline = Date.now() + LOCK_WAIT_DEADLINE_MS;
+          let lastError: unknown = new Error('probe never ran');
+          let proven = false;
+          while (Date.now() < deadline) {
+            const probe = await admin.connect();
+            try {
+              await probe.query('begin');
+              await probe.query("select set_config('app.organisation_id', $1, true)", [org]);
+              // Codex's own reproduction shape: a racing locker must NOT acquire the row
+              // while the lookup holds it (raises 55P03 immediately instead of returning it).
+              await probe.query('select 1 from memberships where user_id = $1 for update nowait', [
+                person.id,
+              ]);
+              await probe.query('rollback');
+            } catch (error) {
+              if (
+                typeof error === 'object' &&
+                error !== null &&
+                'code' in error &&
+                error.code === '55P03'
+              ) {
+                proven = true;
+                break;
+              }
+              lastError = error;
+            } finally {
+              try {
+                await probe.query('rollback');
+              } catch {
+                // ignore
+              }
+              probe.release(true);
+            }
+            await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT_POLL_MS));
+          }
+          expect(
+            proven,
+            `racing locker blocked by the held membership lock: ${String(lastError)}`,
+          ).toBe(true);
+        }
+        await writer.query('begin');
+        await writer.query("select set_config('app.organisation_id', $1, true)", [org]);
+        const racing = writer.query(
+          "update memberships set status = 'disabled' where user_id = $1",
+          [person.id],
+        );
+        const deadline = Date.now() + LOCK_WAIT_DEADLINE_MS;
+        let waiting = '0';
+        while (waiting !== '1' && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT_POLL_MS));
+          const result = await admin.query<{ n: string }>(
+            "select count(*)::text as n from pg_stat_activity where wait_event_type = 'Lock' and datname = $1",
+            [database.name],
+          );
+          waiting = result.rows[0]?.n ?? '0';
+        }
+        expect(waiting, 'disable waits on the held membership lock').toBe('1');
+        const lookedUp = await pending;
+        await holder.query('commit');
+        expect(lookedUp.rowCount, 'lookup holding the lock resolves').toBe(1);
+        await racing;
+        await writer.query('commit');
+        // The disable landed after the lookup released: the next lookup refuses.
+        expect(await store.resolveRequestContext(tokenHash)).toBeUndefined();
+      } finally {
+        holder.release();
+        writer.release();
+      }
+    },
+  );
+
+  evidenceTest('MWAIT3: a disable landing mid-wait is observed after unblock', async () => {
+    // The racing disable commits while the lookup waits: after unblock the lookup must
+    // observe the updated (disabled) status and return nothing — not the pre-wait row.
+    const person = await user();
+    const tokenHash = hash();
+    const id = randomUUID();
+    await admin.query(
+      `with t as materialized (select clock_timestamp() + interval '30 seconds' as idle,
+                                         clock_timestamp() as now)
+         insert into sessions (
+           token_hash, id, family_id, user_id, rotation_reason,
+           created_at, last_seen_at, idle_expires_at, absolute_expires_at,
+           provider_tokens_sealed, provider_tokens_key_id
+         ) select
+           $1, $2, $2, $3, 'login',
+           t.now, t.now,
+           t.idle, t.now + interval '7 days',
+           $4, 'test-v1'
+         from t`,
+      [tokenHash, id, person.id, sealed()],
+    );
+    const org = randomUUID();
+    await admin.query('insert into organisations (id, slug, name) values ($1, $2, $3)', [
+      org,
+      `mw-${org.slice(0, 8)}`,
+      'MW Org',
+    ]);
+    await admin.query(
+      'insert into memberships (organisation_id, id, user_id, role, status) values ($1, $2, $3, $4, $5)',
+      [org, randomUUID(), person.id, 'owner', 'active'],
+    );
+    const appGate = database.pool();
+    const gate = await appGate.connect();
+    const waiter = await identity.connect();
+    try {
+      await gate.query('begin');
+      await gate.query("select set_config('app.organisation_id', $1, true)", [org]);
+      await gate.query('select 1 from memberships where user_id = $1 for update', [person.id]);
+
+      await waiter.query('begin');
+      const pending = waiter.query('select * from app.resolve_request_context($1::bytea)', [
+        tokenHash,
+      ]);
+
+      const deadline = Date.now() + LOCK_WAIT_DEADLINE_MS;
+      let waiting = '0';
+      while (waiting !== '1' && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT_POLL_MS));
+        const result = await admin.query<{ n: string }>(
+          "select count(*)::text as n from pg_stat_activity where wait_event_type = 'Lock' and datname = $1",
+          [database.name],
+        );
+        waiting = result.rows[0]?.n ?? '0';
+      }
+      expect(waiting, 'lookup waits on the membership lock').toBe('1');
+
+      // While blocked, disable the membership (long deadline: no expiry pressure here).
+      await gate.query("update memberships set status = 'disabled' where user_id = $1", [
+        person.id,
+      ]);
+      await gate.query('commit');
+
+      const resolved = await pending;
+      await waiter.query('commit');
+      expect(resolved.rowCount, 'lookup after mid-wait disable returned 0 rows').toBe(0);
+    } finally {
+      gate.release();
+      waiter.release();
+    }
+  });
 });
