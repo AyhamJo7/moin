@@ -24,6 +24,7 @@ import { TenantQueries } from '../platform/tenant-queries.ts';
 import { IdentityAccessModule } from './identity-access.module.ts';
 import { CONTEXT_CLOCK, IDENTITY_CLOCK, REQUEST_CONTEXTS } from './identity-access.tokens.ts';
 import { SessionMembershipGuard } from './http/session-membership.guard.ts';
+import { RequireStepUpGuard } from './http/require-step-up.guard.ts';
 import { TenantContextInterceptor } from './http/tenant-context.interceptor.ts';
 import { startFakeOidcProvider, type FakeOidcProvider } from './__fixtures__/fake-oidc-provider.ts';
 import type { RequestContextService } from './application/request-context.service.ts';
@@ -72,6 +73,12 @@ class ProbeController {
       organisation: this.queries.organisationId(),
       memberships: await this.queries.countMemberships(),
     };
+  }
+
+  @Get('sensitive')
+  @UseGuards(RequireStepUpGuard)
+  sensitive(): { steppedUp: true } {
+    return { steppedUp: true };
   }
 }
 
@@ -392,5 +399,159 @@ describe('the session + membership gate', () => {
     } finally {
       clock.set(new Date());
     }
+  });
+});
+
+describe('the step-up gate (P06.06.04)', () => {
+  evidenceTest('a fresh sign-in passes step-up (login is MFA)', async () => {
+    const cookie = await signedInCookie();
+    const response = await app.inject({
+      method: 'GET',
+      url: '/probe/sensitive',
+      headers: { cookie },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toStrictEqual({ steppedUp: true });
+  });
+
+  evidenceTest('a stamp older than 15 minutes gets 403 step-up-required', async () => {
+    const cookie = await signedInCookie();
+    const token = /^__Host-moin_sid=([A-Za-z0-9_-]{43})$/.exec(cookie)?.[1];
+    if (token === undefined) throw new Error('no token');
+    const { digestOf } = await import('./domain/secret-values.ts');
+    await admin.query(
+      "update sessions set step_up_at = clock_timestamp() - interval '16 minutes' where token_hash = $1",
+      [digestOf(token)],
+    );
+    contexts().clearCache();
+    const response = await app.inject({
+      method: 'GET',
+      url: '/probe/sensitive',
+      headers: { cookie },
+    });
+    expect(response.statusCode).toBe(403);
+    expect(response.headers['content-type']).toMatch(/^application\/problem\+json/);
+    expect(response.json()).toStrictEqual({
+      type: '/problems/step-up-required',
+      title: 'Step-up verification is required',
+      status: 403,
+    });
+    expect(response.headers['cache-control']).toBe('no-store');
+  });
+
+  evidenceTest('a step-up round-trip refreshes the stamp and passes the gate', async () => {
+    const who = await person();
+    await member(who.id, ORG_A);
+    const started = await app.inject({ method: 'GET', url: '/api/auth/login' });
+    const binding = /^__Host-moin_signin=([A-Za-z0-9_-]{43});/.exec(
+      String(started.headers['set-cookie']),
+    )?.[1];
+    if (binding === undefined) throw new Error('no binding');
+    const { code, state } = provider.authorize(String(started.headers.location), {
+      subject: who.subject,
+      email: who.email,
+    });
+    const callback = await app.inject({
+      method: 'GET',
+      url: `/api/auth/callback?${new URLSearchParams({ state, code, iss: provider.issuer }).toString()}`,
+      headers: { cookie: `__Host-moin_signin=${binding}` },
+    });
+    const oldToken = SESSION_COOKIE_CONTRACT.exec(
+      setCookies(callback.headers).find((c) => c.startsWith('__Host-moin_sid=')) ?? '',
+    )?.[1];
+    if (oldToken === undefined) throw new Error('no session cookie');
+    const oldCookie = `__Host-moin_sid=${oldToken}`;
+    // Age the stamp past the window so the gate refuses before the round-trip.
+    const { digestOf } = await import('./domain/secret-values.ts');
+    await admin.query(
+      "update sessions set step_up_at = clock_timestamp() - interval '16 minutes' where token_hash = $1",
+      [digestOf(oldToken)],
+    );
+    contexts().clearCache();
+    expect(
+      (await app.inject({ method: 'GET', url: '/probe/sensitive', headers: { cookie: oldCookie } }))
+        .statusCode,
+    ).toBe(403);
+
+    // The step-up round-trip: POST starts it, provider re-verifies, callback rotates.
+    const begun = await app.inject({
+      method: 'POST',
+      url: '/api/auth/step-up',
+      headers: { cookie: oldCookie },
+    });
+    expect(begun.statusCode).toBe(302);
+    expect(String(begun.headers.location)).toContain('max_age=0');
+    const upBinding = /^__Host-moin_signin=([A-Za-z0-9_-]{43});/.exec(
+      String(begun.headers['set-cookie']),
+    )?.[1];
+    if (upBinding === undefined) throw new Error('no step-up binding');
+    const up = provider.authorize(String(begun.headers.location), {
+      subject: who.subject,
+      email: who.email,
+    });
+    const done = await app.inject({
+      method: 'GET',
+      url: `/api/auth/callback?${new URLSearchParams({ state: up.state, code: up.code, iss: provider.issuer }).toString()}`,
+      headers: { cookie: `__Host-moin_signin=${upBinding}; ${oldCookie}` },
+    });
+    expect(done.statusCode).toBe(302);
+    const newToken = SESSION_COOKIE_CONTRACT.exec(
+      setCookies(done.headers).find((c) => c.startsWith('__Host-moin_sid=')) ?? '',
+    )?.[1];
+    if (newToken === undefined) throw new Error('no successor cookie');
+    expect(newToken).not.toBe(oldToken);
+    const newCookie = `__Host-moin_sid=${newToken}`;
+    contexts().clearCache();
+    expect(
+      (await app.inject({ method: 'GET', url: '/probe/sensitive', headers: { cookie: newCookie } }))
+        .statusCode,
+    ).toBe(200);
+    // The predecessor died in the rotation.
+    contexts().clearCache();
+    expect(
+      (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: oldCookie } }))
+        .statusCode,
+    ).toBe(401);
+  });
+
+  evidenceTest('a step-up for another person rotates nothing', async () => {
+    const who = await person();
+    await member(who.id, ORG_A);
+    const other = await person();
+    await member(other.id, ORG_A);
+    const cookie = await signedInCookie();
+    const begun = await app.inject({
+      method: 'POST',
+      url: '/api/auth/step-up',
+      headers: { cookie },
+    });
+    expect(begun.statusCode).toBe(302);
+    const upBinding = /^__Host-moin_signin=([A-Za-z0-9_-]{43});/.exec(
+      String(begun.headers['set-cookie']),
+    )?.[1];
+    if (upBinding === undefined) throw new Error('no step-up binding');
+    // The provider authenticates someone else: the callback must refuse, rotating nothing.
+    const up = provider.authorize(String(begun.headers.location), {
+      subject: other.subject,
+      email: other.email,
+    });
+    const before = await admin.query<{ n: string }>(
+      'select count(*)::text as n from sessions where revoked_at is null',
+    );
+    const done = await app.inject({
+      method: 'GET',
+      url: `/api/auth/callback?${new URLSearchParams({ state: up.state, code: up.code, iss: provider.issuer }).toString()}`,
+      headers: { cookie: `__Host-moin_signin=${upBinding}; ${cookie}` },
+    });
+    expect(done.statusCode).toBe(400);
+    const after = await admin.query<{ n: string }>(
+      'select count(*)::text as n from sessions where revoked_at is null',
+    );
+    expect(after.rows[0]?.n).toBe(before.rows[0]?.n);
+    // The legitimate session still works: nothing was revoked out from under it.
+    contexts().clearCache();
+    expect(
+      (await app.inject({ method: 'GET', url: '/probe', headers: { cookie } })).statusCode,
+    ).toBe(200);
   });
 });
