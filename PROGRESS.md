@@ -6,7 +6,7 @@ phase: P06
 tier: PILOT
 plan: docs/phases/P06-plan.md
 next: implement P06.06.04 step-up MFA (≤ 15 min) for sensitive actions; P06.06.01/.02/.03 VERIFIED at merge d92f82b (EV-P06-048); then P06.10.03 writer adoption and EXT-09 for P06.10.05 still open
-updated: 2026-10-05
+updated: 2026-10-06
 ---
 
 # PROGRESS — moin
@@ -756,3 +756,5 @@ true, ok: false }` — is serialized by Vitest with none of the `constructor`/`t
 - 2026-10-05 — **PR #36 squash-merged as d92f82b; P06.06.03 VERIFIED on main.** Migrations 0013 and 0014 applied on main; RLS catalog check passes with all 21 pinned DEFINER digests matching freshly migrated md5(prosrc); full test suite green. P06.06.01/.02/.03 VERIFIED; P06.06.04-.07 open.
 
 - 2026-10-06 — **P06.06.04 step-up MFA implemented on branch feat/p06-06-step-up-mfa (EV-P06-049).** Migration 0015 (step_up_at + step_up_session_id, drop-then-create for changed OUT-record shapes); stamp flows through identity-store → RequestContextService → SessionContext; RequireStepUpGuard (403 step-up-required, Date.now comparison, always mutate-mode); POST /api/auth/step-up + callback rotation with max_age=0 and auth_time freshness. Commits 3fa4c99–7806a27. Next: full session sweep (61 variants incl. SU1–SU6), QG-09 triad reviews, founder full gate, draft PR. P06.06.04 stays IN_PROGRESS (never VERIFIED by implementor).
+
+- 2026-10-06 — **BLOCKER: full session sweep 45/61 — 16 pre-existing mutants SURVIVE on this branch.** SU1–SU6 all KILLED_ASSERTION individually (SU2 after strict-> assertion, SU4 retargeted to HTTP probe, SU5 after evidenceTest wrap). But the full sweep shows 16 SURVIVED incl. R1, S1–S3, WAIT5/6/9, M1, U1–U3, CLK2–4, F1, G10 — all KILLED at 55/55 on the P06.06.03 branch. Cause: migration 0015 redefines rotate_session/begin_sign_in/consume_sign_in/resolve_request_context, so old mutants targeting 0012/0014 bodies mutate a shadowed definition the live database never executes. Per stop-on-stall protocol: ending turn for founder direction on whether to (a) retarget old mutants to 0015, (b) accept branch-local sweep of SU1–SU6 only, or (c) other. P06.06.04 stays IN_PROGRESS.
