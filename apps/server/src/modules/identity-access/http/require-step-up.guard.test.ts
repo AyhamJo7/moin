@@ -63,7 +63,7 @@ function harness(stepUpAt: Date | null, method = 'POST') {
     code: (status: number) => {
       sent.status = status;
       return {
-        header: (_name: string, _value: string) => ({
+        header: () => ({
           send: (body: unknown) => {
             sent.body = body;
           },
@@ -100,7 +100,7 @@ function harness(stepUpAt: Date | null, method = 'POST') {
 describe('RequireStepUpGuard', () => {
   it('passes a stamp inside the window and resolves fresh in mutate mode', async () => {
     const at = new Date();
-    const { spied, context, requests, sent, clock } = harness(
+    const { spied, context, requests, sent } = harness(
       new Date(at.getTime() - STEP_UP_WINDOW_MS + 60_000),
       'GET',
     );
@@ -109,7 +109,6 @@ describe('RequireStepUpGuard', () => {
     expect(requests).toHaveLength(1);
     expect(requests[0]?.cookie).toBe(DIGEST_HEX);
     expect(sent.status).toBe(0);
-    void clock;
   });
 
   it('rejects a stamp older than 15 minutes with the step-up problem', async () => {
@@ -164,7 +163,7 @@ describe('RequireStepUpGuard', () => {
           code: (status: number) => {
             sent.status = status;
             return {
-              header: (_n: string, _v: string) => ({
+              header: () => ({
                 send: (body: unknown) => {
                   sent.body = body;
                 },
