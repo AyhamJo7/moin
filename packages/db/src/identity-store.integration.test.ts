@@ -1515,3 +1515,94 @@ describe('the request-context lookup (P06.06.03)', () => {
     }
   });
 });
+
+describe('the request-context membership lock (MWAIT)', () => {
+  evidenceTest(
+    'MWAIT1: idle expiry during a membership-lock wait returns nothing and slides nothing',
+    async () => {
+      const person = await user();
+      // Idle deadline 2 s out from one authoritative timestamp (single materialized CTE row,
+      // like RWAIT1: separate clock calls could violate the absolute ceiling).
+      const tokenHash = hash();
+      const id = randomUUID();
+      await admin.query(
+        `with t as materialized (select clock_timestamp() + interval '2 seconds' as idle,
+                                         clock_timestamp() as now)
+         insert into sessions (
+           token_hash, id, family_id, user_id, rotation_reason,
+           created_at, last_seen_at, idle_expires_at, absolute_expires_at,
+           provider_tokens_sealed, provider_tokens_key_id
+         ) select
+           $1, $2, $2, $3, 'login',
+           t.now, t.now,
+           t.idle, t.now + interval '7 days',
+           $4, 'test-v1'
+         from t`,
+        [tokenHash, id, person.id, sealed()],
+      );
+      const org = randomUUID();
+      await admin.query('insert into organisations (id, slug, name) values ($1, $2, $3)', [
+        org,
+        `mw-${org.slice(0, 8)}`,
+        'MW Org',
+      ]);
+      await admin.query(
+        'insert into memberships (organisation_id, id, user_id, role, status) values ($1, $2, $3, $4, $5)',
+        [org, randomUUID(), person.id, 'owner', 'active'],
+      );
+      const appGate = database.pool();
+      const gate = await appGate.connect();
+      const waiter = await identity.connect();
+      try {
+        await gate.query('begin');
+        // Hold memberships at table level: the lookup's membership access (row locks under
+        // the scoped exemption, table AccessShare for the join) must block here after it
+        // already holds family/session/user. A row-level gate was tried first and proved
+        // unreliable in this cluster: whether the waiter's FOR SHARE blocks on a held row
+        // lock depends on the function owner's RLS-bypass context (migrator-owned functions
+        // do not block where superuser-owned ones do — measured back-to-back in one
+        // database), whereas ACCESS EXCLUSIVE conflicts with any access regardless of
+        // role or RLS path. This also matches the reported shape (LOCK TABLE ... IN
+        // EXCLUSIVE MODE or heavier by a concurrent writer).
+        await gate.query('lock table memberships in access exclusive mode');
+
+        await waiter.query('begin');
+        const pending = waiter.query('select * from app.resolve_request_context($1::bytea)', [
+          tokenHash,
+        ]);
+
+        const deadline = Date.now() + LOCK_WAIT_DEADLINE_MS;
+        let waiting = '0';
+        while (waiting !== '1' && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT_POLL_MS));
+          const result = await admin.query<{ n: string }>(
+            "select count(*)::text as n from pg_stat_activity where wait_event_type = 'Lock' and datname = $1",
+            [database.name],
+          );
+          waiting = result.rows[0]?.n ?? '0';
+        }
+        expect(waiting, 'lookup waits on the membership lock').toBe('1');
+
+        // Hold the lock until the real idle deadline has provably passed on the DB clock.
+        await gate.query('select pg_sleep(2.5)');
+        await gate.query('commit');
+
+        const resolved = await pending;
+        await waiter.query('commit');
+        expect(resolved.rowCount, 'lookup after idle expiry returned 0 rows').toBe(0);
+      } finally {
+        gate.release();
+        waiter.release();
+        await appGate.end();
+      }
+      // The deadline the seed wrote is still there: the blocked lookup refused it instead of
+      // sliding it back to now + 12 h.
+      const after = await admin.query<{ idle: Date }>(
+        'select idle_expires_at as idle from sessions where token_hash = $1',
+        [tokenHash],
+      );
+      const idleAfter = after.rows[0]!.idle;
+      expect(idleAfter.getTime()).toBeLessThan(Date.now());
+    },
+  );
+});

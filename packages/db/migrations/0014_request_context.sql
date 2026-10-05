@@ -34,13 +34,17 @@
 -- RETURN, so it cannot leak into the caller's transaction. The whole exemption — marker set,
 -- read, reset — is visible in the body the `REVIEWED_BODIES` digest pins.
 --
--- ## Lock order follows the canonical graph
+-- ## Lock order follows the canonical graph, memberships included
 --
--- Family, then target session, then owning user — the same order as `begin_session`,
--- `rotate_session` and `resolve_session` — so a re-check racing a rotation, re-login or disable
--- serialises instead of deadlocking. Membership rows need no lock: they are read, never written,
--- by this function, and a concurrent disable commits either before the read (row refused) or
--- after (next request refuses). Either way no live request outlives its membership.
+-- Family, then target session, then owning user, then the user's membership rows — the same
+-- order as `begin_session`, `rotate_session` and `resolve_session`, extended by the membership
+-- lock this function alone needs. Every lock is held before the clock below is read: a wait on
+-- any of them — including a wait on a membership row held by a concurrent disable — happens
+-- before `v_now` is sampled, so an expiry lapsing mid-wait is already expired when the verdict
+-- runs. Membership rows need no write lock (FOR SHARE): they are read, never written, by this
+-- function, and a concurrent disable commits either before the read (row refused) or after
+-- (next request refuses). Either way no live request outlives its membership, and no expired
+-- session is admitted or slid after a membership-lock wait.
 
 CREATE FUNCTION app.resolve_request_context(
   p_token_hash bytea
@@ -66,18 +70,30 @@ BEGIN
   FROM public.sessions s JOIN public.users u ON u.id = s.user_id
   WHERE s.token_hash = p_token_hash FOR SHARE OF u;
 
-  -- Fresh DB clock obtained only after all locks above are held.
-  v_now := clock_timestamp();
-
-  -- Scoped read marker for the membership join below. Set and read inside one subtransaction:
-  -- the inner block resets the marker before re-raising, so no error path can leak it into the
-  -- caller's transaction where a later read as the function owner would inherit the exception.
+  -- All remaining work happens inside one subtransaction: the marker is set first (the
+  -- membership lock needs the exemption to see rows at all — without it the lock would match
+  -- nothing and order nothing), then the membership lock, then the clock, then the slide and
+  -- the verdict sharing that single v_now. The block resets the marker before re-raising, so
+  -- no error path can leak it into the caller's transaction where a later read as the
+  -- function owner would inherit the exception.
   BEGIN
+    PERFORM set_config('app.request_lookup', 'resolve_request_context', true);
+
+    -- The membership lock: held before v_now is sampled, or a wait on it (concurrent disable
+    -- holding the row, or a table-level lock) would evaluate expiry against stale time.
+    -- FOR SHARE conflicts with a concurrent disable's UPDATE on the same rows, so the disable
+    -- commits either before this read (row refused now) or after (next request refuses).
+    PERFORM 1
+    FROM public.sessions s JOIN public.users u ON u.id = s.user_id
+    JOIN public.memberships m ON m.user_id = s.user_id
+    WHERE s.token_hash = p_token_hash FOR SHARE OF m;
+
+    -- Fresh DB clock obtained only after all locks above are held.
+    v_now := clock_timestamp();
+
     -- The capped activity slide, folded in so validity and write share one v_now: a session that
     -- lapses between a separate read and write could be admitted-then-slid; here the write IS the
-    -- verdict. Skipped under a minute like resolve_session — never later than ideal. Runs before
-    -- the marker is set: sessions/users are global, so the write needs no exemption, and the
-    -- exemption window covers exactly the membership join below.
+    -- verdict. Skipped under a minute like resolve_session — never later than ideal.
     UPDATE public.sessions s
     SET last_seen_at = GREATEST(s.last_seen_at, v_now),
         idle_expires_at = LEAST(v_now + interval '12 hours', s.absolute_expires_at)
@@ -90,8 +106,6 @@ BEGIN
       AND u.status = 'active'
       AND LEAST(v_now + interval '12 hours', s.absolute_expires_at) - s.idle_expires_at
           >= interval '60 seconds';
-
-    PERFORM set_config('app.request_lookup', 'resolve_request_context', true);
 
     RETURN QUERY
     SELECT s.id, s.user_id, m.organisation_id, m.role, m.permissions,
