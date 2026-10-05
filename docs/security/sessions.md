@@ -175,8 +175,8 @@ rotation re-reads `revoked_at` after the row lock and inserts nothing, and `rota
 as the structural backstop. `family_id` carries through rotations for forensic lineage.
 
 **Only the login caller exists.** `SessionService.rotate` is the primitive P06.06.04 (step-up) and
-P06.07 (privilege change) will call after their own checks; neither caller exists in this change,
-and neither item is claimed.
+P06.07 (privilege change) will call after their own checks; the step-up endpoint (P06.06.04) is now
+its first caller, and the privilege-change caller is still unclaimed.
 
 ### Fixation
 
@@ -225,7 +225,7 @@ refusal is the token-custody check's, not the provider switch's.
 | Item          | What is missing                                                                                             |
 | ------------- | ----------------------------------------------------------------------------------------------------------- |
 | P06.06.03     | per-request session + membership re-check; `active_organisation_id`; the 30 s read-only cache               |
-| P06.06.04     | step-up MFA policy and its caller of `rotate_session('step_up')`; `step_up_at`                              |
+| P06.06.04     | step-up MFA policy, `step_up_at`, and its caller of `rotate_session('step_up')` (shipped; pending review) |
 | P06.06.05     | revocation on password/MFA reset, role change, membership removal, "sign out other devices"                 |
 | P06.06.06     | CSRF synchronizer token and Origin check (the sign-in routes are GETs and change no tenant state)           |
 | P06.06.07     | the complete lifecycle acceptance suite, including FS-16                                                    |
