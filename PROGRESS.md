@@ -774,3 +774,5 @@ true, ok: false }` — is serialized by Vitest with none of the `constructor`/`t
 - 2026-10-06 — **BLOCKER: awaiting invariant final review; stall hook fired.** Security final OK TO MERGE at 8ae542f (no findings in delta). Architecture final OK TO MERGE at 8ae542f (M1/L1/L2 closed). Invariant final still outstanding; 2 no-change iterations (review-waiting turns, HEAD 8ae542f, tree clean). Needed: invariant verdict, then 3 review artifacts + EV-P06-049, push, founder full gate. P06.06.04 stays IN_PROGRESS.
 
 - 2026-10-06 — **QG-09 triad complete at a1236a2: three OK TO MERGE + EV-P06-049.** Security/architecture/invariant finals all green (residuals hardening-only → wiring backlog). 64/64 sweep, fast 7/7, 163/163 affected integration. Next: push branch, draft PR, founder full gate. P06.06.04 stays READY_FOR_REVIEW (never VERIFIED by implementor).
+
+- 2026-10-06 — **Founder full gate 14/14 PASS at 3f68fc5 (evidence 20261006T014632Z-full.json).** Run by the founder with ephemeral fixture env. P06.06.04 ready for founder acceptance; PR #38 draft awaiting CI. P06.06.04 stays READY_FOR_REVIEW.

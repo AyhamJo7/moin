@@ -14,7 +14,7 @@
 | Architecture-reviewer | exact `b126af4e6fc97d5302d07570035ca0d36dca19da`, OK TO MERGE. Artifact: `docs/evidence/P06/reviews/architecture-reviewer-b126af4.md` (prior H1/M1/L1/L2 verified closed) |
 | Invariant-reviewer | exact `b126af4e6fc97d5302d07570035ca0d36dca19da`, NO BYPASS FOUND. Artifact: `docs/evidence/P06/reviews/invariant-reviewer-b126af4.md` (SHA log-derived, content-verified — reviewer sandbox has no shell) |
 | Session mutation sweep | 64/64 KILLED_ASSERTION (measured at `8ae542f`, artifact `docs/verification/session-mutation-report.md`; includes SU1–SU9) |
-| Founder Full Quality Gate | pending |
+| Founder Full Quality Gate | 14/14 PASS at `3f68fc5` (evidence 20261006T014632Z-full.json, founder-run with ephemeral fixture env) |
 | Reviewer | pending adversarial review |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).
