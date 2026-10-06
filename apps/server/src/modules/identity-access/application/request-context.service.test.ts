@@ -137,8 +137,7 @@ describe('RequestContextService', () => {
     expect('context' in stamped && stamped.context.stepUpFresh).toBe(true);
     const bare = new RequestContextService(
       store({
-        resolveRequestContext: () =>
-          Promise.resolve(rows({ stepUpAt: null, stepUpFresh: false })),
+        resolveRequestContext: () => Promise.resolve(rows({ stepUpAt: null, stepUpFresh: false })),
       }),
       clock,
     );
@@ -171,8 +170,7 @@ describe('RequestContextService', () => {
   evidenceTest('serves an unstamped session from cache across reads', async () => {
     const clock = fixedClock(new Date());
     const backend = store({
-      resolveRequestContext: () =>
-        Promise.resolve(rows({ stepUpAt: null, stepUpFresh: false })),
+      resolveRequestContext: () => Promise.resolve(rows({ stepUpAt: null, stepUpFresh: false })),
     });
     const service = new RequestContextService(backend, clock);
     const spy = vi.spyOn(backend, 'resolveRequestContext');
