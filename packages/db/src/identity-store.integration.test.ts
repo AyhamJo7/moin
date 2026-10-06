@@ -53,7 +53,7 @@ async function signIn(subject: string, replacedHash?: Buffer, stepUp = true) {
     providerTokensSealed: sealed(),
     keyId: 'test-v1',
     replacedHash,
-    stepUp,
+    stepUp: stepUp ? new Date() : undefined,
   });
   return { tokenHash, granted };
 }
@@ -1574,7 +1574,9 @@ describe('the step-up stamp (P06.06.04)', () => {
         [tokenHash],
       );
       const stepped = hash();
-      expect(await store.rotateSession(tokenHash, stepped, randomUUID(), 'step_up')).toBeDefined();
+      expect(
+        await store.rotateSession(tokenHash, stepped, randomUUID(), 'step_up', new Date()),
+      ).toBeDefined();
       const afterStep = await admin.query<{ step_up_at: Date }>(
         'select step_up_at from sessions where token_hash = $1',
         [stepped],
@@ -1649,6 +1651,31 @@ describe('the step-up stamp (P06.06.04)', () => {
       [infRotated],
     );
     expect(infRotatedRow.rows[0]?.step_up_at).toBeNull();
+  });
+
+  evidenceTest('step_up rotation without provider proof never stamps the successor', async () => {
+    const person = await user();
+    const { tokenHash } = await signIn(person.sub, undefined, false);
+    const unproven = hash();
+    const first = await store.rotateSession(tokenHash, unproven, randomUUID(), 'step_up');
+    expect(first).toBeDefined();
+    const firstRow = await admin.query<{ step_up_at: Date | null }>(
+      'select step_up_at from sessions where token_hash = $1',
+      [unproven],
+    );
+    expect(firstRow.rows[0]?.step_up_at).toBeNull();
+
+    const legacy = hash();
+    const second = await identity.query(
+      'select * from app.rotate_session($1::bytea, $2::bytea, $3::uuid, $4::text)',
+      [unproven, legacy, randomUUID(), 'step_up'],
+    );
+    expect(second.rowCount).toBe(1);
+    const legacyRow = await admin.query<{ step_up_at: Date | null }>(
+      'select step_up_at from sessions where token_hash = $1',
+      [legacy],
+    );
+    expect(legacyRow.rows[0]?.step_up_at).toBeNull();
   });
 
   evidenceTest('a step-up round-trip carries its session binding through consume', async () => {

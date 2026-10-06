@@ -552,13 +552,13 @@ describe('the session primitives behind the cookie', () => {
       const { token } = await signIn(who);
       const before = await sessions().resolve(token);
       clock.advance(60_000);
-      const rotated = await sessions().rotate(token, 'privilege_change');
+      const rotated = await sessions().rotate(token);
       expect(rotated?.sessionToken).not.toBe(token);
       expect(await sessions().resolve(token)).toBeUndefined();
       const after = await sessions().resolve(rotated?.sessionToken);
       expect(after?.userId).toBe(who.id);
       expect(after?.absoluteExpiresAt).toStrictEqual(before?.absoluteExpiresAt);
-      expect(await sessions().rotate(token, 'step_up')).toBeUndefined();
+      expect(await sessions().rotate(token)).toBeUndefined();
     },
   );
 

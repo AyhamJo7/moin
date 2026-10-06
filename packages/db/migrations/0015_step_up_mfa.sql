@@ -222,7 +222,7 @@ BEGIN
          CASE
            WHEN p_reason = 'step_up' THEN
              CASE
-               WHEN p_step_up_at IS NULL THEN v_now
+               WHEN p_step_up_at IS NULL THEN NULL
                WHEN NOT isfinite(p_step_up_at) THEN NULL
                WHEN p_step_up_at > v_now + interval '30 seconds' THEN NULL
                WHEN p_step_up_at >= v_now - interval '1 second' THEN v_now

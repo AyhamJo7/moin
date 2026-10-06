@@ -51,11 +51,8 @@ export interface NewSession {
   readonly keyId: string;
   /** The session the browser presented at sign-in, if any; it is revoked as superseded. */
   readonly replacedHash?: Buffer | undefined;
-  /**
-   * Verified auth_time timestamp (or boolean indicating fresh proof).
-   * Fresh proof stamps step_up_at preserving remaining age; anything else leaves NULL.
-   */
-  readonly stepUp?: boolean | Date | undefined;
+  /** Verified provider auth_time; absent proof leaves step_up_at NULL. */
+  readonly stepUp?: Date | undefined;
 }
 
 export interface SessionGrant {
@@ -190,8 +187,6 @@ export function createIdentityStore(pool: Pool): IdentityStore {
     },
 
     async beginSession(input) {
-      const stepUpAt =
-        input.stepUp instanceof Date ? input.stepUp : input.stepUp === true ? new Date() : null;
       const result = await pool.query<GrantRow>(
         'select session_id, user_id, absolute_expires_at from app.begin_session($1::text, $2::bytea, $3::uuid, $4::bytea, $5::text, $6::bytea, $7::timestamptz)',
         [
@@ -201,7 +196,7 @@ export function createIdentityStore(pool: Pool): IdentityStore {
           input.providerTokensSealed,
           input.keyId,
           input.replacedHash === undefined ? null : digest(input.replacedHash),
-          stepUpAt,
+          input.stepUp ?? null,
         ],
       );
       return grant(result.rows[0]);
