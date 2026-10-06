@@ -27,7 +27,6 @@
 
 import type { ActiveMembership, IdentityStore, RequestContext } from '@moin/db';
 import type { Clock } from '@moin/kernel';
-import { STEP_UP_WINDOW_MS } from '../domain/session-policy.ts';
 
 /** What the guard attaches to the request for the interceptor and handlers. */
 export interface SessionContext {
@@ -61,10 +60,9 @@ interface CachedEntry {
   readonly idleExpiresAtMs: number;
   readonly absoluteExpiresAtMs: number;
   /**
-   * Remaining step-up budget in ms, judged at insert against the database verdict, plus the
-   * local resolution time. The hit check compares elapsed local time against this budget —
-   * never a DB timestamp against the app clock — so constant app↔DB skew cannot stretch the
-   * verdict past the database deadline (Defect 2). Entries are never cached unstamped.
+   * Remaining step-up budget in ms, computed entirely on the database clock at insert
+   * (Defect 2). The hit check spends it in local elapsed time, so constant app↔DB skew
+   * can neither stretch nor shrink the verdict. Entries are never cached unstamped.
    */
   readonly stepUpBudgetMs: number;
   readonly cachedAtMs: number;
@@ -155,9 +153,10 @@ export class RequestContextService {
     if (context === undefined) return { failure: 'ambiguous_organisation' };
     // An unstamped session carries no step-up deadline to bound a cache entry — so it is
     // never cached: every read re-resolves rather than serving a verdict with no expiry.
-    // The narrowing below is what proves the stamp non-null to the expiry arithmetic.
-    if (useCache && resolved.stepUpAt !== null) {
-      const stepUpAt: Date = resolved.stepUpAt;
+    // The budget comes from the database verdict (seconds remaining on the DB clock), not
+    // from comparing the DB stamp against the app clock — so skew shifts nothing.
+    if (useCache && resolved.stepUpAt !== null && resolved.stepUpRemainingSeconds !== null) {
+      const stepUpBudgetMs = Math.max(0, resolved.stepUpRemainingSeconds * 1000);
       if (this.#cache.size >= MAX_CACHE_ENTRIES) {
         let oldest = this.#cache.keys().next();
         while (!oldest.done && this.#cache.size >= MAX_CACHE_ENTRIES) {
@@ -176,7 +175,7 @@ export class RequestContextService {
         ),
         idleExpiresAtMs: resolved.idleExpiresAt.getTime(),
         absoluteExpiresAtMs: resolved.absoluteExpiresAt.getTime(),
-        stepUpBudgetMs: STEP_UP_WINDOW_MS - (nowMs - stepUpAt.getTime()),
+        stepUpBudgetMs,
         cachedAtMs: nowMs,
         context,
       });

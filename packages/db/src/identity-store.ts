@@ -91,6 +91,8 @@ export interface RequestContext {
   readonly stepUpAt: Date | null;
   /** Judged by the database clock against the 15-minute window (P06.06.04). */
   readonly stepUpFresh: boolean;
+  /** Remaining step-up validity in seconds at resolve time, DB clock (Defect 2). */
+  readonly stepUpRemainingSeconds: number | null;
 }
 
 export interface IdentityStore {
@@ -248,8 +250,9 @@ export function createIdentityStore(pool: Pool): IdentityStore {
         absolute_expires_at: Date;
         step_up_at: Date | null;
         step_up_fresh: boolean;
+        step_up_remaining_seconds: number | null;
       }>(
-        'select session_id, user_id, organisation_id, role, permissions, idle_expires_at, absolute_expires_at, step_up_at, step_up_fresh from app.resolve_request_context($1::bytea)',
+        'select session_id, user_id, organisation_id, role, permissions, idle_expires_at, absolute_expires_at, step_up_at, step_up_fresh, step_up_remaining_seconds from app.resolve_request_context($1::bytea)',
         [digest(tokenHash)],
       );
       const first = result.rows[0];
@@ -266,6 +269,7 @@ export function createIdentityStore(pool: Pool): IdentityStore {
         absoluteExpiresAt: first.absolute_expires_at,
         stepUpAt: first.step_up_at,
         stepUpFresh: first.step_up_fresh,
+        stepUpRemainingSeconds: first.step_up_remaining_seconds,
       };
     },
   };

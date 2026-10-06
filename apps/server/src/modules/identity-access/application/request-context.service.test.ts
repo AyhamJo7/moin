@@ -22,6 +22,7 @@ function rows(overrides: Partial<RequestContext> = {}): RequestContext {
     absoluteExpiresAt: new Date(Date.now() + 86400_000),
     stepUpAt: new Date(),
     stepUpFresh: true,
+    stepUpRemainingSeconds: 900,
     ...overrides,
   };
 }
@@ -137,7 +138,10 @@ describe('RequestContextService', () => {
     expect('context' in stamped && stamped.context.stepUpFresh).toBe(true);
     const bare = new RequestContextService(
       store({
-        resolveRequestContext: () => Promise.resolve(rows({ stepUpAt: null, stepUpFresh: false })),
+        resolveRequestContext: () =>
+          Promise.resolve(
+            rows({ stepUpAt: null, stepUpFresh: false, stepUpRemainingSeconds: null }),
+          ),
       }),
       clock,
     );
@@ -148,12 +152,11 @@ describe('RequestContextService', () => {
 
   evidenceTest('refuses a cached verdict past the stamp expiry, inside the 30 s TTL', async () => {
     const clock = fixedClock(new Date());
-    const at = clock.now().getTime();
-    // Stamped 14 minutes and 50 seconds ago: fresh now, budget expires in 10 s — inside the
-    // 30 s TTL. The stub always reports fresh: only the spent budget flips the served verdict.
+    // The database reports 10 s of step-up budget remaining; after 15 s of local elapsed
+    // time the served verdict flips stale — inside the 30 s TTL, with no new lookup.
     const backend = store({
       resolveRequestContext: () =>
-        Promise.resolve(rows({ stepUpAt: new Date(at - 14 * 60_000 - 50_000), stepUpFresh: true })),
+        Promise.resolve(rows({ stepUpRemainingSeconds: 10, stepUpFresh: true })),
     });
     const service = new RequestContextService(backend, clock);
     const spy = vi.spyOn(backend, 'resolveRequestContext');
@@ -161,9 +164,8 @@ describe('RequestContextService', () => {
     expect('context' in first && first.context.stepUpFresh).toBe(true);
     expect(spy).toHaveBeenCalledTimes(1);
     clock.advance(15_000);
-    // Stamp is now 15 minutes and 5 seconds old: the 10 s budget elapsed, but the 30 s
-    // cache TTL still has 15 s left. The entry is served with stepUpFresh flipped false —
-    // no new lookup, and the guard 403s on the flipped verdict.
+    // The 10 s budget elapsed, but the 30 s cache TTL still has 15 s left. The entry is
+    // served with stepUpFresh flipped false — no new lookup, and the guard 403s on it.
     const second = await service.resolve(DIGEST, 'read');
     expect(spy).toHaveBeenCalledTimes(1);
     expect('context' in second && second.context.stepUpFresh).toBe(false);
@@ -172,7 +174,8 @@ describe('RequestContextService', () => {
   evidenceTest('an unstamped session never serves from cache', async () => {
     const clock = fixedClock(new Date());
     const backend = store({
-      resolveRequestContext: () => Promise.resolve(rows({ stepUpAt: null, stepUpFresh: false })),
+      resolveRequestContext: () =>
+        Promise.resolve(rows({ stepUpAt: null, stepUpFresh: false, stepUpRemainingSeconds: null })),
     });
     const service = new RequestContextService(backend, clock);
     const spy = vi.spyOn(backend, 'resolveRequestContext');

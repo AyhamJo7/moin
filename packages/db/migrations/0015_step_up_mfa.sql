@@ -397,7 +397,7 @@ CREATE FUNCTION app.resolve_request_context(
 ) RETURNS TABLE (session_id uuid, user_id uuid, organisation_id uuid, role text,
                  permissions text[], idle_expires_at timestamptz,
                  absolute_expires_at timestamptz, step_up_at timestamptz,
-                 step_up_fresh boolean)
+                 step_up_fresh boolean, step_up_remaining_seconds double precision)
   LANGUAGE plpgsql
   SECURITY DEFINER
   SET search_path = pg_catalog, public, app, pg_temp
@@ -457,7 +457,12 @@ BEGIN
     RETURN QUERY
     SELECT s.id, s.user_id, m.organisation_id, m.role, m.permissions,
            s.idle_expires_at, s.absolute_expires_at, s.step_up_at,
-           (s.step_up_at IS NOT NULL AND s.step_up_at > v_now - interval '15 minutes')
+           (s.step_up_at IS NOT NULL AND s.step_up_at > v_now - interval '15 minutes'),
+           -- Remaining validity in seconds, judged entirely on the database clock: the app
+           -- spends this budget in local elapsed time, so constant app↔DB skew can neither
+           -- stretch nor shrink the verdict (Defect 2). NULL stamp means no budget column
+           -- matters — the row is refused by the boolean and never cached by the app.
+           extract(epoch from (s.step_up_at + interval '15 minutes' - v_now))::double precision
     FROM public.sessions s
     JOIN public.users u ON u.id = s.user_id
     JOIN public.memberships m ON m.user_id = s.user_id
