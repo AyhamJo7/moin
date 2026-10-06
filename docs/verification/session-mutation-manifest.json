@@ -523,9 +523,9 @@
     "id": "CLK1-resolve-idle-expiry-bypassed",
     "invariant": "P06.06.02: authoritative DB time governs session resolution; idle-expired sessions cannot resolve",
     "expected": "A session whose idle timeout expired in the database would be resolved if the idle expiry check is relaxed.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "  SELECT s.id, s.user_id, s.idle_expires_at, s.absolute_expires_at\n  FROM public.sessions s\n  JOIN public.users u ON u.id = s.user_id\n  WHERE s.token_hash = p_token_hash\n    AND s.revoked_at IS NULL\n    AND s.idle_expires_at > v_now\n    AND s.absolute_expires_at > v_now\n    AND u.status = 'active';\n",
-    "replace": "  SELECT s.id, s.user_id, s.idle_expires_at, s.absolute_expires_at\n  FROM public.sessions s\n  JOIN public.users u ON u.id = s.user_id\n  WHERE s.token_hash = p_token_hash\n    AND s.revoked_at IS NULL\n    AND s.absolute_expires_at > v_now\n    AND u.status = 'active';\n",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
+    "find": "  SELECT s.id, s.user_id, s.idle_expires_at, s.absolute_expires_at, u.cognito_sub\n  FROM public.sessions s\n  JOIN public.users u ON u.id = s.user_id\n  WHERE s.token_hash = p_token_hash\n    AND s.revoked_at IS NULL\n    AND s.idle_expires_at > v_now\n    AND s.absolute_expires_at > v_now\n    AND u.status = 'active';",
+    "replace": "  SELECT s.id, s.user_id, s.idle_expires_at, s.absolute_expires_at, u.cognito_sub\n  FROM public.sessions s\n  JOIN public.users u ON u.id = s.user_id\n  WHERE s.token_hash = p_token_hash\n    AND s.revoked_at IS NULL\n    AND s.absolute_expires_at > v_now\n    AND u.status = 'active';",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "temporal authorization and expiration (authoritative database clock) > idle expired 1 ms ago cannot resolve"
@@ -562,9 +562,9 @@
     "id": "CLK5-resolve-expired-session-updates-last-seen",
     "invariant": "P06.06.02: activity on an expired session cannot update last_seen_at or extend idle expiry",
     "expected": "An expired session would update last_seen_at and extend idle expiry if the UPDATE omitted the idle expiry condition.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "  UPDATE public.sessions s\n  SET last_seen_at = GREATEST(s.last_seen_at, v_now),\n      idle_expires_at = LEAST(v_now + interval '12 hours', s.absolute_expires_at)\n  FROM public.users u\n  WHERE s.token_hash = p_token_hash\n    AND s.revoked_at IS NULL\n    AND s.idle_expires_at > v_now\n",
-    "replace": "  UPDATE public.sessions s\n  SET last_seen_at = GREATEST(s.last_seen_at, v_now),\n      idle_expires_at = LEAST(v_now + interval '12 hours', s.absolute_expires_at)\n  FROM public.users u\n  WHERE s.token_hash = p_token_hash\n    AND s.revoked_at IS NULL\n",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
+    "find": "  UPDATE public.sessions s\n  SET last_seen_at = GREATEST(s.last_seen_at, v_now),\n      idle_expires_at = LEAST(v_now + interval '12 hours', s.absolute_expires_at)\n  FROM public.users u\n  WHERE s.token_hash = p_token_hash\n    AND s.revoked_at IS NULL\n    AND s.idle_expires_at > v_now",
+    "replace": "  UPDATE public.sessions s\n  SET last_seen_at = GREATEST(s.last_seen_at, v_now),\n      idle_expires_at = LEAST(v_now + interval '12 hours', s.absolute_expires_at)\n  FROM public.users u\n  WHERE s.token_hash = p_token_hash\n    AND s.revoked_at IS NULL",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "temporal authorization and expiration (authoritative database clock) > activity on expired session cannot move last_seen_at or extend idle expiry"
@@ -588,7 +588,7 @@
     "id": "U4-disable-racing-resolve-leaks-read",
     "invariant": "P06.06.02: a disable racing resolution blocks it (user row locked FOR SHARE OF u)",
     "expected": "A disable committing mid-resolution would let one stale read through.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
     "find": "  PERFORM 1 FROM public.sessions s WHERE s.token_hash = p_token_hash FOR UPDATE;\n\n  PERFORM 1\n  FROM public.sessions s JOIN public.users u ON u.id = s.user_id\n  WHERE s.token_hash = p_token_hash FOR SHARE OF u;\n\n  -- Fresh DB clock obtained only after all locks above are held.\n  v_now := clock_timestamp();",
     "replace": "  PERFORM 1;",
     "killingTest": {
@@ -601,9 +601,9 @@
     "id": "WAIT2-resolve-idle-recheck-removed",
     "invariant": "P06.06.02: resolve rechecks idle expiry after the lock",
     "expected": "An idle-expired session would resolve and extend its deadline after a lock wait.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "    AND s.idle_expires_at > v_now\n    AND s.absolute_expires_at > v_now\n    AND u.id = s.user_id\n    AND u.status = 'active'\n    AND LEAST(v_now + interval '12 hours', s.absolute_expires_at) - s.idle_expires_at\n        >= interval '60 seconds'\n  RETURNING s.id, s.user_id, s.idle_expires_at, s.absolute_expires_at;",
-    "replace": "    AND s.absolute_expires_at > v_now\n    AND u.id = s.user_id\n    AND u.status = 'active'\n    AND LEAST(v_now + interval '12 hours', s.absolute_expires_at) - s.idle_expires_at\n        >= interval '60 seconds'\n  RETURNING s.id, s.user_id, s.idle_expires_at, s.absolute_expires_at;",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
+    "find": "    AND s.idle_expires_at > v_now\n    AND s.absolute_expires_at > v_now\n    AND u.id = s.user_id\n    AND u.status = 'active'\n    AND LEAST(v_now + interval '12 hours', s.absolute_expires_at) - s.idle_expires_at\n        >= interval '60 seconds'\n  RETURNING s.id, s.user_id, s.idle_expires_at, s.absolute_expires_at, u.cognito_sub;",
+    "replace": "    AND s.absolute_expires_at > v_now\n    AND u.id = s.user_id\n    AND u.status = 'active'\n    AND LEAST(v_now + interval '12 hours', s.absolute_expires_at) - s.idle_expires_at\n        >= interval '60 seconds'\n  RETURNING s.id, s.user_id, s.idle_expires_at, s.absolute_expires_at, u.cognito_sub;",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "temporal authorization and expiration (authoritative database clock) > waiting on the session lock past expiry (RWAIT) > RWAIT1: idle expiry during the wait returns nothing and revives nothing"
