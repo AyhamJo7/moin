@@ -151,14 +151,11 @@ describe('RequestContextService', () => {
     const clock = fixedClock(new Date());
     const at = clock.now().getTime();
     // Stamped 14 minutes ago: fresh now, stale after one more minute — TTL still has 29 s.
-    // The stub models the DB verdict honestly: fresh while the stamp is within 15 minutes.
+    // The stub always reports the verdict as fresh (a lying cache entry): only the expiry
+    // arithmetic can refuse the second read, so SU9 dies here if the fourth deadline goes.
     const backend = store({
       resolveRequestContext: () =>
-        Promise.resolve(
-          clock.now().getTime() - at < 60_000
-            ? rows({ stepUpAt: new Date(at - 14 * 60_000), stepUpFresh: true })
-            : rows({ stepUpAt: new Date(at - 14 * 60_000), stepUpFresh: false }),
-        ),
+        Promise.resolve(rows({ stepUpAt: new Date(at - 14 * 60_000), stepUpFresh: true })),
     });
     const service = new RequestContextService(backend, clock);
     const spy = vi.spyOn(backend, 'resolveRequestContext');
@@ -166,10 +163,8 @@ describe('RequestContextService', () => {
     expect('context' in first && first.context.stepUpFresh).toBe(true);
     expect(spy).toHaveBeenCalledTimes(1);
     clock.advance(2 * 60_000);
-    // Stamp is 16 minutes old: the cache must not serve the frozen fresh verdict, and the
-    // re-resolve now carries the DB's stale verdict.
-    const second = await service.resolve(DIGEST, 'read');
+    // Stamp is 16 minutes old: the cache must not serve the frozen fresh verdict.
+    await service.resolve(DIGEST, 'read');
     expect(spy).toHaveBeenCalledTimes(2);
-    expect('context' in second && second.context.stepUpFresh).toBe(false);
   });
 });
