@@ -745,7 +745,7 @@
     "invariant": "P06.06.04: a privilege_change rotation inherits the stamp (no fresh proof)",
     "expected": "A role change that refreshed the stamp would mint fresh MFA proof from no human act: privilege change would silently extend step-up.",
     "file": "packages/db/migrations/0015_step_up_mfa.sql",
-    "find": "         CASE\n           WHEN p_reason = 'step_up' THEN\n             CASE\n               WHEN p_step_up_at IS NULL THEN v_now\n               WHEN p_step_up_at >= v_now - interval '1 second' AND p_step_up_at <= v_now + interval '30 seconds' THEN v_now\n               WHEN p_step_up_at > v_now - interval '15 minutes' THEN p_step_up_at\n               ELSE NULL\n             END\n           ELSE p.step_up_at\n         END,",
+    "find": "         CASE\n           WHEN p_reason = 'step_up' THEN\n             CASE\n               WHEN p_step_up_at IS NULL THEN v_now\n               WHEN NOT isfinite(p_step_up_at) THEN NULL\n               WHEN p_step_up_at > v_now + interval '30 seconds' THEN NULL\n               WHEN p_step_up_at >= v_now - interval '1 second' THEN v_now\n               WHEN p_step_up_at > v_now - interval '15 minutes' THEN p_step_up_at\n               ELSE NULL\n             END\n           ELSE p.step_up_at\n         END,",
     "replace": "         v_now,",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
