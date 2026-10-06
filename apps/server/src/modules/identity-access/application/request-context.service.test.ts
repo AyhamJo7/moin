@@ -5,7 +5,8 @@
  * exactly one database call per resolution, cached authority bounded by the session's own
  * expiries, the bound holding under churn, and mutations never touching the cache.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, vi } from 'vitest';
+import { evidenceTest } from '@moin/testing';
 import { fixedClock } from '@moin/kernel';
 import type { IdentityStore, RequestContext } from '@moin/db';
 import { RequestContextService } from './request-context.service.ts';
@@ -48,7 +49,7 @@ function store(
 }
 
 describe('RequestContextService', () => {
-  it('performs exactly one database call per resolution (single query)', async () => {
+  evidenceTest('performs exactly one database call per resolution (single query)', async () => {
     const clock = fixedClock(new Date());
     const backend = store();
     const spy = vi.spyOn(backend, 'resolveRequestContext');
@@ -59,7 +60,7 @@ describe('RequestContextService', () => {
     expect(backend.calls()).toBe(1);
   });
 
-  it('serves a cached session only while its expiries are future', async () => {
+  evidenceTest('serves a cached session only while its expiries are future', async () => {
     const clock = fixedClock(new Date());
     const deadline = clock.now().getTime() + 2_000;
     const backend = store({
@@ -83,7 +84,7 @@ describe('RequestContextService', () => {
     expect(service.cached).toBe(0);
   });
 
-  it('bounds the cache deadline by the session expiries, not just the TTL', async () => {
+  evidenceTest('bounds the cache deadline by the session expiries, not just the TTL', async () => {
     const clock = fixedClock(new Date());
     const deadline = clock.now().getTime() + 5_000;
     const backend = store({
@@ -104,7 +105,7 @@ describe('RequestContextService', () => {
     expect(spy).toHaveBeenCalledTimes(2);
   });
 
-  it('invalidates the cached entry on the mutate path', async () => {
+  evidenceTest('invalidates the cached entry on the mutate path', async () => {
     const clock = fixedClock(new Date());
     const backend = store();
     const service = new RequestContextService(backend, clock);
@@ -114,7 +115,7 @@ describe('RequestContextService', () => {
     expect(service.cached).toBe(0);
   });
 
-  it('never caches mutations and bounds the cache under churn', async () => {
+  evidenceTest('never caches mutations and bounds the cache under churn', async () => {
     const clock = fixedClock(new Date());
     const backend = store();
     const service = new RequestContextService(backend, clock);
@@ -125,7 +126,7 @@ describe('RequestContextService', () => {
     expect(service.cached).toBe(0);
   });
 
-  it('carries the step-up stamp and freshness into the session context', async () => {
+  evidenceTest('carries the step-up stamp and freshness into the session context', async () => {
     const clock = fixedClock(new Date());
     const fresh = new RequestContextService(
       store({ resolveRequestContext: () => Promise.resolve(rows()) }),
@@ -136,12 +137,37 @@ describe('RequestContextService', () => {
     expect('context' in stamped && stamped.context.stepUpFresh).toBe(true);
     const bare = new RequestContextService(
       store({
-        resolveRequestContext: () => Promise.resolve(rows({ stepUpAt: null, stepUpFresh: false })),
+        resolveRequestContext: () =>
+          Promise.resolve(rows({ stepUpAt: null, stepUpFresh: false })),
       }),
       clock,
     );
     const unstamped = await bare.resolve(DIGEST, 'mutate');
     expect('context' in unstamped && unstamped.context.stepUpAt).toBeNull();
     expect('context' in unstamped && unstamped.context.stepUpFresh).toBe(false);
+  });
+
+  evidenceTest('refuses a cached verdict past the stamp expiry, inside the 30 s TTL', async () => {
+    const clock = fixedClock(new Date());
+    const at = clock.now().getTime();
+    // Stamped 14 minutes ago: fresh now, stale after one more minute — TTL still has 29 s.
+    const backend = store({
+      resolveRequestContext: () =>
+        Promise.resolve(
+          rows({
+            stepUpAt: new Date(at - 14 * 60_000),
+            stepUpFresh: true,
+          }),
+        ),
+    });
+    const service = new RequestContextService(backend, clock);
+    const spy = vi.spyOn(backend, 'resolveRequestContext');
+    expect('context' in (await service.resolve(DIGEST, 'read'))).toBe(true);
+    expect(spy).toHaveBeenCalledTimes(1);
+    clock.advance(2 * 60_000);
+    // Stamp is 16 minutes old: the cache must not serve the frozen fresh verdict.
+    // The re-resolve hits the time-aware stub, which now refuses (DB would too).
+    await service.resolve(DIGEST, 'read');
+    expect(spy).toHaveBeenCalledTimes(2);
   });
 });

@@ -21,8 +21,13 @@ export const ABSOLUTE_TIMEOUT_MS = 7 * DAY_MS;
 export const AUTH_TRANSACTION_TTL_MS = 10 * MINUTE_MS;
 
 /**
- * A sensitive action needs MFA proof within the last 15 minutes (P06.06.04, PLAN Security
- * Architecture). Judged against the step-up stamp the database returns — never a caller claim.
+ * The step-up window in milliseconds (P06.06.04, PLAN Security Architecture).
+ *
+ * The authoritative judgment lives in SQL — `step_up_at > v_now - interval '15 minutes'`
+ * inside `app.resolve_request_context`, against the database clock. This constant mirrors
+ * that interval for the cache-expiry arithmetic in `RequestContextService` only: it bounds
+ * how long a cached verdict is served, never whether a stamp is fresh. If the window ever
+ * changes, change both in one reviewed change.
  */
 export const STEP_UP_WINDOW_MS = 15 * MINUTE_MS;
 

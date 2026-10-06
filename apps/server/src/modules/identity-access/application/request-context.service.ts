@@ -27,6 +27,7 @@
 
 import type { ActiveMembership, IdentityStore, RequestContext } from '@moin/db';
 import type { Clock } from '@moin/kernel';
+import { STEP_UP_WINDOW_MS } from '../domain/session-policy.ts';
 
 /** What the guard attaches to the request for the interceptor and handlers. */
 export interface SessionContext {
@@ -59,6 +60,8 @@ interface CachedEntry {
   readonly expiresAtMs: number;
   readonly idleExpiresAtMs: number;
   readonly absoluteExpiresAtMs: number;
+  /** The step-up stamp's own expiry: stepUpAt + 15 min, or -Infinity when unstamped (M1). */
+  readonly stepUpExpiresAtMs: number;
   readonly context: SessionContext;
 }
 
@@ -121,13 +124,16 @@ export class RequestContextService {
     }
     if (useCache) {
       const hit = this.#cache.get(key);
-      // All three deadlines must still be future: the TTL, and the session's own expiries the
-      // DEFINER call returned. A session that lapsed inside the cache window refuses on next read.
+      // All four deadlines must still be future: the TTL, the session's own expiries the
+      // DEFINER call returned, and the step-up stamp's own 15-minute expiry (M1). A stamp
+      // that lapsed inside the cache window refuses on next read — a cached `stepUpFresh`
+      // verdict never outlives the stamp it judged.
       if (
         hit !== undefined &&
         hit.expiresAtMs > nowMs &&
         hit.idleExpiresAtMs > nowMs &&
-        hit.absoluteExpiresAtMs > nowMs
+        hit.absoluteExpiresAtMs > nowMs &&
+        hit.stepUpExpiresAtMs > nowMs
       ) {
         return { context: hit.context };
       }
@@ -149,6 +155,7 @@ export class RequestContextService {
       }
       this.#cache.set(key, {
         // The TTL is bounded by the session's own expiries: authority never outlives either.
+        // The step-up verdict gets the same treatment via its own expiry below (M1).
         expiresAtMs: Math.min(
           nowMs + CONTEXT_CACHE_TTL_MS,
           resolved.idleExpiresAt.getTime(),
@@ -156,6 +163,8 @@ export class RequestContextService {
         ),
         idleExpiresAtMs: resolved.idleExpiresAt.getTime(),
         absoluteExpiresAtMs: resolved.absoluteExpiresAt.getTime(),
+        stepUpExpiresAtMs:
+          resolved.stepUpAt === null ? -Infinity : resolved.stepUpAt.getTime() + STEP_UP_WINDOW_MS,
         context,
       });
     }

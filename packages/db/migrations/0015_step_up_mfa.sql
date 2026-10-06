@@ -34,17 +34,16 @@ ALTER TABLE auth_transactions ADD COLUMN step_up_session_id uuid;
 COMMENT ON COLUMN auth_transactions.step_up_session_id IS
   'NULL for a plain login; the session id being re-verified for a step-up round-trip. The callback rotates exactly this session when the subject matches.';
 
--- The old sign-in arities are superseded: only the new shapes exist after this migration,
--- so deploy is migrate-first-then-drain (no mixed-version rolling window): an old app host
--- calling the 6-argument `begin_sign_in` or reading the narrower OUT-records fails loudly
--- with "function does not exist" instead of silently binding a step-up round-trip as a plain
--- login. That failure is fail-closed (sign-in 500s, never a forged step-up) and converges
--- when the hosts drain — the same migrate-first order every previous session-function change
--- already required. Neither a defaulted parameter, an overload, nor a same-arglist shim
--- would do: defaults live in the caller's expression (still binds the old form);
--- PostgreSQL forbids two functions sharing IN-args with different OUT-records, so a
--- projecting shim cannot coexist with the new body; and CREATE OR REPLACE is refused when
--- the OUT-record type changes (42P13) — hence drop-then-plain-CREATE below.
+-- The old sign-in shapes are superseded: after this migration the new bodies are what run.
+-- Deploy stays expand/contract (INV-17): a 6-argument `begin_sign_in` overload (bottom of this
+-- file) keeps old hosts signing in through the rolling window — it delegates with a NULL
+-- step-up binding, a plain login, which is all an old host can start. Narrow OUT-record
+-- readers (`consume_sign_in`, `resolve_*`) need no shim: old callers selecting a column
+-- subset by name ignore the added columns. Neither a defaulted parameter nor a same-arglist
+-- shim would do for the rest: defaults live in the caller's expression (still binds the old
+-- form), and PostgreSQL forbids two functions sharing IN-args with different OUT-records.
+-- CREATE OR REPLACE is refused when the OUT-record type changes (42P13) — hence
+-- drop-then-plain-CREATE below. The 6-arg overload is contracted (dropped) in 0016.
 DROP FUNCTION IF EXISTS app.begin_sign_in(bytea, bytea, bytea, bytea, text, text);
 DROP FUNCTION IF EXISTS app.consume_sign_in(bytea, bytea);
 DROP FUNCTION IF EXISTS app.resolve_request_context(bytea);
@@ -468,4 +467,36 @@ GRANT EXECUTE ON FUNCTION app.begin_sign_in(bytea, bytea, bytea, bytea, text, te
 GRANT EXECUTE ON FUNCTION app.consume_sign_in(bytea, bytea) TO moin_identity;
 GRANT EXECUTE ON FUNCTION app.resolve_request_context(bytea) TO moin_identity;
 GRANT EXECUTE ON FUNCTION app.resolve_session(bytea) TO moin_identity;
+
+-- ---------------------------------------------------------------------------------------------
+-- Rolling-window overload (H1): old hosts call 6-argument `begin_sign_in`.
+-- ---------------------------------------------------------------------------------------------
+--
+-- A different IN-arity is a different function slot, so this coexists with the 7-arg form
+-- above (unlike the OUT-record changes, which cannot shim). It delegates with a NULL
+-- step-up binding: a plain login, which is all an old host can start — it knows no step-up,
+-- and `startStepUp` passes 7 arguments, so no round-trip can begin here. Contracted (dropped)
+-- in 0016 once no old host remains. Same DEFINER contract: owner, fixed search_path,
+-- moin_identity-only — the catalog names both signatures.
+CREATE FUNCTION app.begin_sign_in(
+  p_state_hash bytea,
+  p_binding_hash bytea,
+  p_nonce_hash bytea,
+  p_verifier_sealed bytea,
+  p_key_id text,
+  p_return_to text
+) RETURNS void
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path = pg_catalog, public, app, pg_temp
+AS $$
+BEGIN
+  PERFORM app.begin_sign_in(p_state_hash, p_binding_hash, p_nonce_hash, p_verifier_sealed,
+                            p_key_id, p_return_to, NULL::uuid);
+END
+$$;
+
+REVOKE ALL ON FUNCTION app.begin_sign_in(bytea, bytea, bytea, bytea, text, text) FROM PUBLIC, moin_app;
+
+GRANT EXECUTE ON FUNCTION app.begin_sign_in(bytea, bytea, bytea, bytea, text, text) TO moin_identity;
 
