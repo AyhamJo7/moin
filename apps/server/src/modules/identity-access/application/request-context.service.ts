@@ -60,7 +60,7 @@ interface CachedEntry {
   readonly expiresAtMs: number;
   readonly idleExpiresAtMs: number;
   readonly absoluteExpiresAtMs: number;
-  /** The step-up stamp's own expiry: stepUpAt + 15 min, or -Infinity when unstamped (M1). */
+  /** The step-up stamp's own expiry: stepUpAt + 15 min (entries are never cached unstamped). */
   readonly stepUpExpiresAtMs: number;
   readonly context: SessionContext;
 }
@@ -145,7 +145,9 @@ export class RequestContextService {
     if (resolved === undefined) return { failure: 'invalid' };
     const context = toSessionContext(resolved);
     if (context === undefined) return { failure: 'ambiguous_organisation' };
-    if (useCache) {
+    // An unstamped session carries no step-up deadline to bound a cache entry — so it is
+    // never cached: every read re-resolves rather than serving a verdict with no expiry.
+    if (useCache && resolved.stepUpAt !== null) {
       if (this.#cache.size >= MAX_CACHE_ENTRIES) {
         let oldest = this.#cache.keys().next();
         while (!oldest.done && this.#cache.size >= MAX_CACHE_ENTRIES) {
@@ -163,8 +165,7 @@ export class RequestContextService {
         ),
         idleExpiresAtMs: resolved.idleExpiresAt.getTime(),
         absoluteExpiresAtMs: resolved.absoluteExpiresAt.getTime(),
-        stepUpExpiresAtMs:
-          resolved.stepUpAt === null ? -Infinity : resolved.stepUpAt.getTime() + STEP_UP_WINDOW_MS,
+        stepUpExpiresAtMs: (resolved.stepUpAt as Date).getTime() + STEP_UP_WINDOW_MS,
         context,
       });
     }

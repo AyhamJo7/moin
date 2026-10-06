@@ -167,7 +167,7 @@ describe('RequestContextService', () => {
     expect(spy).toHaveBeenCalledTimes(2);
   });
 
-  evidenceTest('serves an unstamped session from cache across reads', async () => {
+  evidenceTest('an unstamped session never serves from cache', async () => {
     const clock = fixedClock(new Date());
     const backend = store({
       resolveRequestContext: () => Promise.resolve(rows({ stepUpAt: null, stepUpFresh: false })),
@@ -178,9 +178,9 @@ describe('RequestContextService', () => {
     expect('context' in first && first.context.stepUpFresh).toBe(false);
     expect(spy).toHaveBeenCalledTimes(1);
     clock.advance(10_000);
-    // Inside the 30 s TTL: unstamped session hits cache without hitting the database.
-    const second = await service.resolve(DIGEST, 'read');
-    expect(spy).toHaveBeenCalledTimes(1);
-    expect('context' in second && second.context.stepUpFresh).toBe(false);
+    // No stamp means no step-up expiry to bound the entry — so the entry is never cached:
+    // every read re-resolves rather than risk serving a verdict with no deadline.
+    await service.resolve(DIGEST, 'read');
+    expect(spy).toHaveBeenCalledTimes(2);
   });
 });
