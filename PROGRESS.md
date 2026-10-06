@@ -776,3 +776,5 @@ true, ok: false }` — is serialized by Vitest with none of the `constructor`/`t
 - 2026-10-06 — **QG-09 triad complete at a1236a2: three OK TO MERGE + EV-P06-049.** Security/architecture/invariant finals all green (residuals hardening-only → wiring backlog). 64/64 sweep, fast 7/7, 163/163 affected integration. Next: push branch, draft PR, founder full gate. P06.06.04 stays READY_FOR_REVIEW (never VERIFIED by implementor).
 
 - 2026-10-06 — **Founder full gate 14/14 PASS at 3f68fc5 (evidence 20261006T014632Z-full.json).** Run by the founder with ephemeral fixture env. P06.06.04 ready for founder acceptance; PR #38 draft awaiting CI. P06.06.04 stays READY_FOR_REVIEW.
+
+- 2026-10-06 — **Dep override at 81da2e4: source-map-js 1.2.2 via pnpm.overrides.** Pre-existing HIGH (postcss chain, advisory published after main green); `pnpm audit --prod` clean, web typecheck green. EV-P06-049 candidate SHA updated. Next: push, CI 16/16 watch, final report. P06.06.04 stays READY_FOR_REVIEW.
