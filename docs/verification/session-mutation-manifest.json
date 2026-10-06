@@ -771,11 +771,11 @@
     "invariant": "P06.06.04: a stamp older than 15 minutes is refused",
     "expected": "A guard without the window check would admit a session stepped up hours ago: the 15-minute ceiling would be advisory.",
     "file": "apps/server/src/modules/identity-access/http/require-step-up.guard.ts",
-    "find": "    const stepUpAt = outcome.context.stepUpAt;\n    if (\n      stepUpAt === null ||\n      Date.now() - stepUpAt.getTime() > STEP_UP_WINDOW_MS\n    ) {",
-    "replace": "    const stepUpAt = outcome.context.stepUpAt;\n    if (stepUpAt === null) {",
+    "find": "    const session = currentSessionContext(request);\n    if (session?.stepUpFresh !== true) {",
+    "replace": "    const session = currentSessionContext(request);\n    if (session === undefined) {",
     "killingTest": {
       "file": "apps/server/src/modules/identity-access/http/require-step-up.guard.test.ts",
-      "fullName": "RequireStepUpGuard > rejects a stamp older than 15 minutes with the step-up problem"
+      "fullName": "RequireStepUpGuard > rejects a stale verdict with the step-up problem"
     },
     "project": "unit"
   },
@@ -791,5 +791,31 @@
       "fullName": "ID-token verification > step-up refuses a missing auth_time"
     },
     "project": "unit"
+  },
+  {
+    "id": "SU8-step-up-start-skips-membership",
+    "invariant": "P06.06.04: step-up initiation requires an active membership",
+    "expected": "A removed member's live session could start provider round-trips and mint auth transactions that can never complete usefully.",
+    "file": "apps/server/src/modules/identity-access/http/auth.controller.ts",
+    "find": "  @Post('step-up')\n  @UseGuards(SessionMembershipGuard)",
+    "replace": "  @Post('step-up')",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/session-membership.integration.test.ts",
+      "fullName": "the step-up gate (P06.06.04) > a removed member cannot start a step-up round-trip"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "SU7-step-up-skips-subject-binding",
+    "invariant": "P06.06.04: the fresh provider subject must equal the session owner's subject",
+    "expected": "A round-trip completed as another person would rotate the holder's session and stamp it stepped-up on foreign proof.",
+    "file": "apps/server/src/modules/identity-access/application/sign-in.service.ts",
+    "find": "      if (identity.subject !== bound.subject) {\n        throw this.#fail('step_up_invalid', 'step_up_subject_mismatch');\n      }",
+    "replace": "      if (false) {\n        throw this.#fail('step_up_invalid', 'step_up_subject_mismatch');\n      }",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/session-membership.integration.test.ts",
+      "fullName": "the step-up gate (P06.06.04) > a step-up completed as another person rotates nothing"
+    },
+    "project": "integration"
   }
 ]

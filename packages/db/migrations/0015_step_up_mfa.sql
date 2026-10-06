@@ -34,13 +34,17 @@ ALTER TABLE auth_transactions ADD COLUMN step_up_session_id uuid;
 COMMENT ON COLUMN auth_transactions.step_up_session_id IS
   'NULL for a plain login; the session id being re-verified for a step-up round-trip. The callback rotates exactly this session when the subject matches.';
 
--- The old sign-in arities are superseded, not overloaded: a caller pinned to an old arity
--- must fail loudly at migration time rather than silently bind a step-up round-trip as a
--- plain login. The drops come first: PostgreSQL refuses CREATE OR REPLACE when the
--- OUT-record type changes (42P13), so drop-then-CREATE is the only order that applies —
--- hence plain CREATE below, not OR REPLACE. (A defaulted parameter would not help either:
--- defaults live in the caller's expression, not the function identity, so
--- `begin_sign_in(..., NULL)` would still bind the old form.)
+-- The old sign-in arities are superseded: only the new shapes exist after this migration,
+-- so deploy is migrate-first-then-drain (no mixed-version rolling window): an old app host
+-- calling the 6-argument `begin_sign_in` or reading the narrower OUT-records fails loudly
+-- with "function does not exist" instead of silently binding a step-up round-trip as a plain
+-- login. That failure is fail-closed (sign-in 500s, never a forged step-up) and converges
+-- when the hosts drain — the same migrate-first order every previous session-function change
+-- already required. Neither a defaulted parameter, an overload, nor a same-arglist shim
+-- would do: defaults live in the caller's expression (still binds the old form);
+-- PostgreSQL forbids two functions sharing IN-args with different OUT-records, so a
+-- projecting shim cannot coexist with the new body; and CREATE OR REPLACE is refused when
+-- the OUT-record type changes (42P13) — hence drop-then-plain-CREATE below.
 DROP FUNCTION IF EXISTS app.begin_sign_in(bytea, bytea, bytea, bytea, text, text);
 DROP FUNCTION IF EXISTS app.consume_sign_in(bytea, bytea);
 DROP FUNCTION IF EXISTS app.resolve_request_context(bytea);
@@ -464,3 +468,4 @@ GRANT EXECUTE ON FUNCTION app.begin_sign_in(bytea, bytea, bytea, bytea, text, te
 GRANT EXECUTE ON FUNCTION app.consume_sign_in(bytea, bytea) TO moin_identity;
 GRANT EXECUTE ON FUNCTION app.resolve_request_context(bytea) TO moin_identity;
 GRANT EXECUTE ON FUNCTION app.resolve_session(bytea) TO moin_identity;
+
