@@ -138,7 +138,8 @@ export class RequestContextService {
         hit.idleExpiresAtMs > nowMs &&
         hit.absoluteExpiresAtMs > nowMs
       ) {
-        if (nowMs - hit.cachedAtMs >= hit.stepUpBudgetMs) {
+        if (nowMs < hit.cachedAtMs || nowMs - hit.cachedAtMs >= hit.stepUpBudgetMs) {
+          this.#cache.delete(key);
           return { context: { ...hit.context, stepUpFresh: false } };
         }
         return { context: hit.context };

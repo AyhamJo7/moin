@@ -318,7 +318,7 @@ export class SignInService {
       if (identity.subject !== bound.subject) {
         throw this.#fail('step_up_invalid', 'step_up_subject_mismatch');
       }
-      return this.#completeStepUp(presentedSession);
+      return this.#completeStepUp(presentedSession, authTime);
     }
 
     const now = clock.now();
@@ -352,7 +352,9 @@ export class SignInService {
       stepUp:
         authTime !== undefined &&
         now.getTime() / 1000 - authTime <= STEP_UP_WINDOW_MS / 1000 &&
-        now.getTime() / 1000 - authTime >= -30,
+        now.getTime() / 1000 - authTime >= -30
+          ? new Date(authTime * 1000)
+          : undefined,
     });
     if (granted === undefined) {
       throw this.#fail('identity_unavailable', 'no_active_user_for_subject');
@@ -390,7 +392,10 @@ export class SignInService {
    * active user) against the database clock: a lapsed session fails here rather
    * than stepping up.
    */
-  async #completeStepUp(presentedSession: string): Promise<CompletedSignIn> {
+  async #completeStepUp(
+    presentedSession: string,
+    authTime: number | undefined,
+  ): Promise<CompletedSignIn> {
     const { store, clock } = this.#deps;
     const sessionToken = randomSecret();
     const now = clock.now();
@@ -399,6 +404,7 @@ export class SignInService {
       digestOf(sessionToken),
       uuidv7({ now: () => now }),
       'step_up',
+      authTime !== undefined ? new Date(authTime * 1000) : null,
     );
     if (rotated === undefined) {
       throw this.#fail('step_up_invalid', 'step_up_session_lapsed');

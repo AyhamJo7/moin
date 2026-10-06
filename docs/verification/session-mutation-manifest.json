@@ -719,8 +719,8 @@
     "invariant": "P06.06.04: a fresh sign-in counts as stepped-up (login is MFA)",
     "expected": "Sessions minted without step_up_at would fail every step-up check until re-verified, including the just-signed-in browser.",
     "file": "packages/db/migrations/0015_step_up_mfa.sql",
-    "find": "    (p_token_hash, p_session_id, p_session_id, v_user, 'login', NULL, v_now, v_now,\n     v_now + interval '12 hours', v_now + interval '7 days', v_now, p_provider_tokens_sealed, p_key_id)",
-    "replace": "    (p_token_hash, p_session_id, p_session_id, v_user, 'login', NULL, v_now, v_now,\n     v_now + interval '12 hours', v_now + interval '7 days', NULL, p_provider_tokens_sealed, p_key_id)",
+    "find": "     CASE\n       WHEN p_step_up_at IS NULL THEN NULL\n       WHEN p_step_up_at >= v_now - interval '1 second' AND p_step_up_at <= v_now + interval '30 seconds' THEN v_now\n       WHEN p_step_up_at > v_now - interval '15 minutes' THEN p_step_up_at\n       ELSE NULL\n     END,",
+    "replace": "     NULL,",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "the step-up stamp (P06.06.04) > stamps the sign-in time as the first step-up proof"
@@ -732,7 +732,7 @@
     "invariant": "P06.06.04: a step_up rotation refreshes the stamp to the rotation time",
     "expected": "A step-up rotation that inherited the old stamp would never advance proof: re-verifying would change nothing and the window would lapse from the original sign-in.",
     "file": "packages/db/migrations/0015_step_up_mfa.sql",
-    "find": "         CASE WHEN p_reason = 'step_up' THEN v_now ELSE p.step_up_at END,",
+    "find": "         CASE\n           WHEN p_reason = 'step_up' THEN\n             CASE\n               WHEN p_step_up_at IS NULL THEN v_now\n               WHEN p_step_up_at >= v_now - interval '1 second' AND p_step_up_at <= v_now + interval '30 seconds' THEN v_now\n               WHEN p_step_up_at > v_now - interval '15 minutes' THEN p_step_up_at\n               ELSE NULL\n             END\n           ELSE p.step_up_at\n         END,",
     "replace": "         p.step_up_at,",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
@@ -745,7 +745,7 @@
     "invariant": "P06.06.04: a privilege_change rotation inherits the stamp (no fresh proof)",
     "expected": "A role change that refreshed the stamp would mint fresh MFA proof from no human act: privilege change would silently extend step-up.",
     "file": "packages/db/migrations/0015_step_up_mfa.sql",
-    "find": "         CASE WHEN p_reason = 'step_up' THEN v_now ELSE p.step_up_at END,",
+    "find": "         CASE\n           WHEN p_reason = 'step_up' THEN\n             CASE\n               WHEN p_step_up_at IS NULL THEN v_now\n               WHEN p_step_up_at >= v_now - interval '1 second' AND p_step_up_at <= v_now + interval '30 seconds' THEN v_now\n               WHEN p_step_up_at > v_now - interval '15 minutes' THEN p_step_up_at\n               ELSE NULL\n             END\n           ELSE p.step_up_at\n         END,",
     "replace": "         v_now,",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",

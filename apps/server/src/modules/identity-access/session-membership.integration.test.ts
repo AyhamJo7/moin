@@ -489,6 +489,98 @@ describe('the step-up gate (P06.06.04)', () => {
     },
   );
 
+  evidenceTest(
+    'provider proof auth_time near window boundary retains only its remaining lifetime',
+    async () => {
+      // Codex finding 1: An IdP proof with auth_time = now - 898s (2s left of the 15-minute window)
+      // must preserve its true proof age (step_up_at = auth_time), NOT be stretched to a new 15-minute window.
+      // At creation it passes the sensitive gate; after 2.5s it lapses and 403s.
+      provider.claims = { auth_time: Math.floor(Date.now() / 1000) - 898 };
+      try {
+        const cookie = await signedInCookie();
+        const token = /^__Host-moin_sid=([A-Za-z0-9_-]{43})$/.exec(cookie)?.[1];
+        if (token === undefined) throw new Error('no token');
+
+        contexts().clearCache();
+        const first = await app.inject({
+          method: 'GET',
+          url: '/probe/sensitive',
+          headers: { cookie },
+        });
+        expect(first.statusCode).toBe(200);
+
+        // Sleep 2.5s to cross the remaining 2s lifetime
+        await admin.query('select pg_sleep(2.5)');
+        clock.advance(2500);
+
+        contexts().clearCache();
+        const second = await app.inject({
+          method: 'GET',
+          url: '/probe/sensitive',
+          headers: { cookie },
+        });
+        expect(second.statusCode).toBe(403);
+      } finally {
+        provider.claims = {};
+        clock.set(new Date());
+      }
+    },
+  );
+
+  evidenceTest(
+    'cache rollback protection: wall-clock rollback cannot revive expired cached verdict',
+    async () => {
+      // Codex finding 2: When an entry's step-up budget expires, RequestContextService permanently
+      // evicts the cached entry. A subsequent wall-clock rollback cannot revive the expired verdict.
+      const cookie = await signedInCookie();
+      const token = /^__Host-moin_sid=([A-Za-z0-9_-]{43})$/.exec(cookie)?.[1];
+      if (token === undefined) throw new Error('no token');
+      const { digestOf } = await import('./domain/secret-values.ts');
+
+      await admin.query(
+        "update sessions set step_up_at = clock_timestamp() - interval '15 minutes' + interval '2 seconds' where token_hash = $1",
+        [digestOf(token)],
+      );
+
+      const initialClock = new Date();
+      clock.set(initialClock);
+      try {
+        contexts().clearCache();
+
+        // First read caches entry with ~2s budget
+        const first = await app.inject({
+          method: 'GET',
+          url: '/probe/sensitive',
+          headers: { cookie },
+        });
+        expect(first.statusCode).toBe(200);
+
+        // Advance clock and DB past the budget
+        await admin.query('select pg_sleep(2.5)');
+        clock.advance(2500);
+
+        // Second read sees budget expired, evicts entry permanently and returns 403
+        const second = await app.inject({
+          method: 'GET',
+          url: '/probe/sensitive',
+          headers: { cookie },
+        });
+        expect(second.statusCode).toBe(403);
+
+        // Roll clock back to initial reading: entry was deleted, cannot revive fresh verdict
+        clock.set(initialClock);
+        const third = await app.inject({
+          method: 'GET',
+          url: '/probe/sensitive',
+          headers: { cookie },
+        });
+        expect(third.statusCode).toBe(403);
+      } finally {
+        clock.set(new Date());
+      }
+    },
+  );
+
   evidenceTest('a stamp older than 15 minutes gets 403 step-up-required', async () => {
     const cookie = await signedInCookie();
     const token = /^__Host-moin_sid=([A-Za-z0-9_-]{43})$/.exec(cookie)?.[1];

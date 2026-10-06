@@ -127,8 +127,12 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.begin_sign_in(bytea, bytea, bytea, bytea, text, text, uuid)':
     '66f0c43b05dce5b3b2a02c9922032376',
   'app.consume_sign_in': '92e1cbedb2906c3eceaec382b390ed44',
-  'app.begin_session': 'ebdb8bb122502fa0f8e1b7373f1135ce',
-  'app.rotate_session': '7b2b187f330683f408da0c6b82033f4d',
+  'app.begin_session(text, bytea, uuid, bytea, text, bytea)': '7d8f57a7e0af40b9c4719d0ebced8025',
+  'app.begin_session(text, bytea, uuid, bytea, text, bytea, timestamp with time zone)':
+    '252eb71885e50a3b58ddbc2dfd843d37',
+  'app.rotate_session(bytea, bytea, uuid, text)': 'f73e3aa4ae6c66b031451899652551d6',
+  'app.rotate_session(bytea, bytea, uuid, text, timestamp with time zone)':
+    'afaac12d355ecbd0b70e00ad21f571ed',
   'app.resolve_session': '3b06721c6c8d393e60ff0bcfaa70477d',
   'app.revoke_session': 'a4a30b649c5abf56fab3563d20576aa8',
   'app.resolve_request_context': '562b8626e2e8e160c13ce2169682b9ec',
@@ -204,12 +208,24 @@ const APPROVED_DEFINERS: Readonly<
     executeGrantees: ['moin_identity'],
   },
   'app.begin_session': {
-    arguments: 'text, bytea, uuid, bytea, text, bytea, boolean',
+    arguments: 'text, bytea, uuid, bytea, text, bytea, timestamp with time zone',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: ['moin_identity'],
+  },
+  'app.begin_session(text, bytea, uuid, bytea, text, bytea)': {
+    arguments: 'text, bytea, uuid, bytea, text, bytea',
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
     executeGrantees: ['moin_identity'],
   },
   'app.rotate_session': {
+    arguments: 'bytea, bytea, uuid, text, timestamp with time zone',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: ['moin_identity'],
+  },
+  'app.rotate_session(bytea, bytea, uuid, text)': {
     arguments: 'bytea, bytea, uuid, text',
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
@@ -750,10 +766,13 @@ export async function inspect(
       const { key, approved } = approvedFor(fn);
       if (fn.identity_arguments === approved?.arguments) {
         reviewedFunctionsSeen.add(key);
-        // The 6-arg begin_sign_in shim is SECURITY INVOKER by design (Defect 3): it must
-        // not count as a DEFINER, or old-host readiness (total = 7) breaks on deploy.
+        // The rolling-window shims are SECURITY INVOKER by design (Defect 3): they must
+        // not count as DEFINERs, or old-host readiness (total = 7) breaks on deploy.
         // Every other approved signature stays DEFINER-only.
-        const invokerAllowed = key === 'app.begin_sign_in(bytea, bytea, bytea, bytea, text, text)';
+        const invokerAllowed =
+          key === 'app.begin_sign_in(bytea, bytea, bytea, bytea, text, text)' ||
+          key === 'app.begin_session(text, bytea, uuid, bytea, text, bytea)' ||
+          key === 'app.rotate_session(bytea, bytea, uuid, text)';
         if (!fn.security_definer && !invokerAllowed) {
           findings.push({
             rule: 'reviewed-function-not-security-definer',

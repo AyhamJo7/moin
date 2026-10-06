@@ -52,10 +52,10 @@ export interface NewSession {
   /** The session the browser presented at sign-in, if any; it is revoked as superseded. */
   readonly replacedHash?: Buffer | undefined;
   /**
-   * Whether the provider proof was fresh (auth_time present and within the step-up window).
-   * Fresh proof stamps step_up_at; anything else leaves NULL (fail closed until step-up).
+   * Verified auth_time timestamp (or boolean indicating fresh proof).
+   * Fresh proof stamps step_up_at preserving remaining age; anything else leaves NULL.
    */
-  readonly stepUp?: boolean | undefined;
+  readonly stepUp?: boolean | Date | undefined;
 }
 
 export interface SessionGrant {
@@ -110,6 +110,7 @@ export interface IdentityStore {
     newTokenHash: Buffer,
     newSessionId: string,
     reason: RotationReason,
+    stepUpAt?: Date | null,
   ): Promise<SessionGrant | undefined>;
   resolveSession(tokenHash: Buffer): Promise<ResolvedSession | undefined>;
   /**
@@ -185,8 +186,10 @@ export function createIdentityStore(pool: Pool): IdentityStore {
     },
 
     async beginSession(input) {
+      const stepUpAt =
+        input.stepUp instanceof Date ? input.stepUp : input.stepUp === true ? new Date() : null;
       const result = await pool.query<GrantRow>(
-        'select session_id, user_id, absolute_expires_at from app.begin_session($1::text, $2::bytea, $3::uuid, $4::bytea, $5::text, $6::bytea, $7::boolean)',
+        'select session_id, user_id, absolute_expires_at from app.begin_session($1::text, $2::bytea, $3::uuid, $4::bytea, $5::text, $6::bytea, $7::timestamptz)',
         [
           input.subject,
           digest(input.tokenHash),
@@ -194,16 +197,16 @@ export function createIdentityStore(pool: Pool): IdentityStore {
           input.providerTokensSealed,
           input.keyId,
           input.replacedHash === undefined ? null : digest(input.replacedHash),
-          input.stepUp ?? null,
+          stepUpAt,
         ],
       );
       return grant(result.rows[0]);
     },
 
-    async rotateSession(tokenHash, newTokenHash, newSessionId, reason) {
+    async rotateSession(tokenHash, newTokenHash, newSessionId, reason, stepUpAt) {
       const result = await pool.query<GrantRow>(
-        'select session_id, user_id, absolute_expires_at from app.rotate_session($1::bytea, $2::bytea, $3::uuid, $4::text)',
-        [digest(tokenHash), digest(newTokenHash), newSessionId, reason],
+        'select session_id, user_id, absolute_expires_at from app.rotate_session($1::bytea, $2::bytea, $3::uuid, $4::text, $5::timestamptz)',
+        [digest(tokenHash), digest(newTokenHash), newSessionId, reason, stepUpAt ?? null],
       );
       return grant(result.rows[0]);
     },

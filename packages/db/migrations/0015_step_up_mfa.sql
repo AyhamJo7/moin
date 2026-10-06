@@ -50,26 +50,24 @@ COMMENT ON COLUMN auth_transactions.step_up_session_id IS
 -- rolls — expected and safe (sign-in itself keeps working through the shim), not a defect.
 -- A new-code probe against a pre-0015 database fails closed on the unknown 7-arg signature.
 DROP FUNCTION IF EXISTS app.begin_sign_in(bytea, bytea, bytea, bytea, text, text);
+DROP FUNCTION IF EXISTS app.begin_sign_in(bytea, bytea, bytea, bytea, text, text, uuid);
 DROP FUNCTION IF EXISTS app.consume_sign_in(bytea, bytea);
 DROP FUNCTION IF EXISTS app.resolve_request_context(bytea);
 DROP FUNCTION IF EXISTS app.resolve_session(bytea);
 DROP FUNCTION IF EXISTS app.begin_session(text, bytea, uuid, bytea, text, bytea);
+DROP FUNCTION IF EXISTS app.begin_session(text, bytea, uuid, bytea, text, bytea, boolean);
+DROP FUNCTION IF EXISTS app.begin_session(text, bytea, uuid, bytea, text, bytea, timestamptz);
+DROP FUNCTION IF EXISTS app.rotate_session(bytea, bytea, uuid, text);
+DROP FUNCTION IF EXISTS app.rotate_session(bytea, bytea, uuid, text, timestamptz);
 
 -- ---------------------------------------------------------------------------------------------
--- begin_session: stamp step-up only on fresh provider proof (Defect 1 fix).
+-- begin_session: stamp step-up only on fresh provider proof.
 -- ---------------------------------------------------------------------------------------------
 --
 -- A fresh sign-in is MFA'd only when the provider says the human proved presence recently:
--- `p_step_up` carries whether the ID token's `auth_time` was present and within the
--- 15-minute window (judged by the application against the token). Fresh proof stamps
--- `step_up_at` with the sign-in time; stale or absent proof leaves NULL, so the session
--- begins un-stepped-up and sensitive actions 403 until an explicit step-up round-trip.
--- No DEFAULT on the new parameter: PostgreSQL treats defaults as caller-side sugar, and
--- a defaulted 7th parameter would let a stale 6-argument call bind the new body with an
--- implicit NULL — silently recording the round-trip shape as a plain login. Old hosts keep
--- the old 6-argument name through the INVOKER shim below; new hosts pass all 7 arguments.
--- (Dropped above: without the DROP, OR REPLACE would keep a single 6-arg DEFINER and no
--- 7-arg form — the new parameter would silently vanish.)
+-- `p_step_up_at` carries the verified `auth_time` from the ID token. Fresh proof stamps
+-- `step_up_at` preserving the remaining lifetime of the proof; stale or absent proof leaves NULL,
+-- so the session begins un-stepped-up and sensitive actions 403 until an explicit step-up.
 CREATE FUNCTION app.begin_session(
   p_subject text,
   p_token_hash bytea,
@@ -77,7 +75,7 @@ CREATE FUNCTION app.begin_session(
   p_provider_tokens_sealed bytea,
   p_key_id text,
   p_replaced_hash bytea,
-  p_step_up boolean
+  p_step_up_at timestamptz
 ) RETURNS TABLE (session_id uuid, user_id uuid, absolute_expires_at timestamptz)
   LANGUAGE plpgsql
   SECURITY DEFINER
@@ -135,7 +133,12 @@ BEGIN
   VALUES
     (p_token_hash, p_session_id, p_session_id, v_user, 'login', NULL, v_now, v_now,
      v_now + interval '12 hours', v_now + interval '7 days',
-     CASE WHEN p_step_up IS TRUE THEN v_now ELSE NULL END,
+     CASE
+       WHEN p_step_up_at IS NULL THEN NULL
+       WHEN p_step_up_at >= v_now - interval '1 second' AND p_step_up_at <= v_now + interval '30 seconds' THEN v_now
+       WHEN p_step_up_at > v_now - interval '15 minutes' THEN p_step_up_at
+       ELSE NULL
+     END,
      p_provider_tokens_sealed, p_key_id)
   RETURNING s.id, s.user_id, s.absolute_expires_at;
 END
@@ -150,11 +153,12 @@ $$;
 -- the predecessor's stamp — including NULL, which stays un-stepped-up. The predecessor row is
 -- untouched either way; the trigger allowlists only listed columns, and `step_up_at` on the
 -- predecessor is never written after creation.
-CREATE OR REPLACE FUNCTION app.rotate_session(
+CREATE FUNCTION app.rotate_session(
   p_token_hash bytea,
   p_new_token_hash bytea,
   p_new_session_id uuid,
-  p_reason text
+  p_reason text,
+  p_step_up_at timestamptz
 ) RETURNS TABLE (session_id uuid, user_id uuid, absolute_expires_at timestamptz)
   LANGUAGE plpgsql
   SECURITY DEFINER
@@ -214,7 +218,16 @@ BEGIN
          GREATEST(v_now, p.created_at), GREATEST(v_now, p.created_at),
          LEAST(GREATEST(v_now, p.created_at) + interval '12 hours', p.absolute_expires_at),
          p.absolute_expires_at,
-         CASE WHEN p_reason = 'step_up' THEN v_now ELSE p.step_up_at END,
+         CASE
+           WHEN p_reason = 'step_up' THEN
+             CASE
+               WHEN p_step_up_at IS NULL THEN v_now
+               WHEN p_step_up_at >= v_now - interval '1 second' AND p_step_up_at <= v_now + interval '30 seconds' THEN v_now
+               WHEN p_step_up_at > v_now - interval '15 minutes' THEN p_step_up_at
+               ELSE NULL
+             END
+           ELSE p.step_up_at
+         END,
          p.provider_tokens_sealed, p.provider_tokens_key_id
   FROM predecessor p
   JOIN retired r ON r.id = p.id
@@ -485,32 +498,28 @@ $$;
 -- The DROPs above reset the ACLs to defaults, so re-assert the catalog contract (same
 -- owners, search_path, moin_identity-only grants — the catalog names these exact signatures):
 REVOKE ALL ON FUNCTION app.begin_sign_in(bytea, bytea, bytea, bytea, text, text, uuid) FROM PUBLIC, moin_app;
-REVOKE ALL ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea, boolean) FROM PUBLIC, moin_app;
+REVOKE ALL ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea, timestamptz) FROM PUBLIC, moin_app;
+REVOKE ALL ON FUNCTION app.rotate_session(bytea, bytea, uuid, text, timestamptz) FROM PUBLIC, moin_app;
 REVOKE ALL ON FUNCTION app.consume_sign_in(bytea, bytea) FROM PUBLIC, moin_app;
 REVOKE ALL ON FUNCTION app.resolve_request_context(bytea) FROM PUBLIC, moin_app;
 REVOKE ALL ON FUNCTION app.resolve_session(bytea) FROM PUBLIC, moin_app;
 
 GRANT EXECUTE ON FUNCTION app.begin_sign_in(bytea, bytea, bytea, bytea, text, text, uuid) TO moin_identity;
-GRANT EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea, boolean) TO moin_identity;
+GRANT EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea, timestamptz) TO moin_identity;
+GRANT EXECUTE ON FUNCTION app.rotate_session(bytea, bytea, uuid, text, timestamptz) TO moin_identity;
 GRANT EXECUTE ON FUNCTION app.consume_sign_in(bytea, bytea) TO moin_identity;
 GRANT EXECUTE ON FUNCTION app.resolve_request_context(bytea) TO moin_identity;
 GRANT EXECUTE ON FUNCTION app.resolve_session(bytea) TO moin_identity;
 
 -- ---------------------------------------------------------------------------------------------
--- Rolling-window overload (H1): old hosts call 6-argument `begin_sign_in`.
+-- Rolling-window overloads (H1): old hosts call legacy signatures through INVOKER shims.
 -- ---------------------------------------------------------------------------------------------
 --
--- A different IN-arity is a different function slot, so this coexists with the 7-arg form
--- above (unlike the OUT-record changes, which cannot shim). It delegates with a NULL
--- step-up binding: a plain login, which is all an old host can start — it knows no step-up,
--- and `startStepUp` passes 7 arguments, so no round-trip can begin here. Contracted (dropped)
--- in 0016 once no old host remains.
---
--- SECURITY INVOKER, not DEFINER (Defect 3): the old-host readiness probe counts executable
--- DEFINERs (`total = 7`), so an eighth DEFINER would 503 every not-yet-rolled host the moment
--- 0015 lands. As INVOKER this runs as the caller — `moin_identity`, which already holds
--- EXECUTE on the 7-arg DEFINER — and `pg_proc` keeps exactly 7 definers. The catalog still
--- pins the shim body and its moin_identity-only grant; the body check is arity-keyed.
+-- Old hosts expect the pre-0015 signatures (6-arg begin_sign_in, 6-arg begin_session, 4-arg
+-- rotate_session). These shims delegate with NULL step-up bindings. They are defined as
+-- SECURITY INVOKER so they run under the caller's privileges (moin_identity) and do not
+-- inflate the executable SECURITY DEFINER count (keeping total = 7 for old host readiness probes).
+-- Contracted (dropped) in migration 0016 once the whole fleet runs post-0015 code.
 CREATE FUNCTION app.begin_sign_in(
   p_state_hash bytea,
   p_binding_hash bytea,
@@ -530,6 +539,50 @@ END
 $$;
 
 REVOKE ALL ON FUNCTION app.begin_sign_in(bytea, bytea, bytea, bytea, text, text) FROM PUBLIC, moin_app;
-
 GRANT EXECUTE ON FUNCTION app.begin_sign_in(bytea, bytea, bytea, bytea, text, text) TO moin_identity;
+
+CREATE FUNCTION app.begin_session(
+  p_subject text,
+  p_token_hash bytea,
+  p_session_id uuid,
+  p_provider_tokens_sealed bytea,
+  p_key_id text,
+  p_replaced_hash bytea
+) RETURNS TABLE (session_id uuid, user_id uuid, absolute_expires_at timestamptz)
+  LANGUAGE plpgsql
+  SECURITY INVOKER
+  SET search_path = pg_catalog, public, app, pg_temp
+AS $$
+BEGIN
+  RETURN QUERY
+  SELECT * FROM app.begin_session(
+    p_subject, p_token_hash, p_session_id, p_provider_tokens_sealed,
+    p_key_id, p_replaced_hash, NULL::timestamptz
+  );
+END
+$$;
+
+REVOKE ALL ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea) FROM PUBLIC, moin_app;
+GRANT EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea) TO moin_identity;
+
+CREATE FUNCTION app.rotate_session(
+  p_token_hash bytea,
+  p_new_token_hash bytea,
+  p_new_session_id uuid,
+  p_reason text
+) RETURNS TABLE (session_id uuid, user_id uuid, absolute_expires_at timestamptz)
+  LANGUAGE plpgsql
+  SECURITY INVOKER
+  SET search_path = pg_catalog, public, app, pg_temp
+AS $$
+BEGIN
+  RETURN QUERY
+  SELECT * FROM app.rotate_session(
+    p_token_hash, p_new_token_hash, p_new_session_id, p_reason, NULL::timestamptz
+  );
+END
+$$;
+
+REVOKE ALL ON FUNCTION app.rotate_session(bytea, bytea, uuid, text) FROM PUBLIC, moin_app;
+GRANT EXECUTE ON FUNCTION app.rotate_session(bytea, bytea, uuid, text) TO moin_identity;
 

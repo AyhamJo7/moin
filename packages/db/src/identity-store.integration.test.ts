@@ -122,8 +122,8 @@ function directCalls(subject: string, tokenHash: Buffer): [string, string, unkno
   return [
     [
       'begin_session',
-      'select * from app.begin_session($1::text, $2::bytea, $3::uuid, $4::bytea, $5::text, $6::bytea, $7::boolean)',
-      [subject, hash(), randomUUID(), sealed(), 'test-v1', hash(), true],
+      'select * from app.begin_session($1::text, $2::bytea, $3::uuid, $4::bytea, $5::text, $6::bytea, $7::timestamptz)',
+      [subject, hash(), randomUUID(), sealed(), 'test-v1', hash(), new Date()],
     ],
     [
       'begin_sign_in',
@@ -868,7 +868,7 @@ describe('two callers holding the same row', () => {
   }
 
   const beginSessionSql =
-    'select * from app.begin_session($1::text, $2::bytea, $3::uuid, $4::bytea, $5::text, $6::bytea, $7::boolean)';
+    'select * from app.begin_session($1::text, $2::bytea, $3::uuid, $4::bytea, $5::text, $6::bytea, $7::timestamptz)';
 
   evidenceTest(
     'a sign-in waiting behind a rotation of the session it supersedes revokes the successor too',
@@ -893,7 +893,7 @@ describe('two callers holding the same row', () => {
             sealed(),
             'test-v1',
             presented.tokenHash,
-            true,
+            new Date(),
           ]),
       );
       expect(await store.resolveSession(successor), 'rotated successor').toBeUndefined();
@@ -926,7 +926,7 @@ describe('two callers holding the same row', () => {
             sealed(),
             'test-v1',
             stale.tokenHash,
-            true,
+            new Date(),
           ]),
       );
       expect(await store.resolveSession(inFlight), 'rotated in flight').toBeUndefined();
@@ -951,7 +951,7 @@ describe('two callers holding the same row', () => {
             sealed(),
             'test-v1',
             presented.tokenHash,
-            true,
+            new Date(),
           ]),
         (client) =>
           client.query('select * from app.rotate_session($1, $2, $3, $4)', [
@@ -987,7 +987,7 @@ describe('two callers holding the same row', () => {
             sealed(),
             'test-v1',
             presented.tokenHash,
-            true,
+            new Date(),
           ]);
           await client.query('commit');
           return result.rowCount;
@@ -1435,9 +1435,24 @@ describe('temporal authorization and expiration (authoritative database clock)',
       `select p.proname::text, pg_get_function_identity_arguments(p.oid) as args
        from pg_proc p join pg_namespace n on n.oid = p.pronamespace
        where n.nspname = 'app' and p.proname = any($1) and pg_get_function_identity_arguments(p.oid) like '%timestamp with time zone%'`,
-      [[...SESSION_FUNCTIONS]],
+      [
+        [
+          'begin_sign_in',
+          'consume_sign_in',
+          'resolve_session',
+          'revoke_session',
+          'resolve_request_context',
+        ],
+      ],
     );
     expect(overloads.rows).toHaveLength(0);
+    const callerClockArgs = await admin.query(
+      `select p.proname::text
+       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = 'app' and p.proname = any($1) and ('now' = any(p.proargnames) or 'p_now' = any(p.proargnames))`,
+      [[...SESSION_FUNCTIONS]],
+    );
+    expect(callerClockArgs.rowCount).toBe(0);
     const clock = await admin.query(
       `select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
        where n.nspname = 'app' and p.proname = 'session_clock'`,
