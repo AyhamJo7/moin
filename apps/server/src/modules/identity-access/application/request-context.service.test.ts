@@ -136,8 +136,7 @@ describe('RequestContextService', () => {
     expect('context' in stamped && stamped.context.stepUpFresh).toBe(true);
     const bare = new RequestContextService(
       store({
-        resolveRequestContext: () =>
-          Promise.resolve(rows({ stepUpAt: null, stepUpFresh: false })),
+        resolveRequestContext: () => Promise.resolve(rows({ stepUpAt: null, stepUpFresh: false })),
       }),
       clock,
     );
