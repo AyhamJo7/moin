@@ -492,8 +492,8 @@ describe('the step-up gate (P06.06.04)', () => {
   evidenceTest(
     'provider proof auth_time near window boundary retains only its remaining lifetime',
     async () => {
-      // Codex finding 1: An IdP proof with auth_time = now - 898s (2s left of the 15-minute window)
-      // must preserve its true proof age (step_up_at = auth_time), NOT be stretched to a new 15-minute window.
+      // An IdP proof with auth_time = now - 898s (2s left of the 15-minute window)
+      // preserves its true proof age (step_up_at = auth_time), not a new 15-minute window.
       // At creation it passes the sensitive gate; after 2.5s it lapses and 403s.
       provider.claims = { auth_time: Math.floor(Date.now() / 1000) - 898 };
       try {
@@ -530,8 +530,8 @@ describe('the step-up gate (P06.06.04)', () => {
   evidenceTest(
     'cache rollback protection: wall-clock rollback cannot revive expired cached verdict',
     async () => {
-      // Codex finding 2: When an entry's step-up budget expires, RequestContextService permanently
-      // evicts the cached entry. A subsequent wall-clock rollback cannot revive the expired verdict.
+      // Once the step-up budget expires, the cached verdict stays stale. A subsequent
+      // wall-clock rollback cannot revive it.
       const cookie = await signedInCookie();
       const token = /^__Host-moin_sid=([A-Za-z0-9_-]{43})$/.exec(cookie)?.[1];
       if (token === undefined) throw new Error('no token');
