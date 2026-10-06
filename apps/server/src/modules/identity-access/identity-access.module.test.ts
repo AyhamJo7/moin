@@ -7,7 +7,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { ConfigurationError, loadConfig } from '../../config/env.ts';
 import { buildSignInGate } from './identity-access.module.ts';
 import { AuthController } from './http/auth.controller.ts';
-import { SIGN_IN } from './identity-access.tokens.ts';
+import { SessionMembershipGuard } from './http/session-membership.guard.ts';
+import { REQUEST_CONTEXTS, SIGN_IN } from './identity-access.tokens.ts';
+import { LOGGER } from '../../observability/logger.module.ts';
 
 const store = {} as IdentityStore;
 const logger = { info: vi.fn(), warn: vi.fn() } as never;
@@ -88,7 +90,12 @@ describe('the sign-in routes without sign-in', () => {
   it('answer 503 with a problem', async () => {
     const moduleRef = await Test.createTestingModule({
       controllers: [AuthController],
-      providers: [{ provide: SIGN_IN, useValue: { service: undefined } }],
+      providers: [
+        { provide: SIGN_IN, useValue: { service: undefined } },
+        SessionMembershipGuard,
+        { provide: REQUEST_CONTEXTS, useValue: null },
+        { provide: LOGGER, useValue: logger },
+      ],
     }).compile();
     const app = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
     await app.init();
