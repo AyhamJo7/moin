@@ -182,23 +182,27 @@ describe('RequestContextService', () => {
     expect('context' in second && second.context.stepUpFresh).toBe(false);
   });
 
-  evidenceTest('an unstamped session never serves from cache', async () => {
-    const clock = fixedClock(new Date());
-    const backend = store({
-      resolveRequestContext: () =>
-        Promise.resolve(rows({ stepUpAt: null, stepUpFresh: false, stepUpRemainingSeconds: null })),
-    });
-    const service = new RequestContextService(backend, clock);
-    const spy = vi.spyOn(backend, 'resolveRequestContext');
-    const first = await service.resolve(DIGEST, 'read');
-    expect('context' in first && first.context.stepUpFresh).toBe(false);
-    expect(spy).toHaveBeenCalledTimes(1);
-    clock.advance(10_000);
-    // No stamp means no step-up expiry to bound the entry — so the entry is never cached:
-    // every read re-resolves rather than risk serving a verdict with no deadline.
-    await service.resolve(DIGEST, 'read');
-    expect(spy).toHaveBeenCalledTimes(2);
-  });
+  evidenceTest(
+    'an unstamped session reuses a read-only cache entry without gaining step-up',
+    async () => {
+      const clock = fixedClock(new Date());
+      const backend = store({
+        resolveRequestContext: () =>
+          Promise.resolve(
+            rows({ stepUpAt: null, stepUpFresh: false, stepUpRemainingSeconds: null }),
+          ),
+      });
+      const service = new RequestContextService(backend, clock);
+      const spy = vi.spyOn(backend, 'resolveRequestContext');
+      const first = await service.resolve(DIGEST, 'read');
+      expect('context' in first && first.context.stepUpFresh).toBe(false);
+      expect(spy).toHaveBeenCalledTimes(1);
+      clock.advance(10_000);
+      const second = await service.resolve(DIGEST, 'read');
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect('context' in second && second.context.stepUpFresh).toBe(false);
+    },
+  );
 
   evidenceTest(
     'monotonic TTL enforcement: wall-clock adjustment cannot extend cached authority past 30 s',

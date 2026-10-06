@@ -69,9 +69,9 @@ interface CachedEntry {
   readonly absoluteExpiresAtMs: number;
   /**
    * Remaining step-up budget in ms, computed entirely on the database clock at insert
-   * (Defect 2). The hit check spends it in local monotonic elapsed time, so constant app↔DB
-   * skew can neither stretch nor shrink the verdict, and backward wall-clock adjustments
-   * cannot extend it. Entries are never cached unstamped.
+   * (Defect 2). Zero for unstamped or stale sessions. The hit check spends it in local
+   * monotonic elapsed time, so constant app↔DB skew cannot stretch the verdict, and
+   * backward wall-clock adjustments cannot extend it.
    */
   readonly stepUpBudgetMs: number;
   readonly cachedAtMonotonicMs: number;
@@ -166,12 +166,14 @@ export class RequestContextService {
     if (resolved === undefined) return { failure: 'invalid' };
     const context = toSessionContext(resolved);
     if (context === undefined) return { failure: 'ambiguous_organisation' };
-    // An unstamped session carries no step-up deadline to bound a cache entry — so it is
-    // never cached: every read re-resolves rather than serving a verdict with no expiry.
-    // The budget comes from the database verdict (seconds remaining on the DB clock), not
-    // from comparing the DB stamp against the app clock — so skew shifts nothing.
-    if (useCache && resolved.stepUpAt !== null && resolved.stepUpRemainingSeconds !== null) {
-      const stepUpBudgetMs = Math.max(0, resolved.stepUpRemainingSeconds * 1000);
+    // Cache standard reads even without recent MFA. An absent or expired proof has no
+    // remaining step-up budget, so it stays false on every cache hit. A successful step-up
+    // rotates the token and creates a new cache key.
+    if (useCache) {
+      const stepUpBudgetMs =
+        resolved.stepUpFresh && resolved.stepUpRemainingSeconds !== null
+          ? Math.max(0, resolved.stepUpRemainingSeconds * 1000)
+          : 0;
       const idleRemainingMs = Math.max(0, resolved.idleRemainingSeconds * 1000);
       const absoluteRemainingMs = Math.max(0, resolved.absoluteRemainingSeconds * 1000);
       const maxLifetimeMs = Math.min(CONTEXT_CACHE_TTL_MS, idleRemainingMs, absoluteRemainingMs);
