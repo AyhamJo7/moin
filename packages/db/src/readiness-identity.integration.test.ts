@@ -42,9 +42,10 @@ describe('the identity pool readiness probe', () => {
 
   evidenceTest('is not ready once moin_app can execute a session function', async () => {
     const admin = database.fixturePool();
-    // Every one of the six: readiness must shut out moin_app from the whole session surface,
-    // not just one probe function.
+    // Every one of the session functions, both begin_sign_in arities: readiness must
+    // shut out moin_app from the whole session surface, not just one probe function.
     const grants = [
+      'grant execute on function app.begin_sign_in(bytea, bytea, bytea, bytea, text, text) to moin_app',
       'grant execute on function app.begin_sign_in(bytea, bytea, bytea, bytea, text, text, uuid) to moin_app',
       'grant execute on function app.consume_sign_in(bytea, bytea) to moin_app',
       'grant execute on function app.begin_session(text, bytea, uuid, bytea, text, bytea) to moin_app',

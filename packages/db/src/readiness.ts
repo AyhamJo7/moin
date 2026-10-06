@@ -75,6 +75,7 @@ export const IDENTITY_POOL_ASSERTION = `
   select session_user = 'moin_identity' and current_user = 'moin_identity'
      and not (r.rolsuper or r.rolbypassrls or r.rolcreaterole or r.rolcreatedb or r.rolreplication)
      and not exists (select 1 from pg_auth_members m where m.member = r.oid)
+     and not has_function_privilege('moin_app', 'app.begin_sign_in(bytea, bytea, bytea, bytea, text, text)', 'EXECUTE')
      and not has_function_privilege('moin_app', 'app.begin_sign_in(bytea, bytea, bytea, bytea, text, text, uuid)', 'EXECUTE')
      and not has_function_privilege('moin_app', 'app.consume_sign_in(bytea, bytea)', 'EXECUTE')
      and not has_function_privilege('moin_app', 'app.begin_session(text, bytea, uuid, bytea, text, bytea)', 'EXECUTE')
@@ -86,13 +87,16 @@ export const IDENTITY_POOL_ASSERTION = `
      as ok
     from pg_roles r,
          lateral (
-           select coalesce(array_agg(n.nspname || '.' || p.proname), '{}') as functions,
+           select coalesce(array_agg(d.name), '{}') as functions,
                   count(*) as total,
+                  -- begin_sign_in counts once: DISTINCT collapses the rolling-window overload.
                   array['app.begin_sign_in', 'app.consume_sign_in', 'app.begin_session',
                         'app.rotate_session', 'app.resolve_session', 'app.revoke_session',
                         'app.resolve_request_context'] as expected
-             from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-            where p.prosecdef and has_function_privilege(p.oid, 'EXECUTE')
+             from (select distinct n.nspname || '.' || p.proname as name
+                     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                    where n.nspname = 'app' and p.prosecdef
+                      and has_function_privilege(p.oid, 'EXECUTE')) d
          ) d
    where r.rolname = current_user
 `;
