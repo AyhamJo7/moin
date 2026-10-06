@@ -24,12 +24,12 @@
 -- matches its user. Nullable with no default for the same expand-only reason; plain logins
 -- leave it NULL. It is an opaque identifier, safe to store alongside the hashed state.
 
-ALTER TABLE sessions ADD COLUMN step_up_at timestamptz;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS step_up_at timestamptz;
 
 COMMENT ON COLUMN sessions.step_up_at IS
   'Last MFA proof for this session: sign-in time, or the last step_up rotation time (a privilege_change rotation inherits it). NULL for sessions predating 0015 — never stepped-up until re-verified. Sensitive actions require it within 15 minutes.';
 
-ALTER TABLE auth_transactions ADD COLUMN step_up_session_id uuid;
+ALTER TABLE auth_transactions ADD COLUMN IF NOT EXISTS step_up_session_id uuid;
 
 COMMENT ON COLUMN auth_transactions.step_up_session_id IS
   'NULL for a plain login; the session id being re-verified for a step-up round-trip. The callback rotates exactly this session when the subject matches.';
@@ -134,8 +134,9 @@ BEGIN
     (p_token_hash, p_session_id, p_session_id, v_user, 'login', NULL, v_now, v_now,
      v_now + interval '12 hours', v_now + interval '7 days',
      CASE
-       WHEN p_step_up_at IS NULL THEN NULL
-       WHEN p_step_up_at >= v_now - interval '1 second' AND p_step_up_at <= v_now + interval '30 seconds' THEN v_now
+       WHEN p_step_up_at IS NULL OR NOT isfinite(p_step_up_at) THEN NULL
+       WHEN p_step_up_at > v_now + interval '30 seconds' THEN NULL
+       WHEN p_step_up_at >= v_now - interval '1 second' THEN v_now
        WHEN p_step_up_at > v_now - interval '15 minutes' THEN p_step_up_at
        ELSE NULL
      END,
@@ -222,7 +223,9 @@ BEGIN
            WHEN p_reason = 'step_up' THEN
              CASE
                WHEN p_step_up_at IS NULL THEN v_now
-               WHEN p_step_up_at >= v_now - interval '1 second' AND p_step_up_at <= v_now + interval '30 seconds' THEN v_now
+               WHEN NOT isfinite(p_step_up_at) THEN NULL
+               WHEN p_step_up_at > v_now + interval '30 seconds' THEN NULL
+               WHEN p_step_up_at >= v_now - interval '1 second' THEN v_now
                WHEN p_step_up_at > v_now - interval '15 minutes' THEN p_step_up_at
                ELSE NULL
              END
@@ -470,12 +473,16 @@ BEGIN
     RETURN QUERY
     SELECT s.id, s.user_id, m.organisation_id, m.role, m.permissions,
            s.idle_expires_at, s.absolute_expires_at, s.step_up_at,
-           (s.step_up_at IS NOT NULL AND s.step_up_at > v_now - interval '15 minutes'),
+           (s.step_up_at IS NOT NULL AND isfinite(s.step_up_at) AND s.step_up_at > v_now - interval '15 minutes' AND s.step_up_at <= v_now + interval '30 seconds'),
            -- Remaining validity in seconds, judged entirely on the database clock: the app
            -- spends this budget in local elapsed time, so constant app↔DB skew can neither
            -- stretch nor shrink the verdict (Defect 2). NULL stamp means no budget column
            -- matters — the row is refused by the boolean and never cached by the app.
-           extract(epoch from (s.step_up_at + interval '15 minutes' - v_now))::double precision
+           CASE
+             WHEN s.step_up_at IS NOT NULL AND isfinite(s.step_up_at) AND s.step_up_at > v_now - interval '15 minutes' AND s.step_up_at <= v_now + interval '30 seconds'
+             THEN extract(epoch from (s.step_up_at + interval '15 minutes' - v_now))::double precision
+             ELSE NULL
+           END
     FROM public.sessions s
     JOIN public.users u ON u.id = s.user_id
     JOIN public.memberships m ON m.user_id = s.user_id

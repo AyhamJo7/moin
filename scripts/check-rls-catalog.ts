@@ -129,13 +129,13 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.consume_sign_in': '92e1cbedb2906c3eceaec382b390ed44',
   'app.begin_session(text, bytea, uuid, bytea, text, bytea)': '7d8f57a7e0af40b9c4719d0ebced8025',
   'app.begin_session(text, bytea, uuid, bytea, text, bytea, timestamp with time zone)':
-    '252eb71885e50a3b58ddbc2dfd843d37',
+    'd9071fdb7c7cb2487fef261194db83bf',
   'app.rotate_session(bytea, bytea, uuid, text)': 'f73e3aa4ae6c66b031451899652551d6',
   'app.rotate_session(bytea, bytea, uuid, text, timestamp with time zone)':
-    'afaac12d355ecbd0b70e00ad21f571ed',
+    '7831716936056bfd2e7e86ece666933e',
   'app.resolve_session': '3b06721c6c8d393e60ff0bcfaa70477d',
   'app.revoke_session': 'a4a30b649c5abf56fab3563d20576aa8',
-  'app.resolve_request_context': '562b8626e2e8e160c13ce2169682b9ec',
+  'app.resolve_request_context': '3a99069a4f91bf7398e0af886d637fb6',
 };
 
 /** Reviewed QG-09 contract. Documentation registration alone cannot change privileges. */

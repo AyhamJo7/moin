@@ -581,6 +581,48 @@ describe('the step-up gate (P06.06.04)', () => {
     },
   );
 
+  evidenceTest(
+    'cache rollback protection: partial backward adjustment must not extend freshness',
+    async () => {
+      const cookie = await signedInCookie();
+      const token = /^__Host-moin_sid=([A-Za-z0-9_-]{43})$/.exec(cookie)?.[1];
+      if (token === undefined) throw new Error('no token');
+      const { digestOf } = await import('./domain/secret-values.ts');
+      await admin.query(
+        "update sessions set step_up_at = clock_timestamp() - interval '15 minutes' + interval '3 seconds' where token_hash = $1",
+        [digestOf(token)],
+      );
+      clock.set(new Date());
+      contexts().clearCache();
+      try {
+        expect(
+          (await app.inject({ method: 'GET', url: '/probe/sensitive', headers: { cookie } }))
+            .statusCode,
+        ).toBe(200);
+        await admin.query('select pg_sleep(2)');
+        clock.advance(2000);
+        expect(
+          (await app.inject({ method: 'GET', url: '/probe/sensitive', headers: { cookie } }))
+            .statusCode,
+        ).toBe(200);
+        clock.advance(-1000);
+        await admin.query('select pg_sleep(1.5)');
+        clock.advance(1500);
+        const db = await admin.query<{ fresh: boolean }>(
+          "select step_up_at > clock_timestamp() - interval '15 minutes' as fresh from sessions where token_hash=$1",
+          [digestOf(token)],
+        );
+        expect(db.rows[0]?.fresh).toBe(false);
+        expect(
+          (await app.inject({ method: 'GET', url: '/probe/sensitive', headers: { cookie } }))
+            .statusCode,
+        ).toBe(403);
+      } finally {
+        clock.set(new Date());
+      }
+    },
+  );
+
   evidenceTest('a stamp older than 15 minutes gets 403 step-up-required', async () => {
     const cookie = await signedInCookie();
     const token = /^__Host-moin_sid=([A-Za-z0-9_-]{43})$/.exec(cookie)?.[1];

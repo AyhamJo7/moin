@@ -719,7 +719,7 @@
     "invariant": "P06.06.04: a fresh sign-in counts as stepped-up (login is MFA)",
     "expected": "Sessions minted without step_up_at would fail every step-up check until re-verified, including the just-signed-in browser.",
     "file": "packages/db/migrations/0015_step_up_mfa.sql",
-    "find": "     CASE\n       WHEN p_step_up_at IS NULL THEN NULL\n       WHEN p_step_up_at >= v_now - interval '1 second' AND p_step_up_at <= v_now + interval '30 seconds' THEN v_now\n       WHEN p_step_up_at > v_now - interval '15 minutes' THEN p_step_up_at\n       ELSE NULL\n     END,",
+    "find": "     CASE\n       WHEN p_step_up_at IS NULL OR NOT isfinite(p_step_up_at) THEN NULL\n       WHEN p_step_up_at > v_now + interval '30 seconds' THEN NULL\n       WHEN p_step_up_at >= v_now - interval '1 second' THEN v_now\n       WHEN p_step_up_at > v_now - interval '15 minutes' THEN p_step_up_at\n       ELSE NULL\n     END,",
     "replace": "     NULL,",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
@@ -732,7 +732,7 @@
     "invariant": "P06.06.04: a step_up rotation refreshes the stamp to the rotation time",
     "expected": "A step-up rotation that inherited the old stamp would never advance proof: re-verifying would change nothing and the window would lapse from the original sign-in.",
     "file": "packages/db/migrations/0015_step_up_mfa.sql",
-    "find": "         CASE\n           WHEN p_reason = 'step_up' THEN\n             CASE\n               WHEN p_step_up_at IS NULL THEN v_now\n               WHEN p_step_up_at >= v_now - interval '1 second' AND p_step_up_at <= v_now + interval '30 seconds' THEN v_now\n               WHEN p_step_up_at > v_now - interval '15 minutes' THEN p_step_up_at\n               ELSE NULL\n             END\n           ELSE p.step_up_at\n         END,",
+    "find": "         CASE\n           WHEN p_reason = 'step_up' THEN\n             CASE\n               WHEN p_step_up_at IS NULL THEN v_now\n               WHEN NOT isfinite(p_step_up_at) THEN NULL\n               WHEN p_step_up_at > v_now + interval '30 seconds' THEN NULL\n               WHEN p_step_up_at >= v_now - interval '1 second' THEN v_now\n               WHEN p_step_up_at > v_now - interval '15 minutes' THEN p_step_up_at\n               ELSE NULL\n             END\n           ELSE p.step_up_at\n         END,",
     "replace": "         p.step_up_at,",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
@@ -823,8 +823,8 @@
     "invariant": "P06.06.04: a cached step-up verdict never outlives the stamp it judged",
     "expected": "A stamp expiring inside the 30 s GET window would keep passing the step-up gate from cache for the rest of the TTL.",
     "file": "apps/server/src/modules/identity-access/application/request-context.service.ts",
-    "find": "        if (nowMs - hit.cachedAtMs >= hit.stepUpBudgetMs) {\n          return { context: { ...hit.context, stepUpFresh: false } };\n        }",
-    "replace": "        if (false) {\n          return { context: { ...hit.context, stepUpFresh: false } };\n        }",
+    "find": "        if (wallMovedBack || budgetExpired) {\n          this.#cache.delete(key);\n          return { context: { ...hit.context, stepUpFresh: false } };\n        }",
+    "replace": "        if (false) {\n          this.#cache.delete(key);\n          return { context: { ...hit.context, stepUpFresh: false } };\n        }",
     "killingTest": {
       "file": "apps/server/src/modules/identity-access/application/request-context.service.test.ts",
       "fullName": "RequestContextService > refuses a cached verdict past the stamp expiry, inside the 30 s TTL"

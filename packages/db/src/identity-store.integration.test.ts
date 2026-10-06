@@ -1597,6 +1597,60 @@ describe('the step-up stamp (P06.06.04)', () => {
     },
   );
 
+  evidenceTest('rejects non-finite and excessively future proof timestamps', async () => {
+    const person = await user();
+    const tokenHash = hash();
+    const sessionId = randomUUID();
+
+    // begin_session with future timestamp (> v_now + 30s) must not stamp step_up_at
+    const futureDate = new Date(Date.now() + 86400_000 * 365); // 1 year in future
+    await store.beginSession({
+      subject: person.sub,
+      tokenHash,
+      sessionId,
+      providerTokensSealed: sealed(),
+      keyId: 'test-v1',
+      stepUp: futureDate,
+    });
+    const row = await admin.query<{ step_up_at: Date | null }>(
+      'select step_up_at from sessions where token_hash = $1',
+      [tokenHash],
+    );
+    expect(row.rows[0]?.step_up_at).toBeNull();
+
+    // Direct invocation with infinity
+    const infHash = hash();
+    await identity.query(
+      'select * from app.begin_session($1::text,$2::bytea,$3::uuid,$4::bytea,$5::text,$6::bytea,$7::timestamptz)',
+      [person.sub, infHash, randomUUID(), sealed(), 'test-v1', null, 'infinity'],
+    );
+    const infRow = await admin.query<{ step_up_at: Date | null }>(
+      'select step_up_at from sessions where token_hash = $1',
+      [infHash],
+    );
+    expect(infRow.rows[0]?.step_up_at).toBeNull();
+
+    // rotate_session with future / infinity must not stamp step_up_at
+    const rotated = hash();
+    await store.rotateSession(tokenHash, rotated, randomUUID(), 'step_up', futureDate);
+    const rotatedRow = await admin.query<{ step_up_at: Date | null }>(
+      'select step_up_at from sessions where token_hash = $1',
+      [rotated],
+    );
+    expect(rotatedRow.rows[0]?.step_up_at).toBeNull();
+
+    const infRotated = hash();
+    await identity.query(
+      'select * from app.rotate_session($1::bytea,$2::bytea,$3::uuid,$4::text,$5::timestamptz)',
+      [rotated, infRotated, randomUUID(), 'step_up', 'infinity'],
+    );
+    const infRotatedRow = await admin.query<{ step_up_at: Date | null }>(
+      'select step_up_at from sessions where token_hash = $1',
+      [infRotated],
+    );
+    expect(infRotatedRow.rows[0]?.step_up_at).toBeNull();
+  });
+
   evidenceTest('a step-up round-trip carries its session binding through consume', async () => {
     const person = await user();
     const { granted } = await signIn(person.sub);

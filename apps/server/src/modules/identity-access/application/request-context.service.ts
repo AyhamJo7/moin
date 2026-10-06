@@ -55,17 +55,27 @@ export const CONTEXT_CACHE_TTL_MS = 30_000;
  */
 export const MAX_CACHE_ENTRIES = 10_000;
 
+function monotonicMs(clock: Clock): number {
+  if (typeof clock.monotonicMs === 'function') {
+    return clock.monotonicMs();
+  }
+  return performance.now();
+}
+
 interface CachedEntry {
   readonly expiresAtMs: number;
   readonly idleExpiresAtMs: number;
   readonly absoluteExpiresAtMs: number;
   /**
    * Remaining step-up budget in ms, computed entirely on the database clock at insert
-   * (Defect 2). The hit check spends it in local elapsed time, so constant app↔DB skew
-   * can neither stretch nor shrink the verdict. Entries are never cached unstamped.
+   * (Defect 2). The hit check spends it in local monotonic elapsed time, so constant app↔DB
+   * skew can neither stretch nor shrink the verdict, and backward wall-clock adjustments
+   * cannot extend it. Entries are never cached unstamped.
    */
   readonly stepUpBudgetMs: number;
-  readonly cachedAtMs: number;
+  readonly cachedAtMonotonicMs: number;
+  readonly cachedAtWallMs: number;
+  lastSeenWallMs: number;
   readonly context: SessionContext;
 }
 
@@ -120,6 +130,7 @@ export class RequestContextService {
     const useCache = mode === 'read';
     const key = tokenHash.toString('hex');
     const nowMs = this.#clock.now().getTime();
+    const nowMonoMs = monotonicMs(this.#clock);
     if (!useCache) {
       // A mutation just changed what a cached read would serve (disable, role change,
       // revocation): drop the entry so the next GET re-resolves instead of serving up to 30 s
@@ -129,7 +140,7 @@ export class RequestContextService {
     if (useCache) {
       const hit = this.#cache.get(key);
       // The TTL and the session's own expiries are absolute deadlines. The step-up verdict
-      // is a remaining budget judged at insert: elapsed local time past it flips stepUpFresh
+      // is a remaining budget judged at insert: monotonic elapsed time past it flips stepUpFresh
       // to false while the entry is still served — no re-lookup, no DB timestamp compared
       // against the app clock (Defect 2: constant skew cannot stretch the verdict).
       if (
@@ -138,10 +149,15 @@ export class RequestContextService {
         hit.idleExpiresAtMs > nowMs &&
         hit.absoluteExpiresAtMs > nowMs
       ) {
-        if (nowMs < hit.cachedAtMs || nowMs - hit.cachedAtMs >= hit.stepUpBudgetMs) {
+        const wallMovedBack = nowMs < hit.lastSeenWallMs || nowMs < hit.cachedAtWallMs;
+        const monoElapsed = nowMonoMs - hit.cachedAtMonotonicMs;
+        const budgetExpired = monoElapsed >= hit.stepUpBudgetMs;
+
+        if (wallMovedBack || budgetExpired) {
           this.#cache.delete(key);
           return { context: { ...hit.context, stepUpFresh: false } };
         }
+        hit.lastSeenWallMs = nowMs;
         return { context: hit.context };
       }
       this.#cache.delete(key);
@@ -168,7 +184,7 @@ export class RequestContextService {
       this.#cache.set(key, {
         // The TTL is bounded by the session's own expiries: authority never outlives either.
         // The step-up budget is the remaining window the database verdict allowed, judged
-        // at insert; the hit check spends it in local time (Defect 2).
+        // at insert; the hit check spends it in monotonic elapsed time (Defect 2).
         expiresAtMs: Math.min(
           nowMs + CONTEXT_CACHE_TTL_MS,
           resolved.idleExpiresAt.getTime(),
@@ -177,7 +193,9 @@ export class RequestContextService {
         idleExpiresAtMs: resolved.idleExpiresAt.getTime(),
         absoluteExpiresAtMs: resolved.absoluteExpiresAt.getTime(),
         stepUpBudgetMs,
-        cachedAtMs: nowMs,
+        cachedAtMonotonicMs: nowMonoMs,
+        cachedAtWallMs: nowMs,
+        lastSeenWallMs: nowMs,
         context,
       });
     }
