@@ -419,6 +419,67 @@ describe('the step-up gate (P06.06.04)', () => {
     expect(response.json()).toStrictEqual({ steppedUp: true });
   });
 
+  evidenceTest('old provider authentication must not grant a fresh sensitive-action window', async () => {
+    // Defect 1: a plain login whose ID token carries a stale auth_time (existing IdP
+    // session, no fresh human proof) begins un-stepped-up: the sensitive gate 403s.
+    provider.claims = { auth_time: Math.floor(Date.now() / 1000) - 3600 };
+    try {
+      const cookie = await signedInCookie();
+      contexts().clearCache();
+      const result = await app.inject({
+        method: 'GET',
+        url: '/probe/sensitive',
+        headers: { cookie },
+      });
+      expect(result.statusCode).toBe(403);
+    } finally {
+      provider.claims = {};
+    }
+  });
+
+  evidenceTest('cached freshness must not outlive the DB deadline with an application clock behind', async () => {
+    // Defect 2: constant app↔DB skew must not stretch the verdict. The stamp is ~2 s from
+    // lapsing on the DB clock while the app clock runs 5 minutes behind: the first read
+    // caches a fresh verdict with a ~2 s budget, and the second read — past the budget in
+    // local elapsed time — flips stepUpFresh without any new database lookup.
+    const cookie = await signedInCookie();
+    const token = /^__Host-moin_sid=([A-Za-z0-9_-]{43})$/.exec(cookie)?.[1];
+    if (token === undefined) throw new Error('no token');
+    const { digestOf } = await import('./domain/secret-values.ts');
+    await admin.query(
+      "update sessions set step_up_at = clock_timestamp() - interval '15 minutes' + interval '2 seconds' where token_hash = $1",
+      [digestOf(token)],
+    );
+    const start = await admin.query<{ now: Date }>('select clock_timestamp() as now');
+    clock.set(new Date((start.rows[0]?.now.getTime() ?? Date.now()) - 300_000));
+    try {
+      contexts().clearCache();
+      const first = await app.inject({
+        method: 'GET',
+        url: '/probe/sensitive',
+        headers: { cookie },
+      });
+      expect(first.statusCode).toBe(200);
+      const lookups = contexts().lookups;
+      await admin.query('select pg_sleep(2.5)');
+      clock.advance(2500);
+      const truth = await admin.query<{ fresh: boolean }>(
+        "select step_up_at > clock_timestamp() - interval '15 minutes' as fresh from sessions where token_hash = $1",
+        [digestOf(token)],
+      );
+      expect(truth.rows[0]?.fresh).toBe(false);
+      const second = await app.inject({
+        method: 'GET',
+        url: '/probe/sensitive',
+        headers: { cookie },
+      });
+      expect(contexts().lookups).toBe(lookups);
+      expect(second.statusCode).toBe(403);
+    } finally {
+      clock.set(new Date());
+    }
+  });
+
   evidenceTest('a stamp older than 15 minutes gets 403 step-up-required', async () => {
     const cookie = await signedInCookie();
     const token = /^__Host-moin_sid=([A-Za-z0-9_-]{43})$/.exec(cookie)?.[1];

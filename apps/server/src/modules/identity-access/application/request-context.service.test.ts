@@ -149,8 +149,8 @@ describe('RequestContextService', () => {
   evidenceTest('refuses a cached verdict past the stamp expiry, inside the 30 s TTL', async () => {
     const clock = fixedClock(new Date());
     const at = clock.now().getTime();
-    // Stamped 14 minutes and 50 seconds ago: fresh now, expires in 10 s — inside the 30 s TTL.
-    // The stub always reports fresh: only the fourth deadline (stepUpExpiresAtMs) catches expiry.
+    // Stamped 14 minutes and 50 seconds ago: fresh now, budget expires in 10 s — inside the
+    // 30 s TTL. The stub always reports fresh: only the spent budget flips the served verdict.
     const backend = store({
       resolveRequestContext: () =>
         Promise.resolve(rows({ stepUpAt: new Date(at - 14 * 60_000 - 50_000), stepUpFresh: true })),
@@ -161,10 +161,12 @@ describe('RequestContextService', () => {
     expect('context' in first && first.context.stepUpFresh).toBe(true);
     expect(spy).toHaveBeenCalledTimes(1);
     clock.advance(15_000);
-    // Stamp is now 15 minutes and 5 seconds old: the stamp lapsed at second 10, but the 30 s
-    // cache TTL still has 15 s left. The cache must NOT serve the stale fresh verdict.
-    await service.resolve(DIGEST, 'read');
-    expect(spy).toHaveBeenCalledTimes(2);
+    // Stamp is now 15 minutes and 5 seconds old: the 10 s budget elapsed, but the 30 s
+    // cache TTL still has 15 s left. The entry is served with stepUpFresh flipped false —
+    // no new lookup, and the guard 403s on the flipped verdict.
+    const second = await service.resolve(DIGEST, 'read');
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect('context' in second && second.context.stepUpFresh).toBe(false);
   });
 
   evidenceTest('an unstamped session never serves from cache', async () => {

@@ -44,7 +44,7 @@ async function user(
   return { id, sub };
 }
 
-async function signIn(subject: string, replacedHash?: Buffer) {
+async function signIn(subject: string, replacedHash?: Buffer, stepUp = true) {
   const tokenHash = hash();
   const granted = await store.beginSession({
     subject,
@@ -53,6 +53,7 @@ async function signIn(subject: string, replacedHash?: Buffer) {
     providerTokensSealed: sealed(),
     keyId: 'test-v1',
     replacedHash,
+    stepUp,
   });
   return { tokenHash, granted };
 }
@@ -121,8 +122,8 @@ function directCalls(subject: string, tokenHash: Buffer): [string, string, unkno
   return [
     [
       'begin_session',
-      'select * from app.begin_session($1::text, $2::bytea, $3::uuid, $4::bytea, $5::text, null)',
-      [subject, hash(), randomUUID(), sealed(), 'test-v1'],
+      'select * from app.begin_session($1::text, $2::bytea, $3::uuid, $4::bytea, $5::text, $6::bytea, $7::boolean)',
+      [subject, hash(), randomUUID(), sealed(), 'test-v1', hash(), true],
     ],
     [
       'begin_sign_in',
@@ -867,7 +868,7 @@ describe('two callers holding the same row', () => {
   }
 
   const beginSessionSql =
-    'select * from app.begin_session($1::text, $2::bytea, $3::uuid, $4::bytea, $5::text, $6::bytea)';
+    'select * from app.begin_session($1::text, $2::bytea, $3::uuid, $4::bytea, $5::text, $6::bytea, $7::boolean)';
 
   evidenceTest(
     'a sign-in waiting behind a rotation of the session it supersedes revokes the successor too',
@@ -892,6 +893,7 @@ describe('two callers holding the same row', () => {
             sealed(),
             'test-v1',
             presented.tokenHash,
+            true,
           ]),
       );
       expect(await store.resolveSession(successor), 'rotated successor').toBeUndefined();
@@ -924,6 +926,7 @@ describe('two callers holding the same row', () => {
             sealed(),
             'test-v1',
             stale.tokenHash,
+            true,
           ]),
       );
       expect(await store.resolveSession(inFlight), 'rotated in flight').toBeUndefined();
@@ -948,6 +951,7 @@ describe('two callers holding the same row', () => {
             sealed(),
             'test-v1',
             presented.tokenHash,
+            true,
           ]),
         (client) =>
           client.query('select * from app.rotate_session($1, $2, $3, $4)', [
@@ -983,6 +987,7 @@ describe('two callers holding the same row', () => {
             sealed(),
             'test-v1',
             presented.tokenHash,
+            true,
           ]);
           await client.query('commit');
           return result.rowCount;
@@ -1529,6 +1534,19 @@ describe('the step-up stamp (P06.06.04)', () => {
       [tokenHash],
     );
     expect(row.rows[0]?.step_up_at).toStrictEqual(row.rows[0]?.created_at);
+  });
+
+  evidenceTest('leaves step_up_at NULL without fresh provider proof', async () => {
+    const person = await user();
+    const { tokenHash } = await signIn(person.sub, undefined, false);
+    const row = await admin.query<{ step_up_at: Date | null }>(
+      'select step_up_at from sessions where token_hash = $1',
+      [tokenHash],
+    );
+    expect(row.rows[0]?.step_up_at).toBeNull();
+    // The session itself is valid: only the step-up stamp is withheld. (resolveRequestContext
+    // needs a membership row, so only the session check runs here.)
+    expect(await store.resolveSession(tokenHash)).toBeDefined();
   });
 
   evidenceTest(

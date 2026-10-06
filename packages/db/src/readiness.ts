@@ -78,7 +78,7 @@ export const IDENTITY_POOL_ASSERTION = `
      and not has_function_privilege('moin_app', 'app.begin_sign_in(bytea, bytea, bytea, bytea, text, text)', 'EXECUTE')
      and not has_function_privilege('moin_app', 'app.begin_sign_in(bytea, bytea, bytea, bytea, text, text, uuid)', 'EXECUTE')
      and not has_function_privilege('moin_app', 'app.consume_sign_in(bytea, bytea)', 'EXECUTE')
-     and not has_function_privilege('moin_app', 'app.begin_session(text, bytea, uuid, bytea, text, bytea)', 'EXECUTE')
+     and not has_function_privilege('moin_app', 'app.begin_session(text, bytea, uuid, bytea, text, bytea, boolean)', 'EXECUTE')
      and not has_function_privilege('moin_app', 'app.rotate_session(bytea, bytea, uuid, text)', 'EXECUTE')
      and not has_function_privilege('moin_app', 'app.resolve_session(bytea)', 'EXECUTE')
      and not has_function_privilege('moin_app', 'app.resolve_request_context(bytea)', 'EXECUTE')

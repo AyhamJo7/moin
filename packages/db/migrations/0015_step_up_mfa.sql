@@ -53,6 +53,7 @@ DROP FUNCTION IF EXISTS app.begin_sign_in(bytea, bytea, bytea, bytea, text, text
 DROP FUNCTION IF EXISTS app.consume_sign_in(bytea, bytea);
 DROP FUNCTION IF EXISTS app.resolve_request_context(bytea);
 DROP FUNCTION IF EXISTS app.resolve_session(bytea);
+DROP FUNCTION IF EXISTS app.begin_session(text, bytea, uuid, bytea, text, bytea);
 
 -- ---------------------------------------------------------------------------------------------
 -- begin_session: stamp step-up only on fresh provider proof (Defect 1 fix).
@@ -67,7 +68,9 @@ DROP FUNCTION IF EXISTS app.resolve_session(bytea);
 -- a defaulted 7th parameter would let a stale 6-argument call bind the new body with an
 -- implicit NULL — silently recording the round-trip shape as a plain login. Old hosts keep
 -- the old 6-argument name through the INVOKER shim below; new hosts pass all 7 arguments.
-CREATE OR REPLACE FUNCTION app.begin_session(
+-- (Dropped above: without the DROP, OR REPLACE would keep a single 6-arg DEFINER and no
+-- 7-arg form — the new parameter would silently vanish.)
+CREATE FUNCTION app.begin_session(
   p_subject text,
   p_token_hash bytea,
   p_session_id uuid,
@@ -477,11 +480,13 @@ $$;
 -- The DROPs above reset the ACLs to defaults, so re-assert the catalog contract (same
 -- owners, search_path, moin_identity-only grants — the catalog names these exact signatures):
 REVOKE ALL ON FUNCTION app.begin_sign_in(bytea, bytea, bytea, bytea, text, text, uuid) FROM PUBLIC, moin_app;
+REVOKE ALL ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea, boolean) FROM PUBLIC, moin_app;
 REVOKE ALL ON FUNCTION app.consume_sign_in(bytea, bytea) FROM PUBLIC, moin_app;
 REVOKE ALL ON FUNCTION app.resolve_request_context(bytea) FROM PUBLIC, moin_app;
 REVOKE ALL ON FUNCTION app.resolve_session(bytea) FROM PUBLIC, moin_app;
 
 GRANT EXECUTE ON FUNCTION app.begin_sign_in(bytea, bytea, bytea, bytea, text, text, uuid) TO moin_identity;
+GRANT EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea, boolean) TO moin_identity;
 GRANT EXECUTE ON FUNCTION app.consume_sign_in(bytea, bytea) TO moin_identity;
 GRANT EXECUTE ON FUNCTION app.resolve_request_context(bytea) TO moin_identity;
 GRANT EXECUTE ON FUNCTION app.resolve_session(bytea) TO moin_identity;

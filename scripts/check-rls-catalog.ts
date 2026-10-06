@@ -204,7 +204,7 @@ const APPROVED_DEFINERS: Readonly<
     executeGrantees: ['moin_identity'],
   },
   'app.begin_session': {
-    arguments: 'text, bytea, uuid, bytea, text, bytea',
+    arguments: 'text, bytea, uuid, bytea, text, bytea, boolean',
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
     executeGrantees: ['moin_identity'],

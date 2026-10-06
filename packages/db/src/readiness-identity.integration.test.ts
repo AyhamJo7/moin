@@ -40,6 +40,26 @@ describe('the identity pool readiness probe', () => {
     }
   });
 
+  evidenceTest('an old-host readiness query passes against the migrated schema', async () => {
+    // Defect 3: the pre-0015 probe counts executable DEFINERs with total = 7. The INVOKER
+    // shim must not appear in that count, or every not-yet-rolled host 503s on /readyz
+    // the moment 0015 lands. Run the old shape verbatim against the migrated database.
+    const admin = database.fixturePool();
+    const oldProbe = await admin.query<{ ok: boolean }>(
+      `select d.functions @> d.expected and d.functions <@ d.expected and d.total = 7 as ok
+         from lateral (
+           select coalesce(array_agg(n.nspname || '.' || p.proname), '{}') as functions,
+                  count(*) as total,
+                  array['app.begin_sign_in', 'app.consume_sign_in', 'app.begin_session',
+                        'app.rotate_session', 'app.resolve_session', 'app.revoke_session',
+                        'app.resolve_request_context'] as expected
+             from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+            where p.prosecdef and has_function_privilege('moin_identity', p.oid, 'EXECUTE')
+         ) d`,
+    );
+    expect(oldProbe.rows[0]?.ok).toBe(true);
+  });
+
   evidenceTest('is not ready once moin_app can execute a session function', async () => {
     const admin = database.fixturePool();
     // Every one of the session functions, both begin_sign_in arities: readiness must
@@ -48,7 +68,7 @@ describe('the identity pool readiness probe', () => {
       'grant execute on function app.begin_sign_in(bytea, bytea, bytea, bytea, text, text) to moin_app',
       'grant execute on function app.begin_sign_in(bytea, bytea, bytea, bytea, text, text, uuid) to moin_app',
       'grant execute on function app.consume_sign_in(bytea, bytea) to moin_app',
-      'grant execute on function app.begin_session(text, bytea, uuid, bytea, text, bytea) to moin_app',
+      'grant execute on function app.begin_session(text, bytea, uuid, bytea, text, bytea, boolean) to moin_app',
       'grant execute on function app.rotate_session(bytea, bytea, uuid, text) to moin_app',
       'grant execute on function app.resolve_session(bytea) to moin_app',
       'grant execute on function app.revoke_session(bytea) to moin_app',
