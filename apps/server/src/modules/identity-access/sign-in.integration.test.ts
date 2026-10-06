@@ -305,6 +305,7 @@ describe('signing in', () => {
       'absoluteExpiresAt',
       'idleExpiresAt',
       'sessionId',
+      'subject',
       'userId',
     ]);
   });

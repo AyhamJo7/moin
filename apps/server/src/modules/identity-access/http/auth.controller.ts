@@ -14,7 +14,7 @@
  * membership gate — an unauthenticated caller learns nothing beyond the 401.
  */
 
-import { Controller, Get, Headers, Inject, Post, Query, Res } from '@nestjs/common';
+import { Controller, Get, Headers, Inject, Post, Query, Res, UseGuards } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 import {
   AUTH_TRANSACTION_TTL_MS,
@@ -24,6 +24,7 @@ import {
 import { SignInError, type SignInFailure } from '../application/sign-in.service.ts';
 import { SIGN_IN, type SignInGate } from '../identity-access.tokens.ts';
 import { clearCookie, readCookie, serializeCookie } from './cookies.ts';
+import { SessionMembershipGuard } from './session-membership.guard.ts';
 
 const MS_PER_SECOND = 1000;
 
@@ -130,11 +131,11 @@ export class AuthController {
 
   /**
    * Start a step-up round-trip for the caller's own session. Guarded by the session +
-   * membership gate in the test probe; production wiring of the guard lands with the first
-   * sensitive-action route (P06.07/P06.08). Answers 302 to the provider on success, RFC 9457
-   * otherwise — never the session's state.
+   * membership gate: a removed member's session cannot even start a round-trip. Answers 302
+   * to the provider on success, RFC 9457 otherwise — never the session's state.
    */
   @Post('step-up')
+  @UseGuards(SessionMembershipGuard)
   async stepUp(
     @Headers('cookie') cookieHeader: string | undefined,
     @Res() reply: FastifyReply,

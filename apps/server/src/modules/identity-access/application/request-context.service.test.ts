@@ -20,6 +20,7 @@ function rows(overrides: Partial<RequestContext> = {}): RequestContext {
     idleExpiresAt: new Date(Date.now() + 3600_000),
     absoluteExpiresAt: new Date(Date.now() + 86400_000),
     stepUpAt: new Date(),
+    stepUpFresh: true,
     ...overrides,
   };
 }
@@ -124,7 +125,7 @@ describe('RequestContextService', () => {
     expect(service.cached).toBe(0);
   });
 
-  it('carries the step-up stamp into the session context, including null', async () => {
+  it('carries the step-up stamp and freshness into the session context', async () => {
     const clock = fixedClock(new Date());
     const fresh = new RequestContextService(
       store({ resolveRequestContext: () => Promise.resolve(rows()) }),
@@ -132,11 +133,16 @@ describe('RequestContextService', () => {
     );
     const stamped = await fresh.resolve(DIGEST, 'mutate');
     expect('context' in stamped && stamped.context.stepUpAt).toBeInstanceOf(Date);
+    expect('context' in stamped && stamped.context.stepUpFresh).toBe(true);
     const bare = new RequestContextService(
-      store({ resolveRequestContext: () => Promise.resolve(rows({ stepUpAt: null })) }),
+      store({
+        resolveRequestContext: () =>
+          Promise.resolve(rows({ stepUpAt: null, stepUpFresh: false })),
+      }),
       clock,
     );
     const unstamped = await bare.resolve(DIGEST, 'mutate');
     expect('context' in unstamped && unstamped.context.stepUpAt).toBeNull();
+    expect('context' in unstamped && unstamped.context.stepUpFresh).toBe(false);
   });
 });

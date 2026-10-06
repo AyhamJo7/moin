@@ -64,6 +64,8 @@ export interface ResolvedSession {
   readonly userId: string;
   readonly idleExpiresAt: Date;
   readonly absoluteExpiresAt: Date;
+  /** The owner's provider subject: step-up binds fresh proof to it (P06.06.04). */
+  readonly subject: string;
 }
 
 /** One active membership of a resolved session: the org the request may act for (P06.06.03). */
@@ -82,6 +84,8 @@ export interface RequestContext {
   readonly absoluteExpiresAt: Date;
   /** Last MFA proof; null for sessions predating 0015 until re-verified (P06.06.04). */
   readonly stepUpAt: Date | null;
+  /** Judged by the database clock against the 15-minute window (P06.06.04). */
+  readonly stepUpFresh: boolean;
 }
 
 export interface IdentityStore {
@@ -202,8 +206,9 @@ export function createIdentityStore(pool: Pool): IdentityStore {
         user_id: string;
         idle_expires_at: Date;
         absolute_expires_at: Date;
+        subject: string;
       }>(
-        'select session_id, user_id, idle_expires_at, absolute_expires_at from app.resolve_session($1::bytea)',
+        'select session_id, user_id, idle_expires_at, absolute_expires_at, subject from app.resolve_session($1::bytea)',
         [digest(tokenHash)],
       );
       const row = result.rows[0];
@@ -214,6 +219,7 @@ export function createIdentityStore(pool: Pool): IdentityStore {
             userId: row.user_id,
             idleExpiresAt: row.idle_expires_at,
             absoluteExpiresAt: row.absolute_expires_at,
+            subject: row.subject,
           };
     },
 
@@ -235,8 +241,9 @@ export function createIdentityStore(pool: Pool): IdentityStore {
         idle_expires_at: Date;
         absolute_expires_at: Date;
         step_up_at: Date | null;
+        step_up_fresh: boolean;
       }>(
-        'select session_id, user_id, organisation_id, role, permissions, idle_expires_at, absolute_expires_at, step_up_at from app.resolve_request_context($1::bytea)',
+        'select session_id, user_id, organisation_id, role, permissions, idle_expires_at, absolute_expires_at, step_up_at, step_up_fresh from app.resolve_request_context($1::bytea)',
         [digest(tokenHash)],
       );
       const first = result.rows[0];
@@ -252,6 +259,7 @@ export function createIdentityStore(pool: Pool): IdentityStore {
         idleExpiresAt: first.idle_expires_at,
         absoluteExpiresAt: first.absolute_expires_at,
         stepUpAt: first.step_up_at,
+        stepUpFresh: first.step_up_fresh,
       };
     },
   };

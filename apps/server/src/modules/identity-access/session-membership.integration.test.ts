@@ -158,6 +158,11 @@ function setCookies(headers: Record<string, unknown>): string[] {
 async function signedInCookie(): Promise<string> {
   const who = await person();
   await member(who.id, ORG_A);
+  return signedInCookieAs(who);
+}
+
+/** The same round-trip for a given person (wrong-subject tests sign in as someone else). */
+async function signedInCookieAs(who: { subject: string; email: string }): Promise<string> {
   const started = await app.inject({ method: 'GET', url: '/api/auth/login' });
   expect(started.statusCode).toBe(302);
   const binding = /^__Host-moin_signin=([A-Za-z0-9_-]{43});/.exec(
@@ -512,6 +517,72 @@ describe('the step-up gate (P06.06.04)', () => {
       (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: oldCookie } }))
         .statusCode,
     ).toBe(401);
+  });
+
+  evidenceTest('a step-up completed as another person rotates nothing', async () => {
+    // Subject confusion: the holder's session starts the round-trip, but the provider flow
+    // completes as someone else. The callback must refuse and rotate nothing — otherwise a
+    // stolen session plus any valid IdP account would mint fresh step-up as the victim.
+    const holder = await person();
+    await member(holder.id, ORG_A);
+    const other = await person();
+    await member(other.id, ORG_A);
+    const cookie = await signedInCookieAs(holder);
+    const begun = await app.inject({
+      method: 'POST',
+      url: '/api/auth/step-up',
+      headers: { cookie },
+    });
+    expect(begun.statusCode).toBe(302);
+    const upBinding = /^__Host-moin_signin=([A-Za-z0-9_-]{43});/.exec(
+      String(begun.headers['set-cookie']),
+    )?.[1];
+    if (upBinding === undefined) throw new Error('no step-up binding');
+    const up = provider.authorize(String(begun.headers.location), {
+      subject: other.subject,
+      email: other.email,
+    });
+    const before = await admin.query<{ n: string }>(
+      'select count(*)::text as n from sessions where revoked_at is null',
+    );
+    const done = await app.inject({
+      method: 'GET',
+      url: `/api/auth/callback?${new URLSearchParams({ state: up.state, code: up.code, iss: provider.issuer }).toString()}`,
+      headers: { cookie: `__Host-moin_signin=${upBinding}; ${cookie}` },
+    });
+    expect(done.statusCode).toBe(400);
+    const after = await admin.query<{ n: string }>(
+      'select count(*)::text as n from sessions where revoked_at is null',
+    );
+    expect(after.rows[0]?.n).toBe(before.rows[0]?.n);
+    // The holder's session still works: nothing was revoked out from under it.
+    contexts().clearCache();
+    expect(
+      (await app.inject({ method: 'GET', url: '/probe', headers: { cookie } })).statusCode,
+    ).toBe(200);
+  });
+
+  evidenceTest('a removed member cannot start a step-up round-trip', async () => {
+    // The step-up route is membership-gated: a session with no active membership gets 401
+    // before any provider flow starts, and no auth transaction is minted for it.
+    const who = await person();
+    await member(who.id, ORG_A);
+    const cookie = await signedInCookieAs(who);
+    await admin.query('delete from memberships where user_id = $1', [who.id]);
+    contexts().clearCache();
+    const before = await admin.query<{ n: string }>(
+      'select count(*)::text as n from auth_transactions',
+    );
+    const begun = await app.inject({
+      method: 'POST',
+      url: '/api/auth/step-up',
+      headers: { cookie },
+    });
+    expect(begun.statusCode).toBe(401);
+    const after = await admin.query<{ n: string }>(
+      'select count(*)::text as n from auth_transactions',
+    );
+    expect(after.rows[0]?.n).toBe(before.rows[0]?.n);
   });
 
   evidenceTest('a step-up without the session cookie completes nothing', async () => {

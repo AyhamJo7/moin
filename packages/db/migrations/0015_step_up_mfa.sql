@@ -44,6 +44,7 @@ COMMENT ON COLUMN auth_transactions.step_up_session_id IS
 DROP FUNCTION IF EXISTS app.begin_sign_in(bytea, bytea, bytea, bytea, text, text);
 DROP FUNCTION IF EXISTS app.consume_sign_in(bytea, bytea);
 DROP FUNCTION IF EXISTS app.resolve_request_context(bytea);
+DROP FUNCTION IF EXISTS app.resolve_session(bytea);
 
 -- ---------------------------------------------------------------------------------------------
 -- begin_session: a fresh sign-in is MFA'd, so it is stepped-up from creation.
@@ -287,18 +288,92 @@ $$;
 -- end of this file after every CREATE, because DROP resets the ACL to defaults.)
 
 -- ---------------------------------------------------------------------------------------------
+-- resolve_session: expose the owner's provider subject for the step-up binding (P06.06.04).
+--
+-- The subject rides the existing user join — no new lock, no new clock read. The step-up
+-- completion compares the fresh ID-token subject against exactly this value before rotating,
+-- so a round-trip completed as another person rotates nothing.
+-- ---------------------------------------------------------------------------------------------
+CREATE FUNCTION app.resolve_session(
+  p_token_hash bytea
+) RETURNS TABLE (session_id uuid, user_id uuid, idle_expires_at timestamptz,
+                 absolute_expires_at timestamptz, subject text)
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path = pg_catalog, public, app, pg_temp
+AS $$
+DECLARE
+  v_now timestamptz;
+  v_family uuid;
+BEGIN
+  -- Canonical lock order is family, then target session, then owning user: every function takes
+  -- locks in that order, so concurrent callers serialise instead of deadlocking (AB-BA). The
+  -- family lookup is a key read without a lock; the locks below are taken in canonical order.
+  -- The family-row lock pins the lineage while this call runs, the session-row lock means the
+  -- clock below is read only after the lock protecting the authorized state is held: an idle or
+  -- absolute expiry that lapses while this call waits on either lock is already expired when
+  -- the recheck below runs, and a disable racing this call serialises on the user row rather
+  -- than letting one stale resolution through.
+  SELECT s.family_id INTO v_family FROM public.sessions s WHERE s.token_hash = p_token_hash;
+  IF v_family IS NOT NULL THEN
+    PERFORM 1 FROM public.sessions f WHERE f.id = v_family FOR UPDATE;
+  END IF;
+
+  PERFORM 1 FROM public.sessions s WHERE s.token_hash = p_token_hash FOR UPDATE;
+
+  PERFORM 1
+  FROM public.sessions s JOIN public.users u ON u.id = s.user_id
+  WHERE s.token_hash = p_token_hash FOR SHARE OF u;
+
+  -- Fresh DB clock obtained only after all locks above are held.
+  v_now := clock_timestamp();
+
+  RETURN QUERY
+  UPDATE public.sessions s
+  SET last_seen_at = GREATEST(s.last_seen_at, v_now),
+      idle_expires_at = LEAST(v_now + interval '12 hours', s.absolute_expires_at)
+  FROM public.users u
+  WHERE s.token_hash = p_token_hash
+    AND s.revoked_at IS NULL
+    AND s.idle_expires_at > v_now
+    AND s.absolute_expires_at > v_now
+    AND u.id = s.user_id
+    AND u.status = 'active'
+    AND LEAST(v_now + interval '12 hours', s.absolute_expires_at) - s.idle_expires_at
+        >= interval '60 seconds'
+  RETURNING s.id, s.user_id, s.idle_expires_at, s.absolute_expires_at, u.cognito_sub;
+  IF FOUND THEN
+    RETURN;
+  END IF;
+
+  RETURN QUERY
+  SELECT s.id, s.user_id, s.idle_expires_at, s.absolute_expires_at, u.cognito_sub
+  FROM public.sessions s
+  JOIN public.users u ON u.id = s.user_id
+  WHERE s.token_hash = p_token_hash
+    AND s.revoked_at IS NULL
+    AND s.idle_expires_at > v_now
+    AND s.absolute_expires_at > v_now
+    AND u.status = 'active';
+END
+$$;
+
+-- ---------------------------------------------------------------------------------------------
 -- resolve_request_context: expose the step-up stamp alongside the existing fields
 -- (new OUT-record shape — plain CREATE, same 42P13 ordering as above).
 -- ---------------------------------------------------------------------------------------------
 --
--- The slide UPDATE is untouched; only the verdict SELECT gains the column. The guard judges
--- freshness against its own clock (15-minute window), so the function returns the stamp raw —
--- no expiry comparison here, and no new lock: the membership lock already held covers it.
+-- The slide UPDATE is untouched; only the verdict SELECT gains columns. The freshness boolean
+-- is judged here against the database clock (`v_now`, sampled after all locks): the 15-minute
+-- window in PLAN Security Architecture is an authorization decision, and authorization time
+-- comes from PostgreSQL, never from a caller clock. The guard branches on the boolean; the
+-- raw stamp rides along for observability only.
 CREATE FUNCTION app.resolve_request_context(
   p_token_hash bytea
 ) RETURNS TABLE (session_id uuid, user_id uuid, organisation_id uuid, role text,
                  permissions text[], idle_expires_at timestamptz,
-                 absolute_expires_at timestamptz, step_up_at timestamptz)
+                 absolute_expires_at timestamptz, step_up_at timestamptz,
+                 step_up_fresh boolean)
   LANGUAGE plpgsql
   SECURITY DEFINER
   SET search_path = pg_catalog, public, app, pg_temp
@@ -357,7 +432,8 @@ BEGIN
 
     RETURN QUERY
     SELECT s.id, s.user_id, m.organisation_id, m.role, m.permissions,
-           s.idle_expires_at, s.absolute_expires_at, s.step_up_at
+           s.idle_expires_at, s.absolute_expires_at, s.step_up_at,
+           (s.step_up_at IS NOT NULL AND s.step_up_at > v_now - interval '15 minutes')
     FROM public.sessions s
     JOIN public.users u ON u.id = s.user_id
     JOIN public.memberships m ON m.user_id = s.user_id
@@ -382,7 +458,9 @@ $$;
 REVOKE ALL ON FUNCTION app.begin_sign_in(bytea, bytea, bytea, bytea, text, text, uuid) FROM PUBLIC, moin_app;
 REVOKE ALL ON FUNCTION app.consume_sign_in(bytea, bytea) FROM PUBLIC, moin_app;
 REVOKE ALL ON FUNCTION app.resolve_request_context(bytea) FROM PUBLIC, moin_app;
+REVOKE ALL ON FUNCTION app.resolve_session(bytea) FROM PUBLIC, moin_app;
 
 GRANT EXECUTE ON FUNCTION app.begin_sign_in(bytea, bytea, bytea, bytea, text, text, uuid) TO moin_identity;
 GRANT EXECUTE ON FUNCTION app.consume_sign_in(bytea, bytea) TO moin_identity;
 GRANT EXECUTE ON FUNCTION app.resolve_request_context(bytea) TO moin_identity;
+GRANT EXECUTE ON FUNCTION app.resolve_session(bytea) TO moin_identity;

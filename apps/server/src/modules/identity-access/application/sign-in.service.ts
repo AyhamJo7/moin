@@ -180,7 +180,8 @@ export class SignInService {
    * Start a step-up round-trip for the bearer of `presentedSession` (P06.06.04): the same OIDC
    * flow, but bound to that session and forcing fresh authentication (`max_age=0`). The browser
    * must already hold a valid session — verified by the caller (the route guard) — but this
-   * method re-resolves it: the binding recorded here is the session id, never a caller claim.
+   * method re-resolves it: the binding recorded here is the session id plus the owner's
+   * provider subject, never a caller claim.
    */
   async startStepUp(presentedSession: string | undefined): Promise<StartedSignIn> {
     const { provider, cipher, store } = this.#deps;
@@ -300,10 +301,10 @@ export class SignInService {
     // A step-up round-trip rotates the bound session instead of signing in. The presented
     // cookie must still resolve to the bound session id: the transaction recorded the id at
     // startStepUp from a resolved session, so only the browser holding that session completes
-    // this round-trip — and `resolveSession` returns the session's own user, which the subject
-    // check below pins against the fresh provider proof. The session cannot have lapsed
-    // mid-round-trip either — rotate refuses an invalid predecessor, which fails this
-    // completion rather than issuing anything.
+    // this round-trip. The fresh provider subject must equal the session owner's subject
+    // (resolved alongside): a round-trip completed as another person rotates nothing. The
+    // session cannot have lapsed mid-round-trip either — rotate refuses an invalid
+    // predecessor, which fails this completion rather than issuing anything.
     if (pending.stepUpSessionId !== undefined) {
       if (!isSecretValue(presentedSession)) {
         throw this.#fail('step_up_invalid', 'step_up_session_not_presented');
@@ -311,6 +312,9 @@ export class SignInService {
       const bound = await store.resolveSession(digestOf(presentedSession));
       if (bound?.sessionId !== pending.stepUpSessionId) {
         throw this.#fail('step_up_invalid', 'step_up_session_unknown');
+      }
+      if (identity.subject !== bound.subject) {
+        throw this.#fail('step_up_invalid', 'step_up_subject_mismatch');
       }
       return this.#completeStepUp(presentedSession);
     }
@@ -370,13 +374,11 @@ export class SignInService {
   }
 
   /**
-   * Rotate the bound session after its owner re-verified at the provider (P06.06.04). The
-   * binding is exact: `complete` resolved the presented cookie to the recorded session id,
-   * and the rotation below consumes that same cookie — so only the browser holding the
-   * session completes its own round-trip. No subject comparison is needed on top: the
-   * session id is an unguessable uuid minted server-side, and the transaction that recorded
-   * it was bound to this browser's cookie. The rotation re-resolves validity (unrevoked,
-   * unexpired, active user) against the database clock: a lapsed session fails here rather
+   * Rotate the bound session after its owner re-verified at the provider (P06.06.04).
+   * `complete` already enforced both bindings before this runs: the presented cookie
+   * resolved to the recorded session id, and the fresh provider subject equalled the
+   * session owner's subject. The rotation re-resolves validity (unrevoked, unexpired,
+   * active user) against the database clock: a lapsed session fails here rather
    * than stepping up.
    */
   async #completeStepUp(presentedSession: string): Promise<CompletedSignIn> {
