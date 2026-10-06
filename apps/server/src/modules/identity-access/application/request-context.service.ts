@@ -147,7 +147,9 @@ export class RequestContextService {
     if (context === undefined) return { failure: 'ambiguous_organisation' };
     // An unstamped session carries no step-up deadline to bound a cache entry — so it is
     // never cached: every read re-resolves rather than serving a verdict with no expiry.
+    // The narrowing below is what proves the stamp non-null to the expiry arithmetic.
     if (useCache && resolved.stepUpAt !== null) {
+      const stepUpAt: Date = resolved.stepUpAt;
       if (this.#cache.size >= MAX_CACHE_ENTRIES) {
         let oldest = this.#cache.keys().next();
         while (!oldest.done && this.#cache.size >= MAX_CACHE_ENTRIES) {
@@ -165,7 +167,7 @@ export class RequestContextService {
         ),
         idleExpiresAtMs: resolved.idleExpiresAt.getTime(),
         absoluteExpiresAtMs: resolved.absoluteExpiresAt.getTime(),
-        stepUpExpiresAtMs: (resolved.stepUpAt as Date).getTime() + STEP_UP_WINDOW_MS,
+        stepUpExpiresAtMs: stepUpAt.getTime() + STEP_UP_WINDOW_MS,
         context,
       });
     }
