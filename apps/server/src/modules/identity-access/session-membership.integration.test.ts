@@ -697,6 +697,57 @@ describe('the step-up gate (P06.06.04)', () => {
     },
   );
 
+  evidenceTest(
+    'independent application clock offset must not admit a DB-expired session',
+    async () => {
+      const who = await person();
+      await member(who.id, ORG_A);
+      const { digestOf, randomSecret } = await import('./domain/secret-values.ts');
+      const oldHash = digestOf(randomSecret());
+      const token = randomSecret();
+      const childHash = digestOf(token);
+      const rootId = randomUUID();
+      const childId = randomUUID();
+      const cookie = `__Host-moin_sid=${token}`;
+      await admin.query(
+        "with t as materialized (select clock_timestamp() as now) insert into sessions(token_hash,id,family_id,user_id,rotation_reason,created_at,last_seen_at,idle_expires_at,absolute_expires_at,provider_tokens_sealed,provider_tokens_key_id) select $1,$2,$2,$3,'login',t.now-interval '7 days'+interval '2 seconds',t.now,t.now+interval '2 seconds',t.now+interval '2 seconds',$4,'test-v1' from t",
+        [oldHash, rootId, who.id, Buffer.alloc(64)],
+      );
+      const identityCheck = database.identityPool();
+      try {
+        const rotation = await identityCheck.query(
+          "select * from app.rotate_session($1::bytea,$2::bytea,$3::uuid,'step_up'::text,clock_timestamp())",
+          [oldHash, childHash, childId],
+        );
+        expect(rotation.rowCount).toBe(1);
+        clock.set(new Date(Date.now() - 5000));
+        contexts().clearCache();
+        expect(
+          (await app.inject({ method: 'GET', url: '/probe/sensitive', headers: { cookie } }))
+            .statusCode,
+        ).toBe(200);
+        await admin.query('select pg_sleep(2.5)');
+        clock.advance(2500);
+        const db = await admin.query(
+          'select idle_expires_at > clock_timestamp() as idle_valid, absolute_expires_at > clock_timestamp() as absolute_valid from sessions where token_hash=$1',
+          [childHash],
+        );
+        expect(db.rows[0]).toStrictEqual({ idle_valid: false, absolute_valid: false });
+        const authoritative = await identityCheck.query(
+          'select * from app.resolve_request_context($1::bytea)',
+          [childHash],
+        );
+        expect(authoritative.rowCount).toBe(0);
+        expect(
+          (await app.inject({ method: 'GET', url: '/probe/sensitive', headers: { cookie } }))
+            .statusCode,
+        ).toBe(401);
+      } finally {
+        clock.set(new Date());
+      }
+    },
+  );
+
   evidenceTest('a stamp older than 15 minutes gets 403 step-up-required', async () => {
     const cookie = await signedInCookie();
     const token = /^__Host-moin_sid=([A-Za-z0-9_-]{43})$/.exec(cookie)?.[1];

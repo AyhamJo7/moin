@@ -172,8 +172,8 @@ export class RequestContextService {
     // from comparing the DB stamp against the app clock — so skew shifts nothing.
     if (useCache && resolved.stepUpAt !== null && resolved.stepUpRemainingSeconds !== null) {
       const stepUpBudgetMs = Math.max(0, resolved.stepUpRemainingSeconds * 1000);
-      const idleRemainingMs = Math.max(0, resolved.idleExpiresAt.getTime() - nowMs);
-      const absoluteRemainingMs = Math.max(0, resolved.absoluteExpiresAt.getTime() - nowMs);
+      const idleRemainingMs = Math.max(0, resolved.idleRemainingSeconds * 1000);
+      const absoluteRemainingMs = Math.max(0, resolved.absoluteRemainingSeconds * 1000);
       const maxLifetimeMs = Math.min(CONTEXT_CACHE_TTL_MS, idleRemainingMs, absoluteRemainingMs);
 
       if (maxLifetimeMs > 0) {
@@ -186,13 +186,9 @@ export class RequestContextService {
         }
         this.#cache.set(key, {
           maxLifetimeMs,
-          expiresAtMs: Math.min(
-            nowMs + CONTEXT_CACHE_TTL_MS,
-            resolved.idleExpiresAt.getTime(),
-            resolved.absoluteExpiresAt.getTime(),
-          ),
-          idleExpiresAtMs: resolved.idleExpiresAt.getTime(),
-          absoluteExpiresAtMs: resolved.absoluteExpiresAt.getTime(),
+          expiresAtMs: nowMs + maxLifetimeMs,
+          idleExpiresAtMs: nowMs + idleRemainingMs,
+          absoluteExpiresAtMs: nowMs + absoluteRemainingMs,
           stepUpBudgetMs,
           cachedAtMonotonicMs: nowMonoMs,
           cachedAtWallMs: nowMs,

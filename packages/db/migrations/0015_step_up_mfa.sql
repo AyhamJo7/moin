@@ -413,7 +413,8 @@ CREATE FUNCTION app.resolve_request_context(
 ) RETURNS TABLE (session_id uuid, user_id uuid, organisation_id uuid, role text,
                  permissions text[], idle_expires_at timestamptz,
                  absolute_expires_at timestamptz, step_up_at timestamptz,
-                 step_up_fresh boolean, step_up_remaining_seconds double precision)
+                 step_up_fresh boolean, step_up_remaining_seconds double precision,
+                 idle_remaining_seconds double precision, absolute_remaining_seconds double precision)
   LANGUAGE plpgsql
   SECURITY DEFINER
   SET search_path = pg_catalog, public, app, pg_temp
@@ -482,7 +483,12 @@ BEGIN
              WHEN s.step_up_at IS NOT NULL AND isfinite(s.step_up_at) AND s.step_up_at > v_now - interval '15 minutes' AND s.step_up_at <= v_now + interval '30 seconds'
              THEN extract(epoch from (s.step_up_at + interval '15 minutes' - v_now))::double precision
              ELSE NULL
-           END
+           END,
+           -- Remaining idle and absolute session lifetimes in seconds on the DB clock:
+           -- caching bounds its maximum authority lifetime by these durations in monotonic
+           -- time so app↔DB clock offset cannot extend authority past session expiry.
+           extract(epoch from (s.idle_expires_at - v_now))::double precision,
+           extract(epoch from (s.absolute_expires_at - v_now))::double precision
     FROM public.sessions s
     JOIN public.users u ON u.id = s.user_id
     JOIN public.memberships m ON m.user_id = s.user_id

@@ -14,15 +14,26 @@ import { RequestContextService } from './request-context.service.ts';
 const DIGEST = Buffer.alloc(32, 9);
 
 function rows(overrides: Partial<RequestContext> = {}): RequestContext {
+  const nowMs = overrides.stepUpAt?.getTime() ?? Date.now();
+  const idleExpiresAt = overrides.idleExpiresAt ?? new Date(nowMs + 3600_000);
+  const absoluteExpiresAt = overrides.absoluteExpiresAt ?? new Date(nowMs + 86400_000);
+  const idleRemainingSeconds =
+    overrides.idleRemainingSeconds ??
+    Math.max(0, Math.round((idleExpiresAt.getTime() - nowMs) / 1000));
+  const absoluteRemainingSeconds =
+    overrides.absoluteRemainingSeconds ??
+    Math.max(0, Math.round((absoluteExpiresAt.getTime() - nowMs) / 1000));
   return {
     sessionId: 'session-1',
     userId: 'user-1',
     memberships: [{ organisationId: 'org-1', role: 'owner', permissions: [] }],
-    idleExpiresAt: new Date(Date.now() + 3600_000),
-    absoluteExpiresAt: new Date(Date.now() + 86400_000),
-    stepUpAt: new Date(),
+    idleExpiresAt,
+    absoluteExpiresAt,
+    stepUpAt: new Date(nowMs),
     stepUpFresh: true,
     stepUpRemainingSeconds: 900,
+    idleRemainingSeconds,
+    absoluteRemainingSeconds,
     ...overrides,
   };
 }
@@ -69,7 +80,7 @@ describe('RequestContextService', () => {
         // Time-aware stub modelling the DB: valid before the deadline, refused after.
         Promise.resolve(
           clock.now().getTime() < deadline
-            ? rows({ idleExpiresAt: new Date(deadline) })
+            ? rows({ idleExpiresAt: new Date(deadline), idleRemainingSeconds: 2 })
             : undefined,
         ),
     });
@@ -92,7 +103,7 @@ describe('RequestContextService', () => {
       resolveRequestContext: () =>
         Promise.resolve(
           clock.now().getTime() < deadline
-            ? rows({ idleExpiresAt: new Date(deadline) })
+            ? rows({ idleExpiresAt: new Date(deadline), idleRemainingSeconds: 5 })
             : undefined,
         ),
     });
@@ -224,7 +235,9 @@ describe('RequestContextService', () => {
       let valid = true;
       const backend = store({
         resolveRequestContext: () =>
-          Promise.resolve(valid ? rows({ absoluteExpiresAt: deadline }) : undefined),
+          Promise.resolve(
+            valid ? rows({ absoluteExpiresAt: deadline, absoluteRemainingSeconds: 2 }) : undefined,
+          ),
       });
       const service = new RequestContextService(backend, clock);
       const spy = vi.spyOn(backend, 'resolveRequestContext');
@@ -236,6 +249,43 @@ describe('RequestContextService', () => {
       // Monotonic time advances past 2s deadline (2.5s), wall clock adjusted to start + 1s
       clock.advance(2_500);
       clock.set(new Date(start.getTime() + 1_000));
+
+      const second = await service.resolve(DIGEST, 'read');
+      expect(second).toStrictEqual({ failure: 'invalid' });
+      expect(spy).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  evidenceTest(
+    'database session deadline must bound cache lifetime with application clock behind',
+    async () => {
+      const dbNow = new Date('2026-10-06T20:00:00.000Z');
+      const appStart = new Date(dbNow.getTime() - 5_000);
+      const clock = fixedClock(appStart);
+      const deadline = new Date(dbNow.getTime() + 2_000);
+      let valid = true;
+      const backend = store({
+        resolveRequestContext: () =>
+          Promise.resolve(
+            valid
+              ? rows({
+                  idleExpiresAt: deadline,
+                  absoluteExpiresAt: deadline,
+                  idleRemainingSeconds: 2,
+                  absoluteRemainingSeconds: 2,
+                })
+              : undefined,
+          ),
+      });
+      const service = new RequestContextService(backend, clock);
+      const spy = vi.spyOn(backend, 'resolveRequestContext');
+      const first = await service.resolve(DIGEST, 'read');
+      expect('context' in first).toBe(true);
+      expect(spy).toHaveBeenCalledTimes(1);
+
+      valid = false;
+      // Monotonic time advances past 2s deadline (2.5s)
+      clock.advance(2_500);
 
       const second = await service.resolve(DIGEST, 'read');
       expect(second).toStrictEqual({ failure: 'invalid' });
