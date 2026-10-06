@@ -1529,37 +1529,38 @@ describe('the step-up stamp (P06.06.04)', () => {
     expect(row.rows[0]?.step_up_at).toStrictEqual(row.rows[0]?.created_at);
   });
 
-  evidenceTest('a step-up rotation refreshes the stamp, a privilege change inherits it', async () => {
-    const person = await user();
-    const { tokenHash } = await signIn(person.sub);
-    const before = await admin.query<{ step_up_at: Date }>(
-      'select step_up_at from sessions where token_hash = $1',
-      [tokenHash],
-    );
-    const stepped = hash();
-    expect(
-      await store.rotateSession(tokenHash, stepped, randomUUID(), 'step_up'),
-    ).toBeDefined();
-    const afterStep = await admin.query<{ step_up_at: Date }>(
-      'select step_up_at from sessions where token_hash = $1',
-      [stepped],
-    );
-    // Refresh means strictly after the predecessor's stamp: the rotation clock runs after
-    // the sign-in clock, so inherit-instead-of-refresh (SU2) fails here rather than hiding
-    // inside a >= that two same-millisecond stamps would satisfy.
-    expect(afterStep.rows[0]?.step_up_at.getTime()).toBeGreaterThan(
-      before.rows[0]?.step_up_at.getTime() ?? 0,
-    );
-    const changed = hash();
-    expect(
-      await store.rotateSession(stepped, changed, randomUUID(), 'privilege_change'),
-    ).toBeDefined();
-    const afterChange = await admin.query<{ step_up_at: Date }>(
-      'select step_up_at from sessions where token_hash = $1',
-      [changed],
-    );
-    expect(afterChange.rows[0]?.step_up_at).toStrictEqual(afterStep.rows[0]?.step_up_at);
-  });
+  evidenceTest(
+    'a step-up rotation refreshes the stamp, a privilege change inherits it',
+    async () => {
+      const person = await user();
+      const { tokenHash } = await signIn(person.sub);
+      const before = await admin.query<{ step_up_at: Date }>(
+        'select step_up_at from sessions where token_hash = $1',
+        [tokenHash],
+      );
+      const stepped = hash();
+      expect(await store.rotateSession(tokenHash, stepped, randomUUID(), 'step_up')).toBeDefined();
+      const afterStep = await admin.query<{ step_up_at: Date }>(
+        'select step_up_at from sessions where token_hash = $1',
+        [stepped],
+      );
+      // Refresh means strictly after the predecessor's stamp: the rotation clock runs after
+      // the sign-in clock, so inherit-instead-of-refresh (SU2) fails here rather than hiding
+      // inside a >= that two same-millisecond stamps would satisfy.
+      expect(afterStep.rows[0]?.step_up_at.getTime()).toBeGreaterThan(
+        before.rows[0]?.step_up_at.getTime() ?? 0,
+      );
+      const changed = hash();
+      expect(
+        await store.rotateSession(stepped, changed, randomUUID(), 'privilege_change'),
+      ).toBeDefined();
+      const afterChange = await admin.query<{ step_up_at: Date }>(
+        'select step_up_at from sessions where token_hash = $1',
+        [changed],
+      );
+      expect(afterChange.rows[0]?.step_up_at).toStrictEqual(afterStep.rows[0]?.step_up_at);
+    },
+  );
 
   evidenceTest('a step-up round-trip carries its session binding through consume', async () => {
     const person = await user();
