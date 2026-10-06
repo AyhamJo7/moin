@@ -188,4 +188,58 @@ describe('RequestContextService', () => {
     await service.resolve(DIGEST, 'read');
     expect(spy).toHaveBeenCalledTimes(2);
   });
+
+  evidenceTest(
+    'monotonic TTL enforcement: wall-clock adjustment cannot extend cached authority past 30 s',
+    async () => {
+      const start = new Date();
+      const clock = fixedClock(start);
+      let membershipActive = true;
+      const backend = store({
+        resolveRequestContext: () => Promise.resolve(membershipActive ? rows() : undefined),
+      });
+      const service = new RequestContextService(backend, clock);
+      const spy = vi.spyOn(backend, 'resolveRequestContext');
+      const first = await service.resolve(DIGEST, 'read');
+      expect('context' in first).toBe(true);
+      expect(spy).toHaveBeenCalledTimes(1);
+
+      membershipActive = false;
+      // Monotonic time advances by 31 seconds, but wall clock adjusted to start + 21 seconds
+      clock.advance(31_000);
+      clock.set(new Date(start.getTime() + 21_000));
+
+      const second = await service.resolve(DIGEST, 'read');
+      expect(second).toStrictEqual({ failure: 'invalid' });
+      expect(spy).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  evidenceTest(
+    'monotonic session expiry enforcement: wall-clock adjustment cannot extend authority past session deadline',
+    async () => {
+      const start = new Date();
+      const clock = fixedClock(start);
+      const deadline = new Date(start.getTime() + 2_000);
+      let valid = true;
+      const backend = store({
+        resolveRequestContext: () =>
+          Promise.resolve(valid ? rows({ absoluteExpiresAt: deadline }) : undefined),
+      });
+      const service = new RequestContextService(backend, clock);
+      const spy = vi.spyOn(backend, 'resolveRequestContext');
+      const first = await service.resolve(DIGEST, 'read');
+      expect('context' in first).toBe(true);
+      expect(spy).toHaveBeenCalledTimes(1);
+
+      valid = false;
+      // Monotonic time advances past 2s deadline (2.5s), wall clock adjusted to start + 1s
+      clock.advance(2_500);
+      clock.set(new Date(start.getTime() + 1_000));
+
+      const second = await service.resolve(DIGEST, 'read');
+      expect(second).toStrictEqual({ failure: 'invalid' });
+      expect(spy).toHaveBeenCalledTimes(2);
+    },
+  );
 });

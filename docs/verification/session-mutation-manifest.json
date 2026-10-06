@@ -250,9 +250,9 @@
     "id": "G1-moin-app-executes-session-function",
     "invariant": "ADR-0003 amendment / QG-09 I1: moin_app (voice, worker) executes no session function",
     "expected": "Any voice or worker process could call begin_session for an active subject and obtain a valid seven-day session.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "GRANT EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea) TO moin_identity;\n",
-    "replace": "GRANT EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea) TO moin_identity, moin_app;\n",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
+    "find": "GRANT EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea, timestamptz) TO moin_identity;\n",
+    "replace": "GRANT EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea, timestamptz) TO moin_identity, moin_app;\n",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "moin_app \u2014 the voice and worker role \u2014 and sessions > cannot mint, resolve, rotate or revoke a session by calling the functions"
@@ -823,8 +823,8 @@
     "invariant": "P06.06.04: a cached step-up verdict never outlives the stamp it judged",
     "expected": "A stamp expiring inside the 30 s GET window would keep passing the step-up gate from cache for the rest of the TTL.",
     "file": "apps/server/src/modules/identity-access/application/request-context.service.ts",
-    "find": "        if (wallMovedBack || budgetExpired) {\n          this.#cache.delete(key);\n          return { context: { ...hit.context, stepUpFresh: false } };\n        }",
-    "replace": "        if (false) {\n          this.#cache.delete(key);\n          return { context: { ...hit.context, stepUpFresh: false } };\n        }",
+    "find": "          if (monoElapsed >= hit.stepUpBudgetMs) {\n            return { context: { ...hit.context, stepUpFresh: false } };\n          }",
+    "replace": "          if (false) {\n            return { context: { ...hit.context, stepUpFresh: false } };\n          }",
     "killingTest": {
       "file": "apps/server/src/modules/identity-access/application/request-context.service.test.ts",
       "fullName": "RequestContextService > refuses a cached verdict past the stamp expiry, inside the 30 s TTL"

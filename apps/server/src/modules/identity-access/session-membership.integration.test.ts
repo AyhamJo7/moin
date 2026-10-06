@@ -623,6 +623,80 @@ describe('the step-up gate (P06.06.04)', () => {
     },
   );
 
+  evidenceTest(
+    'cache TTL: monotonic expiry invalidates cached membership after 30 s under wall adjustment',
+    async () => {
+      const cookie = await signedInCookie();
+      const token = /^__Host-moin_sid=([A-Za-z0-9_-]{43})$/.exec(cookie)?.[1];
+      if (token === undefined) throw new Error('no token');
+      const { digestOf } = await import('./domain/secret-values.ts');
+
+      contexts().clearCache();
+      const start = new Date();
+      clock.set(start);
+
+      expect(
+        (await app.inject({ method: 'GET', url: '/probe', headers: { cookie } })).statusCode,
+      ).toBe(200);
+
+      await admin.query(
+        'delete from memberships where user_id = (select user_id from sessions where token_hash = $1)',
+        [digestOf(token)],
+      );
+
+      try {
+        clock.advance(31_000);
+        clock.set(new Date(start.getTime() + 21_000));
+
+        expect(
+          (await app.inject({ method: 'GET', url: '/probe', headers: { cookie } })).statusCode,
+        ).toBe(401);
+      } finally {
+        clock.set(new Date());
+      }
+    },
+  );
+
+  evidenceTest(
+    'session expiry: monotonic expiry invalidates cached authority past session deadline under wall adjustment',
+    async () => {
+      const cookie = await signedInCookie();
+      const token = /^__Host-moin_sid=([A-Za-z0-9_-]{43})$/.exec(cookie)?.[1];
+      if (token === undefined) throw new Error('no token');
+      const { digestOf } = await import('./domain/secret-values.ts');
+
+      await admin.query('alter table sessions disable trigger sessions_fixed_lifetime');
+      await admin.query(
+        "update sessions set idle_expires_at = clock_timestamp() + interval '2 seconds', absolute_expires_at = clock_timestamp() + interval '2 seconds' where token_hash = $1",
+        [digestOf(token)],
+      );
+      await admin.query('alter table sessions enable always trigger sessions_fixed_lifetime');
+
+      contexts().clearCache();
+      const start = new Date();
+      clock.set(start);
+
+      expect(
+        (await app.inject({ method: 'GET', url: '/probe/sensitive', headers: { cookie } }))
+          .statusCode,
+      ).toBe(200);
+
+      await admin.query('select pg_sleep(2.5)');
+
+      try {
+        clock.advance(2500);
+        clock.set(new Date(start.getTime() + 1000));
+
+        expect(
+          (await app.inject({ method: 'GET', url: '/probe/sensitive', headers: { cookie } }))
+            .statusCode,
+        ).toBe(401);
+      } finally {
+        clock.set(new Date());
+      }
+    },
+  );
+
   evidenceTest('a stamp older than 15 minutes gets 403 step-up-required', async () => {
     const cookie = await signedInCookie();
     const token = /^__Host-moin_sid=([A-Za-z0-9_-]{43})$/.exec(cookie)?.[1];

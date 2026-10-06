@@ -63,6 +63,7 @@ function monotonicMs(clock: Clock): number {
 }
 
 interface CachedEntry {
+  readonly maxLifetimeMs: number;
   readonly expiresAtMs: number;
   readonly idleExpiresAtMs: number;
   readonly absoluteExpiresAtMs: number;
@@ -139,28 +140,25 @@ export class RequestContextService {
     }
     if (useCache) {
       const hit = this.#cache.get(key);
-      // The TTL and the session's own expiries are absolute deadlines. The step-up verdict
-      // is a remaining budget judged at insert: monotonic elapsed time past it flips stepUpFresh
-      // to false while the entry is still served — no re-lookup, no DB timestamp compared
-      // against the app clock (Defect 2: constant skew cannot stretch the verdict).
-      if (
-        hit !== undefined &&
-        hit.expiresAtMs > nowMs &&
-        hit.idleExpiresAtMs > nowMs &&
-        hit.absoluteExpiresAtMs > nowMs
-      ) {
+      if (hit !== undefined) {
         const wallMovedBack = nowMs < hit.lastSeenWallMs || nowMs < hit.cachedAtWallMs;
+        const wallExpired =
+          nowMs >= hit.expiresAtMs ||
+          nowMs >= hit.idleExpiresAtMs ||
+          nowMs >= hit.absoluteExpiresAtMs;
         const monoElapsed = nowMonoMs - hit.cachedAtMonotonicMs;
-        const budgetExpired = monoElapsed >= hit.stepUpBudgetMs;
+        const monoExpired = monoElapsed >= hit.maxLifetimeMs;
 
-        if (wallMovedBack || budgetExpired) {
+        if (wallMovedBack || wallExpired || monoExpired) {
           this.#cache.delete(key);
-          return { context: { ...hit.context, stepUpFresh: false } };
+        } else {
+          hit.lastSeenWallMs = nowMs;
+          if (monoElapsed >= hit.stepUpBudgetMs) {
+            return { context: { ...hit.context, stepUpFresh: false } };
+          }
+          return { context: hit.context };
         }
-        hit.lastSeenWallMs = nowMs;
-        return { context: hit.context };
       }
-      this.#cache.delete(key);
     }
     this.#lookups += 1;
     // Single DEFINER call: validity, memberships and the capped activity slide share one v_now.
@@ -174,30 +172,34 @@ export class RequestContextService {
     // from comparing the DB stamp against the app clock — so skew shifts nothing.
     if (useCache && resolved.stepUpAt !== null && resolved.stepUpRemainingSeconds !== null) {
       const stepUpBudgetMs = Math.max(0, resolved.stepUpRemainingSeconds * 1000);
-      if (this.#cache.size >= MAX_CACHE_ENTRIES) {
-        let oldest = this.#cache.keys().next();
-        while (!oldest.done && this.#cache.size >= MAX_CACHE_ENTRIES) {
-          this.#cache.delete(oldest.value);
-          oldest = this.#cache.keys().next();
+      const idleRemainingMs = Math.max(0, resolved.idleExpiresAt.getTime() - nowMs);
+      const absoluteRemainingMs = Math.max(0, resolved.absoluteExpiresAt.getTime() - nowMs);
+      const maxLifetimeMs = Math.min(CONTEXT_CACHE_TTL_MS, idleRemainingMs, absoluteRemainingMs);
+
+      if (maxLifetimeMs > 0) {
+        if (this.#cache.size >= MAX_CACHE_ENTRIES) {
+          let oldest = this.#cache.keys().next();
+          while (!oldest.done && this.#cache.size >= MAX_CACHE_ENTRIES) {
+            this.#cache.delete(oldest.value);
+            oldest = this.#cache.keys().next();
+          }
         }
+        this.#cache.set(key, {
+          maxLifetimeMs,
+          expiresAtMs: Math.min(
+            nowMs + CONTEXT_CACHE_TTL_MS,
+            resolved.idleExpiresAt.getTime(),
+            resolved.absoluteExpiresAt.getTime(),
+          ),
+          idleExpiresAtMs: resolved.idleExpiresAt.getTime(),
+          absoluteExpiresAtMs: resolved.absoluteExpiresAt.getTime(),
+          stepUpBudgetMs,
+          cachedAtMonotonicMs: nowMonoMs,
+          cachedAtWallMs: nowMs,
+          lastSeenWallMs: nowMs,
+          context,
+        });
       }
-      this.#cache.set(key, {
-        // The TTL is bounded by the session's own expiries: authority never outlives either.
-        // The step-up budget is the remaining window the database verdict allowed, judged
-        // at insert; the hit check spends it in monotonic elapsed time (Defect 2).
-        expiresAtMs: Math.min(
-          nowMs + CONTEXT_CACHE_TTL_MS,
-          resolved.idleExpiresAt.getTime(),
-          resolved.absoluteExpiresAt.getTime(),
-        ),
-        idleExpiresAtMs: resolved.idleExpiresAt.getTime(),
-        absoluteExpiresAtMs: resolved.absoluteExpiresAt.getTime(),
-        stepUpBudgetMs,
-        cachedAtMonotonicMs: nowMonoMs,
-        cachedAtWallMs: nowMs,
-        lastSeenWallMs: nowMs,
-        context,
-      });
     }
     return { context };
   }
