@@ -295,7 +295,9 @@ describe('who may execute the session functions', () => {
     for (const row of result.rows) {
       if (row.allowed) (matrix[row.role] ??= []).push(row.fn);
     }
-    for (const role of Object.keys(matrix)) matrix[role]?.sort();
+    // Collapse the rolling-window begin_sign_in overload (contracted in 0016): the grant
+    // matrix asserts names, the catalog asserts each signature's body and grantees.
+    for (const role of Object.keys(matrix)) matrix[role] = [...new Set(matrix[role])].sort();
     expect(matrix).toStrictEqual({ moin_identity: [...SESSION_FUNCTIONS] });
   });
 });
