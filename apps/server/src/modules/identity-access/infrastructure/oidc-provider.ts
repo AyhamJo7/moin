@@ -229,17 +229,19 @@ export class OidcProviderClient {
   }
 
   /**
-   * Verify an ID token from the exchange and bind it to this sign-in's nonce. Returns the payload
-   * for the identity-claims parser, which decides what of it we keep. With `stepUp`, the token
-   * must also carry a fresh `auth_time`: the provider re-authenticated the human minutes ago,
-   * not hours (P06.06.04).
+   * Verify an ID token from the exchange and bind it to this sign-in's nonce. Returns the
+   * payload for the identity-claims parser, which decides what of it we keep, plus the
+   * provider's `auth_time` (seconds since epoch) when present — the sign-in path judges
+   * whether the human proved presence recently enough to count as stepped-up (P06.06.04).
+   * With `stepUp`, the token must also carry a fresh `auth_time`: the provider
+   * re-authenticated the human minutes ago, not hours.
    */
   async verifyIdToken(
     idToken: string,
     expectedNonceHash: Buffer,
     now: Date,
     stepUp = false,
-  ): Promise<JWTPayload> {
+  ): Promise<{ payload: JWTPayload; authTime: number | undefined }> {
     const { jwksUri } = await this.metadata();
     this.#keys ??= createRemoteJWKSet(jwksUri, { timeoutDuration: PROVIDER_TIMEOUT_MS });
 
@@ -285,7 +287,11 @@ export class OidcProviderClient {
         throw new OidcError('token_invalid', 'auth_time_stale');
       }
     }
-    return payload;
+    const authTime = payload['auth_time'];
+    return {
+      payload,
+      authTime: typeof authTime === 'number' && Number.isFinite(authTime) ? authTime : undefined,
+    };
   }
 
   async #discover(): Promise<ProviderMetadata> {

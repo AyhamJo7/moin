@@ -750,7 +750,12 @@ export async function inspect(
       const { key, approved } = approvedFor(fn);
       if (fn.identity_arguments === approved?.arguments) {
         reviewedFunctionsSeen.add(key);
-        if (!fn.security_definer) {
+        // The 6-arg begin_sign_in shim is SECURITY INVOKER by design (Defect 3): it must
+        // not count as a DEFINER, or old-host readiness (total = 7) breaks on deploy.
+        // Every other approved signature stays DEFINER-only.
+        const invokerAllowed =
+          key === 'app.begin_sign_in(bytea, bytea, bytea, bytea, text, text)';
+        if (!fn.security_definer && !invokerAllowed) {
           findings.push({
             rule: 'reviewed-function-not-security-definer',
             subject: fn.function_name,

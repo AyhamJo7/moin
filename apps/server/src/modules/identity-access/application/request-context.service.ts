@@ -60,8 +60,14 @@ interface CachedEntry {
   readonly expiresAtMs: number;
   readonly idleExpiresAtMs: number;
   readonly absoluteExpiresAtMs: number;
-  /** The step-up stamp's own expiry: stepUpAt + 15 min (entries are never cached unstamped). */
-  readonly stepUpExpiresAtMs: number;
+  /**
+   * Remaining step-up budget in ms, judged at insert against the database verdict, plus the
+   * local resolution time. The hit check compares elapsed local time against this budget —
+   * never a DB timestamp against the app clock — so constant app↔DB skew cannot stretch the
+   * verdict past the database deadline (Defect 2). Entries are never cached unstamped.
+   */
+  readonly stepUpBudgetMs: number;
+  readonly cachedAtMs: number;
   readonly context: SessionContext;
 }
 
@@ -124,17 +130,19 @@ export class RequestContextService {
     }
     if (useCache) {
       const hit = this.#cache.get(key);
-      // All four deadlines must still be future: the TTL, the session's own expiries the
-      // DEFINER call returned, and the step-up stamp's own 15-minute expiry (M1). A stamp
-      // that lapsed inside the cache window refuses on next read — a cached `stepUpFresh`
-      // verdict never outlives the stamp it judged.
+      // The TTL and the session's own expiries are absolute deadlines. The step-up verdict
+      // is a remaining budget judged at insert: elapsed local time past it flips stepUpFresh
+      // to false while the entry is still served — no re-lookup, no DB timestamp compared
+      // against the app clock (Defect 2: constant skew cannot stretch the verdict).
       if (
         hit !== undefined &&
         hit.expiresAtMs > nowMs &&
         hit.idleExpiresAtMs > nowMs &&
-        hit.absoluteExpiresAtMs > nowMs &&
-        hit.stepUpExpiresAtMs > nowMs
+        hit.absoluteExpiresAtMs > nowMs
       ) {
+        if (nowMs - hit.cachedAtMs >= hit.stepUpBudgetMs) {
+          return { context: { ...hit.context, stepUpFresh: false } };
+        }
         return { context: hit.context };
       }
       this.#cache.delete(key);
@@ -159,7 +167,8 @@ export class RequestContextService {
       }
       this.#cache.set(key, {
         // The TTL is bounded by the session's own expiries: authority never outlives either.
-        // The step-up verdict gets the same treatment via its own expiry below (M1).
+        // The step-up budget is the remaining window the database verdict allowed, judged
+        // at insert; the hit check spends it in local time (Defect 2).
         expiresAtMs: Math.min(
           nowMs + CONTEXT_CACHE_TTL_MS,
           resolved.idleExpiresAt.getTime(),
@@ -167,7 +176,8 @@ export class RequestContextService {
         ),
         idleExpiresAtMs: resolved.idleExpiresAt.getTime(),
         absoluteExpiresAtMs: resolved.absoluteExpiresAt.getTime(),
-        stepUpExpiresAtMs: stepUpAt.getTime() + STEP_UP_WINDOW_MS,
+        stepUpBudgetMs: STEP_UP_WINDOW_MS - (nowMs - stepUpAt.getTime()),
+        cachedAtMs: nowMs,
         context,
       });
     }

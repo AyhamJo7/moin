@@ -55,15 +55,26 @@ DROP FUNCTION IF EXISTS app.resolve_request_context(bytea);
 DROP FUNCTION IF EXISTS app.resolve_session(bytea);
 
 -- ---------------------------------------------------------------------------------------------
--- begin_session: a fresh sign-in is MFA'd, so it is stepped-up from creation.
+-- begin_session: stamp step-up only on fresh provider proof (Defect 1 fix).
 -- ---------------------------------------------------------------------------------------------
+--
+-- A fresh sign-in is MFA'd only when the provider says the human proved presence recently:
+-- `p_step_up` carries whether the ID token's `auth_time` was present and within the
+-- 15-minute window (judged by the application against the token). Fresh proof stamps
+-- `step_up_at` with the sign-in time; stale or absent proof leaves NULL, so the session
+-- begins un-stepped-up and sensitive actions 403 until an explicit step-up round-trip.
+-- No DEFAULT on the new parameter: PostgreSQL treats defaults as caller-side sugar, and
+-- a defaulted 7th parameter would let a stale 6-argument call bind the new body with an
+-- implicit NULL — silently recording the round-trip shape as a plain login. Old hosts keep
+-- the old 6-argument name through the INVOKER shim below; new hosts pass all 7 arguments.
 CREATE OR REPLACE FUNCTION app.begin_session(
   p_subject text,
   p_token_hash bytea,
   p_session_id uuid,
   p_provider_tokens_sealed bytea,
   p_key_id text,
-  p_replaced_hash bytea
+  p_replaced_hash bytea,
+  p_step_up boolean
 ) RETURNS TABLE (session_id uuid, user_id uuid, absolute_expires_at timestamptz)
   LANGUAGE plpgsql
   SECURITY DEFINER
@@ -120,7 +131,9 @@ BEGIN
      idle_expires_at, absolute_expires_at, step_up_at, provider_tokens_sealed, provider_tokens_key_id)
   VALUES
     (p_token_hash, p_session_id, p_session_id, v_user, 'login', NULL, v_now, v_now,
-     v_now + interval '12 hours', v_now + interval '7 days', v_now, p_provider_tokens_sealed, p_key_id)
+     v_now + interval '12 hours', v_now + interval '7 days',
+     CASE WHEN p_step_up IS TRUE THEN v_now ELSE NULL END,
+     p_provider_tokens_sealed, p_key_id)
   RETURNING s.id, s.user_id, s.absolute_expires_at;
 END
 $$;
@@ -481,8 +494,13 @@ GRANT EXECUTE ON FUNCTION app.resolve_session(bytea) TO moin_identity;
 -- above (unlike the OUT-record changes, which cannot shim). It delegates with a NULL
 -- step-up binding: a plain login, which is all an old host can start — it knows no step-up,
 -- and `startStepUp` passes 7 arguments, so no round-trip can begin here. Contracted (dropped)
--- in 0016 once no old host remains. Same DEFINER contract: owner, fixed search_path,
--- moin_identity-only — the catalog names both signatures.
+-- in 0016 once no old host remains.
+--
+-- SECURITY INVOKER, not DEFINER (Defect 3): the old-host readiness probe counts executable
+-- DEFINERs (`total = 7`), so an eighth DEFINER would 503 every not-yet-rolled host the moment
+-- 0015 lands. As INVOKER this runs as the caller — `moin_identity`, which already holds
+-- EXECUTE on the 7-arg DEFINER — and `pg_proc` keeps exactly 7 definers. The catalog still
+-- pins the shim body and its moin_identity-only grant; the body check is arity-keyed.
 CREATE FUNCTION app.begin_sign_in(
   p_state_hash bytea,
   p_binding_hash bytea,
@@ -492,7 +510,7 @@ CREATE FUNCTION app.begin_sign_in(
   p_return_to text
 ) RETURNS void
   LANGUAGE plpgsql
-  SECURITY DEFINER
+  SECURITY INVOKER
   SET search_path = pg_catalog, public, app, pg_temp
 AS $$
 BEGIN

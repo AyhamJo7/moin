@@ -33,7 +33,7 @@ import type { IdentityStore } from '@moin/db';
 import type { Logger } from '@moin/observability';
 import type { OidcClientConfig } from '../../../config/oidc.ts';
 import { IdentityClaimsError, parseIdentityClaims } from '../domain/identity-claims.ts';
-import { DEFAULT_RETURN_PATH } from '../domain/session-policy.ts';
+import { DEFAULT_RETURN_PATH, STEP_UP_WINDOW_MS } from '../domain/session-policy.ts';
 import { safeReturnPath } from '../domain/return-path.ts';
 import { OidcError, type OidcProviderClient } from '../infrastructure/oidc-provider.ts';
 import { digestOf, isSecretValue, pkceChallenge, randomSecret } from '../domain/secret-values.ts';
@@ -282,15 +282,17 @@ export class SignInService {
 
     let identity: ReturnType<typeof parseIdentityClaims>;
     let tokens: Awaited<ReturnType<OidcProviderClient['exchangeCode']>>;
+    let authTime: number | undefined;
     try {
       tokens = await provider.exchangeCode(code, verifier);
-      const payload = await provider.verifyIdToken(
+      const verified = await provider.verifyIdToken(
         tokens.idToken,
         pending.nonceHash,
         clock.now(),
         pending.stepUpSessionId !== undefined,
       );
-      identity = parseIdentityClaims(payload);
+      authTime = verified.authTime;
+      identity = parseIdentityClaims(verified.payload);
     } catch (error) {
       if (error instanceof IdentityClaimsError) {
         throw this.#fail('token_invalid', 'identity_claims_rejected');
@@ -344,6 +346,13 @@ export class SignInService {
       providerTokensSealed: sealedTokens.sealed,
       keyId: sealedTokens.keyId,
       replacedHash: isSecretValue(presentedSession) ? digestOf(presentedSession) : undefined,
+      // A plain sign-in stamps step-up only on fresh provider proof: auth_time present and
+      // within the 15-minute window. Stale or absent proof leaves step_up_at NULL — the
+      // session begins un-stepped-up and sensitive actions 403 until explicit step-up.
+      stepUp:
+        authTime !== undefined &&
+        now.getTime() / 1000 - authTime <= STEP_UP_WINDOW_MS / 1000 &&
+        now.getTime() / 1000 - authTime >= -30,
     });
     if (granted === undefined) {
       throw this.#fail('identity_unavailable', 'no_active_user_for_subject');
