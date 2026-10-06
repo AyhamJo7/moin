@@ -1,19 +1,19 @@
-# EV-P06-049: step-up MFA (≤ 15 min) for sensitive actions; RFC 9457 challenge; 64/64 mutation kill
+# EV-P06-049: step-up MFA (≤ 15 min) for sensitive actions; 64/64 mutation kill
 
 | Field | Value |
 |---|---|
 | Evidence ID | EV-P06-049 |
 | Item | P06.06.04 |
 | Date (UTC) | 2026-10-06 |
-| Commit | `35046b1` (implementation candidate) |
+| Commit | `b126af4` (evidence HEAD; code identical to `8ae542f` sweep HEAD — only `PROGRESS.md` changed since) |
 | Environment | local |
-| Command / procedure | Migration `0015` (`step_up_at` column, begin_sign_in overload, rotate/resolve step-up stamp); RequireStepUpGuard with RFC 9457 challenge; RequestContextService cached freshness bounded by 15-minute window; 64/64 session mutation sweep; `gates.py fast` 7/7 |
-| Result | READY_FOR_REVIEW — sensitive actions require re-authentication if stamp > 15m; initial sign-in stamps session; step_up rotation updates stamp; other rotations preserve stamp; rolling-window deploy compatibility (INV-17) preserved; GET cache respects expiry |
-| QG-09 | Three-green set at exact `35046b1`: security OK TO MERGE, architecture OK TO MERGE, invariant OK TO MERGE (NO BYPASS FOUND) |
-| Security-reviewer | exact `35046b1b87dda2c8af8ccf4fefbe8e29d86b48df`, OK TO MERGE. Artifact: `docs/evidence/P06/reviews/security-reviewer-35046b1.md` |
-| Architecture-reviewer | exact `35046b1b87dda2c8af8ccf4fefbe8e29d86b48df`, OK TO MERGE. Artifact: `docs/evidence/P06/reviews/architecture-reviewer-35046b1.md` |
-| Invariant-reviewer | exact `35046b1b87dda2c8af8ccf4fefbe8e29d86b48df`, OK TO MERGE, no bypass. Artifact: `docs/evidence/P06/reviews/invariant-reviewer-35046b1.md` |
-| Session mutation sweep | 64/64 KILLED_ASSERTION (measured at `35046b1`, artifact `docs/verification/session-mutation-report.md`) |
+| Command / procedure | Migration `0015` (`step_up_at` + `step_up_session_id` columns, redefined session functions with 6-arg rolling-window overload, DB-clock `step_up_fresh` verdict); subject binding (`identity.subject` vs owner subject); `RequireStepUpGuard` (403, single-resolve off `sessionContext`); `POST /api/auth/step-up` membership-gated; provider `max_age=0` + `auth_time` freshness; 64/64 session mutation sweep; `gates.py fast` 7/7 |
+| Result | READY_FOR_REVIEW — sensitive actions require fresh MFA proof within 15 min; initial sign-in stamps; step_up rotation refreshes, privilege_change inherits; pre-0015 NULL stamps fail closed; rolling-window deploy keeps old hosts signing in (contracted in 0016); GET cache bounded by stamp expiry, unstamped never cached |
+| QG-09 | Three-green set at `b126af4` (code-identical to reviewed `8ae542f`/`d1d5c5f` modulo progress rows): security OK TO MERGE, architecture OK TO MERGE, invariant NO BYPASS FOUND |
+| Security-reviewer | exact `b126af4e6fc97d5302d07570035ca0d36dca19da`, OK TO MERGE. Artifact: `docs/evidence/P06/reviews/security-reviewer-b126af4.md` (prior rounds at `779f146`, `d1d5c5f` closed H1/H2/M2) |
+| Architecture-reviewer | exact `b126af4e6fc97d5302d07570035ca0d36dca19da`, OK TO MERGE. Artifact: `docs/evidence/P06/reviews/architecture-reviewer-b126af4.md` (prior H1/M1/L1/L2 verified closed) |
+| Invariant-reviewer | exact `b126af4e6fc97d5302d07570035ca0d36dca19da`, NO BYPASS FOUND. Artifact: `docs/evidence/P06/reviews/invariant-reviewer-b126af4.md` (SHA log-derived, content-verified — reviewer sandbox has no shell) |
+| Session mutation sweep | 64/64 KILLED_ASSERTION (measured at `8ae542f`, artifact `docs/verification/session-mutation-report.md`; includes SU1–SU9) |
 | Founder Full Quality Gate | pending |
 | Reviewer | pending adversarial review |
 
