@@ -68,4 +68,22 @@ describe('the identity pool readiness probe', () => {
       }
     }
   });
+
+  evidenceTest('is not ready when a foreign-schema definer is executable', async () => {
+    // The executable set spans every schema: a grantable DEFINER smuggled into another
+    // schema must stop the rollout even though the CI catalog would also flag it.
+    const admin = database.fixturePool();
+    await admin.query(
+      'create function public.step_up_backdoor() returns void language plpgsql security definer as $$ begin end $$',
+    );
+    await admin.query('grant execute on function public.step_up_backdoor() to moin_identity');
+    try {
+      expect(await probe(database.identityUrl ?? '')).toMatchObject({
+        ready: false,
+        reason: 'role_mismatch',
+      });
+    } finally {
+      await admin.query('drop function public.step_up_backdoor()');
+    }
+  });
 });

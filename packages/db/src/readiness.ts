@@ -95,7 +95,7 @@ export const IDENTITY_POOL_ASSERTION = `
                         'app.resolve_request_context'] as expected
              from (select distinct n.nspname || '.' || p.proname as name
                      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-                    where n.nspname = 'app' and p.prosecdef
+                    where p.prosecdef
                       and has_function_privilege(p.oid, 'EXECUTE')) d
          ) d
    where r.rolname = current_user

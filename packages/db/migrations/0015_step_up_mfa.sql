@@ -44,6 +44,11 @@ COMMENT ON COLUMN auth_transactions.step_up_session_id IS
 -- form), and PostgreSQL forbids two functions sharing IN-args with different OUT-records.
 -- CREATE OR REPLACE is refused when the OUT-record type changes (42P13) — hence
 -- drop-then-plain-CREATE below. The 6-arg overload is contracted (dropped) in 0016.
+--
+-- Deploy order is migrate-first, then roll the app: once 0015 lands, an old-code readiness
+-- probe (which counts seven names without the overload) reports not-ready until its host
+-- rolls — expected and safe (sign-in itself keeps working through the shim), not a defect.
+-- A new-code probe against a pre-0015 database fails closed on the unknown 7-arg signature.
 DROP FUNCTION IF EXISTS app.begin_sign_in(bytea, bytea, bytea, bytea, text, text);
 DROP FUNCTION IF EXISTS app.consume_sign_in(bytea, bytea);
 DROP FUNCTION IF EXISTS app.resolve_request_context(bytea);
