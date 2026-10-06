@@ -260,7 +260,9 @@ export function registeredGlobalTables(path: string = GLOBAL_REGISTER): Set<stri
 export function allowlistedDefiners(path: string = DEFINER_ALLOWLIST): Set<string> {
   const text = readFileSync(path, 'utf8');
   const names = new Set<string>();
-  for (const match of text.matchAll(/^\|\s*`([a-z0-9_.]+)`\s*\|\s*([^|]+?)\s*\|/gm)) {
+  for (const match of text.matchAll(
+    /^\|\s*`([a-z0-9_.]+)`(?:\s*\([^)]*\))?\s*\|\s*([^|]+?)\s*\|/gm,
+  )) {
     const name = match[1];
     const reason = (match[2] ?? '').trim();
     if (name !== undefined && reason.length > 0 && reason !== '—') {
