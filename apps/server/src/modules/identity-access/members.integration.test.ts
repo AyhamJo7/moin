@@ -171,10 +171,10 @@ async function person() {
   return { id, subject, email };
 }
 
-async function member(userId: string, role: string, status = 'active') {
+async function member(userId: string, role: string, status = 'active', org = ORG) {
   await admin.query(
     'insert into memberships (organisation_id, id, user_id, role, status) values ($1, $2, $3, $4, $5)',
-    [ORG, randomUUID(), userId, role, status],
+    [org, randomUUID(), userId, role, status],
   );
 }
 
@@ -206,34 +206,48 @@ beforeEach(() => {
   provider.claims = {};
 });
 
-/** An owner session pair, plus a keeper owner so lifecycle writes never trip last-owner. */
-async function ownerPair(): Promise<{ pair: SessionPair; owner: { id: string } }> {
+/** An owner pair in a FRESH org: keeper owners from earlier tests never leak into this
+ * session's membership set (the guard refuses multi-org sessions). */
+async function ownerPair(): Promise<{ pair: SessionPair; owner: { id: string }; org: string }> {
+  const org = randomUUID();
+  await admin.query('insert into organisations (id, slug, name) values ($1, $2, $3)', [
+    org,
+    `t-${org.slice(0, 8)}`,
+    'Test Org',
+  ]);
   const owner = await person();
-  await member(owner.id, 'owner');
+  await member(owner.id, 'owner', 'active', org);
   const keeper = await person();
-  await member(keeper.id, 'owner');
+  await member(keeper.id, 'owner', 'active', org);
   const pair = await signInPair(owner);
   contexts().clearCache();
-  return { pair, owner };
+  return { pair, owner, org };
 }
 
 describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
   /** An invitation issued over HTTP, plus the raw token the issuer receives once. */
   async function issue(role = 'staff') {
     const email = `neu-${randomUUID().slice(0, 8)}@example.test`;
-    const { pair } = await ownerPair();
+    const { pair, org } = await ownerPair();
     const response = await postAs(pair, '/api/members/invite', { email, role });
     expect(response.statusCode).toBe(201);
     return {
       pair,
+      org,
       email,
       ...response.json<{ invitationId: string; expiresAt: string; token: string }>(),
     };
   }
 
   /** Acceptance as the store-layer function runs it: inside the invitation's own tenant. */
-  function accept(invitationId: string, token: string, subject: string, email: string) {
-    return withTenant(database.pool(), ORG, (client) =>
+  function accept(
+    org: string,
+    invitationId: string,
+    token: string,
+    subject: string,
+    email: string,
+  ) {
+    return withTenant(database.pool(), org, (client) =>
       acceptInvitation(client, invitationId, token, subject, email),
     );
   }
@@ -262,6 +276,7 @@ describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
     const issued = await issue();
     const subject = randomUUID();
     const result = await accept(
+      issued.org,
       issued.invitationId,
       issued.token,
       subject,
@@ -279,10 +294,17 @@ describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
   evidenceTest('reuse of a consumed invitation is refused', async () => {
     const issued = await issue();
     expect(
-      (await accept(issued.invitationId, issued.token, randomUUID(), issued.email)).outcome,
+      (await accept(issued.org, issued.invitationId, issued.token, randomUUID(), issued.email))
+        .outcome,
     ).toBe('accepted');
     // A different subject presenting the spent token: consumed, no second membership.
-    const again = await accept(issued.invitationId, issued.token, randomUUID(), issued.email);
+    const again = await accept(
+      issued.org,
+      issued.invitationId,
+      issued.token,
+      randomUUID(),
+      issued.email,
+    );
     expect(again.outcome).toBe('consumed');
     const count = await admin.query<{ n: string }>(
       'select count(*)::text as n from memberships m join users u on u.id = m.user_id where u.email = $1',
@@ -294,8 +316,20 @@ describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
   evidenceTest('a retry by the winner is idempotent, not a duplicate (INV-11)', async () => {
     const issued = await issue();
     const subject = randomUUID();
-    const first = await accept(issued.invitationId, issued.token, subject, issued.email);
-    const retry = await accept(issued.invitationId, issued.token, subject, issued.email);
+    const first = await accept(
+      issued.org,
+      issued.invitationId,
+      issued.token,
+      subject,
+      issued.email,
+    );
+    const retry = await accept(
+      issued.org,
+      issued.invitationId,
+      issued.token,
+      subject,
+      issued.email,
+    );
     expect(retry.outcome).toBe('already_accepted');
     expect(retry.membershipId).toBe(first.membershipId);
   });
@@ -307,7 +341,8 @@ describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
       [issued.invitationId],
     );
     expect(
-      (await accept(issued.invitationId, issued.token, randomUUID(), issued.email)).outcome,
+      (await accept(issued.org, issued.invitationId, issued.token, randomUUID(), issued.email))
+        .outcome,
     ).toBe('expired');
   });
 
@@ -315,7 +350,8 @@ describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
     const issued = await issue();
     const subject = randomUUID();
     expect(
-      (await accept(issued.invitationId, issued.token, subject, 'fremd@example.test')).outcome,
+      (await accept(issued.org, issued.invitationId, issued.token, subject, 'fremd@example.test'))
+        .outcome,
     ).toBe('email_mismatch');
     const created = await admin.query<{ n: string }>(
       'select count(*)::text as n from users where cognito_sub = $1',
@@ -326,8 +362,85 @@ describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
 
   evidenceTest('the invitation id alone opens nothing: a wrong token is not_found', async () => {
     const issued = await issue();
-    const wrong = await accept(issued.invitationId, randomSecret(), randomUUID(), issued.email);
+    const wrong = await accept(
+      issued.org,
+      issued.invitationId,
+      randomSecret(),
+      randomUUID(),
+      issued.email,
+    );
     expect(wrong.outcome).toBe('not_found');
+  });
+
+  evidenceTest('expiry is judged at the lock moment, not the snapshot start (HIGH2)', async () => {
+    // now() is fixed at the transaction's first statement; clock_timestamp() moves. The
+    // function must use the latter. Proof in two halves: first a direct demonstration that the
+    // two clocks disagree across a short deadline (a now() comparison would admit past it);
+    // second, the function refuses once the deadline has passed.
+    const issued = await issue();
+    await admin.query(
+      "update invitations set created_at = clock_timestamp() - interval '7 days' + interval '4 seconds', expires_at = clock_timestamp() + interval '4 seconds' where id = $1",
+      [issued.invitationId],
+    );
+    const gate = await database.fixturePool().connect();
+    try {
+      await gate.query('begin');
+      // First statement: fixes now() for this transaction here, ~4 s before the deadline.
+      await gate.query('select pg_sleep(0)');
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+      const expiry = (
+        await admin.query<{ e: string }>(
+          'select expires_at::text as e from invitations where id = $1',
+          [issued.invitationId],
+        )
+      ).rows[0]?.e;
+      const verdict = await gate.query<{ snap: boolean; wall: boolean }>(
+        'select ($1::timestamptz <= now()) as snap, ($1::timestamptz <= clock_timestamp()) as wall',
+        [expiry],
+      );
+      // Sanity: the two clocks really disagree — the snapshot predates the deadline, the wall
+      // clock is past it. If they agree, the test proves nothing.
+      expect(verdict.rows[0]).toStrictEqual({ snap: false, wall: true });
+      await gate.query('rollback');
+    } finally {
+      gate.release();
+    }
+    // And the function refuses: the deadline passed while the snapshot was open.
+    expect(
+      (await accept(issued.org, issued.invitationId, issued.token, randomUUID(), issued.email))
+        .outcome,
+    ).toBe('expired');
+  });
+
+  evidenceTest('every mutation writes its audit row in the same commit (HIGH3)', async () => {
+    // Scoped to this test's own rows: earlier tests already wrote audit rows.
+    const issued = await issue();
+    const target = randomUUID();
+    await accept(issued.org, issued.invitationId, issued.token, target, issued.email);
+    const { pair, org } = await ownerPair();
+    const staff = await person();
+    await member(staff.id, 'staff', 'active', org);
+    await postAs(pair, '/api/members/disable', { userId: staff.id });
+    await postAs(pair, '/api/members/remove', { userId: staff.id });
+    const successor = await person();
+    await member(successor.id, 'admin', 'active', org);
+    await postAs(pair, '/api/members/transfer-ownership', { userId: successor.id });
+    const ops = await admin.query<{ operation: string; n: string }>(
+      `select operation, count(*)::text as n from audit_events
+        where (operation = 'invitation.issue' and target_id = $1)
+           or (target_id = $2 and operation in ('member.disable', 'member.remove'))
+           or (operation = 'member.transfer_ownership' and target_id = $3)
+        group by operation order by operation`,
+      [issued.invitationId, staff.id, successor.id],
+    );
+    expect(new Map(ops.rows.map((row) => [row.operation, row.n]))).toStrictEqual(
+      new Map([
+        ['invitation.issue', '1'],
+        ['member.disable', '1'],
+        ['member.remove', '1'],
+        ['member.transfer_ownership', '1'],
+      ]),
+    );
   });
 
   evidenceTest('a revoked invitation is refused', async () => {
@@ -337,7 +450,8 @@ describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
         .statusCode,
     ).toBe(200);
     expect(
-      (await accept(issued.invitationId, issued.token, randomUUID(), issued.email)).outcome,
+      (await accept(issued.org, issued.invitationId, issued.token, randomUUID(), issued.email))
+        .outcome,
     ).toBe('revoked');
   });
 
@@ -352,21 +466,21 @@ describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
     const crossed = await withTenant(database.pool(), otherOrg, (client) =>
       acceptInvitation(client, issued.invitationId, issued.token, randomUUID(), issued.email),
     );
+    expect(issued.email).toBeDefined();
     expect(crossed.outcome).toBe('not_found');
   });
 
-  evidenceTest('inviting an owner needs the owner capability', async () => {
+  evidenceTest('inviting an owner is 404 without the owner capability (MEDIUM)', async () => {
+    const { org } = await ownerPair();
     const adminUser = await person();
-    await member(adminUser.id, 'admin');
-    const keeper = await person();
-    await member(keeper.id, 'owner');
+    await member(adminUser.id, 'admin', 'active', org);
     const pair = await signInPair(adminUser);
     contexts().clearCache();
     const response = await postAs(pair, '/api/members/invite', {
       email: 'chef@example.test',
       role: 'owner',
     });
-    expect(response.statusCode).toBe(403);
+    expect(response.statusCode).toBe(404);
   });
 });
 
@@ -382,9 +496,9 @@ describe('membership lifecycle (P06.08.03, P06.08.04)', () => {
   }
 
   evidenceTest('disable ends access on the next mutation (FS-16)', async () => {
-    const { pair } = await ownerPair();
+    const { pair, org } = await ownerPair();
     const staff = await person();
-    await member(staff.id, 'staff');
+    await member(staff.id, 'staff', 'active', org);
     const staffPair = await signInPair(staff);
     contexts().clearCache();
     expect(
@@ -400,9 +514,9 @@ describe('membership lifecycle (P06.08.03, P06.08.04)', () => {
   });
 
   evidenceTest('remove ends access immediately and revokes every session', async () => {
-    const { pair } = await ownerPair();
+    const { pair, org } = await ownerPair();
     const staff = await person();
-    await member(staff.id, 'staff');
+    await member(staff.id, 'staff', 'active', org);
     const staffPair = await signInPair(staff);
     contexts().clearCache();
     expect((await postAs(pair, '/api/members/remove', { userId: staff.id })).statusCode).toBe(200);
@@ -419,9 +533,9 @@ describe('membership lifecycle (P06.08.03, P06.08.04)', () => {
   });
 
   evidenceTest('remove needs fresh step-up: a stale session is refused 403', async () => {
-    const { pair } = await ownerPair();
+    const { pair, org } = await ownerPair();
     const staff = await person();
-    await member(staff.id, 'staff');
+    await member(staff.id, 'staff', 'active', org);
     await staleStepUp(pair);
     const response = await postAs(pair, '/api/members/remove', { userId: staff.id });
     expect(response.statusCode).toBe(403);
@@ -434,47 +548,54 @@ describe('membership lifecycle (P06.08.03, P06.08.04)', () => {
   });
 
   evidenceTest(
-    'an admin cannot disable or remove an owner (403), and nothing changes',
+    'an admin cannot disable or remove an owner (404), and nothing changes',
     async () => {
+      const { org } = await ownerPair();
       const adminUser = await person();
-      await member(adminUser.id, 'admin');
+      await member(adminUser.id, 'admin', 'active', org);
       const owner = await person();
-      await member(owner.id, 'owner');
-      const keeper = await person();
-      await member(keeper.id, 'owner');
+      await member(owner.id, 'owner', 'active', org);
       const pair = await signInPair(adminUser);
       contexts().clearCache();
+      // MEDIUM: owner existence is 404 either way (P06.07.03) — never confirm it.
       expect((await postAs(pair, '/api/members/disable', { userId: owner.id })).statusCode).toBe(
-        403,
+        404,
       );
       expect((await postAs(pair, '/api/members/remove', { userId: owner.id })).statusCode).toBe(
-        403,
+        404,
       );
       const row = await admin.query<{ status: string }>(
         'select status from memberships where user_id = $1',
         [owner.id],
       );
       expect(row.rows[0]?.status).toBe('active');
+      // Refused writes leave no audit trace (HIGH3): only commits audit.
+      const audits = await admin.query<{ n: string }>(
+        "select count(*)::text as n from audit_events where target_id = $1 and operation in ('member.disable', 'member.remove')",
+        [owner.id],
+      );
+      expect(audits.rows[0]?.n).toBe('0');
     },
   );
 
   evidenceTest('removing yourself is refused 409', async () => {
     const { pair, owner } = await ownerPair();
+    expect(owner.id).toBeDefined();
     const response = await postAs(pair, '/api/members/remove', { userId: owner.id });
     expect(response.statusCode).toBe(409);
   });
 
   evidenceTest('ownership transfer promotes then demotes in one transaction', async () => {
-    const { pair, owner } = await ownerPair();
+    const { pair, owner, org } = await ownerPair();
     const successor = await person();
-    await member(successor.id, 'admin');
+    await member(successor.id, 'admin', 'active', org);
     const response = await postAs(pair, '/api/members/transfer-ownership', {
       userId: successor.id,
     });
     expect(response.statusCode).toBe(200);
     const roles = await admin.query<{ user_id: string; role: string }>(
       'select user_id, role from memberships where organisation_id = $1',
-      [ORG],
+      [org],
     );
     const byUser = new Map(roles.rows.map((row) => [row.user_id, row.role]));
     expect(byUser.get(successor.id)).toBe('owner');
@@ -482,9 +603,9 @@ describe('membership lifecycle (P06.08.03, P06.08.04)', () => {
   });
 
   evidenceTest('transfer without fresh step-up is refused 403 and changes nothing', async () => {
-    const { pair, owner } = await ownerPair();
+    const { pair, owner, org } = await ownerPair();
     const successor = await person();
-    await member(successor.id, 'admin');
+    await member(successor.id, 'admin', 'active', org);
     await staleStepUp(pair);
     const response = await postAs(pair, '/api/members/transfer-ownership', {
       userId: successor.id,
@@ -505,9 +626,9 @@ describe('membership lifecycle (P06.08.03, P06.08.04)', () => {
   });
 
   evidenceTest('transfer to a disabled member is refused 404 and demotes nobody', async () => {
-    const { pair, owner } = await ownerPair();
+    const { pair, owner, org } = await ownerPair();
     const dormant = await person();
-    await member(dormant.id, 'admin', 'disabled');
+    await member(dormant.id, 'admin', 'disabled', org);
     const response = await postAs(pair, '/api/members/transfer-ownership', { userId: dormant.id });
     expect(response.statusCode).toBe(404);
     const row = await admin.query<{ role: string }>(

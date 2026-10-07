@@ -100,11 +100,13 @@ function checkedPermissions(raw: readonly string[] | undefined): readonly string
 
 /**
  * Issue an invitation in the caller's organisation. Runs inside the caller's `withTenant`
- * transaction; the organisation id is the guarded session's own, never a caller claim.
+ * transaction; the organisation id is the guarded session's own, never a caller claim. Writes
+ * the audit event in the same commit: an invitation without its audit row, or an audit row
+ * without its invitation, is a half-state no retry can distinguish (INV-10, HIGH3).
  */
 export async function issueInvitation(
   client: Pick<TenantClient, 'query'>,
-  input: IssueInvitationInput,
+  input: IssueInvitationInput & { audit: (invitationId: string) => Promise<void> },
 ): Promise<IssuedInvitation> {
   const email = normalisedEmail(input.email);
   const role = checkedRole(input.role);
@@ -113,8 +115,8 @@ export async function issueInvitation(
   const invitationId = randomUUID();
   const result = await client.query<{ expires_at: Date }>(
     `insert into invitations
-       (organisation_id, id, token_hash, email, role, permissions, expires_at, created_by)
-     values ($1, $2, $3, $4, $5, $6::text[], now() + make_interval(days => $7), $8::uuid)
+       (organisation_id, created_at, id, token_hash, email, role, permissions, expires_at, created_by)
+     values ($1::uuid, current_timestamp, $2::uuid, $3::bytea, $4::citext, $5::text, $6::text[], current_timestamp + make_interval(days => $7), $8::uuid)
      returning expires_at`,
     [
       input.organisationId,
@@ -129,6 +131,7 @@ export async function issueInvitation(
   );
   const expiresAt = result.rows[0]?.expires_at;
   if (expiresAt === undefined) throw new InvitationError('invitation was not issued');
+  await input.audit(invitationId);
   return { token, invitationId, expiresAt };
 }
 
@@ -165,20 +168,24 @@ export async function acceptInvitation(
 }
 
 /**
- * Cancel an outstanding invitation. The invitation must belong to the caller's organisation
- * (RLS via withTenant); already-consumed rows stay consumed — revocation never un-accepts.
+ * Cancel an outstanding invitation, with its audit row in the same commit (INV-10). The
+ * invitation must belong to the caller's organisation (RLS via withTenant); already-consumed
+ * rows stay consumed — revocation never un-accepts.
  */
 export async function revokeInvitation(
   client: Pick<TenantClient, 'query'>,
   invitationId: string,
+  audit: (revoked: boolean) => Promise<void>,
 ): Promise<boolean> {
   const result = await client.query<{ n: number }>(
-    `update invitations set revoked_at = now()
+    `update invitations set revoked_at = clock_timestamp()
       where id = $1::uuid and accepted_at is null and revoked_at is null
       returning 1 as n`,
     [invitationId],
   );
-  return (result.rows[0]?.n ?? 0) === 1;
+  const revoked = (result.rows[0]?.n ?? 0) === 1;
+  await audit(revoked);
+  return revoked;
 }
 
 const INVITE_PATH = '/invite/accept';

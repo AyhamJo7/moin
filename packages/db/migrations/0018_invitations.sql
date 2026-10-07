@@ -53,7 +53,10 @@ CREATE TABLE invitations (
   accepted_at     timestamptz,
   revoked_at      timestamptz,
   created_by      uuid,
-  CONSTRAINT invitations_lifetime CHECK (expires_at = created_at + interval '7 days'),
+  CONSTRAINT invitations_lifetime_min
+    CHECK (expires_at >= created_at + interval '7 days' - interval '1 second'),
+  CONSTRAINT invitations_lifetime_max
+    CHECK (expires_at <= created_at + interval '7 days' + interval '1 second'),
   CONSTRAINT invitations_single_outcome CHECK (
     NOT (accepted_at IS NOT NULL AND revoked_at IS NOT NULL)
   ),
@@ -84,9 +87,11 @@ GRANT SELECT, INSERT, UPDATE ON invitations TO moin_app;
 -- Called by moin_app inside withTenant (the organisation is the guarded session's own). Locks the
 -- invitation row first (FOR UPDATE), so two concurrent presentations serialise on the row: the
 -- loser sees accepted_at already set and gets 'consumed'. The checks after the lock are the
--- contract: revoked → 'revoked', expired by the database clock → 'expired', email mismatch →
--- 'email_mismatch'. The clock is the database's own (caller-supplied time is never trusted), and
--- the email arrives already normalised by the application (lower-cased verified provider claim).
+-- contract: revoked → 'revoked', expired → 'expired', email mismatch → 'email_mismatch'. Expiry
+-- is judged by `clock_timestamp()` — the wall clock at the moment the lock is held — never by
+-- `now()`, whose snapshot is fixed at the transaction's first statement: a transaction opened
+-- before the deadline and left waiting past it must still refuse. The email arrives already
+-- normalised by the application (lower-cased verified provider claim).
 --
 -- Idempotency (INV-11): the same subject presenting the same token twice — a retried accept after
 -- a lost response — returns the same membership ('already_accepted') instead of failing or
@@ -148,7 +153,7 @@ BEGIN
     RETURN;
   END IF;
 
-  IF v_inv.expires_at <= now() THEN
+  IF v_inv.expires_at <= clock_timestamp() THEN
     RETURN QUERY SELECT NULL::uuid, NULL::uuid, 'expired'::text;
     RETURN;
   END IF;
@@ -188,7 +193,7 @@ BEGIN
               'active');
   END IF;
 
-  UPDATE public.invitations SET accepted_at = now() WHERE id = v_inv.id;
+  UPDATE public.invitations SET accepted_at = clock_timestamp() WHERE id = v_inv.id;
 
   RETURN QUERY SELECT v_membership_id, v_user_id, 'accepted'::text;
 END

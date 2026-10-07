@@ -97,16 +97,17 @@ export class MembersController {
     const scope = currentTenantScope();
     if (scope === undefined) throw new Error('no tenant scope');
     // Owners are privileged: inviting one needs the owner capability (matrix, P06.07.01).
+    // Unknown invitations and forbidden ones share one 404 (P06.07.03): the response never
+    // confirms whether the caller may invite at all, let alone owners.
+    let needed: 'users:manage' | 'users:manage-owners';
     try {
-      requireCapability(
-        scope.role,
-        scope.permissions,
-        parsed.data.role === 'owner' ? 'users:manage-owners' : 'users:manage',
-      );
+      needed = parsed.data.role === 'owner' ? 'users:manage-owners' : 'users:manage';
+      requireCapability(scope.role, scope.permissions, needed);
     } catch {
-      return fail(reply, 403, '/problems/forbidden', 'Forbidden');
+      return fail(reply, 404, '/problems/not-found', 'Not found');
     }
     try {
+      // Mutation and audit share one commit (HIGH3): either both land or neither does.
       const issued = await this.members.inScope((client) =>
         issueInvitation(client, {
           organisationId: scope.organisationId,
@@ -114,15 +115,14 @@ export class MembersController {
           role: parsed.data.role,
           permissions: parsed.data.permissions,
           createdBy: scope.actorId,
-        }),
-      );
-      await this.members.inScope((client) =>
-        appendAuditEvent(client, {
-          source: 'api',
-          operation: 'invitation.issue',
-          targetKind: 'invitation',
-          targetId: issued.invitationId,
-          result: 'succeeded',
+          audit: (invitationId) =>
+            appendAuditEvent(client, {
+              source: 'api',
+              operation: 'invitation.issue',
+              targetKind: 'invitation',
+              targetId: invitationId,
+              result: 'succeeded',
+            }).then(() => undefined),
         }),
       );
       this.logger.info({ outcome: 'invitation_issued' }, 'issued a member invitation');
@@ -147,19 +147,22 @@ export class MembersController {
     if (!UUID.test(id)) {
       return fail(reply, 404, '/problems/not-found', 'Not found');
     }
-    const revoked = await this.members.inScope((client) => revokeInvitation(client, id));
+    const revoked = await this.members.inScope((client) =>
+      revokeInvitation(client, id, (done) =>
+        done
+          ? appendAuditEvent(client, {
+              source: 'api',
+              operation: 'invitation.revoke',
+              targetKind: 'invitation',
+              targetId: id,
+              result: 'succeeded',
+            }).then(() => undefined)
+          : Promise.resolve(),
+      ),
+    );
     if (!revoked) {
       return fail(reply, 404, '/problems/not-found', 'Not found');
     }
-    await this.members.inScope((client) =>
-      appendAuditEvent(client, {
-        source: 'api',
-        operation: 'invitation.revoke',
-        targetKind: 'invitation',
-        targetId: id,
-        result: 'succeeded',
-      }),
-    );
     this.logger.info({ outcome: 'invitation_revoked' }, 'revoked a member invitation');
     return { revoked: true };
   }
@@ -174,56 +177,60 @@ export class MembersController {
     }
     const scope = currentTenantScope();
     if (scope === undefined) throw new Error('no tenant scope');
-    const target = await this.members.inScope((client) =>
-      client
-        .query<{ role: string }>('select m.role from memberships m where m.user_id = $1::uuid', [
-          parsed.data.userId,
-        ])
-        .then((result) => result.rows[0]),
-    );
-    if (target === undefined) {
-      return fail(reply, 404, '/problems/not-found', 'Not found');
-    }
-    // Owners are privileged: touching one needs the owner capability, whoever the caller is.
-    try {
-      requireCapability(
-        scope.role,
-        scope.permissions,
-        target.role === 'owner' ? 'users:manage-owners' : 'users:manage',
-      );
-    } catch {
-      return fail(reply, 403, '/problems/forbidden', 'Forbidden');
-    }
-    const disabled = await this.members
-      .inScope((client) =>
-        client
+    // One transaction: the target row is locked (FOR UPDATE) before its role is read, the
+    // capability is judged against the locked row, and the disable lands in the same commit.
+    // A concurrent owner-promotion of the target either commits first (locked row read sees
+    // owner, owner capability demanded) or waits on this transaction — never slips between a
+    // read and a later write. Unknown targets and forbidden ones share one 404 (P06.07.03).
+    const outcome = await this.members
+      .inScope(async (client) => {
+        const target = await client
+          .query<{ role: string }>(
+            'select m.role from memberships m where m.user_id = $1::uuid for update',
+            [parsed.data.userId],
+          )
+          .then((result) => result.rows[0]);
+        if (target === undefined) return 'missing' as const;
+        try {
+          requireCapability(
+            scope.role,
+            scope.permissions,
+            target.role === 'owner' ? 'users:manage-owners' : 'users:manage',
+          );
+        } catch {
+          return target.role === 'owner' ? ('missing' as const) : ('denied' as const);
+        }
+        const updated = await client
           .query<{ n: number }>(
-            `update memberships set status = 'disabled', updated_at = now(), version = version + 1
+            `update memberships set status = 'disabled', updated_at = clock_timestamp(), version = version + 1
             where user_id = $1::uuid and status = 'active' returning 1 as n`,
             [parsed.data.userId],
           )
-          .then((result) => (result.rows[0]?.n ?? 0) === 1),
-      )
+          .then((result) => (result.rows[0]?.n ?? 0) === 1);
+        if (!updated) return 'missing' as const;
+        await appendAuditEvent(client, {
+          source: 'api',
+          operation: 'member.disable',
+          targetKind: 'membership',
+          targetId: parsed.data.userId,
+          result: 'succeeded',
+        });
+        return 'disabled' as const;
+      })
       .catch((error: unknown) => {
         // Last-owner backstop (P06.07.04): disabling the last active owner fails structurally.
         if (isIntegrityViolation(error)) return 'last-owner' as const;
         throw error;
       });
-    if (disabled === 'last-owner') {
+    if (outcome === 'last-owner') {
       return fail(reply, 409, '/problems/last-owner', 'The last owner cannot be disabled');
     }
-    if (!disabled) {
+    if (outcome !== 'disabled') {
+      // Missing, denied on a non-owner (the route guard already answered 403 for the caller's
+      // own role), and owner-existence all share one 404: the response never confirms whether
+      // an owner membership exists (P06.07.03).
       return fail(reply, 404, '/problems/not-found', 'Not found');
     }
-    await this.members.inScope((client) =>
-      appendAuditEvent(client, {
-        source: 'api',
-        operation: 'member.disable',
-        targetKind: 'membership',
-        targetId: parsed.data.userId,
-        result: 'succeeded',
-      }),
-    );
     this.logger.info({ outcome: 'member_disabled' }, 'disabled a membership');
     // The 0016 trigger revoked their sessions in the same transaction; the per-request re-check
     // refuses them from the next mutation, with the 30 s GET cache bounding stale reads.
@@ -250,53 +257,52 @@ export class MembersController {
         'Transfer ownership instead of removing yourself',
       );
     }
-    const target = await this.members.inScope((client) =>
-      client
-        .query<{ role: string }>('select m.role from memberships m where m.user_id = $1::uuid', [
-          parsed.data.userId,
-        ])
-        .then((result) => result.rows[0]),
-    );
-    if (target === undefined) {
-      return fail(reply, 404, '/problems/not-found', 'Not found');
-    }
-    try {
-      requireCapability(
-        scope.role,
-        scope.permissions,
-        target.role === 'owner' ? 'users:manage-owners' : 'users:manage',
-      );
-    } catch {
-      return fail(reply, 403, '/problems/forbidden', 'Forbidden');
-    }
-    const removed = await this.members
-      .inScope((client) =>
-        client
+    // Same single-transaction shape as disable: lock the target row, judge the capability
+    // against the locked row, delete and audit in the same commit. Owner existence stays 404.
+    const outcome = await this.members
+      .inScope(async (client) => {
+        const target = await client
+          .query<{ role: string }>(
+            'select m.role from memberships m where m.user_id = $1::uuid for update',
+            [parsed.data.userId],
+          )
+          .then((result) => result.rows[0]);
+        if (target === undefined) return 'missing' as const;
+        try {
+          requireCapability(
+            scope.role,
+            scope.permissions,
+            target.role === 'owner' ? 'users:manage-owners' : 'users:manage',
+          );
+        } catch {
+          return target.role === 'owner' ? ('missing' as const) : ('denied' as const);
+        }
+        const deleted = await client
           .query<{ n: number }>(
             'delete from memberships where user_id = $1::uuid returning 1 as n',
             [parsed.data.userId],
           )
-          .then((result) => (result.rows[0]?.n ?? 0) === 1),
-      )
+          .then((result) => (result.rows[0]?.n ?? 0) === 1);
+        if (!deleted) return 'missing' as const;
+        await appendAuditEvent(client, {
+          source: 'api',
+          operation: 'member.remove',
+          targetKind: 'membership',
+          targetId: parsed.data.userId,
+          result: 'succeeded',
+        });
+        return 'removed' as const;
+      })
       .catch((error: unknown) => {
         if (isIntegrityViolation(error)) return 'last-owner' as const;
         throw error;
       });
-    if (removed === 'last-owner') {
+    if (outcome === 'last-owner') {
       return fail(reply, 409, '/problems/last-owner', 'The last owner cannot be removed');
     }
-    if (!removed) {
+    if (outcome !== 'removed') {
       return fail(reply, 404, '/problems/not-found', 'Not found');
     }
-    await this.members.inScope((client) =>
-      appendAuditEvent(client, {
-        source: 'api',
-        operation: 'member.remove',
-        targetKind: 'membership',
-        targetId: parsed.data.userId,
-        result: 'succeeded',
-      }),
-    );
     this.logger.info({ outcome: 'member_removed' }, 'removed a membership');
     return { removed: true };
   }
