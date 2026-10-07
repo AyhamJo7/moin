@@ -2236,7 +2236,7 @@ describe('session revocation (P06.06.05)', () => {
           ]),
         ).rejects.toMatchObject({ code: '42501' });
         await expect(
-          role.query('select app.revoke_sessions_on_access_change()'),
+          role.query('select app.revoke_sessions_on_membership_change()'),
         ).rejects.toMatchObject({ code: '42501' });
       }
       await expect(

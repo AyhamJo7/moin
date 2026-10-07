@@ -842,7 +842,7 @@ describe('the identity role boundary (P06.06, ADR-0003)', () => {
       'app.revoke_session',
       'app.revoke_session(bytea, text)',
       'app.revoke_session(uuid, text)',
-      'app.revoke_sessions_on_access_change',
+      'app.revoke_sessions_on_membership_change',
       'app.revoke_user_sessions',
       'app.rotate_session',
     ]);

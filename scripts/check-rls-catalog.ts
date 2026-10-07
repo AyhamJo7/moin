@@ -138,11 +138,11 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   // Revocation (P06.06.05): the one implementation, its two entry points and the trigger that
   // calls it on every membership change. A body that returned without revoking would keep every
   // name, owner, signature and grant, and every session would outlive the change that ended it.
-  'app.revoke_user_sessions': 'e0be457ef52462b1ec66b2e395ceec0e',
+  'app.revoke_user_sessions': '63c99f3cbd0a8bfcad1f268dadbecc88',
   'app.revoke_session(bytea)': '73bcf41e304f25de88177ec25cc6a0e7',
   'app.revoke_session(bytea, text)': 'a7fada2daeac2e30e801d6aaeff97b2e',
   'app.revoke_session(uuid, text)': '5e600197d52d7d4f18abe1bf272578b7',
-  'app.revoke_sessions_on_access_change': '7eaf25b9c8c9e0e77307b009507a1553',
+  'app.revoke_sessions_on_membership_change': '7327cf1abdbb5e1b9a08452780f82c44',
 };
 
 /** Reviewed QG-09 contract. Documentation registration alone cannot change privileges. */
@@ -278,7 +278,7 @@ const APPROVED_DEFINERS: Readonly<
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
     executeGrantees: [],
   },
-  'app.revoke_sessions_on_access_change': {
+  'app.revoke_sessions_on_membership_change': {
     arguments: '',
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
@@ -483,7 +483,7 @@ const APPEND_ONLY_TABLES: readonly {
 const REVOCATION_TRIGGER = {
   table: 'memberships',
   trigger: 'memberships_revoke_sessions',
-  fn: 'app.revoke_sessions_on_access_change()',
+  fn: 'app.revoke_sessions_on_membership_change()',
   triggerType: 25, // row (1) + update (16) + delete (8); AFTER, so no before bit (2)
 } as const;
 

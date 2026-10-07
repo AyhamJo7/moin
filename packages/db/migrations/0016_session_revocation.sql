@@ -210,7 +210,7 @@ $$;
 -- Unrelated updates (version, updated_at) revoke nothing. A new membership revokes nothing: a
 -- person invited while signed in keeps their session, and the per-request check starts admitting
 -- them.
-CREATE FUNCTION app.revoke_sessions_on_access_change() RETURNS trigger
+CREATE FUNCTION app.revoke_sessions_on_membership_change() RETURNS trigger
   LANGUAGE plpgsql
   SECURITY DEFINER
   SET search_path = pg_catalog, public, app, pg_temp
@@ -242,7 +242,7 @@ $$;
 
 CREATE TRIGGER memberships_revoke_sessions
   AFTER UPDATE OR DELETE ON memberships
-  FOR EACH ROW EXECUTE FUNCTION app.revoke_sessions_on_access_change();
+  FOR EACH ROW EXECUTE FUNCTION app.revoke_sessions_on_membership_change();
 -- Fires in replica mode too, so a session setting cannot switch it off.
 ALTER TABLE memberships ENABLE ALWAYS TRIGGER memberships_revoke_sessions;
 
@@ -383,4 +383,4 @@ GRANT EXECUTE ON FUNCTION app.revoke_session(uuid, text) TO moin_identity;
 GRANT EXECUTE ON FUNCTION app.revoke_session(bytea) TO moin_identity;
 
 REVOKE ALL ON FUNCTION app.revoke_user_sessions(uuid, bytea, text) FROM PUBLIC, moin_app, moin_identity;
-REVOKE ALL ON FUNCTION app.revoke_sessions_on_access_change() FROM PUBLIC, moin_app, moin_identity;
+REVOKE ALL ON FUNCTION app.revoke_sessions_on_membership_change() FROM PUBLIC, moin_app, moin_identity;
