@@ -1087,7 +1087,7 @@
     "replace": "        AND m.role = 'owner';",
     "killingTest": {
       "file": "apps/server/src/modules/identity-access/rbac-matrix.integration.test.ts",
-      "fullName": "last-owner protection (P06.07.04) > removing the last active owner fails with 23000"
+      "fullName": "last-owner protection (P06.07.04) > a disabled owner does not cover demoting the last active owner"
     },
     "project": "integration"
   },
@@ -1109,8 +1109,8 @@
     "invariant": "P06.07.02: the role guard enforces declared capabilities",
     "expected": "A staff member would pass an owner route: the matrix as decoration.",
     "file": "apps/server/src/modules/identity-access/http/require-role.guard.ts",
-    "find": "      capabilities.every((capability) => may(session.role, session.permissions, capability));",
-    "replace": "      capabilities.every((capability) => may(session.role, session.permissions, capability)) && true;",
+    "find": "    const allowed =\n      session !== undefined &&",
+    "replace": "    const allowed =\n      session !== undefined ||",
     "killingTest": {
       "file": "apps/server/src/modules/identity-access/rbac-matrix.integration.test.ts",
       "fullName": "the role matrix, every route × every role (P06.07.05) > staff fail every decorated route with 403 forbidden"

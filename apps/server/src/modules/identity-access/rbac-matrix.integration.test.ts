@@ -359,6 +359,12 @@ describe('last-owner protection (P06.07.04)', () => {
         await gate.query("update memberships set role = 'admin' where user_id = $1", [active.id]);
       }),
     ).rejects.toMatchObject({ code: '23000' });
+    // Deleting the active one fails too: the disabled row is no cover on any write path.
+    await expect(
+      withTenant(database.pool(), org, async (gate) => {
+        await gate.query('delete from memberships where user_id = $1', [active.id]);
+      }),
+    ).rejects.toMatchObject({ code: '23000' });
   });
 
   evidenceTest('removing the last active owner fails with 23000', async () => {
