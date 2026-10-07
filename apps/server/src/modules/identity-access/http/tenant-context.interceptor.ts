@@ -42,6 +42,8 @@ export class TenantContextInterceptor implements NestInterceptor {
     const scope: TenantScope = {
       organisationId: session.organisationId,
       actorId: session.userId,
+      role: session.role,
+      permissions: session.permissions,
     };
     // Set before delegating so error responses carry it too: any body resolved under a
     // guard is per-tenant from a cookie-authenticated request, success or error.
