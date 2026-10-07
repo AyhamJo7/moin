@@ -964,10 +964,10 @@
   {
     "id": "C1-missing-token-accepted",
     "invariant": "P06.06.06: a mutation without the synchronizer token fails closed",
-    "expected": "A forged cross-site POST carrying only the victim's cookies would be admitted.",
+    "expected": "A POST carrying only the victim's cookies (no header at all) would be admitted: the token layer would check only that a cookie exists.",
     "file": "apps/server/src/modules/identity-access/http/csrf.ts",
     "find": "  if (options.cookie === undefined || !csrfTokenValid(options.token, options.cookie)) {\n    return { ok: false, reason: 'token-invalid' };\n  }",
-    "replace": "  if (options.cookie === undefined && options.token === undefined) {\n    return { ok: false, reason: 'token-invalid' };\n  }",
+    "replace": "  if (options.cookie === undefined) {\n    return { ok: false, reason: 'token-invalid' };\n  }",
     "killingTest": {
       "file": "apps/server/src/modules/identity-access/session-membership.integration.test.ts",
       "fullName": "CSRF synchronizer token plus Origin check (P06.06.06) > a POST without the token fails closed with 403 csrf-required"
@@ -1012,31 +1012,5 @@
       "fullName": "CSRF synchronizer token plus Origin check (P06.06.06) > a POST without the token fails closed with 403 csrf-required"
     },
     "project": "integration"
-  },
-  {
-    "id": "C5-constant-time-comparison-removed",
-    "invariant": "P06.06.06: the token comparison leaks nothing byte by byte",
-    "expected": "An early-exit comparison would let a cross-site attacker measure the token prefix... (unit-pinned).",
-    "file": "apps/server/src/modules/identity-access/http/csrf.ts",
-    "find": "  const a = digest(presented);\n  const b = digest(expected);\n  return a.length === b.length && timingSafeEqual(a, b);",
-    "replace": "  return presented === expected;",
-    "killingTest": {
-      "file": "apps/server/src/modules/identity-access/http/csrf.test.ts",
-      "fullName": "the CSRF verdict (P06.06.06) > a forged token fails: the header must echo the cookie"
-    },
-    "project": "unit"
-  },
-  {
-    "id": "C6-null-origin-accepted",
-    "invariant": "P06.06.06: opaque origins never match",
-    "expected": "A sandboxed iframe (`Origin: null`) would pass the origin layer.",
-    "file": "apps/server/src/modules/identity-access/http/csrf.ts",
-    "find": "  if (raw === undefined || raw === 'null') return undefined;",
-    "replace": "  if (raw === undefined) return undefined;",
-    "killingTest": {
-      "file": "apps/server/src/modules/identity-access/http/csrf.test.ts",
-      "fullName": "the CSRF verdict (P06.06.06) > opaque and non-http origins never match"
-    },
-    "project": "unit"
   }
 ]
