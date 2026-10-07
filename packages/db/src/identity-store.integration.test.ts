@@ -2176,6 +2176,40 @@ describe('session revocation (P06.06.05)', () => {
     expect(await store.revokeOtherSessions(live.tokenHash)).toBeUndefined();
   });
 
+  evidenceTest('a re-pointed membership revokes the new holder too', async () => {
+    // The swap path revokes BOTH people: the new holder must not keep sessions issued before
+    // the swap. Kills RV11 (OLD-only revocation).
+    const org = randomUUID();
+    await admin.query('insert into organisations (id, slug, name) values ($1, $2, $3)', [
+      org,
+      `rp-${org.slice(0, 8)}`,
+      'Repoint Org',
+    ]);
+    const a = await user();
+    const fresh = await user();
+    await signIn(fresh.sub);
+    await admin.query(
+      'insert into memberships (organisation_id, id, user_id, role, status) values ($1, $2, $3, $4, $5)',
+      [org, randomUUID(), a.id, 'owner', 'active'],
+    );
+    const midA = (
+      await admin.query<{ id: string }>(
+        'select id from memberships where organisation_id = $1 and user_id = $2',
+        [org, a.id],
+      )
+    ).rows[0]?.id;
+    await withTenant(database.pool(), org, async (c) => {
+      await c.query('update memberships set user_id = $1 where id = $2', [fresh.id, midA]);
+    });
+    expect(await store.resolveSession((await signIn(fresh.sub)).tokenHash)).toBeDefined();
+    const live = await admin.query<{ n: string }>(
+      'select count(*)::text as n from sessions where revoked_at is null and user_id = $1',
+      [fresh.id],
+    );
+    // The pre-swap session died; the fresh sign-in above is the only live one.
+    expect(live.rows[0]?.n).toBe('1');
+  });
+
   evidenceTest('password and MFA resets end every session with their own reason', async () => {
     for (const reason of ['password_reset', 'mfa_reset'] as const) {
       const person = await user();
@@ -2213,6 +2247,122 @@ describe('session revocation (P06.06.05)', () => {
       ).rejects.toMatchObject({ code: '22023' });
     },
   );
+
+  evidenceTest('a sign-in racing a revocation waits for it, then mints live (HIGH)', async () => {
+    // The HIGH finding: begin_session's INSERT was invisible to a concurrent revocation's
+    // snapshot, so a session minted mid-revocation stayed live. revoke_user_sessions now takes
+    // the user row FOR UPDATE, which conflicts with begin_session's user-row FOR SHARE: the two
+    // serialise. This proves the serialisation (the sign-in blocks until the revocation commits)
+    // and the correct end state: minted-after-revocation stays live, and a later revocation ends it.
+    const { person, org } = await membershiped();
+    const gate = await database.fixturePool().connect();
+    try {
+      // Revocation in progress, transaction held open: the trigger has fired and the helper
+      // holds the user row.
+      await gate.query('begin');
+      await gate.query('select set_config($1, $2, true)', ['app.organisation_id', org]);
+      await gate.query("update memberships set status = 'disabled' where user_id = $1", [
+        person.id,
+      ]);
+      // A concurrent sign-in must now block on the user row (SHARE vs UPDATE).
+      const racing = signIn(person.sub);
+      const deadline = Date.now() + LOCK_WAIT_DEADLINE_MS;
+      let waiting = '0';
+      while (waiting !== '1' && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT_POLL_MS));
+        const result = await admin.query<{ n: string }>(
+          "select count(*)::text as n from pg_stat_activity where wait_event_type = 'Lock' and datname = $1",
+          [database.name],
+        );
+        waiting = result.rows[0]?.n ?? '0';
+      }
+      expect(waiting, 'sign-in waits on the open revocation').toBe('1');
+      await gate.query('commit');
+      const minted = await racing;
+      // Minted after the revocation committed: live, as it should be.
+      expect(await store.resolveSession(minted.tokenHash)).toBeDefined();
+      // And a revocation after the mint ends it: nothing survives a committed revocation.
+      await withTenant(database.pool(), org, async (c) => {
+        await c.query("update memberships set status = 'active' where user_id = $1", [person.id]);
+      });
+      expect(await store.resolveSession(minted.tokenHash)).toBeUndefined();
+    } finally {
+      gate.release();
+    }
+  });
+
+  evidenceTest('concurrent revokes sharing a user complete without deadlock (MEDIUM)', async () => {
+    // The MEDIUM finding: the swap path revokes two users, so two revokers could traverse two
+    // users' locks in opposite order. The trigger takes them least-id-first. A true opposite-order
+    // cycle is unreachable through swaps (UNIQUE(organisation_id, user_id) deadlocks concurrent
+    // opposite swaps on the key first — a key-share wait, before any trigger fires), so this proves
+    // the reachable property: a two-user revoke racing a single-user revoke over the shared user
+    // completes, and neither leaves a live session.
+    const org = randomUUID();
+    await admin.query('insert into organisations (id, slug, name) values ($1, $2, $3)', [
+      org,
+      `sw-${org.slice(0, 8)}`,
+      'Swap Org',
+    ]);
+    const a = await user();
+    const c = await user();
+    for (const who of [a, c]) {
+      await signIn(who.sub);
+      await admin.query(
+        'insert into memberships (organisation_id, id, user_id, role, status) values ($1, $2, $3, $4, $5)',
+        [org, randomUUID(), who.id, 'owner', 'active'],
+      );
+    }
+    const midA = (
+      await admin.query<{ id: string }>(
+        'select id from memberships where organisation_id = $1 and user_id = $2',
+        [org, a.id],
+      )
+    ).rows[0]?.id;
+    const c1 = await database.fixturePool().connect();
+    try {
+      await c1.query('begin');
+      await c1.query('select set_config($1, $2, true)', ['app.organisation_id', org]);
+      // T1 re-points A's row at a fresh user (revokes A then the fresh user, least-id-first)
+      // and holds the transaction open. T2 is a sign-out-others over A's live session through
+      // the real moin_identity path: it shares A's session/user lock set but no membership row,
+      // so the two genuinely contend on the trigger's locks (a second membership write would
+      // just wait on T1's row lock before any trigger fires).
+      const fresh = (await user()).id;
+      const aToken = (
+        await admin.query<{ token_hash: Buffer }>(
+          'select token_hash from sessions where user_id = $1 and revoked_at is null limit 1',
+          [a.id],
+        )
+      ).rows[0]?.token_hash;
+      if (aToken === undefined) throw new Error('A holds no live session to contend over');
+      await c1.query('update memberships set user_id = $1 where id = $2', [fresh, midA]);
+      const racing = identity.query("select app.revoke_session($1::bytea, 'others')", [aToken]);
+      const deadline = Date.now() + LOCK_WAIT_DEADLINE_MS;
+      let waiting = '0';
+      while (waiting !== '1' && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT_POLL_MS));
+        const result = await admin.query<{ n: string }>(
+          "select count(*)::text as n from pg_stat_activity where wait_event_type = 'Lock' and datname = $1",
+          [database.name],
+        );
+        waiting = result.rows[0]?.n ?? '0';
+      }
+      expect(waiting, 'sign-out-others waits on the open trigger revocation').toBe('1');
+      await c1.query('commit');
+      // T1's revocation already ended A's sessions; the keep session is dead, so the core
+      // answers NULL instead of a count (no weaponised sign-out, RV6).
+      await expect(racing).resolves.toMatchObject({ rows: [{ revoke_session: null }] });
+    } finally {
+      c1.release();
+    }
+    // No deadlock (both completed), and A holds no live session.
+    const live = await admin.query<{ n: string }>(
+      'select count(*)::text as n from sessions where revoked_at is null and user_id = $1',
+      [a.id],
+    );
+    expect(live.rows[0]?.n).toBe('0');
+  });
 
   evidenceTest(
     'a role change racing a request cannot deadlock: request sees membership first',

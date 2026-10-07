@@ -934,5 +934,31 @@
       "fullName": "session revocation (P06.06.05) > removal revokes with membership_removed and wipes provider tokens"
     },
     "project": "integration"
+  },
+  {
+    "id": "RV10-revocation-skips-user-lock",
+    "invariant": "P06.06.05/HIGH: revocation serialises with sign-in on the user row",
+    "expected": "A sign-in racing a revocation would mint a session invisible to the revocation's snapshot: the minted session stays live.",
+    "file": "packages/db/migrations/0016_session_revocation.sql",
+    "find": "  PERFORM 1 FROM public.users u WHERE u.id = p_user_id FOR UPDATE;",
+    "replace": "  PERFORM 1 FROM public.users u WHERE u.id = p_user_id FOR SHARE;",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "session revocation (P06.06.05) > a sign-in racing a revocation waits for it, then mints live (HIGH)"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "RV11-swap-skips-new-user",
+    "invariant": "P06.06.05/MEDIUM: a re-pointed membership revokes both people",
+    "expected": "The new holder of a re-pointed membership would keep sessions issued before the swap: access granted without fresh authentication.",
+    "file": "packages/db/migrations/0016_session_revocation.sql",
+    "find": "    IF OLD.user_id < NEW.user_id THEN\n      PERFORM app.revoke_user_sessions(OLD.user_id, NULL, 'membership_removed');\n      PERFORM app.revoke_user_sessions(NEW.user_id, NULL, 'role_change');\n    ELSE\n      PERFORM app.revoke_user_sessions(NEW.user_id, NULL, 'role_change');\n      PERFORM app.revoke_user_sessions(OLD.user_id, NULL, 'membership_removed');\n    END IF;",
+    "replace": "    PERFORM app.revoke_user_sessions(OLD.user_id, NULL, 'membership_removed');",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "session revocation (P06.06.05) > a re-pointed membership revokes the new holder too"
+    },
+    "project": "integration"
   }
 ]

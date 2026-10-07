@@ -85,8 +85,13 @@ BEGIN
     RAISE EXCEPTION 'unknown revocation reason' USING ERRCODE = 'invalid_parameter_value';
   END IF;
 
-  -- Family roots first (ascending), then sessions (ascending): the family-first order of
-  -- `rotate_session` and `begin_session`, made total so that two revokers cannot cross.
+  -- Families (ascending), then sessions (ascending), then the user row (FOR UPDATE): exactly
+  -- the family -> session -> user order of `rotate_session` and `begin_session`, so no AB-BA
+  -- with either. FOR UPDATE (not SHARE) conflicts with the SHARE user-row lock both functions
+  -- hold across their writes: a sign-in racing a revocation serialises here. READ COMMITTED
+  -- takes a fresh snapshot per command, so the UPDATE below sees a session minted before this
+  -- transaction waited, and a sign-in that waits on this revocation inserts after it commits —
+  -- either way no live session survives a committed revocation (HIGH review finding).
   PERFORM 1 FROM public.sessions f
   WHERE f.id IN (SELECT s.family_id FROM public.sessions s
                  WHERE s.user_id = p_user_id AND s.revoked_at IS NULL)
@@ -95,6 +100,8 @@ BEGIN
   PERFORM 1 FROM public.sessions s
   WHERE s.user_id = p_user_id AND s.revoked_at IS NULL
   ORDER BY s.id FOR UPDATE;
+
+  PERFORM 1 FROM public.users u WHERE u.id = p_user_id FOR UPDATE;
 
   -- The clock is read only after every lock is held, so a wait cannot leave it stale.
   v_now := clock_timestamp();
@@ -215,8 +222,15 @@ BEGIN
   END IF;
 
   IF NEW.user_id IS DISTINCT FROM OLD.user_id THEN
-    PERFORM app.revoke_user_sessions(OLD.user_id, NULL, 'membership_removed');
-    PERFORM app.revoke_user_sessions(NEW.user_id, NULL, 'role_change');
+    -- Least id first: two opposite-direction swaps (A->B racing B->A) take the same locks in
+    -- the same order instead of deadlocking.
+    IF OLD.user_id < NEW.user_id THEN
+      PERFORM app.revoke_user_sessions(OLD.user_id, NULL, 'membership_removed');
+      PERFORM app.revoke_user_sessions(NEW.user_id, NULL, 'role_change');
+    ELSE
+      PERFORM app.revoke_user_sessions(NEW.user_id, NULL, 'role_change');
+      PERFORM app.revoke_user_sessions(OLD.user_id, NULL, 'membership_removed');
+    END IF;
   ELSIF NEW.role IS DISTINCT FROM OLD.role OR NEW.permissions IS DISTINCT FROM OLD.permissions THEN
     PERFORM app.revoke_user_sessions(NEW.user_id, NULL, 'role_change');
   ELSIF NEW.status IS DISTINCT FROM OLD.status THEN
