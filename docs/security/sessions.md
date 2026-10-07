@@ -235,7 +235,7 @@ refusal is the token-custody check's, not the provider switch's.
 | P06.06.03     | per-request session + membership re-check; `active_organisation_id`; the 30 s read-only cache                                                                 |
 | P06.06.04     | step-up MFA policy, `step_up_at` + `step_up_fresh`, the step-up guard, and the step-up endpoint calling `rotate_session('step_up')` (shipped; pending review) |
 | P06.06.05     | revocation on password/MFA reset, role change, membership removal, "sign out other devices" (shipped; pending review)                                         |
-| P06.06.06     | CSRF synchronizer token and Origin check (the sign-in routes are GETs and change no tenant state)                                                             |
+| P06.06.06     | CSRF synchronizer token and Origin check (shipped; pending review)                                                                                               |
 | P06.06.07     | the complete lifecycle acceptance suite, including FS-16                                                                                                      |
 | P06.05.05     | the same flow against the staging Cognito pool; nothing here is verified against Cognito                                                                      |
 | P05.08.01     | the KMS data key for provider-token custody; until then deployed sign-in refuses to start                                                                     |
