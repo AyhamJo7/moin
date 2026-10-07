@@ -20,6 +20,9 @@ import type { Pool } from '@moin/db/pool';
 export interface TenantScope {
   readonly organisationId: string;
   readonly actorId: string;
+  /** The caller's role in the guarded organisation, for service-layer capability checks. */
+  readonly role: string;
+  readonly permissions: readonly string[];
 }
 
 const storage = new AsyncLocalStorage<TenantScope>();

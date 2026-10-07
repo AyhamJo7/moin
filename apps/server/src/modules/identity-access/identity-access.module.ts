@@ -20,11 +20,14 @@ import { ConfigurationError, type Config } from '../../config/env.ts';
 import { resolveOidcConfig } from '../../config/oidc.ts';
 import { LOGGER } from '../../observability/logger.module.ts';
 import { IDENTITY_STORE, IdentityPoolModule } from '../platform/identity-pool.module.ts';
+import { TenantPoolModule } from '../platform/tenant-pool.module.ts';
 import { SessionService } from './application/session.service.ts';
 import { RequestContextService } from './application/request-context.service.ts';
 import { SignInService } from './application/sign-in.service.ts';
 import { CALLBACK_PATH } from './domain/session-policy.ts';
 import { AuthController } from './http/auth.controller.ts';
+import { MembersController } from './http/members.controller.ts';
+import { MemberQueries } from '../platform/member-queries.ts';
 import { RequireRoleGuard } from './http/require-role.guard.ts';
 import { RequireStepUpGuard } from './http/require-step-up.guard.ts';
 import { SessionMembershipGuard } from './http/session-membership.guard.ts';
@@ -75,8 +78,8 @@ export function buildSignInGate(
 }
 
 @Module({
-  imports: [IdentityPoolModule],
-  controllers: [AuthController],
+  imports: [IdentityPoolModule, TenantPoolModule],
+  controllers: [AuthController, MembersController],
   providers: [
     { provide: IDENTITY_CLOCK, useValue: systemClock },
     {
@@ -104,6 +107,7 @@ export function buildSignInGate(
     RequireRoleGuard,
     RequireStepUpGuard,
     TenantContextInterceptor,
+    MemberQueries,
   ],
   exports: [SESSIONS, REQUEST_CONTEXTS],
 })
