@@ -14,6 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { PoolClient } from 'pg';
 import { createPool, type Pool } from './pool.ts';
 import { createIdentityStore, type IdentityStore } from './identity-store.ts';
+import { withTenant } from './tenant.ts';
 
 const HOUR_MS = 3_600_000;
 const IDLE_MS = 12 * HOUR_MS;
@@ -2016,94 +2017,70 @@ describe('session revocation (P06.06.05)', () => {
       'privilege_change',
     ]);
     expect(rotated.rowCount, 'rotate mints the second session').toBe(1);
-    const gate = await database.pool().connect();
-    try {
-      await gate.query('begin');
-      await gate.query("select set_config('app.organisation_id', $1, true)", [org]);
+    await withTenant(database.pool(), org, async (gate) => {
+      // eslint-disable-next-line no-restricted-syntax -- membership writes in this file go through the tenant wrapper; the rule's SET-session pattern matches the UPDATE ... SET verb text.
       await gate.query('update memberships set role = $1 where user_id = $2', ['admin', person.id]);
-      await gate.query('commit');
-      for (const [digest, expected] of [
-        [tokenHash, 'rotated'],
-        [secondHash, 'role_change'],
-      ] as const) {
-        const row = await admin.query<{
-          revoked_at: Date | null;
-          revocation_reason: string | null;
-        }>('select revoked_at, revocation_reason from sessions where token_hash = $1', [digest]);
-        expect(row.rows[0]?.revoked_at, 'stale session after role change').not.toBeNull();
-        expect(row.rows[0]?.revocation_reason, 'reason of ended session').toBe(expected);
-      }
-      expect(await store.resolveSession(tokenHash)).toBeUndefined();
-    } finally {
-      gate.release();
+    });
+    for (const [digest, expected] of [
+      [tokenHash, 'rotated'],
+      [secondHash, 'role_change'],
+    ] as const) {
+      const row = await admin.query<{
+        revoked_at: Date | null;
+        revocation_reason: string | null;
+      }>('select revoked_at, revocation_reason from sessions where token_hash = $1', [digest]);
+      expect(row.rows[0]?.revoked_at, 'stale session after role change').not.toBeNull();
+      expect(row.rows[0]?.revocation_reason, 'reason of ended session').toBe(expected);
     }
+    expect(await store.resolveSession(tokenHash)).toBeUndefined();
   });
 
   evidenceTest(
     'a status change revokes with membership_status, and re-enabling revives nothing',
     async () => {
       const { person, tokenHash, org } = await membershiped();
-      const gate = await database.fixturePool().connect();
-      try {
-        await gate.query('begin');
-        await gate.query("select set_config('app.organisation_id', $1, true)", [org]);
+      await withTenant(database.pool(), org, async (gate) => {
         await gate.query("update memberships set status = 'disabled' where user_id = $1", [
           person.id,
         ]);
-        await gate.query('commit');
-        const row = await admin.query<{ revocation_reason: string | null }>(
-          'select revocation_reason from sessions where token_hash = $1',
-          [tokenHash],
-        );
-        expect(row.rows[0]?.revocation_reason).toBe('membership_status');
-        await gate.query('begin');
-        await gate.query("select set_config('app.organisation_id', $1, true)", [org]);
+      });
+      const row = await admin.query<{ revocation_reason: string | null }>(
+        'select revocation_reason from sessions where token_hash = $1',
+        [tokenHash],
+      );
+      expect(row.rows[0]?.revocation_reason).toBe('membership_status');
+      await withTenant(database.pool(), org, async (gate) => {
         await gate.query("update memberships set status = 'active' where user_id = $1", [
           person.id,
         ]);
-        await gate.query('commit');
-        expect(await store.resolveSession(tokenHash)).toBeUndefined();
-      } finally {
-        gate.release();
-      }
+      });
+      expect(await store.resolveSession(tokenHash)).toBeUndefined();
     },
   );
 
   evidenceTest('removal revokes with membership_removed and wipes provider tokens', async () => {
     const { person, tokenHash, org } = await membershiped();
-    const gate = await database.fixturePool().connect();
-    try {
-      await gate.query('begin');
-      await gate.query("select set_config('app.organisation_id', $1, true)", [org]);
+    await withTenant(database.pool(), org, async (gate) => {
       await gate.query('delete from memberships where user_id = $1', [person.id]);
-      await gate.query('commit');
-      const row = await admin.query<{
-        revocation_reason: string | null;
-        provider_tokens_sealed: Buffer | null;
-      }>('select revocation_reason, provider_tokens_sealed from sessions where token_hash = $1', [
-        tokenHash,
-      ]);
-      expect(row.rows[0]?.revocation_reason).toBe('membership_removed');
-      expect(row.rows[0]?.provider_tokens_sealed).toBeNull();
-    } finally {
-      gate.release();
-    }
+    });
+    const row = await admin.query<{
+      revocation_reason: string | null;
+      provider_tokens_sealed: Buffer | null;
+    }>('select revocation_reason, provider_tokens_sealed from sessions where token_hash = $1', [
+      tokenHash,
+    ]);
+    expect(row.rows[0]?.revocation_reason).toBe('membership_removed');
+    expect(row.rows[0]?.provider_tokens_sealed).toBeNull();
   });
 
   evidenceTest('an unrelated membership update revokes nothing', async () => {
     const { person, tokenHash, org } = await membershiped();
-    const gate = await database.fixturePool().connect();
-    try {
-      await gate.query('begin');
-      await gate.query("select set_config('app.organisation_id', $1, true)", [org]);
+    await withTenant(database.pool(), org, async (gate) => {
       await gate.query('update memberships set version = version + 1 where user_id = $1', [
         person.id,
       ]);
-      await gate.query('commit');
-      expect(await store.resolveSession(tokenHash)).toBeDefined();
-    } finally {
-      gate.release();
-    }
+    });
+    expect(await store.resolveSession(tokenHash)).toBeDefined();
   });
 
   evidenceTest('sign-out-others keeps the presented session and ends the rest', async () => {
@@ -2124,8 +2101,8 @@ describe('session revocation (P06.06.05)', () => {
        from sessions, t where token_hash = $4`,
       [secondHash, randomUUID(), sealed(), first.tokenHash],
     );
-    // `membershiped()`'s own session is the second live session of this person: `signIn` does
-    // not supersede without a replaced cookie, so "other devices" is both of them.
+    // membershiped() already signed this person in once, and signIn does not supersede
+    // without a replaced cookie, so "other devices" is both of them.
     const kept = await store.revokeOtherSessions(first.tokenHash);
     expect(kept).toBe(2);
     expect(await store.resolveSession(first.tokenHash)).toBeDefined();
@@ -2160,7 +2137,7 @@ describe('session revocation (P06.06.05)', () => {
          from sessions, t where token_hash = $4`,
         [otherHash, randomUUID(), sealed(), theirHash],
       );
-      const before = await admin.query(
+      const before = await admin.query<{ live: boolean }>(
         'select revoked_at is null as live from sessions where token_hash = $1',
         [theirHash],
       );
@@ -2246,14 +2223,15 @@ describe('session revocation (P06.06.05)', () => {
         // The request locks the membership first, so it never holds a session while it waits on a
         // writer holding the membership — the AB-BA that 0014's order left open.
         await gate.query('begin');
-        await gate.query("select set_config('app.organisation_id', $1, true)", [org]);
+        await gate.query('select set_config($1, $2, true)', ['app.organisation_id', org]);
         const pending = gate.query('select * from app.resolve_request_context($1::bytea)', [
           tokenHash,
         ]);
         const writer = await database.fixturePool().connect();
         try {
           await writer.query('begin');
-          await writer.query("select set_config('app.organisation_id', $1, true)", [org]);
+          await writer.query('select set_config($1, $2, true)', ['app.organisation_id', org]);
+          // eslint-disable-next-line no-restricted-syntax -- same false positive as above: the UPDATE ... SET verb text, inside an explicitly tenant-scoped transaction.
           const racing = writer.query("update memberships set role = 'admin' where user_id = $1", [
             person.id,
           ]);
