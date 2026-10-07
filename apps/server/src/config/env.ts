@@ -140,9 +140,27 @@ const baseSchema = z.object({
    * This deployment's own web origin, e.g. `https://app.example.de` (P06.06.06). The CSRF guard
    * compares the request `Origin` against it, and the value must come from configuration rather
    * than a request header for the same reason `VOICE_PUBLIC_ORIGIN` is configured: a host taken
-   * from the request is a host the attacker chooses.
+   * from the request is a host the attacker chooses. Normalised to `URL.origin` at load
+   * (lowercased host, default port dropped, no trailing slash), so the guard's string comparison
+   * cannot mismatch a differently-spelled same origin.
    */
-  APP_ORIGIN: z.url({ protocol: /^https?$/ }).optional(),
+  APP_ORIGIN: z
+    .url({ protocol: /^https?$/ })
+    .refine(
+      (value) => {
+        const url = new URL(value);
+        return (
+          url.search === '' &&
+          url.hash === '' &&
+          url.username === '' &&
+          url.password === '' &&
+          url.pathname === '/'
+        );
+      },
+      { message: 'must be a bare origin (scheme + host + optional port), never a URL with a path' },
+    )
+    .transform((value) => new URL(value).origin)
+    .optional(),
 
   /** The media WebSocket origin, e.g. `wss://voice.example.de`. */
   VOICE_WEBSOCKET_ORIGIN: z.url({ protocol: /^wss$/ }).optional(),
@@ -350,20 +368,9 @@ const schema = baseSchema.superRefine((value, ctx) => {
     }
   }
   if (value.APP_ORIGIN !== undefined) {
+    // Bare-path and userinfo shape already enforced by the schema refinement; only the
+    // environment rule lives here, against the normalised value the guard compares.
     const origin = new URL(value.APP_ORIGIN);
-    if (
-      origin.search !== '' ||
-      origin.hash !== '' ||
-      origin.username !== '' ||
-      origin.password !== '' ||
-      origin.pathname !== '/'
-    ) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['APP_ORIGIN'],
-        message: 'must be a bare origin (scheme + host + optional port), never a URL with a path',
-      });
-    }
     if (
       value.NODE_ENV !== 'development' &&
       value.NODE_ENV !== 'test' &&

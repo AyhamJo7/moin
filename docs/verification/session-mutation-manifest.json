@@ -1012,5 +1012,18 @@
       "fullName": "CSRF synchronizer token plus Origin check (P06.06.06) > a POST without the token fails closed with 403 csrf-required"
     },
     "project": "integration"
+  },
+  {
+    "id": "C7-trailing-slash-origin-accepted",
+    "invariant": "P06.06.06: the configured origin is canonical before comparison",
+    "expected": "A configured origin with a trailing slash would never equal a browser Origin, 403ing every mutation while looking configured.",
+    "file": "apps/server/src/config/env.ts",
+    "find": ".transform((value) => new URL(value).origin)",
+    "replace": ".transform((value) => value)",
+    "killingTest": {
+      "file": "apps/server/src/config/env.test.ts",
+      "fullName": "configuration loader (P02.03.03) > normalises APP_ORIGIN so equivalent spellings compare equal"
+    },
+    "project": "unit"
   }
 ]

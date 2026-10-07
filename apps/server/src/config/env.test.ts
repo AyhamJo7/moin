@@ -143,6 +143,25 @@ describe('configuration loader (P02.03.03)', () => {
     ).toBe('http://localhost:3000');
   });
 
+  it('normalises APP_ORIGIN so equivalent spellings compare equal', () => {
+    // The review finding: `https://app.example.de/` passed validation (pathname `/`) but never
+    // equals a browser `Origin` (`https://app.example.de`), 403ing every mutation. The loader
+    // stores `URL.origin`, so both spellings — plus case and default-port variants — land equal.
+    for (const spelling of [
+      'https://app.example.de',
+      'https://app.example.de/',
+      'HTTPS://APP.EXAMPLE.DE',
+      'https://app.example.de:443',
+    ]) {
+      expect(loadConfig({ ...VALID, SERVER_ROLE: 'api', APP_ORIGIN: spelling }).APP_ORIGIN).toBe(
+        'https://app.example.de',
+      );
+    }
+    expect(
+      loadConfig({ ...VALID, SERVER_ROLE: 'api', APP_ORIGIN: 'http://localhost:3000/' }).APP_ORIGIN,
+    ).toBe('http://localhost:3000');
+  });
+
   it('refuses an APP_ORIGIN with a path, and non-HTTPS outside dev/test', () => {
     for (const origin of ['https://app.example.de/cb', 'https://app.example.de/?x=1']) {
       expect(() => loadConfig({ ...VALID, SERVER_ROLE: 'api', APP_ORIGIN: origin })).toThrow(
