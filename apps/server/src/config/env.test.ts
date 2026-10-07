@@ -143,7 +143,7 @@ describe('configuration loader (P02.03.03)', () => {
     ).toBe('http://localhost:3000');
   });
 
-  it('normalises APP_ORIGIN so equivalent spellings compare equal', () => {
+  evidenceTest('normalises APP_ORIGIN so equivalent spellings compare equal', () => {
     // The review finding: `https://app.example.de/` passed validation (pathname `/`) but never
     // equals a browser `Origin` (`https://app.example.de`), 403ing every mutation. The loader
     // stores `URL.origin`, so both spellings — plus case and default-port variants — land equal.
