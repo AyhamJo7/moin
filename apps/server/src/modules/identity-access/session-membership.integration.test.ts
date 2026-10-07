@@ -245,6 +245,7 @@ describe('signing out other devices (P06.06.05)', () => {
     expect(
       (await app.inject({ method: 'GET', url: '/probe', headers: { cookie } })).statusCode,
     ).toBe(200);
+    // eslint-disable-next-line no-restricted-syntax -- membership writes in this file go through the tenant wrapper; the rule's SET-session pattern matches the UPDATE ... SET verb text.
     await admin.query('update memberships set role = $1 where user_id = $2', ['admin', who.id]);
     contexts().clearCache();
     expect(
