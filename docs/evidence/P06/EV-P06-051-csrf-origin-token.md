@@ -11,7 +11,7 @@
 | Result | PASS |
 | CI run / artifact | pending (PR to be opened as draft) |
 | Reviewer | pending QG-09 triad at final SHA (security, architecture, invariant) |
-| Mutation sweep | 4/4 C variants KILLED_ASSERTION (C1–C4, measured this session); C5 dropped (timing unobservable black-box), C6 dropped (vacuous — URL parsing already refuses opaque origins); 78-variant manifest resolves |
+| Mutation sweep | 5/5 C variants KILLED_ASSERTION (C1–C4, C7) (C1–C4, measured this session); C5 dropped (timing unobservable black-box), C6 dropped (vacuous — URL parsing already refuses opaque origins); 78-variant manifest resolves |
 | QG-09 status | NOT re-run at this SHA. Required before READY_FOR_REVIEW. |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).
