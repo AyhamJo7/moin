@@ -135,7 +135,14 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
     'a6158abf64196e357060054092488756',
   'app.resolve_session': '3b06721c6c8d393e60ff0bcfaa70477d',
   'app.revoke_session': 'a4a30b649c5abf56fab3563d20576aa8',
-  'app.resolve_request_context': '43fe239ef436231069f7058a197202c8',
+  'app.resolve_request_context': '3e250049a4d4da3be09204c3dc756125',
+  // Revocation (P06.06.05): the one implementation, its two entry points and the trigger that
+  // calls it on every membership change. A body that returned without revoking would keep every
+  // name, owner, signature and grant, and every session would outlive the change that ended it.
+  'app.revoke_user_sessions': 'e0be457ef52462b1ec66b2e395ceec0e',
+  'app.revoke_session(bytea, text)': 'c96f3909b3a87d4bab0ef678b33ec11b',
+  'app.revoke_session(uuid, text)': '5e600197d52d7d4f18abe1bf272578b7',
+  'app.revoke_sessions_on_access_change': '7eaf25b9c8c9e0e77307b009507a1553',
 };
 
 /** Reviewed QG-09 contract. Documentation registration alone cannot change privileges. */
@@ -248,6 +255,34 @@ const APPROVED_DEFINERS: Readonly<
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
     executeGrantees: ['moin_identity'],
+  },
+  // Revocation (P06.06.05). Two more overloads of `revoke_session` — the bare name, so the
+  // seven-name identity set that every host's readiness probe counts does not change mid-rollout.
+  'app.revoke_session(bytea, text)': {
+    arguments: 'bytea, text',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: ['moin_identity'],
+  },
+  'app.revoke_session(uuid, text)': {
+    arguments: 'uuid, text',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: ['moin_identity'],
+  },
+  // Nobody executes these two: the empty grantee list is the assertion. The helper runs only from
+  // the functions above and the trigger runs only as the table's trigger.
+  'app.revoke_user_sessions': {
+    arguments: 'uuid, bytea, text',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: [],
+  },
+  'app.revoke_sessions_on_access_change': {
+    arguments: '',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: [],
   },
 };
 
@@ -438,6 +473,19 @@ const APPEND_ONLY_TABLES: readonly {
     triggerType: TRUNCATE_TRIGGER_TYPE,
   },
 ];
+
+/**
+ * The trigger that ends a person's sessions when their membership changes (P06.06.05, FS-16).
+ *
+ * Disabled, or `ENABLE` rather than `ENABLE ALWAYS`, it reads as installed and revokes nothing: a
+ * role change, a removal or a suspension would leave every session issued for the old answer alive.
+ */
+const REVOCATION_TRIGGER = {
+  table: 'memberships',
+  trigger: 'memberships_revoke_sessions',
+  fn: 'app.revoke_sessions_on_access_change()',
+  triggerType: 25, // row (1) + update (16) + delete (8); AFTER, so no before bit (2)
+} as const;
 
 /** The trigger that registers a tenant's chain when its organisation row is created. */
 const REGISTRY_TRIGGER = {
@@ -858,6 +906,30 @@ export async function inspect(
           detail:
             'the reviewed guard trigger is disabled, is not ENABLE ALWAYS (so replica mode skips ' +
             'it), covers different events, or points at a different function.',
+        });
+      }
+    }
+
+    if (present.has(REVOCATION_TRIGGER.table) && present.has('sessions')) {
+      const triggers = (
+        await pool.query<AuditTriggerRow>(AUDIT_TRIGGER_QUERY, [
+          REVOCATION_TRIGGER.table,
+          REVOCATION_TRIGGER.fn,
+        ])
+      ).rows;
+      const guard = triggers.find((trigger) => trigger.name === REVOCATION_TRIGGER.trigger);
+      if (
+        guard?.enabled !== TRIGGER_ALWAYS ||
+        guard.trigger_type !== REVOCATION_TRIGGER.triggerType ||
+        !guard.correct_function
+      ) {
+        findings.push({
+          rule: 'session-revocation-trigger-unsafe',
+          subject: REVOCATION_TRIGGER.table,
+          detail:
+            'the trigger that revokes sessions when a membership changes is absent, disabled, not ' +
+            'ENABLE ALWAYS (so replica mode skips it), covers different events, or points at a ' +
+            'different function, so a role change or removal would leave old sessions alive.',
         });
       }
     }

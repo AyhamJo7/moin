@@ -51,6 +51,8 @@ function store(
       throw new Error('resolveSession must not be called: single-query invariant');
     },
     revokeSession: () => Promise.resolve(false),
+    revokeOtherSessions: () => Promise.resolve(undefined),
+    revokeAllSessions: () => Promise.resolve(0),
     resolveRequestContext: () => {
       calls += 1;
       return Promise.resolve(rows());

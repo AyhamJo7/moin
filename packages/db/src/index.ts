@@ -42,4 +42,5 @@ export type {
   ActiveMembership,
   RequestContext,
   RotationReason,
+  ResetReason,
 } from './identity-store.ts';

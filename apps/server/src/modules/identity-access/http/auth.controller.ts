@@ -1,5 +1,6 @@
 /**
- * `GET /api/auth/login`, `GET /api/auth/callback` and `POST /api/auth/step-up` (P06.06.01/.04).
+ * `GET /api/auth/login`, `GET /api/auth/callback`, `POST /api/auth/step-up` and
+ * `POST /api/auth/sign-out-others` (P06.06.01/.04/.05).
  *
  * Both are browser navigations, so both answer with a redirect on success and an RFC 9457 problem
  * on failure (ADR-0006). A problem names the coarse outcome and nothing else: whether the `state`
@@ -22,7 +23,8 @@ import {
   SIGN_IN_COOKIE,
 } from '../domain/session-policy.ts';
 import { SignInError, type SignInFailure } from '../application/sign-in.service.ts';
-import { SIGN_IN, type SignInGate } from '../identity-access.tokens.ts';
+import type { SessionService } from '../application/session.service.ts';
+import { SESSIONS, SIGN_IN, type SignInGate } from '../identity-access.tokens.ts';
 import { clearCookie, readCookie, serializeCookie } from './cookies.ts';
 import { SessionMembershipGuard } from './session-membership.guard.ts';
 
@@ -71,7 +73,10 @@ function single(query: Record<string, unknown>, key: string): string | undefined
 
 @Controller('api/auth')
 export class AuthController {
-  constructor(@Inject(SIGN_IN) private readonly gate: SignInGate) {}
+  constructor(
+    @Inject(SIGN_IN) private readonly gate: SignInGate,
+    @Inject(SESSIONS) private readonly sessions: SessionService | null,
+  ) {}
 
   @Get('login')
   async login(@Query() query: Record<string, unknown>, @Res() reply: FastifyReply): Promise<void> {
@@ -155,6 +160,39 @@ export class AuthController {
     } catch (error) {
       await this.#problem(reply, error);
     }
+  }
+
+  /**
+   * "Sign out other devices" (P06.06.05). Ends every other session of the caller's own account and
+   * keeps this one. Guarded by the session + membership gate, and the account is the presented
+   * session's owner: the request carries no user id. Answers the count and nothing else.
+   *
+   * The 30 s read cache of P06.06.03 means another device's already-cached GET may be served for
+   * up to that long in the process that cached it; mutations on those sessions fail at once.
+   */
+  @Post('sign-out-others')
+  @UseGuards(SessionMembershipGuard)
+  async signOutOthers(
+    @Headers('cookie') cookieHeader: string | undefined,
+    @Res() reply: FastifyReply,
+  ): Promise<void> {
+    void reply.header('cache-control', 'no-store');
+    if (this.sessions === null) {
+      await this.#problem(reply, new SignInError('unavailable', 'identity_not_configured'));
+      return;
+    }
+    const revoked = await this.sessions.revokeOthers(readCookie(cookieHeader, SESSION_COOKIE));
+    if (revoked === undefined) {
+      // Valid a moment ago at the guard, not valid now: the session lapsed or was revoked in
+      // between. Same answer as the guard's, naming nothing.
+      await reply.code(401).header('content-type', 'application/problem+json').send({
+        type: '/problems/unauthenticated',
+        title: 'Authentication is required',
+        status: 401,
+      });
+      return;
+    }
+    await reply.code(200).send({ revoked });
   }
 
   #service() {

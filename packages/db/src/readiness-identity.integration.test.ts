@@ -56,6 +56,8 @@ describe('the identity pool readiness probe', () => {
          and not has_function_privilege('moin_app', 'app.resolve_session(bytea)', 'EXECUTE')
          and not has_function_privilege('moin_app', 'app.resolve_request_context(bytea)', 'EXECUTE')
          and not has_function_privilege('moin_app', 'app.revoke_session(bytea)', 'EXECUTE')
+         and not has_function_privilege('moin_app', 'app.revoke_session(bytea, text)', 'EXECUTE')
+         and not has_function_privilege('moin_app', 'app.revoke_session(uuid, text)', 'EXECUTE')
          and d.functions @> d.expected and d.functions <@ d.expected and d.total = 7
          as ok
         from pg_roles r,
@@ -117,6 +119,8 @@ describe('the identity pool readiness probe', () => {
       'grant execute on function app.rotate_session(bytea, bytea, uuid, text, timestamptz) to moin_app',
       'grant execute on function app.resolve_session(bytea) to moin_app',
       'grant execute on function app.revoke_session(bytea) to moin_app',
+      'grant execute on function app.revoke_session(bytea, text) to moin_app',
+      'grant execute on function app.revoke_session(uuid, text) to moin_app',
     ];
     const revokes = grants.map((grant) =>
       grant.replace('grant execute', 'revoke execute').replace(' to moin_app', ' from moin_app'),

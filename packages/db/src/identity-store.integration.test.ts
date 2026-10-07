@@ -147,6 +147,8 @@ function directCalls(subject: string, tokenHash: Buffer): [string, string, unkno
       [tokenHash, hash(), randomUUID(), 'step_up'],
     ],
     ['revoke_session', 'select app.revoke_session($1::bytea)', [tokenHash]],
+    ['revoke_session(bytea,text)', "select app.revoke_session($1::bytea, 'others')", [tokenHash]],
+    ['revoke_session(uuid,text)', "select app.revoke_session($1::uuid, 'mfa_reset')", [randomUUID()]],
   ];
 }
 
@@ -1981,4 +1983,280 @@ describe('the request-context membership lock (MWAIT)', () => {
       waiter.release();
     }
   });
+});
+
+describe('session revocation (P06.06.05)', () => {
+  async function membershiped() {
+    const person = await user();
+    const { tokenHash } = await signIn(person.sub);
+    const org = randomUUID();
+    await admin.query('insert into organisations (id, slug, name) values ($1, $2, $3)', [
+      org,
+      `rv-${org.slice(0, 8)}`,
+      'Revoke Org',
+    ]);
+    await admin.query(
+      'insert into memberships (organisation_id, id, user_id, role, status) values ($1, $2, $3, $4, $5)',
+      [org, randomUUID(), person.id, 'owner', 'active'],
+    );
+    return { person, tokenHash, org };
+  }
+
+  evidenceTest('a role change revokes every session with reason role_change', async () => {
+    const { person, tokenHash, org } = await membershiped();
+    const secondHash = hash();
+    const rotated = await identity.query('select * from app.rotate_session($1, $2, $3, $4)', [
+      tokenHash,
+      secondHash,
+      randomUUID(),
+      'privilege_change',
+    ]);
+    expect(rotated.rowCount, 'rotate mints the second session').toBe(1);
+    const gate = await database.pool().connect();
+    try {
+      await gate.query('begin');
+      await gate.query("select set_config('app.organisation_id', $1, true)", [org]);
+      await gate.query('update memberships set role = $1 where user_id = $2', ['admin', person.id]);
+      await gate.query('commit');
+      for (const [digest, expected] of [
+        [tokenHash, 'rotated'],
+        [secondHash, 'role_change'],
+      ] as const) {
+        const row = await admin.query<{
+          revoked_at: Date | null;
+          revocation_reason: string | null;
+        }>('select revoked_at, revocation_reason from sessions where token_hash = $1', [digest]);
+        expect(row.rows[0]?.revoked_at, 'stale session after role change').not.toBeNull();
+        expect(row.rows[0]?.revocation_reason, 'reason of ended session').toBe(expected);
+      }
+      expect(await store.resolveSession(tokenHash)).toBeUndefined();
+    } finally {
+      gate.release();
+    }
+  });
+
+  evidenceTest(
+    'a status change revokes with membership_status, and re-enabling revives nothing',
+    async () => {
+      const { person, tokenHash, org } = await membershiped();
+      const gate = await database.fixturePool().connect();
+      try {
+        await gate.query('begin');
+        await gate.query("select set_config('app.organisation_id', $1, true)", [org]);
+        await gate.query("update memberships set status = 'disabled' where user_id = $1", [
+          person.id,
+        ]);
+        await gate.query('commit');
+        const row = await admin.query<{ revocation_reason: string | null }>(
+          'select revocation_reason from sessions where token_hash = $1',
+          [tokenHash],
+        );
+        expect(row.rows[0]?.revocation_reason).toBe('membership_status');
+        await gate.query('begin');
+        await gate.query("select set_config('app.organisation_id', $1, true)", [org]);
+        await gate.query("update memberships set status = 'active' where user_id = $1", [
+          person.id,
+        ]);
+        await gate.query('commit');
+        expect(await store.resolveSession(tokenHash)).toBeUndefined();
+      } finally {
+        gate.release();
+      }
+    },
+  );
+
+  evidenceTest('removal revokes with membership_removed and wipes provider tokens', async () => {
+    const { person, tokenHash, org } = await membershiped();
+    const gate = await database.fixturePool().connect();
+    try {
+      await gate.query('begin');
+      await gate.query("select set_config('app.organisation_id', $1, true)", [org]);
+      await gate.query('delete from memberships where user_id = $1', [person.id]);
+      await gate.query('commit');
+      const row = await admin.query<{
+        revocation_reason: string | null;
+        provider_tokens_sealed: Buffer | null;
+      }>('select revocation_reason, provider_tokens_sealed from sessions where token_hash = $1', [
+        tokenHash,
+      ]);
+      expect(row.rows[0]?.revocation_reason).toBe('membership_removed');
+      expect(row.rows[0]?.provider_tokens_sealed).toBeNull();
+    } finally {
+      gate.release();
+    }
+  });
+
+  evidenceTest('an unrelated membership update revokes nothing', async () => {
+    const { person, tokenHash, org } = await membershiped();
+    const gate = await database.fixturePool().connect();
+    try {
+      await gate.query('begin');
+      await gate.query("select set_config('app.organisation_id', $1, true)", [org]);
+      await gate.query('update memberships set version = version + 1 where user_id = $1', [
+        person.id,
+      ]);
+      await gate.query('commit');
+      expect(await store.resolveSession(tokenHash)).toBeDefined();
+    } finally {
+      gate.release();
+    }
+  });
+
+  evidenceTest('sign-out-others keeps the presented session and ends the rest', async () => {
+    const { person, tokenHash } = await membershiped();
+    const first = await signIn(person.sub);
+    const secondHash = hash();
+    // A fresh sign-in supersedes the whole family, so only a directly seeded session stands in
+    // for "another device" here (admin fixture connection, checkout-wide pattern).
+    await admin.query(
+      `with t as (select clock_timestamp() as now)
+       insert into sessions (token_hash, id, family_id, user_id, rotation_reason, created_at,
+        last_seen_at, idle_expires_at, absolute_expires_at, provider_tokens_sealed,
+        provider_tokens_key_id)
+       select $1, $2, $2, user_id, 'login',
+         t.now, t.now,
+         t.now + interval '12 hours', t.now + interval '7 days',
+         $3, 'test-v1'
+       from sessions, t where token_hash = $4`,
+      [secondHash, randomUUID(), sealed(), first.tokenHash],
+    );
+    // `membershiped()`'s own session is the second live session of this person: `signIn` does
+    // not supersede without a replaced cookie, so "other devices" is both of them.
+    const kept = await store.revokeOtherSessions(first.tokenHash);
+    expect(kept).toBe(2);
+    expect(await store.resolveSession(first.tokenHash)).toBeDefined();
+    expect(await store.resolveSession(secondHash)).toBeUndefined();
+    expect(await store.resolveSession(tokenHash)).toBeUndefined();
+    const row = await admin.query<{ revocation_reason: string | null }>(
+      'select revocation_reason from sessions where token_hash = $1',
+      [secondHash],
+    );
+    expect(row.rows[0]?.revocation_reason).toBe('sign_out_others');
+  });
+
+  evidenceTest(
+    'a dead cookie revokes nothing, and a live one is only ended by its owner',
+    async () => {
+      const { person, tokenHash: helperHash } = await membershiped();
+      const live = await signIn(person.sub);
+      expect(await store.revokeOtherSessions(hash())).toBeUndefined();
+      expect(await store.resolveSession(live.tokenHash)).toBeDefined();
+      const stranger = await user();
+      const { tokenHash: theirHash } = await signIn(stranger.sub);
+    const otherHash = hash();
+    await admin.query(
+      `with t as (select clock_timestamp() as now)
+       insert into sessions (token_hash, id, family_id, user_id, rotation_reason, created_at,
+        last_seen_at, idle_expires_at, absolute_expires_at, provider_tokens_sealed,
+        provider_tokens_key_id)
+       select $1, $2, $2, user_id, 'login',
+         t.now, t.now,
+         t.now + interval '12 hours', t.now + interval '7 days',
+         $3, 'test-v1'
+       from sessions, t where token_hash = $4`,
+      [otherHash, randomUUID(), sealed(), theirHash],
+    );
+      const before = await admin.query(
+        'select revoked_at is null as live from sessions where token_hash = $1',
+        [theirHash],
+      );
+      expect(before.rows[0]?.live).toBe(true);
+      // The second argument is a scope, never a person: no caller can name another's sessions,
+      // whatever bytes land in the first. A cross-user revocation would return a count here.
+      expect(await store.revokeOtherSessions(theirHash)).toBe(1);
+      // Only the stranger's other session ended: nothing of ours, and nothing of the helper's.
+      const stray = await admin.query<{ n: string }>(
+        "select count(*)::text as n from sessions where user_id = $1 and revoked_at is not null",
+        [person.id],
+      );
+      expect(stray.rows[0]?.n).toBe('0');
+      expect(await store.resolveSession(live.tokenHash)).toBeDefined();
+      expect(await store.resolveSession(helperHash)).toBeDefined();
+    },
+  );
+
+  evidenceTest('password and MFA resets end every session with their own reason', async () => {
+    for (const reason of ['password_reset', 'mfa_reset'] as const) {
+      const person = await user();
+      await signIn(person.sub);
+      await signIn(person.sub);
+      expect(await store.revokeAllSessions(person.id, reason)).toBe(2);
+      const rows = await admin.query<{ n: string }>(
+        'select count(*)::text as n from sessions where user_id = $1 and revocation_reason = $2 and provider_tokens_sealed is null',
+        [person.id, reason],
+      );
+      expect(rows.rows[0]?.n, `sessions ended by ${reason}`).toBe('2');
+    }
+  });
+
+  evidenceTest(
+    'nobody executes the helper or the trigger function, not even moin_identity',
+    async () => {
+      const nobody = [identity, app] as const;
+      for (const role of nobody) {
+        await expect(
+          role.query('select app.revoke_user_sessions($1::uuid, null, $2::text)', [
+            randomUUID(),
+            'role_change',
+          ]),
+        ).rejects.toMatchObject({ code: '42501' });
+        await expect(
+          role.query('select app.revoke_sessions_on_access_change()'),
+        ).rejects.toMatchObject({ code: '42501' });
+      }
+      await expect(
+        identity.query("select app.revoke_session($1::bytea, 'bogus')", [hash()]),
+      ).rejects.toMatchObject({ code: '22023' });
+      await expect(
+        identity.query("select app.revoke_session($1::uuid, 'bogus')", [randomUUID()]),
+      ).rejects.toMatchObject({ code: '22023' });
+    },
+  );
+
+  evidenceTest(
+    'a role change racing a request cannot deadlock: request sees membership first',
+    async () => {
+      const { person, tokenHash, org } = await membershiped();
+      const gate = await database.fixturePool().connect();
+      try {
+        // The request locks the membership first, so it never holds a session while it waits on a
+        // writer holding the membership — the AB-BA that 0014's order left open.
+        await gate.query('begin');
+        await gate.query("select set_config('app.organisation_id', $1, true)", [org]);
+        const pending = gate.query('select * from app.resolve_request_context($1::bytea)', [
+          tokenHash,
+        ]);
+        const writer = await database.fixturePool().connect();
+        try {
+          await writer.query('begin');
+          await writer.query("select set_config('app.organisation_id', $1, true)", [org]);
+          const racing = writer.query("update memberships set role = 'admin' where user_id = $1", [
+            person.id,
+          ]);
+          const deadline = Date.now() + LOCK_WAIT_DEADLINE_MS;
+          let waiting = '0';
+          while (waiting !== '1' && Date.now() < deadline) {
+            await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT_POLL_MS));
+            const result = await admin.query<{ n: string }>(
+              "select count(*)::text as n from pg_stat_activity where wait_event_type = 'Lock' and datname = $1",
+              [database.name],
+            );
+            waiting = result.rows[0]?.n ?? '0';
+          }
+          // The writer waits on the membership (no session held), and the request never waits on a
+          // session while holding it: the request holds the membership, the writer holds nothing.
+          await gate.query('commit');
+          const seen = await pending;
+          await writer.query('commit');
+          await racing;
+          expect(seen.rowCount, 'request resolves before role change commits').toBe(1);
+          expect(await store.resolveSession(tokenHash)).toBeUndefined();
+        } finally {
+          writer.release();
+        }
+      } finally {
+        gate.release();
+      }
+    },
+  );
 });

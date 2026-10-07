@@ -28,7 +28,7 @@
   {
     "id": "P2-pkce-verifier-dropped",
     "invariant": "P06.06.01: the code is redeemed with its PKCE verifier",
-    "expected": "The exchange would omit the verifier; a provider that enforces PKCE refuses it, so sign-in breaks \u2014 and one that does not would redeem a stolen code.",
+    "expected": "The exchange would omit the verifier; a provider that enforces PKCE refuses it, so sign-in breaks — and one that does not would redeem a stolen code.",
     "file": "apps/server/src/modules/identity-access/infrastructure/oidc-provider.ts",
     "find": "          code_verifier: codeVerifier,\n",
     "replace": "",
@@ -105,7 +105,7 @@
   },
   {
     "id": "F1-relogin-leaves-old-session",
-    "invariant": "P06.06.02: login rotates \u2014 the session the browser held does not survive as a parallel login",
+    "invariant": "P06.06.02: login rotates — the session the browser held does not survive as a parallel login",
     "expected": "Signing in again would leave the previous session valid and unnoticed.",
     "file": "packages/db/migrations/0015_step_up_mfa.sql",
     "find": "    SET revoked_at = v_now, revocation_reason = 'superseded',\n        provider_tokens_sealed = NULL, provider_tokens_key_id = NULL\n",
@@ -171,7 +171,7 @@
   {
     "id": "C1-cookie-without-httponly",
     "invariant": "Security Architecture: `__Host-moin_sid` is HttpOnly",
-    "expected": "Script on the page \u2014 any XSS \u2014 could read the session token.",
+    "expected": "Script on the page — any XSS — could read the session token.",
     "file": "apps/server/src/modules/identity-access/http/cookies.ts",
     "find": "const ATTRIBUTES = 'Path=/; HttpOnly; Secure; SameSite=Lax';\n",
     "replace": "const ATTRIBUTES = 'Path=/; Secure; SameSite=Lax';\n",
@@ -255,7 +255,7 @@
     "replace": "GRANT EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea, timestamptz) TO moin_identity, moin_app;\n",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
-      "fullName": "moin_app \u2014 the voice and worker role \u2014 and sessions > cannot mint, resolve, rotate or revoke a session by calling the functions"
+      "fullName": "moin_app — the voice and worker role — and sessions > cannot mint, resolve, rotate or revoke a session by calling the functions"
     },
     "project": "integration"
   },
@@ -268,7 +268,7 @@
     "replace": "GRANT EXECUTE ON FUNCTION app.revoke_session(bytea) TO moin_identity;\nGRANT SELECT, INSERT, UPDATE, DELETE ON TABLE sessions TO moin_identity;\n",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
-      "fullName": "moin_identity \u2014 the api-only session role > has no table privilege anywhere, tenant table or session table"
+      "fullName": "moin_identity — the api-only session role > has no table privilege anywhere, tenant table or session table"
     },
     "project": "integration"
   },
@@ -281,7 +281,7 @@
     "replace": "GRANT USAGE ON SCHEMA public, app TO moin_identity;\nGRANT SELECT ON TABLE organisations TO moin_identity;\n",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
-      "fullName": "moin_identity \u2014 the api-only session role > has no table privilege anywhere, tenant table or session table"
+      "fullName": "moin_identity — the api-only session role > has no table privilege anywhere, tenant table or session table"
     },
     "project": "integration"
   },
@@ -294,7 +294,7 @@
     "replace": "GRANT EXECUTE ON FUNCTION app.revoke_session(bytea) TO moin_identity;\nGRANT EXECUTE ON FUNCTION app.audit_chain_high_water() TO moin_identity;\n",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
-      "fullName": "moin_identity \u2014 the api-only session role > cannot execute any other privileged function"
+      "fullName": "moin_identity — the api-only session role > cannot execute any other privileged function"
     },
     "project": "integration"
   },
@@ -398,7 +398,7 @@
     "replace": "",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
-      "fullName": "moin_identity \u2014 the api-only session role > is unprivileged, a member of nothing, and owns nothing"
+      "fullName": "moin_identity — the api-only session role > is unprivileged, a member of nothing, and owns nothing"
     },
     "project": "integration"
   },
@@ -515,7 +515,7 @@
     "replace": "",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
-      "fullName": "moin_identity \u2014 the api-only session role > is unprivileged, a member of nothing, and owns nothing"
+      "fullName": "moin_identity — the api-only session role > is unprivileged, a member of nothing, and owns nothing"
     },
     "project": "integration"
   },
@@ -615,8 +615,8 @@
     "invariant": "P06.06.01: consume reads the clock only after the transaction claim",
     "expected": "A consume that reads the clock before winning the transaction row would return secret material for a transaction that expired during the wait.",
     "file": "packages/db/migrations/0015_step_up_mfa.sql",
-    "find": "  -- The DELETE claims the transaction single-use: whichever caller wins the row lock deletes it\n  -- and every other presentation finds nothing. The binding is compared before the clock is read:\n  -- a foreign browser burns the transaction above and learns nothing about its expiry. The clock\n  -- is read only after that claim's lock wait completes, so an expiry that lapses while this call\n  -- blocks is already expired when the validation below runs. The claimed material is returned\n  -- only when it is still usable \u2014 never its nonce, verifier, or return path otherwise.\n  DELETE FROM public.auth_transactions t\n  WHERE t.state_hash = p_state_hash\n  RETURNING t.binding_hash, t.nonce_hash, t.verifier_sealed, t.key_id, t.return_to,\n            t.step_up_session_id, t.expires_at\n  INTO v_claimed_binding, v_claimed_nonce, v_claimed_verifier, v_claimed_key, v_claimed_return,\n       v_claimed_step_up, v_claimed_expires;\n  IF NOT FOUND THEN\n    RETURN;\n  END IF;\n\n  IF v_claimed_binding IS DISTINCT FROM p_binding_hash THEN\n    RETURN;\n  END IF;\n\n  v_now := clock_timestamp();",
-    "replace": "  -- The DELETE claims the transaction single-use: whichever caller wins the row lock deletes it\n  -- and every other presentation finds nothing. The binding is compared before the clock is read:\n  -- a foreign browser burns the transaction above and learns nothing about its expiry. The clock\n  -- is read only after that claim's lock wait completes, so an expiry that lapses while this call\n  -- blocks is already expired when the validation below runs. The claimed material is returned\n  -- only when it is still usable \u2014 never its nonce, verifier, or return path otherwise.\n  v_now := clock_timestamp();\n  DELETE FROM public.auth_transactions t\n  WHERE t.state_hash = p_state_hash\n  RETURNING t.binding_hash, t.nonce_hash, t.verifier_sealed, t.key_id, t.return_to,\n            t.step_up_session_id, t.expires_at\n  INTO v_claimed_binding, v_claimed_nonce, v_claimed_verifier, v_claimed_key, v_claimed_return,\n       v_claimed_step_up, v_claimed_expires;\n  IF NOT FOUND THEN\n    RETURN;\n  END IF;\n\n  IF v_claimed_binding IS DISTINCT FROM p_binding_hash THEN\n    RETURN;\n  END IF;",
+    "find": "  -- The DELETE claims the transaction single-use: whichever caller wins the row lock deletes it\n  -- and every other presentation finds nothing. The binding is compared before the clock is read:\n  -- a foreign browser burns the transaction above and learns nothing about its expiry. The clock\n  -- is read only after that claim's lock wait completes, so an expiry that lapses while this call\n  -- blocks is already expired when the validation below runs. The claimed material is returned\n  -- only when it is still usable — never its nonce, verifier, or return path otherwise.\n  DELETE FROM public.auth_transactions t\n  WHERE t.state_hash = p_state_hash\n  RETURNING t.binding_hash, t.nonce_hash, t.verifier_sealed, t.key_id, t.return_to,\n            t.step_up_session_id, t.expires_at\n  INTO v_claimed_binding, v_claimed_nonce, v_claimed_verifier, v_claimed_key, v_claimed_return,\n       v_claimed_step_up, v_claimed_expires;\n  IF NOT FOUND THEN\n    RETURN;\n  END IF;\n\n  IF v_claimed_binding IS DISTINCT FROM p_binding_hash THEN\n    RETURN;\n  END IF;\n\n  v_now := clock_timestamp();",
+    "replace": "  -- The DELETE claims the transaction single-use: whichever caller wins the row lock deletes it\n  -- and every other presentation finds nothing. The binding is compared before the clock is read:\n  -- a foreign browser burns the transaction above and learns nothing about its expiry. The clock\n  -- is read only after that claim's lock wait completes, so an expiry that lapses while this call\n  -- blocks is already expired when the validation below runs. The claimed material is returned\n  -- only when it is still usable — never its nonce, verifier, or return path otherwise.\n  v_now := clock_timestamp();\n  DELETE FROM public.auth_transactions t\n  WHERE t.state_hash = p_state_hash\n  RETURNING t.binding_hash, t.nonce_hash, t.verifier_sealed, t.key_id, t.return_to,\n            t.step_up_session_id, t.expires_at\n  INTO v_claimed_binding, v_claimed_nonce, v_claimed_verifier, v_claimed_key, v_claimed_return,\n       v_claimed_step_up, v_claimed_expires;\n  IF NOT FOUND THEN\n    RETURN;\n  END IF;\n\n  IF v_claimed_binding IS DISTINCT FROM p_binding_hash THEN\n    RETURN;\n  END IF;",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "a sign-in transaction > waiting on the transaction lock past expiry (CWAIT) > CWAIT1: expiry during the wait returns nothing and stays consumed"
@@ -652,7 +652,7 @@
   {
     "id": "S2-state-validation-bypassed",
     "invariant": "P06.06.01: a callback completes only from the browser that started it, before expiry",
-    "expected": "Any browser holding a victim's `state` \u2014 the login-CSRF case \u2014 could complete the sign-in, at any time.",
+    "expected": "Any browser holding a victim's `state` — the login-CSRF case — could complete the sign-in, at any time.",
     "file": "packages/db/migrations/0015_step_up_mfa.sql",
     "find": "  IF v_claimed_binding IS DISTINCT FROM p_binding_hash THEN\n    RETURN;\n  END IF;",
     "replace": "  IF v_claimed_binding IS DISTINCT FROM v_claimed_binding THEN\n    RETURN;\n  END IF;",
@@ -830,5 +830,122 @@
       "fullName": "RequestContextService > refuses a cached verdict past the stamp expiry, inside the 30 s TTL"
     },
     "project": "unit"
+  },
+  {
+    "id": "RV1-role-change-keeps-sessions",
+    "invariant": "P06.06.05: a role or permission change ends the session",
+    "expected": "A demotion would leave the old-privilege session live. The per-request row is refused, but the row and its sealed tokens would outlive it.",
+    "file": "packages/db/migrations/0016_session_revocation.sql",
+    "find": "  ELSIF NEW.role IS DISTINCT FROM OLD.role OR NEW.permissions IS DISTINCT FROM OLD.permissions THEN\n    PERFORM app.revoke_user_sessions(NEW.user_id, NULL, 'role_change');",
+    "replace": "  ELSIF NEW.role IS DISTINCT FROM OLD.role OR NEW.permissions IS DISTINCT FROM OLD.permissions THEN\n    NULL;",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "session revocation (P06.06.05) > a role change revokes every session with reason role_change"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "RV2-disable-revives-session",
+    "invariant": "P06.06.05: disablement ends the session so re-enabling revives nothing",
+    "expected": "A disabled-then-reenabled member's old session would resolve again: removal of access without revocation is a suspension anyone can undo.",
+    "file": "packages/db/migrations/0016_session_revocation.sql",
+    "find": "  ELSIF NEW.status IS DISTINCT FROM OLD.status THEN\n    PERFORM app.revoke_user_sessions(NEW.user_id, NULL, 'membership_status');",
+    "replace": "  ELSIF NEW.status IS DISTINCT FROM OLD.status THEN\n    NULL;",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "session revocation (P06.06.05) > a status change revokes with membership_status, and re-enabling revives nothing"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "RV3-removal-keeps-session",
+    "invariant": "P06.06.05: membership removal ends the session",
+    "expected": "A removed member's session would stay live holding sealed provider tokens; only the per-request refusal would stand between it and data.",
+    "file": "packages/db/migrations/0016_session_revocation.sql",
+    "find": "  IF TG_OP = 'DELETE' THEN\n    PERFORM app.revoke_user_sessions(OLD.user_id, NULL, 'membership_removed');\n    RETURN OLD;",
+    "replace": "  IF TG_OP = 'DELETE' THEN\n    RETURN OLD;",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "session revocation (P06.06.05) > removal revokes with membership_removed and wipes provider tokens"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "RV4-unconditional-revocation",
+    "invariant": "P06.06.05: unrelated membership writes revoke nothing",
+    "expected": "Every membership touch (a version bump, a timestamp) would sign the person out of all devices: revocation as noise, trained to be ignored.",
+    "file": "packages/db/migrations/0016_session_revocation.sql",
+    "find": "  ELSIF NEW.status IS DISTINCT FROM OLD.status THEN\n    PERFORM app.revoke_user_sessions(NEW.user_id, NULL, 'membership_status');\n  END IF;",
+    "replace": "  PERFORM app.revoke_user_sessions(NEW.user_id, NULL, 'membership_status');",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "session revocation (P06.06.05) > an unrelated membership update revokes nothing"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "RV5-sign-out-others-spares-nothing",
+    "invariant": "P06.06.05: sign-out-others keeps the presented session",
+    "expected": "The endpoint meant to shed other devices would also kill the caller's own session: the user who asked for safety is signed out instead.",
+    "file": "packages/db/migrations/0016_session_revocation.sql",
+    "find": "    AND (p_keep_token_hash IS NULL OR s.token_hash <> p_keep_token_hash);",
+    "replace": "    ;",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "session revocation (P06.06.05) > sign-out-others keeps the presented session and ends the rest"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "RV6-dead-cookie-revokes",
+    "invariant": "P06.06.05: a dead cookie revokes nothing",
+    "expected": "A stolen-but-expired cookie presented to sign-out-others would end the victim's live sessions: the weaponised sign-out.",
+    "file": "packages/db/migrations/0016_session_revocation.sql",
+    "find": "    IF NOT FOUND THEN\n      RETURN NULL;\n    END IF;",
+    "replace": "    IF NOT FOUND THEN\n      NULL;\n    END IF;",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "session revocation (P06.06.05) > a dead cookie revokes nothing, and a live one is only ended by its owner"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "RV7-reset-keeps-sessions",
+    "invariant": "P06.06.05: password/MFA reset ends every session",
+    "expected": "After a credential reset the old sessions would stay live: the attacker who stole them keeps access while the user believes they are safe.",
+    "file": "packages/db/migrations/0016_session_revocation.sql",
+    "find": "  RETURN app.revoke_user_sessions(p_user_id, NULL, p_reason);",
+    "replace": "  RETURN 0;",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "session revocation (P06.06.05) > password and MFA resets end every session with their own reason"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "RV8-revocation-keeps-tokens",
+    "invariant": "P06.06.05: revocation wipes sealed provider tokens",
+    "expected": "Revoked sessions would keep sealed refresh material: dead sessions as a token store, readable by any future reader of the table.",
+    "file": "packages/db/migrations/0016_session_revocation.sql",
+    "find": "  SET revoked_at = v_now, revocation_reason = p_reason,\n      provider_tokens_sealed = NULL, provider_tokens_key_id = NULL\n  WHERE s.user_id = p_user_id",
+    "replace": "  SET revoked_at = v_now, revocation_reason = p_reason\n  WHERE s.user_id = p_user_id",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "session revocation (P06.06.05) > removal revokes with membership_removed and wipes provider tokens"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "RV9-revocation-clock-before-locks",
+    "invariant": "P06.06.05: the revocation clock is sampled after the locks",
+    "expected": "A revocation that waited on a held family lock would stamp an expiry against time sampled before the wait: a session lapsing during the wait could be treated as live.",
+    "file": "packages/db/migrations/0016_session_revocation.sql",
+    "find": "  -- The clock is read only after every lock is held, so a wait cannot leave it stale.\n  v_now := clock_timestamp();",
+    "replace": "  v_now := clock_timestamp();",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "session revocation (P06.06.05) > a role change racing a request cannot deadlock: request sees membership first"
+    },
+    "project": "integration"
   }
 ]

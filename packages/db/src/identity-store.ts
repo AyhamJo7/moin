@@ -2,7 +2,7 @@
  * The sign-in and session store (P06.06.01, P06.06.02, P06.06.04, ADR-0005).
  *
  * The runtime role holds no privilege on `users`, `auth_transactions`, `sessions` or `memberships`;
- * it may only execute the seven session functions (migrations 0012/0014/0015). This module is the only
+ * it may only execute the seven session functions (migrations 0012/0014/0015/0016). This module is the only
  * caller of those functions,
  * and each method is one call, so what the database guarantees — single-use transactions, a fixed
  * absolute lifetime, final revocation, no session without an active user — is exactly what a
@@ -22,6 +22,9 @@ import type { Pool } from 'pg';
 const DIGEST_BYTES = 32;
 
 export type RotationReason = 'step_up' | 'privilege_change';
+
+/** Why every session of a person ends at once; the provider-driven resets of P06.09. */
+export type ResetReason = 'password_reset' | 'mfa_reset';
 
 export interface NewAuthTransaction {
   readonly stateHash: Buffer;
@@ -121,6 +124,18 @@ export interface IdentityStore {
    */
   resolveRequestContext(tokenHash: Buffer): Promise<RequestContext | undefined>;
   revokeSession(tokenHash: Buffer): Promise<boolean>;
+  /**
+   * "Sign out other devices" (P06.06.05): revokes every other live session of the presented
+   * session's owner and keeps the presented one. The owner comes from the presented session, never
+   * from the caller. Undefined when the presented session is not valid now: a dead cookie
+   * revokes nothing.
+   */
+  revokeOtherSessions(tokenHash: Buffer): Promise<number | undefined>;
+  /**
+   * Ends every session of a person after a password or MFA reset (P06.06.05). The caller has
+   * already established, outside this store, that the reset really happened.
+   */
+  revokeAllSessions(userId: string, reason: ResetReason): Promise<number>;
 }
 
 function digest(value: Buffer): Buffer {
@@ -239,6 +254,22 @@ export function createIdentityStore(pool: Pool): IdentityStore {
         [digest(tokenHash)],
       );
       return result.rows[0]?.revoked === true;
+    },
+
+    async revokeOtherSessions(tokenHash) {
+      const result = await pool.query<{ revoked: number | null }>(
+        "select app.revoke_session($1::bytea, 'others') as revoked",
+        [digest(tokenHash)],
+      );
+      return result.rows[0]?.revoked ?? undefined;
+    },
+
+    async revokeAllSessions(userId, reason) {
+      const result = await pool.query<{ revoked: number }>(
+        'select app.revoke_session($1::uuid, $2::text) as revoked',
+        [userId, reason],
+      );
+      return result.rows[0]?.revoked ?? 0;
     },
 
     async resolveRequestContext(tokenHash) {
