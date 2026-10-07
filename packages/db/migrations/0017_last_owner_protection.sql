@@ -44,6 +44,15 @@ BEGIN
                                  UNION SELECT NEW.organisation_id) o
       WHERE o.id IS NOT NULL
     LOOP
+      -- One serialisation point per organisation (same pattern as the per-user session-writer
+      -- lock in 0016 section 7): concurrent membership mutations of one org queue here holding
+      -- nothing else yet, so two transactions demoting the last two owners cannot both count
+      -- the other still active. READ COMMITTED gives the waiter a fresh snapshot, and it sees
+      -- what committed first. Different organisations never contend.
+      -- `last-owner:` prefix keeps this keyspace disjoint from the 0016 per-user session-writer
+      -- lock (`hashtext(user-id)`) and the provisioning lock: a uuid colliding across types
+      -- must not serialize unrelated work.
+      PERFORM pg_advisory_xact_lock(hashtext('last-owner:' || v_organisation::text));
       SELECT count(*) INTO v_owners
       FROM public.memberships m
       WHERE m.organisation_id = v_organisation

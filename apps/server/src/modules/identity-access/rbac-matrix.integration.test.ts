@@ -27,7 +27,7 @@ import { IdentityAccessModule } from './identity-access.module.ts';
 import { CONTEXT_CLOCK, IDENTITY_CLOCK, REQUEST_CONTEXTS } from './identity-access.tokens.ts';
 import { SessionMembershipGuard } from './http/session-membership.guard.ts';
 import { RequireRoleGuard } from './http/require-role.guard.ts';
-import { Require } from './http/role.ts';
+import { CAPABILITIES_KEY, Require } from './http/role.ts';
 import { startFakeOidcProvider, type FakeOidcProvider } from './__fixtures__/fake-oidc-provider.ts';
 import type { RequestContextService } from './application/request-context.service.ts';
 import type { Capability } from './domain/roles.ts';
@@ -234,20 +234,56 @@ beforeEach(() => {
   provider.claims = {};
 });
 
-/** Route → capabilities, read from the controller metadata the guard itself reads. */
+/** Route → capabilities, READ from the controller metadata the guard itself reads. */
 interface RouteSpec {
   readonly method: 'GET' | 'POST';
   readonly url: string;
   readonly capabilities: readonly Capability[];
 }
 
-const ROUTES: readonly RouteSpec[] = [
-  { method: 'GET', url: '/matrix/open', capabilities: [] },
-  { method: 'POST', url: '/matrix/admin', capabilities: ['users:manage'] },
-  { method: 'POST', url: '/matrix/owners', capabilities: ['users:manage-owners'] },
-  { method: 'POST', url: '/matrix/integrations', capabilities: ['integrations:manage'] },
-  { method: 'POST', url: '/matrix/billing', capabilities: ['billing:manage'] },
-];
+/**
+ * The matrix under test, generated from route metadata — not hand-kept. It reflects over
+ * `MatrixProbeController`: every handler becomes a row with the `@Require` capabilities the
+ * guard enforces, so a route added without metadata (or with metadata this table ignores)
+ * fails the coverage test below instead of passing silently.
+ */
+function readRoutes(): readonly RouteSpec[] {
+  const prefix = Reflect.getMetadata('path', MatrixProbeController) as string;
+  const names = Object.getOwnPropertyNames(MatrixProbeController.prototype).filter(
+    (name) => name !== 'constructor',
+  );
+  return names.map((name) => {
+    const handler = (MatrixProbeController.prototype as unknown as Record<string, unknown>)[
+      name
+    ] as (...args: never[]) => unknown;
+    const path = Reflect.getMetadata('path', handler) as string | string[];
+    const method: number = Reflect.getMetadata('method', handler) as number;
+    const capabilities =
+      (Reflect.getMetadata(CAPABILITIES_KEY, handler) as readonly Capability[] | undefined) ?? [];
+    return {
+      method: method === 0 ? ('GET' as const) : ('POST' as const),
+      url: `/${prefix}/${Array.isArray(path) ? path[0] : path}`,
+      capabilities,
+    };
+  });
+}
+
+const ROUTES: readonly RouteSpec[] = readRoutes();
+
+evidenceTest('route metadata covers every probe route', () => {
+  // Fails when a route is added without metadata this table ignores, or when the reflection
+  // above stops seeing a handler (e.g. a method-decorator API change) — the empty table would
+  // otherwise pass every loop silently.
+  expect(ROUTES.map((route) => `${route.method} ${route.url}`).sort()).toStrictEqual(
+    [
+      'GET /matrix/open',
+      'POST /matrix/admin',
+      'POST /matrix/billing',
+      'POST /matrix/integrations',
+      'POST /matrix/owners',
+    ].sort(),
+  );
+});
 
 describe('the role matrix, every route × every role (P06.07.05)', () => {
   evidenceTest('undecorated routes admit any active membership', async () => {

@@ -2356,14 +2356,14 @@ describe('session revocation (P06.06.05)', () => {
       await gate.query("update memberships set status = 'disabled' where user_id = $1", [
         person.id,
       ]);
-      // One advisory lock on this backend: the revocation's per-user serialisation lock.
-      // (Its key is hashtext of the user id, but pg_locks renders int4 keys with a
-      // path-dependent signedness, so the count on this backend is the stable assertion;
-      // RV12 removes the PERFORM and the row disappears.)
+      // The update disables one of two owners (the fixture keeps a keeper), so the
+      // last-owner lock fires and releases: two advisory locks on this backend, the
+      // revocation's per-user serialisation lock plus P06.07's per-org lock. RV12 removes
+      // the per-user PERFORM and the count drops to 1.
       const mine = await gate.query<{ n: string }>(
         `select count(*)::text as n from pg_locks where locktype = 'advisory' and pid = pg_backend_pid()`,
       );
-      expect(mine.rows[0]?.n).toBe('1');
+      expect(mine.rows[0]?.n).toBe('2');
       await gate.query('commit');
     } finally {
       gate.release();
