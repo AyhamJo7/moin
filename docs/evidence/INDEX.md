@@ -174,3 +174,4 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P06-047 | P06.06.02 | 2026-10-05 | `195a6bd69d1d` | Founder acceptance of P06.06.01/.02 at reviewed implementation 316caa6, candidate 195a6bd | [EV-P06-047-founder-acceptance.md](P06/EV-P06-047-founder-acceptance.md) |
 | EV-P06-048 | P06.06.03 | 2026-10-05 | `ea42c829a671` | per-request session validity and membership re-check; single DEFINER lookup; GET-only 30s cache | [EV-P06-048-session-membership-recheck.md](P06/EV-P06-048-session-membership-recheck.md) |
 | EV-P06-049 | P06.06.04 | 2026-10-05 | `48a551d846f9` | Step-up MFA (≤ 15 min) for sensitive actions | [EV-P06-049-step-up-mfa.md](P06/EV-P06-049-step-up-mfa.md) |
+| EV-P06-050 | P06.06.05 | 2026-10-07 | `745163b9cd54` | server-side revocation on membership change, reset and demand; trigger + overloads; 8/8 RV mutants kill; full gates 14/14 | [EV-P06-050-session-revocation.md](P06/EV-P06-050-session-revocation.md) |
