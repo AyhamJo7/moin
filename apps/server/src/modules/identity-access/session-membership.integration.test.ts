@@ -210,6 +210,64 @@ beforeEach(() => {
   provider.claims = {};
 });
 
+describe('signing out other devices (P06.06.05)', () => {
+  evidenceTest(
+    'POST /api/auth/sign-out-others ends the other sessions and keeps this one',
+    async () => {
+      const who = await person();
+      await member(who.id, ORG_A);
+      const first = await signedInCookieAs(who);
+      const second = await signedInCookieAs(who);
+      // A fresh sign-in supersedes the old family, so this endpoint's own count is the one other
+      // live session of this account.
+      const answer = await app.inject({
+        method: 'POST',
+        url: '/api/auth/sign-out-others',
+        headers: { cookie: second },
+      });
+      expect(answer.statusCode).toBe(200);
+      expect(answer.json()).toStrictEqual({ revoked: 1 });
+      expect(
+        (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: second } }))
+          .statusCode,
+      ).toBe(200);
+      // The superseded first cookie fails either way now.
+      expect(
+        (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: first } })).statusCode,
+      ).toBe(401);
+    },
+  );
+
+  evidenceTest('a role change ends the sessions it was issued for (P06.06.05)', async () => {
+    const who = await person();
+    await member(who.id, ORG_A);
+    const cookie = await signedInCookieAs(who);
+    expect(
+      (await app.inject({ method: 'GET', url: '/probe', headers: { cookie } })).statusCode,
+    ).toBe(200);
+    // eslint-disable-next-line no-restricted-syntax -- membership writes in this file go through the tenant wrapper; the rule's SET-session pattern matches the UPDATE ... SET verb text.
+    await admin.query('update memberships set role = $1 where user_id = $2', ['admin', who.id]);
+    contexts().clearCache();
+    expect(
+      (await app.inject({ method: 'GET', url: '/probe', headers: { cookie } })).statusCode,
+    ).toBe(401);
+  });
+
+  evidenceTest('removal ends the session (P06.06.05)', async () => {
+    const who = await person();
+    await member(who.id, ORG_A);
+    const cookie = await signedInCookieAs(who);
+    expect(
+      (await app.inject({ method: 'GET', url: '/probe', headers: { cookie } })).statusCode,
+    ).toBe(200);
+    await admin.query('delete from memberships where user_id = $1', [who.id]);
+    contexts().clearCache();
+    expect(
+      (await app.inject({ method: 'GET', url: '/probe', headers: { cookie } })).statusCode,
+    ).toBe(401);
+  });
+});
+
 describe('the session + membership gate', () => {
   evidenceTest('rejects a request with no session cookie', async () => {
     const response = await app.inject({ method: 'GET', url: '/probe' });

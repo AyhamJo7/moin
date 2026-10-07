@@ -8,7 +8,7 @@ import { ConfigurationError, loadConfig } from '../../config/env.ts';
 import { buildSignInGate } from './identity-access.module.ts';
 import { AuthController } from './http/auth.controller.ts';
 import { SessionMembershipGuard } from './http/session-membership.guard.ts';
-import { REQUEST_CONTEXTS, SIGN_IN } from './identity-access.tokens.ts';
+import { REQUEST_CONTEXTS, SESSIONS, SIGN_IN } from './identity-access.tokens.ts';
 import { LOGGER } from '../../observability/logger.module.ts';
 
 const store = {} as IdentityStore;
@@ -92,6 +92,7 @@ describe('the sign-in routes without sign-in', () => {
       controllers: [AuthController],
       providers: [
         { provide: SIGN_IN, useValue: { service: undefined } },
+        { provide: SESSIONS, useValue: null },
         SessionMembershipGuard,
         { provide: REQUEST_CONTEXTS, useValue: null },
         { provide: LOGGER, useValue: logger },

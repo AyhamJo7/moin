@@ -85,6 +85,8 @@ export const IDENTITY_POOL_ASSERTION = `
      and not has_function_privilege('moin_app', 'app.resolve_session(bytea)', 'EXECUTE')
      and not has_function_privilege('moin_app', 'app.resolve_request_context(bytea)', 'EXECUTE')
      and not has_function_privilege('moin_app', 'app.revoke_session(bytea)', 'EXECUTE')
+     and not has_function_privilege('moin_app', 'app.revoke_session(bytea, text)', 'EXECUTE')
+     and not has_function_privilege('moin_app', 'app.revoke_session(uuid, text)', 'EXECUTE')
      and d.functions @> d.expected and d.functions <@ d.expected and d.total = 7
      as ok
     from pg_roles r,

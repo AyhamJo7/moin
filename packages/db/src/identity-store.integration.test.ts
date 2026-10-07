@@ -14,6 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { PoolClient } from 'pg';
 import { createPool, type Pool } from './pool.ts';
 import { createIdentityStore, type IdentityStore } from './identity-store.ts';
+import { withTenant } from './tenant.ts';
 
 const HOUR_MS = 3_600_000;
 const IDLE_MS = 12 * HOUR_MS;
@@ -147,6 +148,12 @@ function directCalls(subject: string, tokenHash: Buffer): [string, string, unkno
       [tokenHash, hash(), randomUUID(), 'step_up'],
     ],
     ['revoke_session', 'select app.revoke_session($1::bytea)', [tokenHash]],
+    ['revoke_session(bytea,text)', "select app.revoke_session($1::bytea, 'others')", [tokenHash]],
+    [
+      'revoke_session(uuid,text)',
+      "select app.revoke_session($1::uuid, 'mfa_reset')",
+      [randomUUID()],
+    ],
   ];
 }
 
@@ -1981,4 +1988,383 @@ describe('the request-context membership lock (MWAIT)', () => {
       waiter.release();
     }
   });
+});
+
+describe('session revocation (P06.06.05)', () => {
+  async function membershiped() {
+    const person = await user();
+    const { tokenHash } = await signIn(person.sub);
+    const org = randomUUID();
+    await admin.query('insert into organisations (id, slug, name) values ($1, $2, $3)', [
+      org,
+      `rv-${org.slice(0, 8)}`,
+      'Revoke Org',
+    ]);
+    await admin.query(
+      'insert into memberships (organisation_id, id, user_id, role, status) values ($1, $2, $3, $4, $5)',
+      [org, randomUUID(), person.id, 'owner', 'active'],
+    );
+    return { person, tokenHash, org };
+  }
+
+  evidenceTest('a role change revokes every session with reason role_change', async () => {
+    const { person, tokenHash, org } = await membershiped();
+    const secondHash = hash();
+    const rotated = await identity.query('select * from app.rotate_session($1, $2, $3, $4)', [
+      tokenHash,
+      secondHash,
+      randomUUID(),
+      'privilege_change',
+    ]);
+    expect(rotated.rowCount, 'rotate mints the second session').toBe(1);
+    await withTenant(database.pool(), org, async (gate) => {
+      // eslint-disable-next-line no-restricted-syntax -- membership writes in this file go through the tenant wrapper; the rule's SET-session pattern matches the UPDATE ... SET verb text.
+      await gate.query('update memberships set role = $1 where user_id = $2', ['admin', person.id]);
+    });
+    for (const [digest, expected] of [
+      [tokenHash, 'rotated'],
+      [secondHash, 'role_change'],
+    ] as const) {
+      const row = await admin.query<{
+        revoked_at: Date | null;
+        revocation_reason: string | null;
+      }>('select revoked_at, revocation_reason from sessions where token_hash = $1', [digest]);
+      expect(row.rows[0]?.revoked_at, 'stale session after role change').not.toBeNull();
+      expect(row.rows[0]?.revocation_reason, 'reason of ended session').toBe(expected);
+    }
+    expect(await store.resolveSession(tokenHash)).toBeUndefined();
+  });
+
+  evidenceTest(
+    'a status change revokes with membership_status, and re-enabling revives nothing',
+    async () => {
+      const { person, tokenHash, org } = await membershiped();
+      await withTenant(database.pool(), org, async (gate) => {
+        await gate.query("update memberships set status = 'disabled' where user_id = $1", [
+          person.id,
+        ]);
+      });
+      const row = await admin.query<{ revocation_reason: string | null }>(
+        'select revocation_reason from sessions where token_hash = $1',
+        [tokenHash],
+      );
+      expect(row.rows[0]?.revocation_reason).toBe('membership_status');
+      await withTenant(database.pool(), org, async (gate) => {
+        await gate.query("update memberships set status = 'active' where user_id = $1", [
+          person.id,
+        ]);
+      });
+      expect(await store.resolveSession(tokenHash)).toBeUndefined();
+    },
+  );
+
+  evidenceTest('removal revokes with membership_removed and wipes provider tokens', async () => {
+    const { person, tokenHash, org } = await membershiped();
+    await withTenant(database.pool(), org, async (gate) => {
+      await gate.query('delete from memberships where user_id = $1', [person.id]);
+    });
+    const row = await admin.query<{
+      revocation_reason: string | null;
+      provider_tokens_sealed: Buffer | null;
+    }>('select revocation_reason, provider_tokens_sealed from sessions where token_hash = $1', [
+      tokenHash,
+    ]);
+    expect(row.rows[0]?.revocation_reason).toBe('membership_removed');
+    expect(row.rows[0]?.provider_tokens_sealed).toBeNull();
+  });
+
+  evidenceTest('an unrelated membership update revokes nothing', async () => {
+    const { person, tokenHash, org } = await membershiped();
+    await withTenant(database.pool(), org, async (gate) => {
+      await gate.query('update memberships set version = version + 1 where user_id = $1', [
+        person.id,
+      ]);
+    });
+    expect(await store.resolveSession(tokenHash)).toBeDefined();
+  });
+
+  evidenceTest('sign-out-others keeps the presented session and ends the rest', async () => {
+    const { person, tokenHash } = await membershiped();
+    const first = await signIn(person.sub);
+    const secondHash = hash();
+    // A fresh sign-in supersedes the whole family, so only a directly seeded session stands in
+    // for "another device" here (admin fixture connection, checkout-wide pattern).
+    await admin.query(
+      `with t as (select clock_timestamp() as now)
+       insert into sessions (token_hash, id, family_id, user_id, rotation_reason, created_at,
+        last_seen_at, idle_expires_at, absolute_expires_at, provider_tokens_sealed,
+        provider_tokens_key_id)
+       select $1, $2, $2, user_id, 'login',
+         t.now, t.now,
+         t.now + interval '12 hours', t.now + interval '7 days',
+         $3, 'test-v1'
+       from sessions, t where token_hash = $4`,
+      [secondHash, randomUUID(), sealed(), first.tokenHash],
+    );
+    // membershiped() already signed this person in once, and signIn does not supersede
+    // without a replaced cookie, so "other devices" is both of them.
+    const kept = await store.revokeOtherSessions(first.tokenHash);
+    expect(kept).toBe(2);
+    expect(await store.resolveSession(first.tokenHash)).toBeDefined();
+    expect(await store.resolveSession(secondHash)).toBeUndefined();
+    expect(await store.resolveSession(tokenHash)).toBeUndefined();
+    const row = await admin.query<{ revocation_reason: string | null }>(
+      'select revocation_reason from sessions where token_hash = $1',
+      [secondHash],
+    );
+    expect(row.rows[0]?.revocation_reason).toBe('sign_out_others');
+  });
+
+  evidenceTest(
+    'a dead cookie revokes nothing, and a live one is only ended by its owner',
+    async () => {
+      const { person, tokenHash: helperHash } = await membershiped();
+      const live = await signIn(person.sub);
+      expect(await store.revokeOtherSessions(hash())).toBeUndefined();
+      expect(await store.resolveSession(live.tokenHash)).toBeDefined();
+      const stranger = await user();
+      const { tokenHash: theirHash } = await signIn(stranger.sub);
+      const otherHash = hash();
+      await admin.query(
+        `with t as (select clock_timestamp() as now)
+         insert into sessions (token_hash, id, family_id, user_id, rotation_reason, created_at,
+          last_seen_at, idle_expires_at, absolute_expires_at, provider_tokens_sealed,
+          provider_tokens_key_id)
+         select $1, $2, $2, user_id, 'login',
+           t.now, t.now,
+           t.now + interval '12 hours', t.now + interval '7 days',
+           $3, 'test-v1'
+         from sessions, t where token_hash = $4`,
+        [otherHash, randomUUID(), sealed(), theirHash],
+      );
+      const before = await admin.query<{ live: boolean }>(
+        'select revoked_at is null as live from sessions where token_hash = $1',
+        [theirHash],
+      );
+      expect(before.rows[0]?.live).toBe(true);
+      // The second argument is a scope, never a person: no caller can name another's sessions,
+      // whatever bytes land in the first. A cross-user revocation would return a count here.
+      expect(await store.revokeOtherSessions(theirHash)).toBe(1);
+      // Only the stranger's other session ended: nothing of ours, and nothing of the helper's.
+      const stray = await admin.query<{ n: string }>(
+        'select count(*)::text as n from sessions where user_id = $1 and revoked_at is not null',
+        [person.id],
+      );
+      expect(stray.rows[0]?.n).toBe('0');
+      expect(await store.resolveSession(live.tokenHash)).toBeDefined();
+      expect(await store.resolveSession(helperHash)).toBeDefined();
+    },
+  );
+
+  evidenceTest('a dead presented session answers NULL, not a zero count', async () => {
+    // The NULL/number split is the endpoint's 401/200 branch: 0 would read as "signed out,
+    // nobody else was signed in". Proved at the store level because the endpoint answers the
+    // store's NULL with the same 401 the guard gives an invalid session.
+    const { person } = await membershiped();
+    const live = await signIn(person.sub);
+    expect(await store.revokeOtherSessions(live.tokenHash)).toBe(1);
+    const row = await admin.query<{ revoked_at: Date | null }>(
+      'select revoked_at from sessions where token_hash = $1',
+      [live.tokenHash],
+    );
+    expect(row.rows[0]?.revoked_at).toBeNull();
+    // Now the presented session itself is dead: the next call must answer NULL, not 0.
+    await admin.query(
+      'update sessions set idle_expires_at = clock_timestamp() where token_hash = $1',
+      [live.tokenHash],
+    );
+    expect(await store.revokeOtherSessions(live.tokenHash)).toBeUndefined();
+  });
+
+  evidenceTest('a re-pointed membership revokes the new holder too', async () => {
+    // The swap path revokes BOTH people: the new holder must not keep sessions issued before
+    // the swap. Kills RV11 (OLD-only revocation).
+    const org = randomUUID();
+    await admin.query('insert into organisations (id, slug, name) values ($1, $2, $3)', [
+      org,
+      `rp-${org.slice(0, 8)}`,
+      'Repoint Org',
+    ]);
+    const a = await user();
+    const fresh = await user();
+    await signIn(fresh.sub);
+    await admin.query(
+      'insert into memberships (organisation_id, id, user_id, role, status) values ($1, $2, $3, $4, $5)',
+      [org, randomUUID(), a.id, 'owner', 'active'],
+    );
+    const midA = (
+      await admin.query<{ id: string }>(
+        'select id from memberships where organisation_id = $1 and user_id = $2',
+        [org, a.id],
+      )
+    ).rows[0]?.id;
+    await withTenant(database.pool(), org, async (c) => {
+      await c.query('update memberships set user_id = $1 where id = $2', [fresh.id, midA]);
+    });
+    expect(await store.resolveSession((await signIn(fresh.sub)).tokenHash)).toBeDefined();
+    const live = await admin.query<{ n: string }>(
+      'select count(*)::text as n from sessions where revoked_at is null and user_id = $1',
+      [fresh.id],
+    );
+    // The pre-swap session died; the fresh sign-in above is the only live one.
+    expect(live.rows[0]?.n).toBe('1');
+  });
+
+  evidenceTest('password and MFA resets end every session with their own reason', async () => {
+    for (const reason of ['password_reset', 'mfa_reset'] as const) {
+      const person = await user();
+      await signIn(person.sub);
+      await signIn(person.sub);
+      expect(await store.revokeAllSessions(person.id, reason)).toBe(2);
+      const rows = await admin.query<{ n: string }>(
+        'select count(*)::text as n from sessions where user_id = $1 and revocation_reason = $2 and provider_tokens_sealed is null',
+        [person.id, reason],
+      );
+      expect(rows.rows[0]?.n, `sessions ended by ${reason}`).toBe('2');
+    }
+  });
+
+  evidenceTest(
+    'nobody executes the helper or the trigger function, not even moin_identity',
+    async () => {
+      const nobody = [identity, app] as const;
+      for (const role of nobody) {
+        await expect(
+          role.query('select app.revoke_user_sessions($1::uuid, null, $2::text)', [
+            randomUUID(),
+            'role_change',
+          ]),
+        ).rejects.toMatchObject({ code: '42501' });
+        await expect(
+          role.query('select app.revoke_sessions_on_membership_change()'),
+        ).rejects.toMatchObject({ code: '42501' });
+      }
+      await expect(
+        identity.query("select app.revoke_session($1::bytea, 'bogus')", [hash()]),
+      ).rejects.toMatchObject({ code: '22023' });
+      await expect(
+        identity.query("select app.revoke_session($1::uuid, 'bogus')", [randomUUID()]),
+      ).rejects.toMatchObject({ code: '22023' });
+    },
+  );
+
+  evidenceTest('a sign-in racing a revocation waits for it, then mints live (HIGH)', async () => {
+    // The HIGH finding: begin_session's INSERT was invisible to a concurrent revocation's
+    // snapshot, so a session minted mid-revocation stayed live. revoke_user_sessions now takes
+    // the user row FOR UPDATE, which conflicts with begin_session's user-row FOR SHARE: the two
+    // serialise. This proves the serialisation (the sign-in blocks until the revocation commits)
+    // and the correct end state: minted-after-revocation stays live, and a later revocation ends it.
+    const { person, org } = await membershiped();
+    const gate = await database.fixturePool().connect();
+    try {
+      // Revocation in progress, transaction held open: the trigger has fired and the helper
+      // holds the user row.
+      await gate.query('begin');
+      await gate.query('select set_config($1, $2, true)', ['app.organisation_id', org]);
+      await gate.query("update memberships set status = 'disabled' where user_id = $1", [
+        person.id,
+      ]);
+      // A concurrent sign-in must now block on the user row (SHARE vs UPDATE).
+      const racing = signIn(person.sub);
+      const deadline = Date.now() + LOCK_WAIT_DEADLINE_MS;
+      let waiting = '0';
+      while (waiting !== '1' && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT_POLL_MS));
+        const result = await admin.query<{ n: string }>(
+          "select count(*)::text as n from pg_stat_activity where wait_event_type = 'Lock' and datname = $1",
+          [database.name],
+        );
+        waiting = result.rows[0]?.n ?? '0';
+      }
+      expect(waiting, 'sign-in waits on the open revocation').toBe('1');
+      await gate.query('commit');
+      const minted = await racing;
+      // Minted after the revocation committed: live, as it should be.
+      expect(await store.resolveSession(minted.tokenHash)).toBeDefined();
+      // And a revocation after the mint ends it: nothing survives a committed revocation.
+      await withTenant(database.pool(), org, async (c) => {
+        await c.query("update memberships set status = 'active' where user_id = $1", [person.id]);
+      });
+      expect(await store.resolveSession(minted.tokenHash)).toBeUndefined();
+    } finally {
+      gate.release();
+    }
+  });
+  evidenceTest('an open revocation holds the per-user advisory lock (MEDIUM-2)', async () => {
+    // The new MEDIUM interleaving needs three parties (a sign-in minting a family, a rotation
+    // of it, and a revocation) with sub-statement timing no deterministic test can hit — that
+    // is why it is a race. What a test CAN pin is the mechanism that removes it: every session
+    // writer takes pg_advisory_xact_lock on the user-id hash before any row lock, so same-user
+    // writers serialise holding nothing. This holds a revocation open and asserts the lock is
+    // held with the expected key; without it (RV12 mutant) the pg_locks row is absent.
+    // Deadlock-freedom itself is argued in migration 0016 section 7 and the re-review.
+    const { person, org } = await membershiped();
+    const gate = await database.fixturePool().connect();
+    try {
+      await gate.query('begin');
+      await gate.query('select set_config($1, $2, true)', ['app.organisation_id', org]);
+      await gate.query("update memberships set status = 'disabled' where user_id = $1", [
+        person.id,
+      ]);
+      // One advisory lock on this backend: the revocation's per-user serialisation lock.
+      // (Its key is hashtext of the user id, but pg_locks renders int4 keys with a
+      // path-dependent signedness, so the count on this backend is the stable assertion;
+      // RV12 removes the PERFORM and the row disappears.)
+      const mine = await gate.query<{ n: string }>(
+        `select count(*)::text as n from pg_locks where locktype = 'advisory' and pid = pg_backend_pid()`,
+      );
+      expect(mine.rows[0]?.n).toBe('1');
+      await gate.query('commit');
+    } finally {
+      gate.release();
+    }
+  });
+
+  evidenceTest(
+    'a role change racing a request cannot deadlock: request sees membership first',
+    async () => {
+      const { person, tokenHash, org } = await membershiped();
+      const gate = await database.fixturePool().connect();
+      try {
+        // The request locks the membership first, so it never holds a session while it waits on a
+        // writer holding the membership — the AB-BA that 0014's order left open.
+        await gate.query('begin');
+        await gate.query('select set_config($1, $2, true)', ['app.organisation_id', org]);
+        const pending = gate.query('select * from app.resolve_request_context($1::bytea)', [
+          tokenHash,
+        ]);
+        const writer = await database.fixturePool().connect();
+        try {
+          await writer.query('begin');
+          await writer.query('select set_config($1, $2, true)', ['app.organisation_id', org]);
+          // eslint-disable-next-line no-restricted-syntax -- same false positive as above: the UPDATE ... SET verb text, inside an explicitly tenant-scoped transaction.
+          const racing = writer.query("update memberships set role = 'admin' where user_id = $1", [
+            person.id,
+          ]);
+          const deadline = Date.now() + LOCK_WAIT_DEADLINE_MS;
+          let waiting = '0';
+          while (waiting !== '1' && Date.now() < deadline) {
+            await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT_POLL_MS));
+            const result = await admin.query<{ n: string }>(
+              "select count(*)::text as n from pg_stat_activity where wait_event_type = 'Lock' and datname = $1",
+              [database.name],
+            );
+            waiting = result.rows[0]?.n ?? '0';
+          }
+          // The writer waits on the membership (no session held), and the request never waits on a
+          // session while holding it: the request holds the membership, the writer holds nothing.
+          await gate.query('commit');
+          const seen = await pending;
+          await writer.query('commit');
+          await racing;
+          expect(seen.rowCount, 'request resolves before role change commits').toBe(1);
+          expect(await store.resolveSession(tokenHash)).toBeUndefined();
+        } finally {
+          writer.release();
+        }
+      } finally {
+        gate.release();
+      }
+    },
+  );
 });

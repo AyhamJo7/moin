@@ -13,7 +13,7 @@
  */
 
 import { uuidv7, type Clock } from '@moin/kernel';
-import type { IdentityStore, ResolvedSession, SessionGrant } from '@moin/db';
+import type { IdentityStore, ResetReason, ResolvedSession, SessionGrant } from '@moin/db';
 import { digestOf, isSecretValue, randomSecret } from '../domain/secret-values.ts';
 
 export interface RotatedSession {
@@ -56,5 +56,23 @@ export class SessionService {
   async revoke(presented: string | undefined): Promise<boolean> {
     if (!isSecretValue(presented)) return false;
     return this.#store.revokeSession(digestOf(presented));
+  }
+
+  /**
+   * "Sign out other devices" (P06.06.05): every other live session of the presented session's
+   * owner ends, the presented one stays. The owner is whoever the presented session belongs to —
+   * there is no user id parameter to forge. Undefined when the cookie is not a valid session now.
+   */
+  async revokeOthers(presented: string | undefined): Promise<number | undefined> {
+    if (!isSecretValue(presented)) return undefined;
+    return this.#store.revokeOtherSessions(digestOf(presented));
+  }
+
+  /**
+   * Every session of a person ends after a password or MFA reset (P06.06.05). The provider-event
+   * and support flows of P06.09 are the callers; they establish that the reset happened.
+   */
+  revokeAll(userId: string, reason: ResetReason): Promise<number> {
+    return this.#store.revokeAllSessions(userId, reason);
   }
 }
