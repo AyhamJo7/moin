@@ -1008,10 +1008,10 @@
     "find": "    request.sessionContext = outcome.context;\n    if (requiresCsrfProtection(request.method ?? 'GET')) {",
     "replace": "    request.sessionContext = outcome.context;\n    if (requiresCsrfProtection(request.method ?? 'GET') && false) {",
     "killingTest": {
-      "file": "apps/server/src/modules/identity-access/http/session-membership.guard.ts",
+      "file": "apps/server/src/modules/identity-access/session-membership.integration.test.ts",
       "fullName": "CSRF synchronizer token plus Origin check (P06.06.06) > a POST without the token fails closed with 403 csrf-required"
     },
-    "project": "unit"
+    "project": "integration"
   },
   {
     "id": "C5-constant-time-comparison-removed",
@@ -1035,7 +1035,7 @@
     "replace": "  if (raw === undefined) return undefined;",
     "killingTest": {
       "file": "apps/server/src/modules/identity-access/http/csrf.test.ts",
-      "fullName": "CSRF synchronizer token plus Origin check (P06.06.06) > opaque and non-http origins never match"
+      "fullName": "the CSRF verdict (P06.06.06) > opaque and non-http origins never match"
     },
     "project": "unit"
   }
