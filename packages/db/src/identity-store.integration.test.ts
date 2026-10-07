@@ -2143,19 +2143,19 @@ describe('session revocation (P06.06.05)', () => {
       expect(await store.resolveSession(live.tokenHash)).toBeDefined();
       const stranger = await user();
       const { tokenHash: theirHash } = await signIn(stranger.sub);
-    const otherHash = hash();
-    await admin.query(
-      `with t as (select clock_timestamp() as now)
-       insert into sessions (token_hash, id, family_id, user_id, rotation_reason, created_at,
-        last_seen_at, idle_expires_at, absolute_expires_at, provider_tokens_sealed,
-        provider_tokens_key_id)
-       select $1, $2, $2, user_id, 'login',
-         t.now, t.now,
-         t.now + interval '12 hours', t.now + interval '7 days',
-         $3, 'test-v1'
-       from sessions, t where token_hash = $4`,
-      [otherHash, randomUUID(), sealed(), theirHash],
-    );
+      const otherHash = hash();
+      await admin.query(
+        `with t as (select clock_timestamp() as now)
+         insert into sessions (token_hash, id, family_id, user_id, rotation_reason, created_at,
+          last_seen_at, idle_expires_at, absolute_expires_at, provider_tokens_sealed,
+          provider_tokens_key_id)
+         select $1, $2, $2, user_id, 'login',
+           t.now, t.now,
+           t.now + interval '12 hours', t.now + interval '7 days',
+           $3, 'test-v1'
+         from sessions, t where token_hash = $4`,
+        [otherHash, randomUUID(), sealed(), theirHash],
+      );
       const before = await admin.query(
         'select revoked_at is null as live from sessions where token_hash = $1',
         [theirHash],
@@ -2172,6 +2172,28 @@ describe('session revocation (P06.06.05)', () => {
       expect(stray.rows[0]?.n).toBe('0');
       expect(await store.resolveSession(live.tokenHash)).toBeDefined();
       expect(await store.resolveSession(helperHash)).toBeDefined();
+    },
+  );
+
+  evidenceTest(
+    'a dead presented session answers NULL, not a zero count',
+    async () => {
+      // The NULL/number split is the endpoint's 401/200 branch: 0 would read as "signed out,
+      // nobody else was signed in". Proved at the store level because the endpoint answers the
+      // store's NULL with the same 401 the guard gives an invalid session.
+      const { person } = await membershiped();
+      const live = await signIn(person.sub);
+      expect(await store.revokeOtherSessions(live.tokenHash)).toBe(1);
+      const row = await admin.query<{ revoked_at: Date | null }>(
+        'select revoked_at from sessions where token_hash = $1',
+        [live.tokenHash],
+      );
+      expect(row.rows[0]?.revoked_at).toBeNull();
+      // Now the presented session itself is dead: the next call must answer NULL, not 0.
+      await admin.query('update sessions set idle_expires_at = clock_timestamp() where token_hash = $1', [
+        live.tokenHash,
+      ]);
+      expect(await store.revokeOtherSessions(live.tokenHash)).toBeUndefined();
     },
   );
 

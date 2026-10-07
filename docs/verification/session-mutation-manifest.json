@@ -873,10 +873,10 @@
   {
     "id": "RV4-unconditional-revocation",
     "invariant": "P06.06.05: unrelated membership writes revoke nothing",
-    "expected": "Every membership touch (a version bump, a timestamp) would sign the person out of all devices: revocation as noise, trained to be ignored.",
+    "expected": "An unconditional revocation on every membership UPDATE would end the session even for an unrelated write: revocation as noise.",
     "file": "packages/db/migrations/0016_session_revocation.sql",
-    "find": "  ELSIF NEW.status IS DISTINCT FROM OLD.status THEN\n    PERFORM app.revoke_user_sessions(NEW.user_id, NULL, 'membership_status');\n  END IF;",
-    "replace": "  PERFORM app.revoke_user_sessions(NEW.user_id, NULL, 'membership_status');",
+    "find": "  IF TG_OP = 'DELETE' THEN\n    PERFORM app.revoke_user_sessions(OLD.user_id, NULL, 'membership_removed');\n    RETURN OLD;\n  END IF;",
+    "replace": "  PERFORM app.revoke_user_sessions(OLD.user_id, NULL, 'membership_removed');\n  IF TG_OP = 'DELETE' THEN\n    RETURN OLD;\n  END IF;",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "session revocation (P06.06.05) > an unrelated membership update revokes nothing"
@@ -899,13 +899,13 @@
   {
     "id": "RV6-dead-cookie-revokes",
     "invariant": "P06.06.05: a dead cookie revokes nothing",
-    "expected": "A stolen-but-expired cookie presented to sign-out-others would end the victim's live sessions: the weaponised sign-out.",
+    "expected": "A dead presented cookie would answer 0 instead of NULL: the endpoint would 200 with {revoked:0}, so a lapsed or concurrently-revoked session reads as a successful sign-out rather than an unauthenticated call.",
     "file": "packages/db/migrations/0016_session_revocation.sql",
     "find": "    IF NOT FOUND THEN\n      RETURN NULL;\n    END IF;",
-    "replace": "    IF NOT FOUND THEN\n      NULL;\n    END IF;",
+    "replace": "    IF NOT FOUND THEN\n      RETURN 0;\n    END IF;",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
-      "fullName": "session revocation (P06.06.05) > a dead cookie revokes nothing, and a live one is only ended by its owner"
+      "fullName": "session revocation (P06.06.05) > a dead presented session answers NULL, not a zero count"
     },
     "project": "integration"
   },
@@ -932,19 +932,6 @@
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "session revocation (P06.06.05) > removal revokes with membership_removed and wipes provider tokens"
-    },
-    "project": "integration"
-  },
-  {
-    "id": "RV9-revocation-clock-before-locks",
-    "invariant": "P06.06.05: the revocation clock is sampled after the locks",
-    "expected": "A revocation that waited on a held family lock would stamp an expiry against time sampled before the wait: a session lapsing during the wait could be treated as live.",
-    "file": "packages/db/migrations/0016_session_revocation.sql",
-    "find": "  -- The clock is read only after every lock is held, so a wait cannot leave it stale.\n  v_now := clock_timestamp();",
-    "replace": "  v_now := clock_timestamp();",
-    "killingTest": {
-      "file": "packages/db/src/identity-store.integration.test.ts",
-      "fullName": "session revocation (P06.06.05) > a role change racing a request cannot deadlock: request sees membership first"
     },
     "project": "integration"
   }
