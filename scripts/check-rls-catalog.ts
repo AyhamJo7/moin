@@ -107,6 +107,7 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   // The append-only and register guards, and the two chain-integrity guards.
   'app.reject_audit_mutation': '42ea8b78a19fbe7aeb537d96a6087e14',
   'app.reject_registry_mutation': '60ee49a225936633fc8512cfa1d85049',
+  'app.reject_last_owner_loss': 'e1740991527052f99b632df9de89e767',
   'app.reject_audit_head_rewrite': 'c9278e84aa3190487818218e3ca4f761',
   'app.reject_unlinked_audit_event': '7c2302af293e06986eb4fbec32b90362',
   'app.register_audit_chain': '221bd18d0326d55150a2405786768fa8',
@@ -279,6 +280,13 @@ const APPROVED_DEFINERS: Readonly<
     executeGrantees: [],
   },
   'app.revoke_sessions_on_membership_change': {
+    arguments: '',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: [],
+  },
+  // Nobody executes it: the empty grantee list is the assertion. Runs only as the table trigger.
+  'app.reject_last_owner_loss': {
     arguments: '',
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
@@ -484,6 +492,18 @@ const REVOCATION_TRIGGER = {
   table: 'memberships',
   trigger: 'memberships_revoke_sessions',
   fn: 'app.revoke_sessions_on_membership_change()',
+  triggerType: 25, // row (1) + update (16) + delete (8); AFTER, so no before bit (2)
+} as const;
+
+/**
+ * The trigger that keeps at least one active owner per organisation (P06.07.04). Disabled, it
+ * reads as installed and protects nothing: the last owner could be removed, demoted or disabled
+ * with no error anywhere.
+ */
+const LAST_OWNER_TRIGGER = {
+  table: 'memberships',
+  trigger: 'memberships_last_owner',
+  fn: 'app.reject_last_owner_loss()',
   triggerType: 25, // row (1) + update (16) + delete (8); AFTER, so no before bit (2)
 } as const;
 
@@ -931,6 +951,30 @@ export async function inspect(
             'the trigger that revokes sessions when a membership changes is absent, disabled, not ' +
             'ENABLE ALWAYS (so replica mode skips it), covers different events, or points at a ' +
             'different function, so a role change or removal would leave old sessions alive.',
+        });
+      }
+    }
+
+    if (present.has(LAST_OWNER_TRIGGER.table)) {
+      const triggers = (
+        await pool.query<AuditTriggerRow>(AUDIT_TRIGGER_QUERY, [
+          LAST_OWNER_TRIGGER.table,
+          LAST_OWNER_TRIGGER.fn,
+        ])
+      ).rows;
+      const guard = triggers.find((trigger) => trigger.name === LAST_OWNER_TRIGGER.trigger);
+      if (
+        guard?.enabled !== TRIGGER_ALWAYS ||
+        guard.trigger_type !== LAST_OWNER_TRIGGER.triggerType ||
+        !guard.correct_function
+      ) {
+        findings.push({
+          rule: 'last-owner-trigger-unsafe',
+          subject: LAST_OWNER_TRIGGER.table,
+          detail:
+            'the trigger that keeps at least one active owner is absent, disabled, not ' +
+            'ENABLE ALWAYS (so replica mode skips it), covers different events, or points at a ' +
+            'different function, so the last owner could be removed, demoted or disabled.',
         });
       }
     }
