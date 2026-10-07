@@ -85,13 +85,31 @@ BEGIN
     RAISE EXCEPTION 'unknown revocation reason' USING ERRCODE = 'invalid_parameter_value';
   END IF;
 
-  -- Families (ascending), then sessions (ascending), then the user row (FOR UPDATE): exactly
-  -- the family -> session -> user order of `rotate_session` and `begin_session`, so no AB-BA
-  -- with either. FOR UPDATE (not SHARE) conflicts with the SHARE user-row lock both functions
-  -- hold across their writes: a sign-in racing a revocation serialises here. READ COMMITTED
-  -- takes a fresh snapshot per command, so the UPDATE below sees a session minted before this
-  -- transaction waited, and a sign-in that waits on this revocation inserts after it commits —
-  -- either way no live session survives a committed revocation (HIGH review finding).
+  -- Serialisation first (see section 7): the per-user advisory lock, before any row lock. The
+  -- trigger and the two entry points all funnel through here, so every revocation takes it.
+  PERFORM pg_advisory_xact_lock(hashtext(p_user_id::text));
+
+  -- Families (ascending), then sessions (ascending), then the user row (FOR UPDATE): the
+  -- family -> session -> user order of `rotate_session` and `begin_session`. FOR UPDATE (not
+  -- SHARE) conflicts with the SHARE user-row lock both functions hold across their writes: a
+  -- sign-in racing a revocation serialises here. READ COMMITTED takes a fresh snapshot per
+  -- command, so the final UPDATE below sees a session minted before this transaction waited,
+  -- and a sign-in that waits on this revocation inserts after it commits — either way no live
+  -- session survives a committed revocation (earlier HIGH review finding).
+  --
+  -- The user row comes FIRST here, before any session row (unlike the two functions, which take
+  -- it last): the revoker must never hold a session row while waiting on the user row, because a
+  -- rotation that locked family and predecessor first and now waits on the user row would be the
+  -- other half of that wait (new MEDIUM interleaving). Taken in the opposite order — user,
+  -- then families, then sessions, each strictly ordered — the revoker and a concurrent rotation
+  -- traverse locks in an order with no cycle: the rotation holds family and waits on the user
+  -- row while the revoker holds the user row and waits on... the rotation's family or
+  -- predecessor. One of the two waits on the other, never both: whoever holds the family lock
+  -- proceeds, the other follows, and the final UPDATE's fresh snapshot sees whatever committed
+  -- first. A rotation that minted its successor before waiting is revoked by that UPDATE; a
+  -- rotation that proceeds after this commit re-checks validity after its own locks.
+  PERFORM 1 FROM public.users u WHERE u.id = p_user_id FOR UPDATE;
+
   PERFORM 1 FROM public.sessions f
   WHERE f.id IN (SELECT s.family_id FROM public.sessions s
                  WHERE s.user_id = p_user_id AND s.revoked_at IS NULL)
@@ -100,8 +118,6 @@ BEGIN
   PERFORM 1 FROM public.sessions s
   WHERE s.user_id = p_user_id AND s.revoked_at IS NULL
   ORDER BY s.id FOR UPDATE;
-
-  PERFORM 1 FROM public.users u WHERE u.id = p_user_id FOR UPDATE;
 
   -- The clock is read only after every lock is held, so a wait cannot leave it stale.
   v_now := clock_timestamp();
@@ -367,6 +383,212 @@ CREATE FUNCTION app.revoke_session(
 AS $$
 BEGIN
   RETURN app.revoke_session(p_token_hash, 'self');
+END
+$$;
+
+-- ---------------------------------------------------------------------------------------------
+-- 7. One serialisation point for session writes (new MEDIUM interleaving).
+-- ---------------------------------------------------------------------------------------------
+--
+-- A rotation of a session minted DURING a revocation can deadlock it: the rotation holds its
+-- (new, unordered) family and predecessor rows and waits on the user row the revoker holds,
+-- while the revoker's final UPDATE waits on the predecessor row the rotation holds. The new
+-- family did not exist when the revoker ordered its locks, so no row-lock order covers it.
+--
+-- The fix is a per-user serialisation lock taken before any row lock, in all three session
+-- writers: `pg_advisory_xact_lock` on the user's id hash. Advisory locks do not participate in
+-- row-lock deadlocks; two writers for one user serialise with neither holding a row, and writers
+-- for different users never contend (families never cross users — the supersede is scoped by
+-- user_id — so per-user serialisation loses no legitimate concurrency). Readers
+-- (`resolve_session`, `resolve_request_context`) take none: reads never need to serialise with
+-- writes for correctness here (validity is re-checked after locks against the DB clock), and
+-- serialising every request on a user lock would turn the per-request lookup into a bottleneck.
+-- Rolling deploys: old hosts do not take the lock and behave as before (no worse); the lock only
+-- orders writers that all take it.
+--
+-- `rotate_session` resolves the owner from the presented token WITHOUT a lock first
+-- (user_id never changes after creation — the session trigger forbids it), takes the advisory
+-- lock, then follows the existing family -> session -> user order. `begin_session` resolves the
+-- owner by subject without a lock first, takes the advisory lock, then re-reads FOR SHARE: the
+-- unlocked read can only fail closed (cognito_sub is UNIQUE, so the re-read either confirms the
+-- same user or finds nothing and returns).
+-- `begin_session` resolves the owner by subject without a lock first (cognito_sub is UNIQUE:
+-- the FOR SHARE re-read either confirms the same user or finds nothing and returns), takes the
+-- advisory lock, then follows the existing order. A sign-in for a subject with no user resolves
+-- to NULL and locks the subject string: harmless and fail-closed below.
+CREATE OR REPLACE FUNCTION app.begin_session(
+  p_subject text,
+  p_token_hash bytea,
+  p_session_id uuid,
+  p_provider_tokens_sealed bytea,
+  p_key_id text,
+  p_replaced_hash bytea,
+  p_step_up_at timestamptz
+) RETURNS TABLE (session_id uuid, user_id uuid, absolute_expires_at timestamptz)
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path = pg_catalog, public, app, pg_temp
+AS $$
+DECLARE
+  v_now timestamptz;
+  v_user uuid;
+  v_family uuid;
+  v_owner uuid;
+BEGIN
+  SELECT u.id INTO v_owner
+  FROM public.users u
+  WHERE u.cognito_sub = p_subject AND u.status = 'active';
+  PERFORM pg_advisory_xact_lock(hashtext(COALESCE(v_owner::text, p_subject)));
+
+  -- Lock order is family first, then the presented session, then user, in this function,
+  -- `rotate_session` and `resolve_session`: a re-login superseding a family while a rotation or a
+  -- resolution of the same family is in flight takes all locks in the same order, so the callers
+  -- serialise instead of deadlocking (AB-BA). The presented-session lock (taken below, before
+  -- the user-row lock) means the supersede below runs only after that row's lock is held. The
+  -- user-row FOR SHARE conflicts with a concurrent disable's UPDATE: either the disable commits
+  -- first and v_user is NULL, or this insert commits first. Either way no live session exists
+  -- for a disabled user — `resolve_session` re-checks `u.status = 'active'`, so a session minted
+  -- ahead of a racing disable stops resolving rather than living on.
+  IF p_replaced_hash IS NOT NULL THEN
+    SELECT s.family_id INTO v_family FROM public.sessions s WHERE s.token_hash = p_replaced_hash;
+    IF v_family IS NOT NULL THEN
+      PERFORM 1 FROM public.sessions f WHERE f.id = v_family FOR UPDATE;
+      PERFORM 1 FROM public.sessions s WHERE s.token_hash = p_replaced_hash FOR UPDATE;
+    END IF;
+  END IF;
+
+  SELECT u.id INTO v_user
+  FROM public.users u
+  WHERE u.cognito_sub = p_subject AND u.status = 'active'
+  FOR SHARE;
+  IF v_user IS NULL THEN
+    RETURN;
+  END IF;
+
+  -- The family lock above is held across the user-row lock: family first, then user, matching
+  -- `rotate_session`. The supersede below re-uses the already-held family lock. It is scoped to
+  -- the just-authenticated user: a presented token from another person's family matches nothing
+  -- and revokes nothing, so a stolen-but-valid cookie can never become a weapon that signs the
+  -- victim out of all their devices.
+  IF v_family IS NOT NULL THEN
+    v_now := clock_timestamp();
+    UPDATE public.sessions s
+    SET revoked_at = v_now, revocation_reason = 'superseded',
+        provider_tokens_sealed = NULL, provider_tokens_key_id = NULL
+    WHERE s.family_id = v_family AND s.user_id = v_user AND s.revoked_at IS NULL;
+  END IF;
+
+  v_now := clock_timestamp();
+
+  RETURN QUERY
+  INSERT INTO public.sessions AS s
+    (token_hash, id, family_id, user_id, rotation_reason, rotated_from, created_at, last_seen_at,
+     idle_expires_at, absolute_expires_at, step_up_at, provider_tokens_sealed, provider_tokens_key_id)
+  VALUES
+    (p_token_hash, p_session_id, p_session_id, v_user, 'login', NULL, v_now, v_now,
+     v_now + interval '12 hours', v_now + interval '7 days',
+     CASE
+       WHEN p_step_up_at IS NULL OR NOT isfinite(p_step_up_at) THEN NULL
+       WHEN p_step_up_at > v_now + interval '30 seconds' THEN NULL
+       WHEN p_step_up_at >= v_now - interval '1 second' THEN v_now
+       WHEN p_step_up_at > v_now - interval '15 minutes' THEN p_step_up_at
+       ELSE NULL
+     END,
+     p_provider_tokens_sealed, p_key_id)
+  RETURNING s.id, s.user_id, s.absolute_expires_at;
+END
+$$;
+
+CREATE OR REPLACE FUNCTION app.rotate_session(
+  p_token_hash bytea,
+  p_new_token_hash bytea,
+  p_new_session_id uuid,
+  p_reason text,
+  p_step_up_at timestamptz
+) RETURNS TABLE (session_id uuid, user_id uuid, absolute_expires_at timestamptz)
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path = pg_catalog, public, app, pg_temp
+AS $$
+DECLARE
+  v_now timestamptz;
+  v_family uuid;
+  v_owner uuid;
+BEGIN
+  IF p_reason IS NULL OR p_reason NOT IN ('step_up', 'privilege_change') THEN
+    RAISE EXCEPTION 'rotation reason must be step_up or privilege_change'
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+
+  -- Serialisation first: the owner, unlocked (user_id never changes after creation — the
+  -- session trigger forbids it), then the per-user lock. An unknown token resolves to NULL
+  -- and locks the token's own hash: harmless, released at end of transaction, and the family
+  -- lookup below returns nothing anyway. Everything below follows the existing
+  -- family -> session -> user order.
+  SELECT s.user_id INTO v_owner FROM public.sessions s WHERE s.token_hash = p_token_hash;
+  PERFORM pg_advisory_xact_lock(hashtext(COALESCE(v_owner::text, p_token_hash::text)));
+
+  -- The family's lock first, as in `begin_session`: see there.
+  SELECT s.family_id INTO v_family FROM public.sessions s WHERE s.token_hash = p_token_hash;
+  IF v_family IS NULL THEN
+    RETURN;
+  END IF;
+  PERFORM 1 FROM public.sessions f WHERE f.id = v_family FOR UPDATE;
+
+  -- Lock predecessor row before evaluating validity
+  PERFORM 1 FROM public.sessions s WHERE s.token_hash = p_token_hash FOR UPDATE;
+
+  -- Lock the owning user row (FOR SHARE conflicts with a concurrent disable's UPDATE), so a
+  -- disable racing this rotation serialises here rather than extending a session that should die.
+  PERFORM 1
+  FROM public.sessions s JOIN public.users u ON u.id = s.user_id
+  WHERE s.token_hash = p_token_hash FOR SHARE OF u;
+
+  -- Fresh DB clock obtained after acquiring the locks
+  v_now := clock_timestamp();
+
+  RETURN QUERY
+  WITH predecessor AS (
+    SELECT s.token_hash, s.id, s.family_id, s.user_id, s.created_at, s.absolute_expires_at,
+           s.step_up_at, s.provider_tokens_sealed, s.provider_tokens_key_id
+    FROM public.sessions s
+    JOIN public.users u ON u.id = s.user_id
+    WHERE s.token_hash = p_token_hash
+      AND s.revoked_at IS NULL
+      AND s.idle_expires_at > v_now
+      AND s.absolute_expires_at > v_now
+      AND u.status = 'active'
+  ), retired AS (
+    UPDATE public.sessions s
+    SET revoked_at = v_now, revocation_reason = 'rotated',
+        provider_tokens_sealed = NULL, provider_tokens_key_id = NULL
+    FROM predecessor p
+    WHERE s.token_hash = p.token_hash
+    RETURNING s.id
+  )
+  INSERT INTO public.sessions AS n
+    (token_hash, id, family_id, user_id, rotation_reason, rotated_from, created_at, last_seen_at,
+     idle_expires_at, absolute_expires_at, step_up_at, provider_tokens_sealed, provider_tokens_key_id)
+  SELECT p_new_token_hash, p_new_session_id, p.family_id, p.user_id, p_reason, p.id,
+         GREATEST(v_now, p.created_at), GREATEST(v_now, p.created_at),
+         LEAST(GREATEST(v_now, p.created_at) + interval '12 hours', p.absolute_expires_at),
+         p.absolute_expires_at,
+         CASE
+           WHEN p_reason = 'step_up' THEN
+             CASE
+               WHEN p_step_up_at IS NULL THEN NULL
+               WHEN NOT isfinite(p_step_up_at) THEN NULL
+               WHEN p_step_up_at > v_now + interval '30 seconds' THEN NULL
+               WHEN p_step_up_at >= v_now - interval '1 second' THEN v_now
+               WHEN p_step_up_at > v_now - interval '15 minutes' THEN p_step_up_at
+               ELSE NULL
+             END
+           ELSE p.step_up_at
+         END,
+         p.provider_tokens_sealed, p.provider_tokens_key_id
+  FROM predecessor p
+  JOIN retired r ON r.id = p.id
+  RETURNING n.id, n.user_id, n.absolute_expires_at;
 END
 $$;
 

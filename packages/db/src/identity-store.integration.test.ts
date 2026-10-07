@@ -2290,79 +2290,49 @@ describe('session revocation (P06.06.05)', () => {
       gate.release();
     }
   });
-
-  evidenceTest('concurrent revokes sharing a user complete without deadlock (MEDIUM)', async () => {
-    // The MEDIUM finding: the swap path revokes two users, so two revokers could traverse two
-    // users' locks in opposite order. The trigger takes them least-id-first. A true opposite-order
-    // cycle is unreachable through swaps (UNIQUE(organisation_id, user_id) deadlocks concurrent
-    // opposite swaps on the key first — a key-share wait, before any trigger fires), so this proves
-    // the reachable property: a two-user revoke racing a single-user revoke over the shared user
-    // completes, and neither leaves a live session.
-    const org = randomUUID();
-    await admin.query('insert into organisations (id, slug, name) values ($1, $2, $3)', [
-      org,
-      `sw-${org.slice(0, 8)}`,
-      'Swap Org',
-    ]);
-    const a = await user();
-    const c = await user();
-    for (const who of [a, c]) {
-      await signIn(who.sub);
-      await admin.query(
-        'insert into memberships (organisation_id, id, user_id, role, status) values ($1, $2, $3, $4, $5)',
-        [org, randomUUID(), who.id, 'owner', 'active'],
-      );
-    }
-    const midA = (
-      await admin.query<{ id: string }>(
-        'select id from memberships where organisation_id = $1 and user_id = $2',
-        [org, a.id],
-      )
-    ).rows[0]?.id;
-    const c1 = await database.fixturePool().connect();
-    try {
-      await c1.query('begin');
-      await c1.query('select set_config($1, $2, true)', ['app.organisation_id', org]);
-      // T1 re-points A's row at a fresh user (revokes A then the fresh user, least-id-first)
-      // and holds the transaction open. T2 is a sign-out-others over A's live session through
-      // the real moin_identity path: it shares A's session/user lock set but no membership row,
-      // so the two genuinely contend on the trigger's locks (a second membership write would
-      // just wait on T1's row lock before any trigger fires).
-      const fresh = (await user()).id;
-      const aToken = (
-        await admin.query<{ token_hash: Buffer }>(
-          'select token_hash from sessions where user_id = $1 and revoked_at is null limit 1',
-          [a.id],
-        )
-      ).rows[0]?.token_hash;
-      if (aToken === undefined) throw new Error('A holds no live session to contend over');
-      await c1.query('update memberships set user_id = $1 where id = $2', [fresh, midA]);
-      const racing = identity.query("select app.revoke_session($1::bytea, 'others')", [aToken]);
-      const deadline = Date.now() + LOCK_WAIT_DEADLINE_MS;
-      let waiting = '0';
-      while (waiting !== '1' && Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT_POLL_MS));
-        const result = await admin.query<{ n: string }>(
-          "select count(*)::text as n from pg_stat_activity where wait_event_type = 'Lock' and datname = $1",
-          [database.name],
+  evidenceTest(
+    'a rotation that waits out a revocation finds its predecessor gone (MEDIUM-2)',
+    async () => {
+      // The new MEDIUM interleaving: a rotation of a session minted while a revocation is open
+      // would hold its (new, unordered) family and predecessor rows and wait on the user row the
+      // revoker holds, while the revoker's final UPDATE waits on the predecessor — a deadlock no
+      // row-lock order covers, because the new family did not exist when the revoker ordered its
+      // locks. The per-user advisory lock (taken before any row lock by begin, rotate and
+      // revoke) serialises the three: the rotation waits holding nothing, then re-checks
+      // validity after the revocation commits and finds its predecessor revoked (fail-closed).
+      const { person, tokenHash, org } = await membershiped();
+      const gate = await database.fixturePool().connect();
+      try {
+        await gate.query('begin');
+        await gate.query('select set_config($1, $2, true)', ['app.organisation_id', org]);
+        await gate.query("update memberships set status = 'disabled' where user_id = $1", [
+          person.id,
+        ]);
+        // The predecessor is already revoked by the open transaction; the rotation must wait on
+        // the advisory lock, then return no row once the revocation commits.
+        const racing = identity.query(
+          'select * from app.rotate_session($1::bytea, $2::bytea, $3::uuid, $4::text)',
+          [tokenHash, hash(), randomUUID(), 'privilege_change'],
         );
-        waiting = result.rows[0]?.n ?? '0';
+        const deadline = Date.now() + LOCK_WAIT_DEADLINE_MS;
+        let waiting = '0';
+        while (waiting !== '1' && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT_POLL_MS));
+          const result = await admin.query<{ n: string }>(
+            "select count(*)::text as n from pg_stat_activity where wait_event_type = 'Lock' and datname = $1",
+            [database.name],
+          );
+          waiting = result.rows[0]?.n ?? '0';
+        }
+        expect(waiting, 'rotation waits on the open revocation').toBe('1');
+        await gate.query('commit');
+        const rotated = await racing;
+        expect(rotated.rowCount, 'rotation of a revoked predecessor returns no row').toBe(0);
+      } finally {
+        gate.release();
       }
-      expect(waiting, 'sign-out-others waits on the open trigger revocation').toBe('1');
-      await c1.query('commit');
-      // T1's revocation already ended A's sessions; the keep session is dead, so the core
-      // answers NULL instead of a count (no weaponised sign-out, RV6).
-      await expect(racing).resolves.toMatchObject({ rows: [{ revoke_session: null }] });
-    } finally {
-      c1.release();
-    }
-    // No deadlock (both completed), and A holds no live session.
-    const live = await admin.query<{ n: string }>(
-      'select count(*)::text as n from sessions where revoked_at is null and user_id = $1',
-      [a.id],
-    );
-    expect(live.rows[0]?.n).toBe('0');
-  });
+    },
+  );
 
   evidenceTest(
     'a role change racing a request cannot deadlock: request sees membership first',
