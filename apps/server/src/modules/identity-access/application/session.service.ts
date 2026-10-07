@@ -7,14 +7,13 @@
  * revokes the predecessor and keeps its absolute expiry; revocation is final — live in the database
  * functions, so this layer cannot weaken them.
  *
- * `rotate` is the primitive P06.06.04 (step-up) and P06.07 (privilege change) call after their own
- * checks. Nothing in this change calls it for those reasons yet; sign-in has its own path, which
- * always issues a fresh token.
+ * `rotate` handles privilege-change rotation after its caller's checks. Step-up rotation belongs
+ * only in `SignInService.#completeStepUp`, after verified provider proof and subject binding;
+ * this primitive cannot express an unproven step-up.
  */
 
 import { uuidv7, type Clock } from '@moin/kernel';
 import type { IdentityStore, ResolvedSession, SessionGrant } from '@moin/db';
-import type { RotationReason } from '../domain/session-policy.ts';
 import { digestOf, isSecretValue, randomSecret } from '../domain/secret-values.ts';
 
 export interface RotatedSession {
@@ -41,10 +40,7 @@ export class SessionService {
     return this.#store.resolveSession(digestOf(presented));
   }
 
-  async rotate(
-    presented: string | undefined,
-    reason: RotationReason,
-  ): Promise<RotatedSession | undefined> {
+  async rotate(presented: string | undefined): Promise<RotatedSession | undefined> {
     if (!isSecretValue(presented)) return undefined;
     const sessionToken = randomSecret();
     const now = this.#idClock.now();
@@ -52,7 +48,7 @@ export class SessionService {
       digestOf(presented),
       digestOf(sessionToken),
       uuidv7({ now: () => now }),
-      reason,
+      'privilege_change',
     );
     return grant === undefined ? undefined : { sessionToken, grant };
   }

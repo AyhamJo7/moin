@@ -10,6 +10,11 @@
     "node": ">=24.21.0 <25",
     "pnpm": ">=10.34.5 <11"
   },
+  "pnpm": {
+    "overrides": {
+      "source-map-js": "1.2.2"
+    }
+  },
   "scripts": {
     "build": "turbo run build",
     "check:audit-arguments": "node scripts/check-audit-arguments.ts",

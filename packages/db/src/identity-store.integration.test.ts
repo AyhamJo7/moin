@@ -44,7 +44,7 @@ async function user(
   return { id, sub };
 }
 
-async function signIn(subject: string, replacedHash?: Buffer) {
+async function signIn(subject: string, replacedHash?: Buffer, stepUp = true) {
   const tokenHash = hash();
   const granted = await store.beginSession({
     subject,
@@ -53,6 +53,7 @@ async function signIn(subject: string, replacedHash?: Buffer) {
     providerTokensSealed: sealed(),
     keyId: 'test-v1',
     replacedHash,
+    stepUp: stepUp ? new Date() : undefined,
   });
   return { tokenHash, granted };
 }
@@ -121,13 +122,13 @@ function directCalls(subject: string, tokenHash: Buffer): [string, string, unkno
   return [
     [
       'begin_session',
-      'select * from app.begin_session($1::text, $2::bytea, $3::uuid, $4::bytea, $5::text, null)',
-      [subject, hash(), randomUUID(), sealed(), 'test-v1'],
+      'select * from app.begin_session($1::text, $2::bytea, $3::uuid, $4::bytea, $5::text, $6::bytea, $7::timestamptz)',
+      [subject, hash(), randomUUID(), sealed(), 'test-v1', hash(), new Date()],
     ],
     [
       'begin_sign_in',
-      'select app.begin_sign_in($1::bytea, $2::bytea, $3::bytea, $4::bytea, $5::text, $6::text)',
-      [hash(), hash(), hash(), sealed(), 'test-v1', '/'],
+      'select app.begin_sign_in($1::bytea, $2::bytea, $3::bytea, $4::bytea, $5::text, $6::text, $7::uuid)',
+      [hash(), hash(), hash(), sealed(), 'test-v1', '/', null],
     ],
     [
       'consume_sign_in',
@@ -295,7 +296,9 @@ describe('who may execute the session functions', () => {
     for (const row of result.rows) {
       if (row.allowed) (matrix[row.role] ??= []).push(row.fn);
     }
-    for (const role of Object.keys(matrix)) matrix[role]?.sort();
+    // Collapse the rolling-window begin_sign_in overload (contracted in 0016): the grant
+    // matrix asserts names, the catalog asserts each signature's body and grantees.
+    for (const role of Object.keys(matrix)) matrix[role] = [...new Set(matrix[role])].sort();
     expect(matrix).toStrictEqual({ moin_identity: [...SESSION_FUNCTIONS] });
   });
 });
@@ -310,6 +313,7 @@ describe('a sign-in transaction', () => {
       verifierSealed: tx.verifierSealed,
       keyId: 'test-v1',
       returnTo: '/today',
+      stepUpSessionId: undefined,
     });
     expect(await store.consumeAuthTransaction(tx.stateHash, tx.bindingHash)).toBeUndefined();
   });
@@ -864,7 +868,7 @@ describe('two callers holding the same row', () => {
   }
 
   const beginSessionSql =
-    'select * from app.begin_session($1::text, $2::bytea, $3::uuid, $4::bytea, $5::text, $6::bytea)';
+    'select * from app.begin_session($1::text, $2::bytea, $3::uuid, $4::bytea, $5::text, $6::bytea, $7::timestamptz)';
 
   evidenceTest(
     'a sign-in waiting behind a rotation of the session it supersedes revokes the successor too',
@@ -889,6 +893,7 @@ describe('two callers holding the same row', () => {
             sealed(),
             'test-v1',
             presented.tokenHash,
+            new Date(),
           ]),
       );
       expect(await store.resolveSession(successor), 'rotated successor').toBeUndefined();
@@ -921,6 +926,7 @@ describe('two callers holding the same row', () => {
             sealed(),
             'test-v1',
             stale.tokenHash,
+            new Date(),
           ]),
       );
       expect(await store.resolveSession(inFlight), 'rotated in flight').toBeUndefined();
@@ -945,6 +951,7 @@ describe('two callers holding the same row', () => {
             sealed(),
             'test-v1',
             presented.tokenHash,
+            new Date(),
           ]),
         (client) =>
           client.query('select * from app.rotate_session($1, $2, $3, $4)', [
@@ -980,6 +987,7 @@ describe('two callers holding the same row', () => {
             sealed(),
             'test-v1',
             presented.tokenHash,
+            new Date(),
           ]);
           await client.query('commit');
           return result.rowCount;
@@ -1427,9 +1435,24 @@ describe('temporal authorization and expiration (authoritative database clock)',
       `select p.proname::text, pg_get_function_identity_arguments(p.oid) as args
        from pg_proc p join pg_namespace n on n.oid = p.pronamespace
        where n.nspname = 'app' and p.proname = any($1) and pg_get_function_identity_arguments(p.oid) like '%timestamp with time zone%'`,
-      [[...SESSION_FUNCTIONS]],
+      [
+        [
+          'begin_sign_in',
+          'consume_sign_in',
+          'resolve_session',
+          'revoke_session',
+          'resolve_request_context',
+        ],
+      ],
     );
     expect(overloads.rows).toHaveLength(0);
+    const callerClockArgs = await admin.query(
+      `select p.proname::text
+       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = 'app' and p.proname = any($1) and ('now' = any(p.proargnames) or 'p_now' = any(p.proargnames))`,
+      [[...SESSION_FUNCTIONS]],
+    );
+    expect(callerClockArgs.rowCount).toBe(0);
     const clock = await admin.query(
       `select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
        where n.nspname = 'app' and p.proname = 'session_clock'`,
@@ -1482,8 +1505,190 @@ describe('the request-context lookup (P06.06.03)', () => {
     expect(resolved?.memberships).toStrictEqual([
       { organisationId: org, role: 'admin', permissions: [] },
     ]);
+    expect(resolved?.stepUpAt).toBeInstanceOf(Date);
   });
 
+  evidenceTest('refuses a disabled membership without touching the session', async () => {
+    const person = await user();
+    const { tokenHash } = await signIn(person.sub);
+    const org = randomUUID();
+    await admin.query('insert into organisations (id, slug, name) values ($1, $2, $3)', [
+      org,
+      `rc-${org.slice(0, 8)}`,
+      'RC Org',
+    ]);
+    await admin.query(
+      'insert into memberships (organisation_id, id, user_id, role, status) values ($1, $2, $3, $4, $5)',
+      [org, randomUUID(), person.id, 'staff', 'disabled'],
+    );
+    expect(await store.resolveRequestContext(tokenHash)).toBeUndefined();
+    // The session itself is untouched and still valid: the refusal came from membership status.
+    expect(await store.resolveSession(tokenHash)).toBeDefined();
+  });
+
+  evidenceTest('leaves no lookup marker on the caller connection', async () => {
+    const client = await identity.connect();
+    try {
+      await client.query('select * from app.resolve_request_context($1::bytea)', [hash()]);
+      const marker = await client.query<{ v: string }>(
+        "select current_setting('app.request_lookup', true) as v",
+      );
+      expect(marker.rows[0]?.v ?? '').toBe('');
+    } finally {
+      client.release();
+    }
+  });
+});
+
+describe('the step-up stamp (P06.06.04)', () => {
+  evidenceTest('stamps the sign-in time as the first step-up proof', async () => {
+    const person = await user();
+    const { tokenHash } = await signIn(person.sub);
+    const row = await admin.query<{ step_up_at: Date; created_at: Date }>(
+      'select step_up_at, created_at from sessions where token_hash = $1',
+      [tokenHash],
+    );
+    expect(row.rows[0]?.step_up_at).toStrictEqual(row.rows[0]?.created_at);
+  });
+
+  evidenceTest('leaves step_up_at NULL without fresh provider proof', async () => {
+    const person = await user();
+    const { tokenHash } = await signIn(person.sub, undefined, false);
+    const row = await admin.query<{ step_up_at: Date | null }>(
+      'select step_up_at from sessions where token_hash = $1',
+      [tokenHash],
+    );
+    expect(row.rows[0]?.step_up_at).toBeNull();
+    // The session itself is valid: only the step-up stamp is withheld. (resolveRequestContext
+    // needs a membership row, so only the session check runs here.)
+    expect(await store.resolveSession(tokenHash)).toBeDefined();
+  });
+
+  evidenceTest(
+    'a step-up rotation refreshes the stamp, a privilege change inherits it',
+    async () => {
+      const person = await user();
+      const { tokenHash } = await signIn(person.sub);
+      const before = await admin.query<{ step_up_at: Date }>(
+        'select step_up_at from sessions where token_hash = $1',
+        [tokenHash],
+      );
+      const stepped = hash();
+      expect(
+        await store.rotateSession(tokenHash, stepped, randomUUID(), 'step_up', new Date()),
+      ).toBeDefined();
+      const afterStep = await admin.query<{ step_up_at: Date }>(
+        'select step_up_at from sessions where token_hash = $1',
+        [stepped],
+      );
+      // Refresh means strictly after the predecessor's stamp: the rotation clock runs after
+      // the sign-in clock, so inherit-instead-of-refresh (SU2) fails here rather than hiding
+      // inside a >= that two same-millisecond stamps would satisfy.
+      expect(afterStep.rows[0]?.step_up_at.getTime()).toBeGreaterThan(
+        before.rows[0]?.step_up_at.getTime() ?? 0,
+      );
+      const changed = hash();
+      expect(
+        await store.rotateSession(stepped, changed, randomUUID(), 'privilege_change'),
+      ).toBeDefined();
+      const afterChange = await admin.query<{ step_up_at: Date }>(
+        'select step_up_at from sessions where token_hash = $1',
+        [changed],
+      );
+      expect(afterChange.rows[0]?.step_up_at).toStrictEqual(afterStep.rows[0]?.step_up_at);
+    },
+  );
+
+  evidenceTest('rejects non-finite and excessively future proof timestamps', async () => {
+    const person = await user();
+    const tokenHash = hash();
+    const sessionId = randomUUID();
+
+    // begin_session with future timestamp (> v_now + 30s) must not stamp step_up_at
+    const futureDate = new Date(Date.now() + 86400_000 * 365); // 1 year in future
+    await store.beginSession({
+      subject: person.sub,
+      tokenHash,
+      sessionId,
+      providerTokensSealed: sealed(),
+      keyId: 'test-v1',
+      stepUp: futureDate,
+    });
+    const row = await admin.query<{ step_up_at: Date | null }>(
+      'select step_up_at from sessions where token_hash = $1',
+      [tokenHash],
+    );
+    expect(row.rows[0]?.step_up_at).toBeNull();
+
+    // Direct invocation with infinity
+    const infHash = hash();
+    await identity.query(
+      'select * from app.begin_session($1::text,$2::bytea,$3::uuid,$4::bytea,$5::text,$6::bytea,$7::timestamptz)',
+      [person.sub, infHash, randomUUID(), sealed(), 'test-v1', null, 'infinity'],
+    );
+    const infRow = await admin.query<{ step_up_at: Date | null }>(
+      'select step_up_at from sessions where token_hash = $1',
+      [infHash],
+    );
+    expect(infRow.rows[0]?.step_up_at).toBeNull();
+
+    // rotate_session with future / infinity must not stamp step_up_at
+    const rotated = hash();
+    await store.rotateSession(tokenHash, rotated, randomUUID(), 'step_up', futureDate);
+    const rotatedRow = await admin.query<{ step_up_at: Date | null }>(
+      'select step_up_at from sessions where token_hash = $1',
+      [rotated],
+    );
+    expect(rotatedRow.rows[0]?.step_up_at).toBeNull();
+
+    const infRotated = hash();
+    await identity.query(
+      'select * from app.rotate_session($1::bytea,$2::bytea,$3::uuid,$4::text,$5::timestamptz)',
+      [rotated, infRotated, randomUUID(), 'step_up', 'infinity'],
+    );
+    const infRotatedRow = await admin.query<{ step_up_at: Date | null }>(
+      'select step_up_at from sessions where token_hash = $1',
+      [infRotated],
+    );
+    expect(infRotatedRow.rows[0]?.step_up_at).toBeNull();
+  });
+
+  evidenceTest('step_up rotation without provider proof never stamps the successor', async () => {
+    const person = await user();
+    const { tokenHash } = await signIn(person.sub, undefined, false);
+    const unproven = hash();
+    const first = await store.rotateSession(tokenHash, unproven, randomUUID(), 'step_up');
+    expect(first).toBeDefined();
+    const firstRow = await admin.query<{ step_up_at: Date | null }>(
+      'select step_up_at from sessions where token_hash = $1',
+      [unproven],
+    );
+    expect(firstRow.rows[0]?.step_up_at).toBeNull();
+
+    const legacy = hash();
+    const second = await identity.query(
+      'select * from app.rotate_session($1::bytea, $2::bytea, $3::uuid, $4::text)',
+      [unproven, legacy, randomUUID(), 'step_up'],
+    );
+    expect(second.rowCount).toBe(1);
+    const legacyRow = await admin.query<{ step_up_at: Date | null }>(
+      'select step_up_at from sessions where token_hash = $1',
+      [legacy],
+    );
+    expect(legacyRow.rows[0]?.step_up_at).toBeNull();
+  });
+
+  evidenceTest('a step-up round-trip carries its session binding through consume', async () => {
+    const person = await user();
+    const { granted } = await signIn(person.sub);
+    const tx = { ...transaction(), stepUpSessionId: granted?.sessionId };
+    await store.beginAuthTransaction(tx);
+    const consumed = await store.consumeAuthTransaction(tx.stateHash, tx.bindingHash);
+    expect(consumed?.stepUpSessionId).toBe(granted?.sessionId);
+  });
+});
+
+describe('the request-context membership lock (MWAIT)', () => {
   evidenceTest('refuses a disabled membership without touching the session', async () => {
     const person = await user();
     const { tokenHash } = await signIn(person.sub);

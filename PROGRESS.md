@@ -6,7 +6,7 @@ phase: P06
 tier: PILOT
 plan: docs/phases/P06-plan.md
 next: implement P06.06.04 step-up MFA (≤ 15 min) for sensitive actions; P06.06.01/.02/.03 VERIFIED at merge d92f82b (EV-P06-048); then P06.10.03 writer adoption and EXT-09 for P06.10.05 still open
-updated: 2026-10-05
+updated: 2026-10-06
 ---
 
 # PROGRESS — moin
@@ -754,3 +754,29 @@ true, ok: false }` — is serialized by Vitest with none of the `constructor`/`t
 - 2026-10-05 — **Codex re-review at ac2b3e2: READY FOR FOUNDER ACCEPTANCE.** Independent verification confirmed membership row-lock retention under FORCE RLS (55P03 on concurrent writer, wait until context commit), tenant WITH CHECK preservation, 156 focused tests PASS, and 20/20 affected stress runs PASS. All scenarios A through I PASS; 14/14 full gates PASS. P06.06.03 cleared for founder acceptance and merge.
 
 - 2026-10-05 — **PR #36 squash-merged as d92f82b; P06.06.03 VERIFIED on main.** Migrations 0013 and 0014 applied on main; RLS catalog check passes with all 21 pinned DEFINER digests matching freshly migrated md5(prosrc); full test suite green. P06.06.01/.02/.03 VERIFIED; P06.06.04-.07 open.
+
+- 2026-10-06 — **P06.06.04 step-up MFA implemented on branch feat/p06-06-step-up-mfa (EV-P06-049).** Migration 0015 (step_up_at + step_up_session_id, drop-then-create for changed OUT-record shapes); stamp flows through identity-store → RequestContextService → SessionContext; RequireStepUpGuard (403 step-up-required, Date.now comparison, always mutate-mode); POST /api/auth/step-up + callback rotation with max_age=0 and auth_time freshness. Commits 3fa4c99–7806a27. Next: full session sweep (61 variants incl. SU1–SU6), QG-09 triad reviews, founder full gate, draft PR. P06.06.04 stays IN_PROGRESS (never VERIFIED by implementor).
+
+- 2026-10-06 — **BLOCKER: full session sweep 45/61 — 16 pre-existing mutants SURVIVE on this branch.** SU1–SU6 all KILLED_ASSERTION individually (SU2 after strict-> assertion, SU4 retargeted to HTTP probe, SU5 after evidenceTest wrap). But the full sweep shows 16 SURVIVED incl. R1, S1–S3, WAIT5/6/9, M1, U1–U3, CLK2–4, F1, G10 — all KILLED at 55/55 on the P06.06.03 branch. Cause: migration 0015 redefines rotate_session/begin_sign_in/consume_sign_in/resolve_request_context, so old mutants targeting 0012/0014 bodies mutate a shadowed definition the live database never executes. Per stop-on-stall protocol: ending turn for founder direction on whether to (a) retarget old mutants to 0015, (b) accept branch-local sweep of SU1–SU6 only, or (c) other. P06.06.04 stays IN_PROGRESS.
+
+- 2026-10-06 — **Sweep BLOCKER cleared: 61/61 KILLED_ASSERTION at 5fc9764 (report committed at b4a6d37).** Sixteen stale mutants retargeted from shadowed 0012/0014 definitions to live 0015 bodies (commit 4d4a5af); WAIT5 reshaped for the binding-first consume (5fc9764); SU1–SU6 new. Nine dead-function mutants (revoke_session/resolve_session/grants) correctly left on 0012 — those bodies still execute. Next: QG-09 triad reviews, founder full gate, draft PR. P06.06.04 stays IN_PROGRESS.
+
+- 2026-10-06 — **BLOCKER: QG-09 architecture BLOCK_MERGE (H1/H2/H3 + M1/M2/M3); repair proposed, awaiting founder go-ahead.** Invariant review INCOMPLETE (reviewer pathed to parent repo, never saw moin-stepup — no verdict, will re-dispatch). Security review still pending at stall time. Stall hook fired after 2 no-change iterations (both turns were review-waiting + repair proposal, HEAD 41223ae, tree clean). Repair plan posted to founder: H1 subject binding + test, H2 DB freshness boolean, H3 shims, M1 single-resolve, M2 route guard, M3 mutants + re-sweep. Needed: founder authorization to execute repair on feat/p06-06-step-up-mfa. P06.06.04 stays IN_PROGRESS.
+
+- 2026-10-06 — **Repair committed through 702782d: H1/H2/M1/M2 fixed, 63/63 sweep, fast gates 7/7.** Subject binding enforced (wrong-subject test), DB-clock freshness verdict + single-resolve guard, POST step-up membership-gated, migrate-first deploy order documented (shims impossible: same IN-args forbid coexisting OUT-records), SU7/SU8 added, 20 mutants retargeted total. 159/159 affected integration green. Next: QG-09 triad re-reviews at repair HEAD, EV-P06-049, founder full gate, draft PR. P06.06.04 stays IN_PROGRESS.
+
+- 2026-10-06 — **BLOCKER: awaiting architecture re-review; stall hook fired.** Security re-review OK TO MERGE at 779f146 (H1/H2/M2 closed, residuals M+L only); invariant NO BYPASS FOUND (SHA binding INCOMPLETE — read-only reviewer, content-verified vs 63/63 report). Architecture re-review still outstanding at stall time; 2 no-change iterations (both review-waiting turns, HEAD 779f146, tree clean). Needed: architecture verdict, then write 3 review artifacts + EV-P06-049, push, founder full gate. P06.06.04 stays IN_PROGRESS.
+
+- 2026-10-06 — **Second repair round complete at 10cd519: fast 7/7, 162/162 affected integration, 64/64 sweep.** Architecture H1 (6-arg overload + overload-aware catalog/readiness/grant-matrix) and M1 (stamp-expiry cache bound + no-cache-unstyled + SU9) fixed; grant-matrix and catalog drift tests updated for the overload. Next: QG-09 triad re-reviews at fix HEAD, EV-P06-049, push, founder full gate, draft PR. P06.06.04 stays IN_PROGRESS.
+
+- 2026-10-06 — **BLOCKER: awaiting architecture re-review; stall hook fired.** Security re-review OK TO MERGE at d1d5c5f (overload introduces no forge path; residuals M1/L1/L2 hardening-only). Invariant re-review NO BYPASS FOUND at d1d5c5f (LC1/LC3 closed, LC2 accepted). Architecture re-review still outstanding; 2 no-change iterations (review-waiting turns, HEAD d1d5c5f, tree clean). Needed: architecture verdict, then 3 review artifacts + EV-P06-049, push, founder full gate. P06.06.04 stays IN_PROGRESS.
+
+- 2026-10-06 — **BLOCKER: awaiting invariant final review; stall hook fired.** Security final OK TO MERGE at 8ae542f (no findings in delta). Architecture final OK TO MERGE at 8ae542f (M1/L1/L2 closed). Invariant final still outstanding; 2 no-change iterations (review-waiting turns, HEAD 8ae542f, tree clean). Needed: invariant verdict, then 3 review artifacts + EV-P06-049, push, founder full gate. P06.06.04 stays IN_PROGRESS.
+
+- 2026-10-06 — **QG-09 triad complete at a1236a2: three OK TO MERGE + EV-P06-049.** Security/architecture/invariant finals all green (residuals hardening-only → wiring backlog). 64/64 sweep, fast 7/7, 163/163 affected integration. Next: push branch, draft PR, founder full gate. P06.06.04 stays READY_FOR_REVIEW (never VERIFIED by implementor).
+
+- 2026-10-06 — **Founder full gate 14/14 PASS at 3f68fc5 (evidence 20261006T014632Z-full.json).** Run by the founder with ephemeral fixture env. P06.06.04 ready for founder acceptance; PR #38 draft awaiting CI. P06.06.04 stays READY_FOR_REVIEW.
+
+- 2026-10-06 — **Dep override at 81da2e4: source-map-js 1.2.2 via pnpm.overrides.** Pre-existing HIGH (postcss chain, advisory published after main green); `pnpm audit --prod` clean, web typecheck green. EV-P06-049 candidate SHA updated. Next: push, CI 16/16 watch, final report. P06.06.04 stays READY_FOR_REVIEW.
+
+- 2026-10-06 — **PR #38 CI 16/16 PASS at 8816c79 (dep override included).** Founder full gate 14/14 recorded (EV-P06-049). P06.06.04 READY_FOR_REVIEW — founder merge/acceptance only; PR stays DRAFT and unmerged.

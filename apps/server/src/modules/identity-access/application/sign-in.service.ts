@@ -33,7 +33,7 @@ import type { IdentityStore } from '@moin/db';
 import type { Logger } from '@moin/observability';
 import type { OidcClientConfig } from '../../../config/oidc.ts';
 import { IdentityClaimsError, parseIdentityClaims } from '../domain/identity-claims.ts';
-import { DEFAULT_RETURN_PATH } from '../domain/session-policy.ts';
+import { DEFAULT_RETURN_PATH, STEP_UP_WINDOW_MS } from '../domain/session-policy.ts';
 import { safeReturnPath } from '../domain/return-path.ts';
 import { OidcError, type OidcProviderClient } from '../infrastructure/oidc-provider.ts';
 import { digestOf, isSecretValue, pkceChallenge, randomSecret } from '../domain/secret-values.ts';
@@ -58,7 +58,9 @@ export type SignInFailure =
   /** The exchange was refused, or what came back is not a token we accept. */
   | 'token_invalid'
   /** The person authenticated but has no active user here. Sign-in never creates one. */
-  | 'identity_unavailable';
+  | 'identity_unavailable'
+  /** A step-up round-trip whose session is gone, foreign, or belongs to another person. */
+  | 'step_up_invalid';
 
 export class SignInError extends Error {
   override readonly name = 'SignInError';
@@ -96,6 +98,8 @@ export interface CompletedSignIn {
   readonly absoluteExpiresAt: Date;
   /** Seconds until the absolute expiry: the session cookie never outlives the session. */
   readonly cookieMaxAgeSeconds: number;
+  /** True when this completion rotated a session for step-up rather than signing in. */
+  readonly steppedUp?: boolean | undefined;
 }
 
 export interface SignInDependencies {
@@ -163,10 +167,63 @@ export class SignInService {
       verifierSealed: sealedVerifier.sealed,
       keyId: sealedVerifier.keyId,
       returnTo: target,
+      stepUpSessionId: undefined,
     });
     this.#deps.logger.info(
       { outcome: 'sign-in started', provider: this.#deps.config.provider },
       'sign-in started',
+    );
+    return { location, binding };
+  }
+
+  /**
+   * Start a step-up round-trip for the bearer of `presentedSession` (P06.06.04): the same OIDC
+   * flow, but bound to that session and forcing fresh authentication (`max_age=0`). The browser
+   * must already hold a valid session — verified by the caller (the route guard) — but this
+   * method re-resolves it: the binding recorded here is the session id plus the owner's
+   * provider subject, never a caller claim.
+   */
+  async startStepUp(presentedSession: string | undefined): Promise<StartedSignIn> {
+    const { provider, cipher, store } = this.#deps;
+    if (!isSecretValue(presentedSession)) {
+      throw this.#fail('step_up_invalid', 'step_up_without_session');
+    }
+    const resolved = await store.resolveSession(digestOf(presentedSession));
+    if (resolved === undefined) {
+      throw this.#fail('step_up_invalid', 'step_up_session_unknown');
+    }
+
+    const state = randomSecret();
+    const nonce = randomSecret();
+    const verifier = randomSecret();
+    const binding = randomSecret();
+    const stateHash = digestOf(state);
+
+    let location: string;
+    try {
+      location = await provider.authorizationUrl({
+        state,
+        nonce,
+        codeChallenge: pkceChallenge(verifier),
+        stepUp: true,
+      });
+    } catch (error) {
+      throw this.#fromProvider(error);
+    }
+
+    const sealedVerifier = cipher.seal(verifier, verifierContext(stateHash));
+    await store.beginAuthTransaction({
+      stateHash,
+      bindingHash: digestOf(binding),
+      nonceHash: digestOf(nonce),
+      verifierSealed: sealedVerifier.sealed,
+      keyId: sealedVerifier.keyId,
+      returnTo: DEFAULT_RETURN_PATH,
+      stepUpSessionId: resolved.sessionId,
+    });
+    this.#deps.logger.info(
+      { outcome: 'step-up started', provider: this.#deps.config.provider },
+      'step-up started',
     );
     return { location, binding };
   }
@@ -225,15 +282,43 @@ export class SignInService {
 
     let identity: ReturnType<typeof parseIdentityClaims>;
     let tokens: Awaited<ReturnType<OidcProviderClient['exchangeCode']>>;
+    let authTime: number | undefined;
     try {
       tokens = await provider.exchangeCode(code, verifier);
-      const payload = await provider.verifyIdToken(tokens.idToken, pending.nonceHash, clock.now());
-      identity = parseIdentityClaims(payload);
+      const verified = await provider.verifyIdToken(
+        tokens.idToken,
+        pending.nonceHash,
+        clock.now(),
+        pending.stepUpSessionId !== undefined,
+      );
+      authTime = verified.authTime;
+      identity = parseIdentityClaims(verified.payload);
     } catch (error) {
       if (error instanceof IdentityClaimsError) {
         throw this.#fail('token_invalid', 'identity_claims_rejected');
       }
       throw this.#fromProvider(error);
+    }
+
+    // A step-up round-trip rotates the bound session instead of signing in. The presented
+    // cookie must still resolve to the bound session id: the transaction recorded the id at
+    // startStepUp from a resolved session, so only the browser holding that session completes
+    // this round-trip. The fresh provider subject must equal the session owner's subject
+    // (resolved alongside): a round-trip completed as another person rotates nothing. The
+    // session cannot have lapsed mid-round-trip either — rotate refuses an invalid
+    // predecessor, which fails this completion rather than issuing anything.
+    if (pending.stepUpSessionId !== undefined) {
+      if (!isSecretValue(presentedSession)) {
+        throw this.#fail('step_up_invalid', 'step_up_session_not_presented');
+      }
+      const bound = await store.resolveSession(digestOf(presentedSession));
+      if (bound?.sessionId !== pending.stepUpSessionId) {
+        throw this.#fail('step_up_invalid', 'step_up_session_unknown');
+      }
+      if (identity.subject !== bound.subject) {
+        throw this.#fail('step_up_invalid', 'step_up_subject_mismatch');
+      }
+      return this.#completeStepUp(presentedSession, authTime);
     }
 
     const now = clock.now();
@@ -261,6 +346,15 @@ export class SignInService {
       providerTokensSealed: sealedTokens.sealed,
       keyId: sealedTokens.keyId,
       replacedHash: isSecretValue(presentedSession) ? digestOf(presentedSession) : undefined,
+      // A plain sign-in stamps step-up only on fresh provider proof: auth_time present and
+      // within the 15-minute window. Stale or absent proof leaves step_up_at NULL — the
+      // session begins un-stepped-up and sensitive actions 403 until explicit step-up.
+      stepUp:
+        authTime !== undefined &&
+        now.getTime() / 1000 - authTime <= STEP_UP_WINDOW_MS / 1000 &&
+        now.getTime() / 1000 - authTime >= -30
+          ? new Date(authTime * 1000)
+          : undefined,
     });
     if (granted === undefined) {
       throw this.#fail('identity_unavailable', 'no_active_user_for_subject');
@@ -287,6 +381,49 @@ export class SignInService {
         1,
         Math.floor((granted.absoluteExpiresAt.getTime() - now.getTime()) / MS_PER_SECOND),
       ),
+    };
+  }
+
+  /**
+   * Rotate the bound session after its owner re-verified at the provider (P06.06.04).
+   * `complete` already enforced both bindings before this runs: the presented cookie
+   * resolved to the recorded session id, and the fresh provider subject equalled the
+   * session owner's subject. The rotation re-resolves validity (unrevoked, unexpired,
+   * active user) against the database clock: a lapsed session fails here rather
+   * than stepping up.
+   */
+  async #completeStepUp(
+    presentedSession: string,
+    authTime: number | undefined,
+  ): Promise<CompletedSignIn> {
+    const { store, clock } = this.#deps;
+    const sessionToken = randomSecret();
+    const now = clock.now();
+    const rotated = await store.rotateSession(
+      digestOf(presentedSession),
+      digestOf(sessionToken),
+      uuidv7({ now: () => now }),
+      'step_up',
+      authTime !== undefined ? new Date(authTime * 1000) : null,
+    );
+    if (rotated === undefined) {
+      throw this.#fail('step_up_invalid', 'step_up_session_lapsed');
+    }
+    this.#deps.logger.info(
+      { outcome: 'stepped up', sessionId: rotated.sessionId, userId: rotated.userId },
+      'stepped up',
+    );
+    return {
+      location: DEFAULT_RETURN_PATH,
+      sessionToken,
+      sessionId: rotated.sessionId,
+      userId: rotated.userId,
+      absoluteExpiresAt: rotated.absoluteExpiresAt,
+      cookieMaxAgeSeconds: Math.max(
+        1,
+        Math.floor((rotated.absoluteExpiresAt.getTime() - now.getTime()) / MS_PER_SECOND),
+      ),
+      steppedUp: true,
     };
   }
 

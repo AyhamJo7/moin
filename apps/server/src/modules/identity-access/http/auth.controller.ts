@@ -1,5 +1,5 @@
 /**
- * `GET /api/auth/login` and `GET /api/auth/callback` (P06.06.01).
+ * `GET /api/auth/login`, `GET /api/auth/callback` and `POST /api/auth/step-up` (P06.06.01/.04).
  *
  * Both are browser navigations, so both answer with a redirect on success and an RFC 9457 problem
  * on failure (ADR-0006). A problem names the coarse outcome and nothing else: whether the `state`
@@ -7,9 +7,14 @@
  * logged as a reason code and never told to the caller, who may be the attacker the check exists
  * for. Every response is `no-store`, and the callback sends no referrer, because its own URL held
  * an authorization code.
+ *
+ * `POST /api/auth/step-up` starts a step-up round-trip for the calling browser's own session
+ * (P06.06.04): it 302s to the provider with `max_age=0`, and the callback rotates that session
+ * with reason `step_up` when the same person re-verifies. The route is guarded by the session +
+ * membership gate — an unauthenticated caller learns nothing beyond the 401.
  */
 
-import { Controller, Get, Headers, Inject, Query, Res } from '@nestjs/common';
+import { Controller, Get, Headers, Inject, Post, Query, Res, UseGuards } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 import {
   AUTH_TRANSACTION_TTL_MS,
@@ -19,6 +24,7 @@ import {
 import { SignInError, type SignInFailure } from '../application/sign-in.service.ts';
 import { SIGN_IN, type SignInGate } from '../identity-access.tokens.ts';
 import { clearCookie, readCookie, serializeCookie } from './cookies.ts';
+import { SessionMembershipGuard } from './session-membership.guard.ts';
 
 const MS_PER_SECOND = 1000;
 
@@ -53,6 +59,7 @@ const PROBLEMS: Readonly<Record<SignInFailure, Problem>> = {
     type: '/problems/sign-in-not-permitted',
     title: 'Sign-in not permitted',
   },
+  step_up_invalid: { status: 400, type: '/problems/sign-in-failed', title: 'Sign-in failed' },
 };
 
 /** A query value as Fastify parsed it: a repeated key arrives as an array, which we never accept. */
@@ -118,6 +125,34 @@ export class AuthController {
         .send();
     } catch (error) {
       void reply.header('set-cookie', clearCookie(SIGN_IN_COOKIE));
+      await this.#problem(reply, error);
+    }
+  }
+
+  /**
+   * Start a step-up round-trip for the caller's own session. Guarded by the session +
+   * membership gate: a removed member's session cannot even start a round-trip. Answers 302
+   * to the provider on success, RFC 9457 otherwise — never the session's state.
+   */
+  @Post('step-up')
+  @UseGuards(SessionMembershipGuard)
+  async stepUp(
+    @Headers('cookie') cookieHeader: string | undefined,
+    @Res() reply: FastifyReply,
+  ): Promise<void> {
+    void reply.header('cache-control', 'no-store');
+    try {
+      const service = this.#service();
+      const started = await service.startStepUp(readCookie(cookieHeader, SESSION_COOKIE));
+      await reply
+        .code(302)
+        .header('location', started.location)
+        .header(
+          'set-cookie',
+          serializeCookie(SIGN_IN_COOKIE, started.binding, AUTH_TRANSACTION_TTL_MS / MS_PER_SECOND),
+        )
+        .send();
+    } catch (error) {
       await this.#problem(reply, error);
     }
   }

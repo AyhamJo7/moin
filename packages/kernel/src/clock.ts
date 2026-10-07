@@ -9,11 +9,15 @@
 
 export interface Clock {
   now(): Date;
+  monotonicMs?(): number;
 }
 
 export const systemClock: Clock = {
   now(): Date {
     return new Date();
+  },
+  monotonicMs(): number {
+    return performance.now();
   },
 };
 
@@ -22,12 +26,19 @@ export function fixedClock(
   start: Date,
 ): Clock & { advance(ms: number): void; set(at: Date): void } {
   let current = new Date(start.getTime());
+  let monotonic = 0;
   return {
     now(): Date {
       return new Date(current.getTime());
     },
+    monotonicMs(): number {
+      return monotonic;
+    },
     advance(ms: number): void {
       current = new Date(current.getTime() + ms);
+      if (ms > 0) {
+        monotonic += ms;
+      }
     },
     set(at: Date): void {
       current = new Date(at.getTime());

@@ -25,6 +25,7 @@ import { RequestContextService } from './application/request-context.service.ts'
 import { SignInService } from './application/sign-in.service.ts';
 import { CALLBACK_PATH } from './domain/session-policy.ts';
 import { AuthController } from './http/auth.controller.ts';
+import { RequireStepUpGuard } from './http/require-step-up.guard.ts';
 import { SessionMembershipGuard } from './http/session-membership.guard.ts';
 import { TenantContextInterceptor } from './http/tenant-context.interceptor.ts';
 import {
@@ -99,6 +100,7 @@ export function buildSignInGate(
         store === null ? null : new RequestContextService(store, clock),
     },
     SessionMembershipGuard,
+    RequireStepUpGuard,
     TenantContextInterceptor,
   ],
   exports: [SESSIONS, REQUEST_CONTEXTS],

@@ -21,6 +21,17 @@ export const ABSOLUTE_TIMEOUT_MS = 7 * DAY_MS;
 export const AUTH_TRANSACTION_TTL_MS = 10 * MINUTE_MS;
 
 /**
+ * The step-up window in milliseconds (P06.06.04, PLAN Security Architecture).
+ *
+ * The authoritative judgment lives in SQL — `step_up_at > v_now - interval '15 minutes'`
+ * inside `app.resolve_request_context`, against the database clock. This constant mirrors
+ * that interval for the cache-expiry arithmetic in `RequestContextService` only: it bounds
+ * how long a cached verdict is served, never whether a stamp is fresh. If the window ever
+ * changes, change both in one reviewed change.
+ */
+export const STEP_UP_WINDOW_MS = 15 * MINUTE_MS;
+
+/**
  * The application session cookie (Security Architecture: `__Host-moin_sid`, HttpOnly, Secure,
  * SameSite=Lax, Path=/). `__Host-` makes the browser refuse it unless it is Secure, has Path=/ and
  * carries no Domain, so no sibling host can plant or overwrite it.

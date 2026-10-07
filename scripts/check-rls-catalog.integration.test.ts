@@ -476,7 +476,7 @@ describe('the identity role boundary (P06.06, ADR-0003)', () => {
   // never mutated here.
   evidenceTest('rejects moin_app regaining EXECUTE on a session function', async () => {
     await ddl(
-      'GRANT EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea) TO moin_app',
+      'GRANT EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea, timestamptz) TO moin_app',
     );
     try {
       expect(rulesFor(await findings(), 'app.begin_session')).toContain(
@@ -484,7 +484,7 @@ describe('the identity role boundary (P06.06, ADR-0003)', () => {
       );
     } finally {
       await ddl(
-        'REVOKE EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea) FROM moin_app',
+        'REVOKE EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea, timestamptz) FROM moin_app',
       );
     }
   });

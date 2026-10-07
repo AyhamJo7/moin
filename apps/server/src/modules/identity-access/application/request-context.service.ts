@@ -35,6 +35,10 @@ export interface SessionContext {
   readonly organisationId: string;
   readonly role: string;
   readonly permissions: readonly string[];
+  /** Last MFA proof; null until re-verified. Sensitive actions judge it (P06.06.04). */
+  readonly stepUpAt: Date | null;
+  /** Freshness judged by the database clock against the 15-minute window (P06.06.04). */
+  readonly stepUpFresh: boolean;
 }
 
 export type ContextFailure = 'no_session' | 'invalid' | 'ambiguous_organisation' | 'unavailable';
@@ -51,10 +55,28 @@ export const CONTEXT_CACHE_TTL_MS = 30_000;
  */
 export const MAX_CACHE_ENTRIES = 10_000;
 
+function monotonicMs(clock: Clock): number {
+  if (typeof clock.monotonicMs === 'function') {
+    return clock.monotonicMs();
+  }
+  return performance.now();
+}
+
 interface CachedEntry {
+  readonly maxLifetimeMs: number;
   readonly expiresAtMs: number;
   readonly idleExpiresAtMs: number;
   readonly absoluteExpiresAtMs: number;
+  /**
+   * Remaining step-up budget in ms, computed entirely on the database clock at insert
+   * (Defect 2). Zero for unstamped or stale sessions. The hit check spends it in local
+   * monotonic elapsed time, so constant app↔DB skew cannot stretch the verdict, and
+   * backward wall-clock adjustments cannot extend it.
+   */
+  readonly stepUpBudgetMs: number;
+  readonly cachedAtMonotonicMs: number;
+  readonly cachedAtWallMs: number;
+  lastSeenWallMs: number;
   readonly context: SessionContext;
 }
 
@@ -71,6 +93,8 @@ function toSessionContext(context: RequestContext): SessionContext | undefined {
     organisationId: membership.organisationId,
     role: membership.role,
     permissions: membership.permissions,
+    stepUpAt: context.stepUpAt,
+    stepUpFresh: context.stepUpFresh,
   };
 }
 
@@ -107,6 +131,7 @@ export class RequestContextService {
     const useCache = mode === 'read';
     const key = tokenHash.toString('hex');
     const nowMs = this.#clock.now().getTime();
+    const nowMonoMs = monotonicMs(this.#clock);
     if (!useCache) {
       // A mutation just changed what a cached read would serve (disable, role change,
       // revocation): drop the entry so the next GET re-resolves instead of serving up to 30 s
@@ -115,17 +140,25 @@ export class RequestContextService {
     }
     if (useCache) {
       const hit = this.#cache.get(key);
-      // All three deadlines must still be future: the TTL, and the session's own expiries the
-      // DEFINER call returned. A session that lapsed inside the cache window refuses on next read.
-      if (
-        hit !== undefined &&
-        hit.expiresAtMs > nowMs &&
-        hit.idleExpiresAtMs > nowMs &&
-        hit.absoluteExpiresAtMs > nowMs
-      ) {
-        return { context: hit.context };
+      if (hit !== undefined) {
+        const wallMovedBack = nowMs < hit.lastSeenWallMs || nowMs < hit.cachedAtWallMs;
+        const wallExpired =
+          nowMs >= hit.expiresAtMs ||
+          nowMs >= hit.idleExpiresAtMs ||
+          nowMs >= hit.absoluteExpiresAtMs;
+        const monoElapsed = nowMonoMs - hit.cachedAtMonotonicMs;
+        const monoExpired = monoElapsed >= hit.maxLifetimeMs;
+
+        if (wallMovedBack || wallExpired || monoExpired) {
+          this.#cache.delete(key);
+        } else {
+          hit.lastSeenWallMs = nowMs;
+          if (monoElapsed >= hit.stepUpBudgetMs) {
+            return { context: { ...hit.context, stepUpFresh: false } };
+          }
+          return { context: hit.context };
+        }
       }
-      this.#cache.delete(key);
     }
     this.#lookups += 1;
     // Single DEFINER call: validity, memberships and the capped activity slide share one v_now.
@@ -133,25 +166,38 @@ export class RequestContextService {
     if (resolved === undefined) return { failure: 'invalid' };
     const context = toSessionContext(resolved);
     if (context === undefined) return { failure: 'ambiguous_organisation' };
+    // Cache standard reads even without recent MFA. An absent or expired proof has no
+    // remaining step-up budget, so it stays false on every cache hit. A successful step-up
+    // rotates the token and creates a new cache key.
     if (useCache) {
-      if (this.#cache.size >= MAX_CACHE_ENTRIES) {
-        let oldest = this.#cache.keys().next();
-        while (!oldest.done && this.#cache.size >= MAX_CACHE_ENTRIES) {
-          this.#cache.delete(oldest.value);
-          oldest = this.#cache.keys().next();
+      const stepUpBudgetMs =
+        resolved.stepUpFresh && resolved.stepUpRemainingSeconds !== null
+          ? Math.max(0, resolved.stepUpRemainingSeconds * 1000)
+          : 0;
+      const idleRemainingMs = Math.max(0, resolved.idleRemainingSeconds * 1000);
+      const absoluteRemainingMs = Math.max(0, resolved.absoluteRemainingSeconds * 1000);
+      const maxLifetimeMs = Math.min(CONTEXT_CACHE_TTL_MS, idleRemainingMs, absoluteRemainingMs);
+
+      if (maxLifetimeMs > 0) {
+        if (this.#cache.size >= MAX_CACHE_ENTRIES) {
+          let oldest = this.#cache.keys().next();
+          while (!oldest.done && this.#cache.size >= MAX_CACHE_ENTRIES) {
+            this.#cache.delete(oldest.value);
+            oldest = this.#cache.keys().next();
+          }
         }
+        this.#cache.set(key, {
+          maxLifetimeMs,
+          expiresAtMs: nowMs + maxLifetimeMs,
+          idleExpiresAtMs: nowMs + idleRemainingMs,
+          absoluteExpiresAtMs: nowMs + absoluteRemainingMs,
+          stepUpBudgetMs,
+          cachedAtMonotonicMs: nowMonoMs,
+          cachedAtWallMs: nowMs,
+          lastSeenWallMs: nowMs,
+          context,
+        });
       }
-      this.#cache.set(key, {
-        // The TTL is bounded by the session's own expiries: authority never outlives either.
-        expiresAtMs: Math.min(
-          nowMs + CONTEXT_CACHE_TTL_MS,
-          resolved.idleExpiresAt.getTime(),
-          resolved.absoluteExpiresAt.getTime(),
-        ),
-        idleExpiresAtMs: resolved.idleExpiresAt.getTime(),
-        absoluteExpiresAtMs: resolved.absoluteExpiresAt.getTime(),
-        context,
-      });
     }
     return { context };
   }

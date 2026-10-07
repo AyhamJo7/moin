@@ -143,8 +143,37 @@ it('refuses a token response larger than any real one, without buffering it whol
 describe('ID-token verification', () => {
   evidenceTest('accepts a token for this client, this issuer and this nonce', async () => {
     const { client, tokens, nonceHash } = await exchange();
-    const payload = await client.verifyIdToken(tokens.idToken, nonceHash, clock.now());
+    const { payload } = await client.verifyIdToken(tokens.idToken, nonceHash, clock.now());
     expect(payload.sub).toBe(PERSON.subject);
+  });
+
+  evidenceTest('a plain verification ignores a missing auth_time', async () => {
+    provider.claims = { auth_time: undefined };
+    const { client, tokens, nonceHash } = await exchange();
+    const { payload } = await client.verifyIdToken(tokens.idToken, nonceHash, clock.now());
+    expect(payload.sub).toBe(PERSON.subject);
+  });
+
+  evidenceTest('step-up accepts a fresh auth_time', async () => {
+    const { client, tokens, nonceHash } = await exchange();
+    const { payload } = await client.verifyIdToken(tokens.idToken, nonceHash, clock.now(), true);
+    expect(payload.sub).toBe(PERSON.subject);
+  });
+
+  evidenceTest('step-up refuses a missing auth_time', async () => {
+    provider.claims = { auth_time: undefined };
+    const { client, tokens, nonceHash } = await exchange();
+    expect(
+      await rejection(client.verifyIdToken(tokens.idToken, nonceHash, clock.now(), true)),
+    ).toStrictEqual({ kind: 'token_invalid', reason: 'auth_time_missing' });
+  });
+
+  evidenceTest('step-up refuses a stale auth_time', async () => {
+    provider.claims = { auth_time: Math.floor(clock.now().getTime() / 1000) - 600 };
+    const { client, tokens, nonceHash } = await exchange();
+    expect(
+      await rejection(client.verifyIdToken(tokens.idToken, nonceHash, clock.now(), true)),
+    ).toStrictEqual({ kind: 'token_invalid', reason: 'auth_time_stale' });
   });
 
   evidenceTest('refuses the wrong nonce', async () => {

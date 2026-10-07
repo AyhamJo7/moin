@@ -94,7 +94,7 @@
     "id": "R1-rotation-leaves-predecessor-valid",
     "invariant": "P06.06.02: rotation invalidates the predecessor",
     "expected": "After step-up or a privilege change the old token would keep working beside the new one.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
     "find": "    SET revoked_at = v_now, revocation_reason = 'rotated',\n        provider_tokens_sealed = NULL, provider_tokens_key_id = NULL\n",
     "replace": "    SET last_seen_at = s.last_seen_at\n",
     "killingTest": {
@@ -107,7 +107,7 @@
     "id": "F1-relogin-leaves-old-session",
     "invariant": "P06.06.02: login rotates \u2014 the session the browser held does not survive as a parallel login",
     "expected": "Signing in again would leave the previous session valid and unnoticed.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
     "find": "    SET revoked_at = v_now, revocation_reason = 'superseded',\n        provider_tokens_sealed = NULL, provider_tokens_key_id = NULL\n",
     "replace": "      SET last_seen_at = s.last_seen_at\n",
     "killingTest": {
@@ -121,8 +121,8 @@
     "invariant": "P06.06.07 precondition / P06.06.02: the post-login token is never caller-chosen",
     "expected": "An attacker who plants `__Host-moin_sid=X` before the victim signs in would own the victim's session afterwards.",
     "file": "apps/server/src/modules/identity-access/application/sign-in.service.ts",
-    "find": "    const sessionToken = randomSecret();\n",
-    "replace": "    const sessionToken = isSecretValue(presentedSession) ? presentedSession : randomSecret();\n",
+    "find": "    const now = clock.now();\n    const sessionToken = randomSecret();\n    // One reading of the clock per operation, so the session id's timestamp is its creation time.",
+    "replace": "    const now = clock.now();\n    const sessionToken = isSecretValue(presentedSession) ? presentedSession : randomSecret();\n    // One reading of the clock per operation, so the session id's timestamp is its creation time.",
     "killingTest": {
       "file": "apps/server/src/modules/identity-access/sign-in.integration.test.ts",
       "fullName": "session fixation > an attacker-chosen cookie never becomes the session"
@@ -133,7 +133,7 @@
     "id": "U1-disabled-user-signs-in",
     "invariant": "ADR-0005: a session is issued only to an active user",
     "expected": "A disabled person who still authenticates at the provider would get a session.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
     "find": "  WHERE u.cognito_sub = p_subject AND u.status = 'active'\n  FOR SHARE;\n",
     "replace": "  WHERE u.cognito_sub = p_subject;\n",
     "killingTest": {
@@ -146,7 +146,7 @@
     "id": "U2-disable-racing-sign-in-mints-session",
     "invariant": "ADR-0005: a disable racing sign-in mints no live session (user row locked FOR SHARE)",
     "expected": "Disabling a user while their sign-in is in flight would mint a live 7-day session.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
     "find": "  WHERE u.cognito_sub = p_subject AND u.status = 'active'\n  FOR SHARE;\n",
     "replace": "  WHERE u.cognito_sub = p_subject AND u.status = 'active';\n",
     "killingTest": {
@@ -159,7 +159,7 @@
     "id": "U3-disable-racing-rotation-extends-session",
     "invariant": "P06.06.02: a disable racing rotation extends nothing (user row locked FOR SHARE OF u)",
     "expected": "Disabling a user while their rotation is in flight would issue a live successor.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
     "find": "  -- Lock the owning user row (FOR SHARE conflicts with a concurrent disable's UPDATE), so a\n  -- disable racing this rotation serialises here rather than extending a session that should die.\n  PERFORM 1\n  FROM public.sessions s JOIN public.users u ON u.id = s.user_id\n  WHERE s.token_hash = p_token_hash FOR SHARE OF u;\n",
     "replace": "  PERFORM 1;\n",
     "killingTest": {
@@ -250,9 +250,9 @@
     "id": "G1-moin-app-executes-session-function",
     "invariant": "ADR-0003 amendment / QG-09 I1: moin_app (voice, worker) executes no session function",
     "expected": "Any voice or worker process could call begin_session for an active subject and obtain a valid seven-day session.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "GRANT EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea) TO moin_identity;\n",
-    "replace": "GRANT EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea) TO moin_identity, moin_app;\n",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
+    "find": "GRANT EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea, timestamptz) TO moin_identity;\n",
+    "replace": "GRANT EXECUTE ON FUNCTION app.begin_session(text, bytea, uuid, bytea, text, bytea, timestamptz) TO moin_identity, moin_app;\n",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "moin_app \u2014 the voice and worker role \u2014 and sessions > cannot mint, resolve, rotate or revoke a session by calling the functions"
@@ -367,7 +367,7 @@
     "id": "G10-sign-in-supersedes-only-presented-token",
     "invariant": "P06.06.02 (QG-09 review): a sign-in leaves no live session of the family it supersedes",
     "expected": "A rotation racing the sign-in would leave its successor alive beside the new session.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
     "find": "    WHERE s.family_id = v_family AND s.user_id = v_user AND s.revoked_at IS NULL;",
     "replace": "      WHERE s.token_hash = p_replaced_hash AND s.revoked_at IS NULL;\n",
     "killingTest": {
@@ -523,9 +523,9 @@
     "id": "CLK1-resolve-idle-expiry-bypassed",
     "invariant": "P06.06.02: authoritative DB time governs session resolution; idle-expired sessions cannot resolve",
     "expected": "A session whose idle timeout expired in the database would be resolved if the idle expiry check is relaxed.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "  SELECT s.id, s.user_id, s.idle_expires_at, s.absolute_expires_at\n  FROM public.sessions s\n  JOIN public.users u ON u.id = s.user_id\n  WHERE s.token_hash = p_token_hash\n    AND s.revoked_at IS NULL\n    AND s.idle_expires_at > v_now\n    AND s.absolute_expires_at > v_now\n    AND u.status = 'active';\n",
-    "replace": "  SELECT s.id, s.user_id, s.idle_expires_at, s.absolute_expires_at\n  FROM public.sessions s\n  JOIN public.users u ON u.id = s.user_id\n  WHERE s.token_hash = p_token_hash\n    AND s.revoked_at IS NULL\n    AND s.absolute_expires_at > v_now\n    AND u.status = 'active';\n",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
+    "find": "  SELECT s.id, s.user_id, s.idle_expires_at, s.absolute_expires_at, u.cognito_sub\n  FROM public.sessions s\n  JOIN public.users u ON u.id = s.user_id\n  WHERE s.token_hash = p_token_hash\n    AND s.revoked_at IS NULL\n    AND s.idle_expires_at > v_now\n    AND s.absolute_expires_at > v_now\n    AND u.status = 'active';",
+    "replace": "  SELECT s.id, s.user_id, s.idle_expires_at, s.absolute_expires_at, u.cognito_sub\n  FROM public.sessions s\n  JOIN public.users u ON u.id = s.user_id\n  WHERE s.token_hash = p_token_hash\n    AND s.revoked_at IS NULL\n    AND s.absolute_expires_at > v_now\n    AND u.status = 'active';",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "temporal authorization and expiration (authoritative database clock) > idle expired 1 ms ago cannot resolve"
@@ -536,9 +536,9 @@
     "id": "CLK2-rotate-idle-expiry-bypassed",
     "invariant": "P06.06.02: authoritative DB time governs session rotation; expired sessions cannot rotate",
     "expected": "An expired session would be rotated and a new successor issued if rotation ignored idle expiry.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "  WITH predecessor AS (\n    SELECT s.token_hash, s.id, s.family_id, s.user_id, s.created_at, s.absolute_expires_at,\n           s.provider_tokens_sealed, s.provider_tokens_key_id\n    FROM public.sessions s\n    JOIN public.users u ON u.id = s.user_id\n    WHERE s.token_hash = p_token_hash\n      AND s.revoked_at IS NULL\n      AND s.idle_expires_at > v_now\n      AND s.absolute_expires_at > v_now\n      AND u.status = 'active'\n  )",
-    "replace": "  WITH predecessor AS (\n    SELECT s.token_hash, s.id, s.family_id, s.user_id, s.created_at, s.absolute_expires_at,\n           s.provider_tokens_sealed, s.provider_tokens_key_id\n    FROM public.sessions s\n    JOIN public.users u ON u.id = s.user_id\n    WHERE s.token_hash = p_token_hash\n      AND s.revoked_at IS NULL\n      AND s.absolute_expires_at > v_now\n      AND u.status = 'active'\n  )",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
+    "find": "  WITH predecessor AS (\n    SELECT s.token_hash, s.id, s.family_id, s.user_id, s.created_at, s.absolute_expires_at,\n           s.step_up_at, s.provider_tokens_sealed, s.provider_tokens_key_id\n    FROM public.sessions s\n    JOIN public.users u ON u.id = s.user_id\n    WHERE s.token_hash = p_token_hash\n      AND s.revoked_at IS NULL\n      AND s.idle_expires_at > v_now\n      AND s.absolute_expires_at > v_now\n      AND u.status = 'active'\n  )",
+    "replace": "  WITH predecessor AS (\n    SELECT s.token_hash, s.id, s.family_id, s.user_id, s.created_at, s.absolute_expires_at,\n           s.step_up_at, s.provider_tokens_sealed, s.provider_tokens_key_id\n    FROM public.sessions s\n    JOIN public.users u ON u.id = s.user_id\n    WHERE s.token_hash = p_token_hash\n      AND s.revoked_at IS NULL\n      AND s.absolute_expires_at > v_now\n      AND u.status = 'active'\n  )",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "temporal authorization and expiration (authoritative database clock) > expired session cannot rotate"
@@ -549,7 +549,7 @@
     "id": "CLK4-rotate-expiry-before-lock-only",
     "invariant": "P06.06.02: session rotation rechecks authoritative DB time after acquiring family and row locks",
     "expected": "A session expiring while waiting on a family lock would rotate if expiration is not rechecked post-lock.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
     "find": "  -- Fresh DB clock obtained after acquiring the locks\n  v_now := clock_timestamp();\n",
     "replace": "  -- Stale clock an hour behind the post-lock time: expiry evaluated against the wrong time\n  v_now := clock_timestamp() - interval '1 hour';\n",
     "killingTest": {
@@ -562,9 +562,9 @@
     "id": "CLK5-resolve-expired-session-updates-last-seen",
     "invariant": "P06.06.02: activity on an expired session cannot update last_seen_at or extend idle expiry",
     "expected": "An expired session would update last_seen_at and extend idle expiry if the UPDATE omitted the idle expiry condition.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "  UPDATE public.sessions s\n  SET last_seen_at = GREATEST(s.last_seen_at, v_now),\n      idle_expires_at = LEAST(v_now + interval '12 hours', s.absolute_expires_at)\n  FROM public.users u\n  WHERE s.token_hash = p_token_hash\n    AND s.revoked_at IS NULL\n    AND s.idle_expires_at > v_now\n",
-    "replace": "  UPDATE public.sessions s\n  SET last_seen_at = GREATEST(s.last_seen_at, v_now),\n      idle_expires_at = LEAST(v_now + interval '12 hours', s.absolute_expires_at)\n  FROM public.users u\n  WHERE s.token_hash = p_token_hash\n    AND s.revoked_at IS NULL\n",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
+    "find": "  UPDATE public.sessions s\n  SET last_seen_at = GREATEST(s.last_seen_at, v_now),\n      idle_expires_at = LEAST(v_now + interval '12 hours', s.absolute_expires_at)\n  FROM public.users u\n  WHERE s.token_hash = p_token_hash\n    AND s.revoked_at IS NULL\n    AND s.idle_expires_at > v_now",
+    "replace": "  UPDATE public.sessions s\n  SET last_seen_at = GREATEST(s.last_seen_at, v_now),\n      idle_expires_at = LEAST(v_now + interval '12 hours', s.absolute_expires_at)\n  FROM public.users u\n  WHERE s.token_hash = p_token_hash\n    AND s.revoked_at IS NULL",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "temporal authorization and expiration (authoritative database clock) > activity on expired session cannot move last_seen_at or extend idle expiry"
@@ -588,7 +588,7 @@
     "id": "U4-disable-racing-resolve-leaks-read",
     "invariant": "P06.06.02: a disable racing resolution blocks it (user row locked FOR SHARE OF u)",
     "expected": "A disable committing mid-resolution would let one stale read through.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
     "find": "  PERFORM 1 FROM public.sessions s WHERE s.token_hash = p_token_hash FOR UPDATE;\n\n  PERFORM 1\n  FROM public.sessions s JOIN public.users u ON u.id = s.user_id\n  WHERE s.token_hash = p_token_hash FOR SHARE OF u;\n\n  -- Fresh DB clock obtained only after all locks above are held.\n  v_now := clock_timestamp();",
     "replace": "  PERFORM 1;",
     "killingTest": {
@@ -601,9 +601,9 @@
     "id": "WAIT2-resolve-idle-recheck-removed",
     "invariant": "P06.06.02: resolve rechecks idle expiry after the lock",
     "expected": "An idle-expired session would resolve and extend its deadline after a lock wait.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "    AND s.idle_expires_at > v_now\n    AND s.absolute_expires_at > v_now\n    AND u.id = s.user_id\n    AND u.status = 'active'\n    AND LEAST(v_now + interval '12 hours', s.absolute_expires_at) - s.idle_expires_at\n        >= interval '60 seconds'\n  RETURNING s.id, s.user_id, s.idle_expires_at, s.absolute_expires_at;",
-    "replace": "    AND s.absolute_expires_at > v_now\n    AND u.id = s.user_id\n    AND u.status = 'active'\n    AND LEAST(v_now + interval '12 hours', s.absolute_expires_at) - s.idle_expires_at\n        >= interval '60 seconds'\n  RETURNING s.id, s.user_id, s.idle_expires_at, s.absolute_expires_at;",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
+    "find": "    AND s.idle_expires_at > v_now\n    AND s.absolute_expires_at > v_now\n    AND u.id = s.user_id\n    AND u.status = 'active'\n    AND LEAST(v_now + interval '12 hours', s.absolute_expires_at) - s.idle_expires_at\n        >= interval '60 seconds'\n  RETURNING s.id, s.user_id, s.idle_expires_at, s.absolute_expires_at, u.cognito_sub;",
+    "replace": "    AND s.absolute_expires_at > v_now\n    AND u.id = s.user_id\n    AND u.status = 'active'\n    AND LEAST(v_now + interval '12 hours', s.absolute_expires_at) - s.idle_expires_at\n        >= interval '60 seconds'\n  RETURNING s.id, s.user_id, s.idle_expires_at, s.absolute_expires_at, u.cognito_sub;",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "temporal authorization and expiration (authoritative database clock) > waiting on the session lock past expiry (RWAIT) > RWAIT1: idle expiry during the wait returns nothing and revives nothing"
@@ -614,9 +614,9 @@
     "id": "WAIT5-consume-clock-before-claim",
     "invariant": "P06.06.01: consume reads the clock only after the transaction claim",
     "expected": "A consume that reads the clock before winning the transaction row would return secret material for a transaction that expired during the wait.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "  DELETE FROM public.auth_transactions t\n  WHERE t.state_hash = p_state_hash\n  RETURNING t.binding_hash, t.nonce_hash, t.verifier_sealed, t.key_id, t.return_to, t.expires_at\n  INTO v_claimed_binding, v_claimed_nonce, v_claimed_verifier, v_claimed_key,\n       v_claimed_return, v_claimed_expires;\n  IF NOT FOUND THEN\n    RETURN;\n  END IF;\n\n  -- Fresh DB clock obtained only after the claim's lock wait completes.\n  v_now := clock_timestamp();",
-    "replace": "  -- Stale pre-claim clock: expiry evaluated against a time captured before the row lock.\n  v_now := clock_timestamp();\n\n  DELETE FROM public.auth_transactions t\n  WHERE t.state_hash = p_state_hash\n  RETURNING t.binding_hash, t.nonce_hash, t.verifier_sealed, t.key_id, t.return_to, t.expires_at\n  INTO v_claimed_binding, v_claimed_nonce, v_claimed_verifier, v_claimed_key,\n       v_claimed_return, v_claimed_expires;\n  IF NOT FOUND THEN\n    RETURN;\n  END IF;",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
+    "find": "  -- The DELETE claims the transaction single-use: whichever caller wins the row lock deletes it\n  -- and every other presentation finds nothing. The binding is compared before the clock is read:\n  -- a foreign browser burns the transaction above and learns nothing about its expiry. The clock\n  -- is read only after that claim's lock wait completes, so an expiry that lapses while this call\n  -- blocks is already expired when the validation below runs. The claimed material is returned\n  -- only when it is still usable \u2014 never its nonce, verifier, or return path otherwise.\n  DELETE FROM public.auth_transactions t\n  WHERE t.state_hash = p_state_hash\n  RETURNING t.binding_hash, t.nonce_hash, t.verifier_sealed, t.key_id, t.return_to,\n            t.step_up_session_id, t.expires_at\n  INTO v_claimed_binding, v_claimed_nonce, v_claimed_verifier, v_claimed_key, v_claimed_return,\n       v_claimed_step_up, v_claimed_expires;\n  IF NOT FOUND THEN\n    RETURN;\n  END IF;\n\n  IF v_claimed_binding IS DISTINCT FROM p_binding_hash THEN\n    RETURN;\n  END IF;\n\n  v_now := clock_timestamp();",
+    "replace": "  -- The DELETE claims the transaction single-use: whichever caller wins the row lock deletes it\n  -- and every other presentation finds nothing. The binding is compared before the clock is read:\n  -- a foreign browser burns the transaction above and learns nothing about its expiry. The clock\n  -- is read only after that claim's lock wait completes, so an expiry that lapses while this call\n  -- blocks is already expired when the validation below runs. The claimed material is returned\n  -- only when it is still usable \u2014 never its nonce, verifier, or return path otherwise.\n  v_now := clock_timestamp();\n  DELETE FROM public.auth_transactions t\n  WHERE t.state_hash = p_state_hash\n  RETURNING t.binding_hash, t.nonce_hash, t.verifier_sealed, t.key_id, t.return_to,\n            t.step_up_session_id, t.expires_at\n  INTO v_claimed_binding, v_claimed_nonce, v_claimed_verifier, v_claimed_key, v_claimed_return,\n       v_claimed_step_up, v_claimed_expires;\n  IF NOT FOUND THEN\n    RETURN;\n  END IF;\n\n  IF v_claimed_binding IS DISTINCT FROM p_binding_hash THEN\n    RETURN;\n  END IF;",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "a sign-in transaction > waiting on the transaction lock past expiry (CWAIT) > CWAIT1: expiry during the wait returns nothing and stays consumed"
@@ -627,9 +627,9 @@
     "id": "WAIT6-consume-returns-without-expiry-check",
     "invariant": "P06.06.01: consume returns claimed material only when still usable",
     "expected": "An expired or wrong-browser transaction would still return its nonce, verifier and return path after the claim.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "  IF v_claimed_binding = p_binding_hash AND v_claimed_expires > v_now THEN",
-    "replace": "  IF v_claimed_binding IS NOT NULL THEN",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
+    "find": "  v_now := clock_timestamp();\n  IF v_claimed_expires <= v_now THEN\n    RETURN;\n  END IF;",
+    "replace": "  v_now := clock_timestamp();",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "a sign-in transaction > waiting on the transaction lock past expiry (CWAIT) > CWAIT1: expiry during the wait returns nothing and stays consumed"
@@ -640,9 +640,9 @@
     "id": "S1-state-reusable",
     "invariant": "P06.06.01: `state` is single-use",
     "expected": "Consuming a sign-in would leave its row in place, so the same `state` could be presented again and complete a second sign-in.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "  DELETE FROM public.auth_transactions t\n  WHERE t.state_hash = p_state_hash\n  RETURNING t.binding_hash, t.nonce_hash, t.verifier_sealed, t.key_id, t.return_to, t.expires_at\n  INTO v_claimed_binding, v_claimed_nonce, v_claimed_verifier, v_claimed_key,\n       v_claimed_return, v_claimed_expires;",
-    "replace": "  SELECT t.binding_hash, t.nonce_hash, t.verifier_sealed, t.key_id, t.return_to, t.expires_at\n  INTO v_claimed_binding, v_claimed_nonce, v_claimed_verifier, v_claimed_key,\n       v_claimed_return, v_claimed_expires\n  FROM public.auth_transactions t\n  WHERE t.state_hash = p_state_hash;",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
+    "find": "  DELETE FROM public.auth_transactions t\n  WHERE t.state_hash = p_state_hash\n  RETURNING t.binding_hash, t.nonce_hash, t.verifier_sealed, t.key_id, t.return_to,\n            t.step_up_session_id, t.expires_at\n  INTO v_claimed_binding, v_claimed_nonce, v_claimed_verifier, v_claimed_key, v_claimed_return,\n       v_claimed_step_up, v_claimed_expires;",
+    "replace": "  SELECT t.binding_hash, t.nonce_hash, t.verifier_sealed, t.key_id, t.return_to,\n         t.step_up_session_id, t.expires_at\n  INTO v_claimed_binding, v_claimed_nonce, v_claimed_verifier, v_claimed_key, v_claimed_return,\n       v_claimed_step_up, v_claimed_expires\n  FROM public.auth_transactions t\n  WHERE t.state_hash = p_state_hash;",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "a sign-in transaction > is consumed exactly once"
@@ -653,9 +653,9 @@
     "id": "S2-state-validation-bypassed",
     "invariant": "P06.06.01: a callback completes only from the browser that started it, before expiry",
     "expected": "Any browser holding a victim's `state` \u2014 the login-CSRF case \u2014 could complete the sign-in, at any time.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "  IF v_claimed_binding = p_binding_hash AND v_claimed_expires > v_now THEN",
-    "replace": "  IF v_claimed_binding IS NOT NULL THEN",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
+    "find": "  IF v_claimed_binding IS DISTINCT FROM p_binding_hash THEN\n    RETURN;\n  END IF;",
+    "replace": "  IF v_claimed_binding IS DISTINCT FROM v_claimed_binding THEN\n    RETURN;\n  END IF;",
     "killingTest": {
       "file": "apps/server/src/modules/identity-access/sign-in.integration.test.ts",
       "fullName": "a callback that must fail closed > another browser presenting a valid state"
@@ -666,9 +666,9 @@
     "id": "S3-expired-state-accepted",
     "invariant": "P06.06.01: a pending sign-in expires after 10 minutes",
     "expected": "A stale `state` from a forgotten tab would still complete a sign-in.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "  IF v_claimed_binding = p_binding_hash AND v_claimed_expires > v_now THEN",
-    "replace": "  IF v_claimed_binding = p_binding_hash THEN",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
+    "find": "  v_now := clock_timestamp();\n  IF v_claimed_expires <= v_now THEN\n    RETURN;\n  END IF;",
+    "replace": "  v_now := clock_timestamp();",
     "killingTest": {
       "file": "apps/server/src/modules/identity-access/sign-in.integration.test.ts",
       "fullName": "a callback that must fail closed > expired state"
@@ -679,9 +679,9 @@
     "id": "CLK3-auth-transaction-expiry-bypassed",
     "invariant": "P06.06.01: a pending sign-in expires after 10 minutes (DB clock)",
     "expected": "An expired transaction would return its secrets after the claim.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
-    "find": "  IF v_claimed_binding = p_binding_hash AND v_claimed_expires > v_now THEN",
-    "replace": "  IF v_claimed_binding = p_binding_hash AND v_claimed_expires > v_claimed_expires THEN",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
+    "find": "  v_now := clock_timestamp();\n  IF v_claimed_expires <= v_now THEN\n    RETURN;\n  END IF;",
+    "replace": "  v_now := clock_timestamp();\n  IF v_claimed_expires <= v_claimed_expires THEN\n    RETURN;\n  END IF;",
     "killingTest": {
       "file": "packages/db/src/identity-store.integration.test.ts",
       "fullName": "a sign-in transaction > expires exactly 10 minutes after it starts"
@@ -692,7 +692,7 @@
     "id": "M1-cross-user-supersede-scoped",
     "invariant": "P06.06.02: re-login supersedes only the authenticated user's family sessions",
     "expected": "A presented token from another person's family would revoke the victim's live sessions on the attacker's login.",
-    "file": "packages/db/migrations/0012_identity_and_sessions.sql",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
     "find": "    WHERE s.family_id = v_family AND s.user_id = v_user AND s.revoked_at IS NULL;",
     "replace": "    WHERE s.family_id = v_family AND s.revoked_at IS NULL;",
     "killingTest": {
@@ -705,7 +705,7 @@
     "id": "WAIT9-membership-lock-stale-clock",
     "invariant": "P06.06.03: no authorization timestamp is captured before the membership-row lock",
     "expected": "A resolve that reads the clock before winning the membership lock would authorize against a stale time and admit (and slide) a session whose idle expiry lapsed during the wait.",
-    "file": "packages/db/migrations/0014_request_context.sql",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
     "find": "    PERFORM 1\n    FROM public.sessions s JOIN public.users u ON u.id = s.user_id\n    JOIN public.memberships m ON m.user_id = s.user_id\n    WHERE s.token_hash = p_token_hash FOR SHARE OF m;\n\n    -- Fresh DB clock obtained only after all locks above are held.\n    v_now := clock_timestamp();",
     "replace": "    SELECT clock_timestamp() INTO v_now;\n\n    PERFORM 1\n    FROM public.sessions s JOIN public.users u ON u.id = s.user_id\n    JOIN public.memberships m ON m.user_id = s.user_id\n    WHERE s.token_hash = p_token_hash FOR SHARE OF m;",
     "killingTest": {
@@ -713,5 +713,122 @@
       "fullName": "the request-context membership lock (MWAIT) > MWAIT1: idle expiry during a membership-lock wait returns nothing and slides nothing"
     },
     "project": "integration"
+  },
+  {
+    "id": "SU1-login-omits-step-up-stamp",
+    "invariant": "P06.06.04: a fresh sign-in counts as stepped-up (login is MFA)",
+    "expected": "Sessions minted without step_up_at would fail every step-up check until re-verified, including the just-signed-in browser.",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
+    "find": "     CASE\n       WHEN p_step_up_at IS NULL OR NOT isfinite(p_step_up_at) THEN NULL\n       WHEN p_step_up_at > v_now + interval '30 seconds' THEN NULL\n       WHEN p_step_up_at >= v_now - interval '1 second' THEN v_now\n       WHEN p_step_up_at > v_now - interval '15 minutes' THEN p_step_up_at\n       ELSE NULL\n     END,",
+    "replace": "     NULL,",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "the step-up stamp (P06.06.04) > stamps the sign-in time as the first step-up proof"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "SU2-step-up-inherits-instead-of-refreshing",
+    "invariant": "P06.06.04: a step_up rotation refreshes the stamp to the rotation time",
+    "expected": "A step-up rotation that inherited the old stamp would never advance proof: re-verifying would change nothing and the window would lapse from the original sign-in.",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
+    "find": "         CASE\n           WHEN p_reason = 'step_up' THEN\n             CASE\n               WHEN p_step_up_at IS NULL THEN v_now\n               WHEN NOT isfinite(p_step_up_at) THEN NULL\n               WHEN p_step_up_at > v_now + interval '30 seconds' THEN NULL\n               WHEN p_step_up_at >= v_now - interval '1 second' THEN v_now\n               WHEN p_step_up_at > v_now - interval '15 minutes' THEN p_step_up_at\n               ELSE NULL\n             END\n           ELSE p.step_up_at\n         END,",
+    "replace": "         p.step_up_at,",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "the step-up stamp (P06.06.04) > a step-up rotation refreshes the stamp, a privilege change inherits it"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "SU3-privilege-change-refreshes-instead-of-inheriting",
+    "invariant": "P06.06.04: a privilege_change rotation inherits the stamp (no fresh proof)",
+    "expected": "A role change that refreshed the stamp would mint fresh MFA proof from no human act: privilege change would silently extend step-up.",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
+    "find": "         CASE\n           WHEN p_reason = 'step_up' THEN\n             CASE\n               WHEN p_step_up_at IS NULL THEN v_now\n               WHEN NOT isfinite(p_step_up_at) THEN NULL\n               WHEN p_step_up_at > v_now + interval '30 seconds' THEN NULL\n               WHEN p_step_up_at >= v_now - interval '1 second' THEN v_now\n               WHEN p_step_up_at > v_now - interval '15 minutes' THEN p_step_up_at\n               ELSE NULL\n             END\n           ELSE p.step_up_at\n         END,",
+    "replace": "         v_now,",
+    "killingTest": {
+      "file": "packages/db/src/identity-store.integration.test.ts",
+      "fullName": "the step-up stamp (P06.06.04) > a step-up rotation refreshes the stamp, a privilege change inherits it"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "SU4-context-drops-step-up-stamp",
+    "invariant": "P06.06.04: the per-request lookup returns the step-up stamp",
+    "expected": "A verdict that omitted step_up_at would leave every session unstamped at the guard: all sensitive actions would 403, including fresh sign-ins.",
+    "file": "packages/db/migrations/0015_step_up_mfa.sql",
+    "find": "    SELECT s.id, s.user_id, m.organisation_id, m.role, m.permissions,\n           s.idle_expires_at, s.absolute_expires_at, s.step_up_at",
+    "replace": "    SELECT s.id, s.user_id, m.organisation_id, m.role, m.permissions,\n           s.idle_expires_at, s.absolute_expires_at, NULL",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/session-membership.integration.test.ts",
+      "fullName": "the step-up gate (P06.06.04) > a fresh sign-in passes step-up (login is MFA)"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "SU5-guard-accepts-stale-stamp",
+    "invariant": "P06.06.04: a stamp older than 15 minutes is refused",
+    "expected": "A guard without the window check would admit a session stepped up hours ago: the 15-minute ceiling would be advisory.",
+    "file": "apps/server/src/modules/identity-access/http/require-step-up.guard.ts",
+    "find": "    const session = currentSessionContext(request);\n    if (session?.stepUpFresh !== true) {",
+    "replace": "    const session = currentSessionContext(request);\n    if (session === undefined) {",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/http/require-step-up.guard.test.ts",
+      "fullName": "RequireStepUpGuard > rejects a stale verdict with the step-up problem"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "SU6-step-up-skips-auth-time",
+    "invariant": "P06.06.04: step-up requires a fresh auth_time from the provider",
+    "expected": "Skipping the auth_time check would accept a provider round-trip answered from an SSO cookie: no fresh human proof, still stepped up.",
+    "file": "apps/server/src/modules/identity-access/infrastructure/oidc-provider.ts",
+    "find": "    if (stepUp) {",
+    "replace": "    if (false) {",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/infrastructure/oidc-provider.test.ts",
+      "fullName": "ID-token verification > step-up refuses a missing auth_time"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "SU8-step-up-start-skips-membership",
+    "invariant": "P06.06.04: step-up initiation requires an active membership",
+    "expected": "A removed member's live session could start provider round-trips and mint auth transactions that can never complete usefully.",
+    "file": "apps/server/src/modules/identity-access/http/auth.controller.ts",
+    "find": "  @Post('step-up')\n  @UseGuards(SessionMembershipGuard)",
+    "replace": "  @Post('step-up')",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/session-membership.integration.test.ts",
+      "fullName": "the step-up gate (P06.06.04) > a removed member cannot start a step-up round-trip"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "SU7-step-up-skips-subject-binding",
+    "invariant": "P06.06.04: the fresh provider subject must equal the session owner's subject",
+    "expected": "A round-trip completed as another person would rotate the holder's session and stamp it stepped-up on foreign proof.",
+    "file": "apps/server/src/modules/identity-access/application/sign-in.service.ts",
+    "find": "      if (identity.subject !== bound.subject) {\n        throw this.#fail('step_up_invalid', 'step_up_subject_mismatch');\n      }",
+    "replace": "      if (false) {\n        throw this.#fail('step_up_invalid', 'step_up_subject_mismatch');\n      }",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/session-membership.integration.test.ts",
+      "fullName": "the step-up gate (P06.06.04) > a step-up completed as another person rotates nothing"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "SU9-cache-serves-stale-step-up-verdict",
+    "invariant": "P06.06.04: a cached step-up verdict never outlives the stamp it judged",
+    "expected": "A stamp expiring inside the 30 s GET window would keep passing the step-up gate from cache for the rest of the TTL.",
+    "file": "apps/server/src/modules/identity-access/application/request-context.service.ts",
+    "find": "          if (monoElapsed >= hit.stepUpBudgetMs) {\n            return { context: { ...hit.context, stepUpFresh: false } };\n          }",
+    "replace": "          if (false) {\n            return { context: { ...hit.context, stepUpFresh: false } };\n          }",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/application/request-context.service.test.ts",
+      "fullName": "RequestContextService > refuses a cached verdict past the stamp expiry, inside the 30 s TTL"
+    },
+    "project": "unit"
   }
 ]

@@ -123,13 +123,19 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   // the seven functions that are the runtime role's only access to users, auth_transactions,
   // sessions and membership reads. resolve_request_context is the per-request re-check (P06.06.03).
   'app.reject_session_rewrite': '1b7209a5119fd835537b390fcbd558e0',
-  'app.begin_sign_in': '46d951fb285c7fe09aac5cdabbc24aa3',
-  'app.consume_sign_in': '65c3f6a7df85974ff5e8aa9854c4d48d',
-  'app.begin_session': '23034ecb67b830beaaed19822118456a',
-  'app.rotate_session': 'fe4a2f4e30221e87d1249a425838a102',
-  'app.resolve_session': 'cfab5a739c28a8e8f99b664803a5412b',
+  'app.begin_sign_in(bytea, bytea, bytea, bytea, text, text)': 'f4ba5d92f3e25bfd5a7e9b9e0ff6bd6c',
+  'app.begin_sign_in(bytea, bytea, bytea, bytea, text, text, uuid)':
+    '66f0c43b05dce5b3b2a02c9922032376',
+  'app.consume_sign_in': '92e1cbedb2906c3eceaec382b390ed44',
+  'app.begin_session(text, bytea, uuid, bytea, text, bytea)': '7d8f57a7e0af40b9c4719d0ebced8025',
+  'app.begin_session(text, bytea, uuid, bytea, text, bytea, timestamp with time zone)':
+    'd9071fdb7c7cb2487fef261194db83bf',
+  'app.rotate_session(bytea, bytea, uuid, text)': 'f73e3aa4ae6c66b031451899652551d6',
+  'app.rotate_session(bytea, bytea, uuid, text, timestamp with time zone)':
+    'a6158abf64196e357060054092488756',
+  'app.resolve_session': '3b06721c6c8d393e60ff0bcfaa70477d',
   'app.revoke_session': 'a4a30b649c5abf56fab3563d20576aa8',
-  'app.resolve_request_context': '2476c022976e66ba886623f8c688cf98',
+  'app.resolve_request_context': '43fe239ef436231069f7058a197202c8',
 };
 
 /** Reviewed QG-09 contract. Documentation registration alone cannot change privileges. */
@@ -182,6 +188,14 @@ const APPROVED_DEFINERS: Readonly<
     executeGrantees: ['moin_app'],
   },
   'app.begin_sign_in': {
+    arguments: 'bytea, bytea, bytea, bytea, text, text, uuid',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: ['moin_identity'],
+  },
+  // Rolling-window overload (contracted in 0016): old hosts sign in through this 6-arg
+  // shim, which delegates with a NULL step-up binding. Same owner/path/grants as the 7-arg form.
+  'app.begin_sign_in(bytea, bytea, bytea, bytea, text, text)': {
     arguments: 'bytea, bytea, bytea, bytea, text, text',
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
@@ -194,12 +208,24 @@ const APPROVED_DEFINERS: Readonly<
     executeGrantees: ['moin_identity'],
   },
   'app.begin_session': {
+    arguments: 'text, bytea, uuid, bytea, text, bytea, timestamp with time zone',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: ['moin_identity'],
+  },
+  'app.begin_session(text, bytea, uuid, bytea, text, bytea)': {
     arguments: 'text, bytea, uuid, bytea, text, bytea',
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
     executeGrantees: ['moin_identity'],
   },
   'app.rotate_session': {
+    arguments: 'bytea, bytea, uuid, text, timestamp with time zone',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: ['moin_identity'],
+  },
+  'app.rotate_session(bytea, bytea, uuid, text)': {
     arguments: 'bytea, bytea, uuid, text',
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
@@ -250,7 +276,9 @@ export function registeredGlobalTables(path: string = GLOBAL_REGISTER): Set<stri
 export function allowlistedDefiners(path: string = DEFINER_ALLOWLIST): Set<string> {
   const text = readFileSync(path, 'utf8');
   const names = new Set<string>();
-  for (const match of text.matchAll(/^\|\s*`([a-z0-9_.]+)`\s*\|\s*([^|]+?)\s*\|/gm)) {
+  for (const match of text.matchAll(
+    /^\|\s*`([a-z0-9_.]+)`(?:\s*\([^)]*\))?\s*\|\s*([^|]+?)\s*\|/gm,
+  )) {
     const name = match[1];
     const reason = (match[2] ?? '').trim();
     if (name !== undefined && reason.length > 0 && reason !== '—') {
@@ -724,11 +752,28 @@ export async function inspect(
 
     const functions = (await pool.query<FunctionRow>(FUNCTION_QUERY)).rows;
     const reviewedFunctionsSeen = new Set<string>();
+    // Overload-aware approval: the key is name + argument list. The 6-arg begin_sign_in
+    // shim is a second approved signature of the same name (contracted in 0016).
+    const approvedFor = (
+      fn: FunctionRow,
+    ): { key: string; approved: (typeof APPROVED_DEFINERS)[string] | undefined } => {
+      const keyed = APPROVED_DEFINERS[`${fn.function_name}(${fn.identity_arguments})`];
+      if (keyed !== undefined)
+        return { key: `${fn.function_name}(${fn.identity_arguments})`, approved: keyed };
+      return { key: fn.function_name, approved: APPROVED_DEFINERS[fn.function_name] };
+    };
     for (const fn of functions) {
-      const approved = APPROVED_DEFINERS[fn.function_name];
+      const { key, approved } = approvedFor(fn);
       if (fn.identity_arguments === approved?.arguments) {
-        reviewedFunctionsSeen.add(fn.function_name);
-        if (!fn.security_definer) {
+        reviewedFunctionsSeen.add(key);
+        // The rolling-window shims are SECURITY INVOKER by design (Defect 3): they must
+        // not count as DEFINERs, or old-host readiness (total = 7) breaks on deploy.
+        // Every other approved signature stays DEFINER-only.
+        const invokerAllowed =
+          key === 'app.begin_sign_in(bytea, bytea, bytea, bytea, text, text)' ||
+          key === 'app.begin_session(text, bytea, uuid, bytea, text, bytea)' ||
+          key === 'app.rotate_session(bytea, bytea, uuid, text)';
+        if (!fn.security_definer && !invokerAllowed) {
           findings.push({
             rule: 'reviewed-function-not-security-definer',
             subject: fn.function_name,
@@ -861,12 +906,15 @@ export async function inspect(
       }
     }
 
-    // Function bodies, pinned. See REVIEWED_BODIES for why identity is not enough.
+    // Function bodies, pinned by name + argument list: two overloads share a bare name
+    // but never a body (the 6-arg begin_sign_in shim delegates; the 7-arg form inserts).
+    // See REVIEWED_BODIES for why identity is not enough.
     const seenBodies = new Set<string>();
     for (const fn of functions) {
-      const expected = REVIEWED_BODIES[fn.function_name];
+      const key = `${fn.function_name}(${fn.identity_arguments})`;
+      const expected = REVIEWED_BODIES[key] ?? REVIEWED_BODIES[fn.function_name];
       if (expected === undefined) continue;
-      seenBodies.add(fn.function_name);
+      seenBodies.add(REVIEWED_BODIES[key] !== undefined ? key : fn.function_name);
       if (fn.body_digest !== expected) {
         findings.push({
           rule: 'reviewed-function-body-changed',
@@ -1074,15 +1122,17 @@ export async function inspectIdentityRole(
   }
   // Invoker functions any role may run (extension helpers, `app.current_org`) execute with the
   // caller's own privileges, so they give this role nothing. What could give it something is a
-  // definer function, or a grant by name: both must be exactly the seven.
+  // definer function, or a grant by name: both must be exactly the seven session functions, with
+  // the rolling-window begin_sign_in overload collapsing to its bare name (contracted in 0016).
   for (const [kind, functions] of [
     ['SECURITY DEFINER functions it can execute', row.executable_definers],
     ['functions granted to it', row.granted_functions],
   ] as const) {
-    if (functions.join(',') !== IDENTITY_FUNCTIONS.join(',')) {
+    const collapsed = [...new Set(functions)];
+    if (collapsed.join(',') !== IDENTITY_FUNCTIONS.join(',')) {
       push(
         'identity-role-unexpected-execute',
-        `${kind}: ${functions.join(', ') || 'none'}; must be exactly ${IDENTITY_FUNCTIONS.join(', ')}.`,
+        `${kind}: ${collapsed.join(', ') || 'none'}; must be exactly ${IDENTITY_FUNCTIONS.join(', ')}.`,
       );
     }
   }

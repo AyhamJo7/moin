@@ -1,8 +1,8 @@
 /**
- * The sign-in and session store (P06.06.01, P06.06.02, ADR-0005).
+ * The sign-in and session store (P06.06.01, P06.06.02, P06.06.04, ADR-0005).
  *
  * The runtime role holds no privilege on `users`, `auth_transactions`, `sessions` or `memberships`;
- * it may only execute the seven session functions (migrations 0012/0014). This module is the only
+ * it may only execute the seven session functions (migrations 0012/0014/0015). This module is the only
  * caller of those functions,
  * and each method is one call, so what the database guarantees — single-use transactions, a fixed
  * absolute lifetime, final revocation, no session without an active user — is exactly what a
@@ -30,6 +30,8 @@ export interface NewAuthTransaction {
   readonly verifierSealed: Buffer;
   readonly keyId: string;
   readonly returnTo: string;
+  /** The session id being re-verified; absent for a plain login (P06.06.04). */
+  readonly stepUpSessionId?: string | undefined;
 }
 
 export interface ConsumedAuthTransaction {
@@ -37,6 +39,8 @@ export interface ConsumedAuthTransaction {
   readonly verifierSealed: Buffer;
   readonly keyId: string;
   readonly returnTo: string;
+  /** The session id being re-verified; undefined for a plain login (P06.06.04). */
+  readonly stepUpSessionId: string | undefined;
 }
 
 export interface NewSession {
@@ -47,6 +51,8 @@ export interface NewSession {
   readonly keyId: string;
   /** The session the browser presented at sign-in, if any; it is revoked as superseded. */
   readonly replacedHash?: Buffer | undefined;
+  /** Verified provider auth_time; absent proof leaves step_up_at NULL. */
+  readonly stepUp?: Date | undefined;
 }
 
 export interface SessionGrant {
@@ -60,6 +66,8 @@ export interface ResolvedSession {
   readonly userId: string;
   readonly idleExpiresAt: Date;
   readonly absoluteExpiresAt: Date;
+  /** The owner's provider subject: step-up binds fresh proof to it (P06.06.04). */
+  readonly subject: string;
 }
 
 /** One active membership of a resolved session: the org the request may act for (P06.06.03). */
@@ -76,6 +84,16 @@ export interface RequestContext {
   readonly memberships: readonly ActiveMembership[];
   readonly idleExpiresAt: Date;
   readonly absoluteExpiresAt: Date;
+  /** Last MFA proof; null for sessions predating 0015 until re-verified (P06.06.04). */
+  readonly stepUpAt: Date | null;
+  /** Judged by the database clock against the 15-minute window (P06.06.04). */
+  readonly stepUpFresh: boolean;
+  /** Remaining step-up validity in seconds at resolve time, DB clock (Defect 2). */
+  readonly stepUpRemainingSeconds: number | null;
+  /** Remaining idle lifetime in seconds at resolve time, DB clock. */
+  readonly idleRemainingSeconds: number;
+  /** Remaining absolute lifetime in seconds at resolve time, DB clock. */
+  readonly absoluteRemainingSeconds: number;
 }
 
 export interface IdentityStore {
@@ -93,6 +111,7 @@ export interface IdentityStore {
     newTokenHash: Buffer,
     newSessionId: string,
     reason: RotationReason,
+    stepUpAt?: Date | null,
   ): Promise<SessionGrant | undefined>;
   resolveSession(tokenHash: Buffer): Promise<ResolvedSession | undefined>;
   /**
@@ -131,7 +150,7 @@ export function createIdentityStore(pool: Pool): IdentityStore {
   return {
     async beginAuthTransaction(input) {
       await pool.query(
-        'select app.begin_sign_in($1::bytea, $2::bytea, $3::bytea, $4::bytea, $5::text, $6::text)',
+        'select app.begin_sign_in($1::bytea, $2::bytea, $3::bytea, $4::bytea, $5::text, $6::text, $7::uuid)',
         [
           digest(input.stateHash),
           digest(input.bindingHash),
@@ -139,6 +158,7 @@ export function createIdentityStore(pool: Pool): IdentityStore {
           input.verifierSealed,
           input.keyId,
           input.returnTo,
+          input.stepUpSessionId ?? null,
         ],
       );
     },
@@ -149,8 +169,9 @@ export function createIdentityStore(pool: Pool): IdentityStore {
         verifier_sealed: Buffer;
         key_id: string;
         return_to: string;
+        step_up_session_id: string | null;
       }>(
-        'select nonce_hash, verifier_sealed, key_id, return_to from app.consume_sign_in($1::bytea, $2::bytea)',
+        'select nonce_hash, verifier_sealed, key_id, return_to, step_up_session_id from app.consume_sign_in($1::bytea, $2::bytea)',
         [digest(stateHash), digest(bindingHash)],
       );
       const row = result.rows[0];
@@ -161,12 +182,13 @@ export function createIdentityStore(pool: Pool): IdentityStore {
             verifierSealed: row.verifier_sealed,
             keyId: row.key_id,
             returnTo: row.return_to,
+            stepUpSessionId: row.step_up_session_id ?? undefined,
           };
     },
 
     async beginSession(input) {
       const result = await pool.query<GrantRow>(
-        'select session_id, user_id, absolute_expires_at from app.begin_session($1::text, $2::bytea, $3::uuid, $4::bytea, $5::text, $6::bytea)',
+        'select session_id, user_id, absolute_expires_at from app.begin_session($1::text, $2::bytea, $3::uuid, $4::bytea, $5::text, $6::bytea, $7::timestamptz)',
         [
           input.subject,
           digest(input.tokenHash),
@@ -174,15 +196,16 @@ export function createIdentityStore(pool: Pool): IdentityStore {
           input.providerTokensSealed,
           input.keyId,
           input.replacedHash === undefined ? null : digest(input.replacedHash),
+          input.stepUp ?? null,
         ],
       );
       return grant(result.rows[0]);
     },
 
-    async rotateSession(tokenHash, newTokenHash, newSessionId, reason) {
+    async rotateSession(tokenHash, newTokenHash, newSessionId, reason, stepUpAt) {
       const result = await pool.query<GrantRow>(
-        'select session_id, user_id, absolute_expires_at from app.rotate_session($1::bytea, $2::bytea, $3::uuid, $4::text)',
-        [digest(tokenHash), digest(newTokenHash), newSessionId, reason],
+        'select session_id, user_id, absolute_expires_at from app.rotate_session($1::bytea, $2::bytea, $3::uuid, $4::text, $5::timestamptz)',
+        [digest(tokenHash), digest(newTokenHash), newSessionId, reason, stepUpAt ?? null],
       );
       return grant(result.rows[0]);
     },
@@ -193,8 +216,9 @@ export function createIdentityStore(pool: Pool): IdentityStore {
         user_id: string;
         idle_expires_at: Date;
         absolute_expires_at: Date;
+        subject: string;
       }>(
-        'select session_id, user_id, idle_expires_at, absolute_expires_at from app.resolve_session($1::bytea)',
+        'select session_id, user_id, idle_expires_at, absolute_expires_at, subject from app.resolve_session($1::bytea)',
         [digest(tokenHash)],
       );
       const row = result.rows[0];
@@ -205,6 +229,7 @@ export function createIdentityStore(pool: Pool): IdentityStore {
             userId: row.user_id,
             idleExpiresAt: row.idle_expires_at,
             absoluteExpiresAt: row.absolute_expires_at,
+            subject: row.subject,
           };
     },
 
@@ -225,8 +250,13 @@ export function createIdentityStore(pool: Pool): IdentityStore {
         permissions: string[];
         idle_expires_at: Date;
         absolute_expires_at: Date;
+        step_up_at: Date | null;
+        step_up_fresh: boolean;
+        step_up_remaining_seconds: number | null;
+        idle_remaining_seconds: number;
+        absolute_remaining_seconds: number;
       }>(
-        'select session_id, user_id, organisation_id, role, permissions, idle_expires_at, absolute_expires_at from app.resolve_request_context($1::bytea)',
+        'select session_id, user_id, organisation_id, role, permissions, idle_expires_at, absolute_expires_at, step_up_at, step_up_fresh, step_up_remaining_seconds, idle_remaining_seconds, absolute_remaining_seconds from app.resolve_request_context($1::bytea)',
         [digest(tokenHash)],
       );
       const first = result.rows[0];
@@ -241,6 +271,11 @@ export function createIdentityStore(pool: Pool): IdentityStore {
         })),
         idleExpiresAt: first.idle_expires_at,
         absoluteExpiresAt: first.absolute_expires_at,
+        stepUpAt: first.step_up_at,
+        stepUpFresh: first.step_up_fresh,
+        stepUpRemainingSeconds: first.step_up_remaining_seconds,
+        idleRemainingSeconds: first.idle_remaining_seconds,
+        absoluteRemainingSeconds: first.absolute_remaining_seconds,
       };
     },
   };
