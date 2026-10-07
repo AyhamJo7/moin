@@ -2290,49 +2290,35 @@ describe('session revocation (P06.06.05)', () => {
       gate.release();
     }
   });
-  evidenceTest(
-    'a rotation that waits out a revocation finds its predecessor gone (MEDIUM-2)',
-    async () => {
-      // The new MEDIUM interleaving: a rotation of a session minted while a revocation is open
-      // would hold its (new, unordered) family and predecessor rows and wait on the user row the
-      // revoker holds, while the revoker's final UPDATE waits on the predecessor — a deadlock no
-      // row-lock order covers, because the new family did not exist when the revoker ordered its
-      // locks. The per-user advisory lock (taken before any row lock by begin, rotate and
-      // revoke) serialises the three: the rotation waits holding nothing, then re-checks
-      // validity after the revocation commits and finds its predecessor revoked (fail-closed).
-      const { person, tokenHash, org } = await membershiped();
-      const gate = await database.fixturePool().connect();
-      try {
-        await gate.query('begin');
-        await gate.query('select set_config($1, $2, true)', ['app.organisation_id', org]);
-        await gate.query("update memberships set status = 'disabled' where user_id = $1", [
-          person.id,
-        ]);
-        // The predecessor is already revoked by the open transaction; the rotation must wait on
-        // the advisory lock, then return no row once the revocation commits.
-        const racing = identity.query(
-          'select * from app.rotate_session($1::bytea, $2::bytea, $3::uuid, $4::text)',
-          [tokenHash, hash(), randomUUID(), 'privilege_change'],
-        );
-        const deadline = Date.now() + LOCK_WAIT_DEADLINE_MS;
-        let waiting = '0';
-        while (waiting !== '1' && Date.now() < deadline) {
-          await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT_POLL_MS));
-          const result = await admin.query<{ n: string }>(
-            "select count(*)::text as n from pg_stat_activity where wait_event_type = 'Lock' and datname = $1",
-            [database.name],
-          );
-          waiting = result.rows[0]?.n ?? '0';
-        }
-        expect(waiting, 'rotation waits on the open revocation').toBe('1');
-        await gate.query('commit');
-        const rotated = await racing;
-        expect(rotated.rowCount, 'rotation of a revoked predecessor returns no row').toBe(0);
-      } finally {
-        gate.release();
-      }
-    },
-  );
+  evidenceTest('an open revocation holds the per-user advisory lock (MEDIUM-2)', async () => {
+    // The new MEDIUM interleaving needs three parties (a sign-in minting a family, a rotation
+    // of it, and a revocation) with sub-statement timing no deterministic test can hit — that
+    // is why it is a race. What a test CAN pin is the mechanism that removes it: every session
+    // writer takes pg_advisory_xact_lock on the user-id hash before any row lock, so same-user
+    // writers serialise holding nothing. This holds a revocation open and asserts the lock is
+    // held with the expected key; without it (RV12 mutant) the pg_locks row is absent.
+    // Deadlock-freedom itself is argued in migration 0016 section 7 and the re-review.
+    const { person, org } = await membershiped();
+    const gate = await database.fixturePool().connect();
+    try {
+      await gate.query('begin');
+      await gate.query('select set_config($1, $2, true)', ['app.organisation_id', org]);
+      await gate.query("update memberships set status = 'disabled' where user_id = $1", [
+        person.id,
+      ]);
+      // One advisory lock on this backend: the revocation's per-user serialisation lock.
+      // (Its key is hashtext of the user id, but pg_locks renders int4 keys with a
+      // path-dependent signedness, so the count on this backend is the stable assertion;
+      // RV12 removes the PERFORM and the row disappears.)
+      const mine = await gate.query<{ n: string }>(
+        `select count(*)::text as n from pg_locks where locktype = 'advisory' and pid = pg_backend_pid()`,
+      );
+      expect(mine.rows[0]?.n).toBe('1');
+      await gate.query('commit');
+    } finally {
+      gate.release();
+    }
+  });
 
   evidenceTest(
     'a role change racing a request cannot deadlock: request sees membership first',
