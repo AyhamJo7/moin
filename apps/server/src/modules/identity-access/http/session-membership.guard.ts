@@ -79,13 +79,35 @@ export class SessionMembershipGuard implements CanActivate {
       return false;
     }
     request.sessionContext = outcome.context;
-    if (requiresCsrfProtection(request.method ?? 'GET')) {
+    if (requiresCsrfProtection(request.method)) {
+      const expectedOrigin = this.config.APP_ORIGIN;
+      // Unreachable when the api role started, because the loader requires APP_ORIGIN for it.
+      // Kept because "unreachable" is a claim about another file (same pattern as
+      // TwilioSignatureGuard's config-missing branch): without an origin to compare against,
+      // every mutation fails closed.
+      if (expectedOrigin === undefined) {
+        this.logger.error(
+          {
+            route: request.routeOptions.url,
+            method: request.method,
+            reason: 'csrf-origin-missing',
+          },
+          'rejected a mutation without a configured origin',
+        );
+        void reply.header('cache-control', 'no-store');
+        await reply.code(503).header('content-type', 'application/problem+json').send({
+          type: '/problems/csrf-unavailable',
+          title: 'CSRF protection is unavailable',
+          status: 503,
+        });
+        return false;
+      }
       const verdict = verifyCsrf({
-        method: request.method ?? 'GET',
+        method: request.method,
         origin: request.headers.origin,
         token: firstHeader(request.headers[CSRF_HEADER]),
         cookie: readCookie(request.headers.cookie, CSRF_COOKIE),
-        expectedOrigin: this.config.APP_ORIGIN ?? '',
+        expectedOrigin,
       });
       if (!verdict.ok) {
         this.logger.warn(
