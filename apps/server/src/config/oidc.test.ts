@@ -9,6 +9,7 @@ import { resolveOidcConfig } from './oidc.ts';
 
 const BASE = {
   SERVER_ROLE: 'api',
+  APP_ORIGIN: 'http://localhost:3000',
   DATABASE_URL: 'postgres://moin_app:s3cr3t-p4ssw0rd@localhost:5432/moin',
 } satisfies NodeJS.ProcessEnv;
 

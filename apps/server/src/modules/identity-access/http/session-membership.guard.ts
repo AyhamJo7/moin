@@ -19,14 +19,17 @@ import type { CanActivate, ExecutionContext } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from '@moin/observability';
 import { digestOf } from '../domain/secret-values.ts';
-import { SESSION_COOKIE } from '../domain/session-policy.ts';
+import { CSRF_COOKIE, SESSION_COOKIE } from '../domain/session-policy.ts';
 import {
   type ContextFailure,
   RequestContextService,
 } from '../application/request-context.service.ts';
+import { CONFIG } from '../../../config/config.module.ts';
+import type { Config } from '../../../config/env.ts';
 import { LOGGER } from '../../../observability/logger.module.ts';
 import { REQUEST_CONTEXTS } from '../identity-access.tokens.ts';
 import { readCookie } from './cookies.ts';
+import { CSRF_HEADER, firstHeader, requiresCsrfProtection, verifyCsrf } from './csrf.ts';
 
 const PROBLEM_TYPE = '/problems/unauthenticated';
 const PROBLEM_TITLE = 'Authentication is required';
@@ -40,6 +43,7 @@ function resolveMode(request: FastifyRequest): 'read' | 'mutate' {
 export class SessionMembershipGuard implements CanActivate {
   constructor(
     @Inject(REQUEST_CONTEXTS) private readonly contexts: RequestContextService | null,
+    @Inject(CONFIG) private readonly config: Config,
     @Inject(LOGGER) private readonly logger: Logger,
   ) {}
 
@@ -75,6 +79,28 @@ export class SessionMembershipGuard implements CanActivate {
       return false;
     }
     request.sessionContext = outcome.context;
+    if (requiresCsrfProtection(request.method ?? 'GET')) {
+      const verdict = verifyCsrf({
+        method: request.method ?? 'GET',
+        origin: request.headers.origin,
+        token: firstHeader(request.headers[CSRF_HEADER]),
+        cookie: readCookie(request.headers.cookie, CSRF_COOKIE),
+        expectedOrigin: this.config.APP_ORIGIN ?? '',
+      });
+      if (!verdict.ok) {
+        this.logger.warn(
+          { route: request.routeOptions.url, method: request.method, reason: verdict.reason },
+          'rejected a state-changing request without CSRF proof',
+        );
+        void reply.header('cache-control', 'no-store');
+        await reply.code(403).header('content-type', 'application/problem+json').send({
+          type: '/problems/csrf-required',
+          title: 'CSRF proof is required',
+          status: 403,
+        });
+        return false;
+      }
+    }
     return true;
   }
 

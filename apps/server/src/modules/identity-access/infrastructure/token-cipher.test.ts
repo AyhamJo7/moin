@@ -84,7 +84,11 @@ describe('the provider-token cipher', () => {
 });
 
 describe('where the key comes from', () => {
-  const base = { SERVER_ROLE: 'api', DATABASE_URL: 'postgres://u:p@localhost:5432/moin' };
+  const base = {
+    SERVER_ROLE: 'api',
+    APP_ORIGIN: 'http://localhost:3000',
+    DATABASE_URL: 'postgres://u:p@localhost:5432/moin',
+  };
 
   evidenceTest('refuses staging and production until the KMS key source exists', () => {
     // Even holding local key material — which the loader already refuses there — a deployed

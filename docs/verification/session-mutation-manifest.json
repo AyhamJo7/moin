@@ -960,5 +960,83 @@
       "fullName": "session revocation (P06.06.05) > an open revocation holds the per-user advisory lock (MEDIUM-2)"
     },
     "project": "integration"
+  },
+  {
+    "id": "C1-missing-token-accepted",
+    "invariant": "P06.06.06: a mutation without the synchronizer token fails closed",
+    "expected": "A forged cross-site POST carrying only the victim's cookies would be admitted.",
+    "file": "apps/server/src/modules/identity-access/http/csrf.ts",
+    "find": "  if (options.cookie === undefined || !csrfTokenValid(options.token, options.cookie)) {\n    return { ok: false, reason: 'token-invalid' };\n  }",
+    "replace": "  if (options.cookie === undefined && options.token === undefined) {\n    return { ok: false, reason: 'token-invalid' };\n  }",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/session-membership.integration.test.ts",
+      "fullName": "CSRF synchronizer token plus Origin check (P06.06.06) > a POST without the token fails closed with 403 csrf-required"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "C2-forged-token-accepted",
+    "invariant": "P06.06.06: the header must echo the cookie",
+    "expected": "Any 43-char string in the header would pass: the comparison is the whole control.",
+    "file": "apps/server/src/modules/identity-access/http/csrf.ts",
+    "find": "  if (options.cookie === undefined || !csrfTokenValid(options.token, options.cookie)) {\n    return { ok: false, reason: 'token-invalid' };\n  }",
+    "replace": "  if (options.cookie === undefined) {\n    return { ok: false, reason: 'token-invalid' };\n  }",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/session-membership.integration.test.ts",
+      "fullName": "CSRF synchronizer token plus Origin check (P06.06.06) > a POST with a forged token fails: the header must echo the cookie"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "C3-foreign-origin-accepted",
+    "invariant": "P06.06.06: a mismatched Origin fails even with a valid token",
+    "expected": "A cross-site request naming the attacker's origin would pass on the token alone.",
+    "file": "apps/server/src/modules/identity-access/http/csrf.ts",
+    "find": "  if (options.origin !== undefined && parsed !== options.expectedOrigin) {\n    return { ok: false, reason: 'origin-mismatch' };\n  }",
+    "replace": "  if (options.origin !== undefined && parsed === undefined) {\n    return { ok: false, reason: 'origin-mismatch' };\n  }",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/session-membership.integration.test.ts",
+      "fullName": "CSRF synchronizer token plus Origin check (P06.06.06) > a POST from a foreign origin fails even with a valid token"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "C4-guard-skips-csrf-on-mutations",
+    "invariant": "P06.06.06: every guarded mutation passes the CSRF check",
+    "expected": "Removing the guard call leaves every POST unprotected while GETs look unchanged.",
+    "file": "apps/server/src/modules/identity-access/http/session-membership.guard.ts",
+    "find": "    request.sessionContext = outcome.context;\n    if (requiresCsrfProtection(request.method ?? 'GET')) {",
+    "replace": "    request.sessionContext = outcome.context;\n    if (requiresCsrfProtection(request.method ?? 'GET') && false) {",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/http/session-membership.guard.ts",
+      "fullName": "CSRF synchronizer token plus Origin check (P06.06.06) > a POST without the token fails closed with 403 csrf-required"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "C5-constant-time-comparison-removed",
+    "invariant": "P06.06.06: the token comparison leaks nothing byte by byte",
+    "expected": "An early-exit comparison would let a cross-site attacker measure the token prefix... (unit-pinned).",
+    "file": "apps/server/src/modules/identity-access/http/csrf.ts",
+    "find": "  const a = digest(presented);\n  const b = digest(expected);\n  return a.length === b.length && timingSafeEqual(a, b);",
+    "replace": "  return presented === expected;",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/http/csrf.test.ts",
+      "fullName": "the CSRF verdict (P06.06.06) > a forged token fails: the header must echo the cookie"
+    },
+    "project": "unit"
+  },
+  {
+    "id": "C6-null-origin-accepted",
+    "invariant": "P06.06.06: opaque origins never match",
+    "expected": "A sandboxed iframe (`Origin: null`) would pass the origin layer.",
+    "file": "apps/server/src/modules/identity-access/http/csrf.ts",
+    "find": "  if (raw === undefined || raw === 'null') return undefined;",
+    "replace": "  if (raw === undefined) return undefined;",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/http/csrf.test.ts",
+      "fullName": "CSRF synchronizer token plus Origin check (P06.06.06) > opaque and non-http origins never match"
+    },
+    "project": "unit"
   }
 ]

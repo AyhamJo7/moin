@@ -45,6 +45,14 @@ export const SESSION_COOKIE = '__Host-moin_sid';
  */
 export const SIGN_IN_COOKIE = '__Host-moin_signin';
 
+/**
+ * The CSRF synchronizer token cookie (P06.06.06, double-submit). Readable by same-origin script
+ * (no `HttpOnly` — the script must echo it into the header), `SameSite=Lax` like the session
+ * cookie. A forged cross-site request carries it but its author cannot read it, so cannot echo
+ * it. `__Host-` still binds it to this host over Secure with `Path=/` and no `Domain`.
+ */
+export const CSRF_COOKIE = '__Host-moin_csrf';
+
 /** Where sign-in lands when no return path was asked for. */
 export const DEFAULT_RETURN_PATH = '/';
 

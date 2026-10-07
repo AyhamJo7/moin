@@ -44,6 +44,7 @@ function config(env: Record<string, string> = {}) {
   return loadConfig({
     NODE_ENV: 'test',
     SERVER_ROLE: 'api',
+    APP_ORIGIN: 'http://localhost:3000',
     LOG_LEVEL: 'info',
     DATABASE_URL: database.appUrl,
     OIDC_PROVIDER: 'keycloak',

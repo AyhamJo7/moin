@@ -5,6 +5,7 @@ import { ConfigurationError, configKeys, describeConfig, loadConfig, secretKeys 
 const VALID = {
   SERVER_ROLE: 'api',
   DATABASE_URL: 'postgres://moin_app:s3cr3t-p4ssw0rd@localhost:5432/moin',
+  APP_ORIGIN: 'http://localhost:3000',
 } satisfies NodeJS.ProcessEnv;
 
 const OIDC = {
@@ -55,6 +56,7 @@ describe('configuration loader (P02.03.03)', () => {
     const config = loadConfig({
       ...VALID,
       ...OIDC,
+      APP_ORIGIN: 'https://app.example.de',
       NODE_ENV: 'production',
       OIDC_PROVIDER: 'cognito',
       OIDC_ISSUER_URL: 'https://cognito-idp.eu-central-1.amazonaws.com/eu-central-1_pool',
@@ -124,6 +126,45 @@ describe('configuration loader (P02.03.03)', () => {
       expect(problems).toContain('VOICE_PUBLIC_ORIGIN');
       expect(problems).toContain('VOICE_WEBSOCKET_ORIGIN');
     }
+  });
+
+  it('requires APP_ORIGIN for the api role and accepts a bare origin', () => {
+    try {
+      loadConfig({ ...VALID, SERVER_ROLE: 'api', APP_ORIGIN: undefined });
+      expect.unreachable('expected the api role to require its CSRF origin');
+    } catch (error) {
+      expect((error as ConfigurationError).problems.join('\n')).toContain('APP_ORIGIN');
+    }
+    expect(
+      loadConfig({ ...VALID, SERVER_ROLE: 'api', APP_ORIGIN: 'https://app.example.de' }).APP_ORIGIN,
+    ).toBe('https://app.example.de');
+    expect(
+      loadConfig({ ...VALID, SERVER_ROLE: 'api', APP_ORIGIN: 'http://localhost:3000' }).APP_ORIGIN,
+    ).toBe('http://localhost:3000');
+  });
+
+  it('refuses an APP_ORIGIN with a path, and non-HTTPS outside dev/test', () => {
+    for (const origin of ['https://app.example.de/cb', 'https://app.example.de/?x=1']) {
+      expect(() => loadConfig({ ...VALID, SERVER_ROLE: 'api', APP_ORIGIN: origin })).toThrow(
+        ConfigurationError,
+      );
+    }
+    expect(() =>
+      loadConfig({
+        ...VALID,
+        SERVER_ROLE: 'api',
+        NODE_ENV: 'production',
+        APP_ORIGIN: 'http://app.example.de',
+      }),
+    ).toThrow(ConfigurationError);
+    expect(() =>
+      loadConfig({
+        ...VALID,
+        SERVER_ROLE: 'worker',
+        NODE_ENV: 'production',
+        APP_ORIGIN: 'http://app.example.de',
+      }),
+    ).toThrow(ConfigurationError);
   });
 
   it('starts the voice role when its telephony configuration is complete', () => {

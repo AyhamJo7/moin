@@ -186,6 +186,7 @@ beforeAll(async () => {
   const config = loadConfig({
     NODE_ENV: 'test',
     SERVER_ROLE: 'api',
+    APP_ORIGIN: 'http://localhost:3000',
     DATABASE_URL: database.appUrl,
     OIDC_PROVIDER: 'keycloak',
     OIDC_ISSUER_URL: issuer,
@@ -261,6 +262,7 @@ describe('the moin-web Authorization Code + PKCE flow against local Keycloak', (
               loadConfig({
                 NODE_ENV: 'test',
                 SERVER_ROLE: 'api',
+                APP_ORIGIN: 'http://localhost:3000',
                 DATABASE_URL: database.appUrl,
                 AUTH_LOCAL_TOKEN_KEY: LOCAL_KEY,
               }),
