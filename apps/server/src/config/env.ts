@@ -136,6 +136,32 @@ const baseSchema = z.object({
    */
   VOICE_PUBLIC_ORIGIN: z.url({ protocol: /^https$/ }).optional(),
 
+  /**
+   * This deployment's own web origin, e.g. `https://app.example.de` (P06.06.06). The CSRF guard
+   * compares the request `Origin` against it, and the value must come from configuration rather
+   * than a request header for the same reason `VOICE_PUBLIC_ORIGIN` is configured: a host taken
+   * from the request is a host the attacker chooses. Normalised to `URL.origin` at load
+   * (lowercased host, default port dropped, no trailing slash), so the guard's string comparison
+   * cannot mismatch a differently-spelled same origin.
+   */
+  APP_ORIGIN: z
+    .url({ protocol: /^https?$/ })
+    .refine(
+      (value) => {
+        const url = new URL(value);
+        return (
+          url.search === '' &&
+          url.hash === '' &&
+          url.username === '' &&
+          url.password === '' &&
+          url.pathname === '/'
+        );
+      },
+      { message: 'must be a bare origin (scheme + host + optional port), never a URL with a path' },
+    )
+    .transform((value) => new URL(value).origin)
+    .optional(),
+
   /** The media WebSocket origin, e.g. `wss://voice.example.de`. */
   VOICE_WEBSOCKET_ORIGIN: z.url({ protocol: /^wss$/ }).optional(),
 
@@ -326,6 +352,36 @@ const schema = baseSchema.superRefine((value, ctx) => {
         'writes caller utterances to a file and is development-only: it exists for the P04 ' +
         'feasibility calls under volunteer consent, and must never be set where real callers reach',
     });
+  }
+
+  // The api role serves cookie-authenticated browser traffic, so its CSRF guard needs the
+  // deployment's own origin. Required for api (like the voice role's telephony values below):
+  // without it the guard could compare against nothing and every mutation would fail — or,
+  // worse, a later change could treat "no configured origin" as "skip the check".
+  if (value.SERVER_ROLE === 'api') {
+    if (value.APP_ORIGIN === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['APP_ORIGIN'],
+        message: 'is required for the api role: the CSRF Origin check compares against it',
+      });
+    }
+  }
+  if (value.APP_ORIGIN !== undefined) {
+    // Bare-path and userinfo shape already enforced by the schema refinement; only the
+    // environment rule lives here, against the normalised value the guard compares.
+    const origin = new URL(value.APP_ORIGIN);
+    if (
+      value.NODE_ENV !== 'development' &&
+      value.NODE_ENV !== 'test' &&
+      (origin.protocol !== 'https:' || origin.hostname === 'localhost')
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['APP_ORIGIN'],
+        message: 'must be HTTPS outside local development (loopback http is for dev/test only)',
+      });
+    }
   }
 
   if (value.SERVER_ROLE === 'voice') {

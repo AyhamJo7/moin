@@ -4,6 +4,7 @@ import { systemClock } from '@moin/kernel';
 import type { IdentityStore } from '@moin/db';
 import { evidenceTest } from '@moin/testing';
 import { describe, expect, it, vi } from 'vitest';
+import { CONFIG } from '../../config/config.module.ts';
 import { ConfigurationError, loadConfig } from '../../config/env.ts';
 import { buildSignInGate } from './identity-access.module.ts';
 import { AuthController } from './http/auth.controller.ts';
@@ -25,6 +26,7 @@ const LOCAL = {
   OIDC_REDIRECT_URI: 'http://localhost:3000/api/auth/callback',
   AUTH_LOCAL_TOKEN_KEY: 'local-v1:local-development-only',
   IDENTITY_DATABASE_URL: 'postgres://moin_identity:x@localhost:5432/moin',
+  APP_ORIGIN: 'http://localhost:3000',
 };
 
 function without(source: Record<string, string>, ...keys: string[]): Record<string, string> {
@@ -39,6 +41,7 @@ const DEPLOYED = {
   OIDC_CLIENT_ID: 'client',
   OIDC_CLIENT_SECRET: 'resolved-from-secrets-manager',
   OIDC_REDIRECT_URI: 'https://app.example.de/api/auth/callback',
+  APP_ORIGIN: 'https://app.example.de',
 };
 
 describe('building sign-in', () => {
@@ -93,6 +96,7 @@ describe('the sign-in routes without sign-in', () => {
       providers: [
         { provide: SIGN_IN, useValue: { service: undefined } },
         { provide: SESSIONS, useValue: null },
+        { provide: CONFIG, useValue: loadConfig(LOCAL) },
         SessionMembershipGuard,
         { provide: REQUEST_CONTEXTS, useValue: null },
         { provide: LOGGER, useValue: logger },

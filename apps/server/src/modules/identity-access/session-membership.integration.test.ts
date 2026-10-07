@@ -32,6 +32,9 @@ import type { RequestContextService } from './application/request-context.servic
 const LOCAL_KEY = 'local-v1:local-development-only';
 const SESSION_COOKIE_CONTRACT =
   /^__Host-moin_sid=([A-Za-z0-9_-]{43}); Max-Age=(\d+); Path=\/; HttpOnly; Secure; SameSite=Lax$/;
+const CSRF_COOKIE_CONTRACT =
+  /^__Host-moin_csrf=([A-Za-z0-9_-]{43}); Max-Age=(\d+); Path=\/; Secure; SameSite=Lax$/;
+const APP_ORIGIN = 'http://localhost:3000';
 const ORG_A = 'aaaaaaaa-aaaa-4111-8111-aaaaaaaaaaaa';
 const ORG_B = 'bbbbbbbb-bbbb-4111-8111-bbbbbbbbbbbb';
 
@@ -89,6 +92,7 @@ async function build(): Promise<NestFastifyApplication> {
         loadConfig({
           NODE_ENV: 'test',
           SERVER_ROLE: 'api',
+          APP_ORIGIN: 'http://localhost:3000',
           LOG_LEVEL: 'info',
           DATABASE_URL: database.appUrl,
           OIDC_PROVIDER: 'keycloak',
@@ -161,6 +165,43 @@ async function signedInCookie(): Promise<string> {
   return signedInCookieAs(who);
 }
 
+/** The pair for a fresh user: session header plus synchronizer token. */
+async function signedInCookies(): Promise<SessionCookies> {
+  const who = await person();
+  await member(who.id, ORG_A);
+  return signedInCookiesAs(who);
+}
+
+interface SessionCookies {
+  readonly header: string;
+  readonly csrfToken: string;
+  readonly csrfCookie: string;
+}
+
+/** Parse a callback's Set-Cookie pair into the session header plus the synchronizer token. */
+function sessionCookiesFromCallback(headers: Record<string, unknown>): SessionCookies {
+  const all = setCookies(headers);
+  const sessionCookie = all.find((c) => c.startsWith('__Host-moin_sid='));
+  const token = SESSION_COOKIE_CONTRACT.exec(sessionCookie ?? '')?.[1];
+  const csrfCookie = all.find((c) => c.startsWith('__Host-moin_csrf='));
+  const csrfToken = CSRF_COOKIE_CONTRACT.exec(csrfCookie ?? '')?.[1];
+  if (token === undefined || csrfToken === undefined) throw new Error('no session cookies');
+  return {
+    header: `__Host-moin_sid=${token}`,
+    csrfToken,
+    csrfCookie: `__Host-moin_csrf=${csrfToken}`,
+  };
+}
+
+/** POST headers carrying the double-submit proof: matching header token plus same origin. */
+function csrfHeaders(cookies: SessionCookies): Record<string, string> {
+  return {
+    cookie: `${cookies.header}; ${cookies.csrfCookie}`,
+    origin: APP_ORIGIN,
+    'x-csrf-token': cookies.csrfToken,
+  };
+}
+
 /** The same round-trip for a given person (wrong-subject tests sign in as someone else). */
 async function signedInCookieAs(who: { subject: string; email: string }): Promise<string> {
   const started = await app.inject({ method: 'GET', url: '/api/auth/login' });
@@ -183,6 +224,27 @@ async function signedInCookieAs(who: { subject: string; email: string }): Promis
   const token = SESSION_COOKIE_CONTRACT.exec(sessionCookie ?? '')?.[1];
   if (token === undefined) throw new Error('no session cookie');
   return `__Host-moin_sid=${token}`;
+}
+
+/** The pair: session header plus synchronizer token, for CSRF-protected POSTs. */
+async function signedInCookiesAs(who: { subject: string; email: string }): Promise<SessionCookies> {
+  const started = await app.inject({ method: 'GET', url: '/api/auth/login' });
+  expect(started.statusCode).toBe(302);
+  const binding = /^__Host-moin_signin=([A-Za-z0-9_-]{43});/.exec(
+    String(started.headers['set-cookie']),
+  )?.[1];
+  if (binding === undefined) throw new Error('no binding');
+  const { code, state } = provider.authorize(String(started.headers.location), {
+    subject: who.subject,
+    email: who.email,
+  });
+  const response = await app.inject({
+    method: 'GET',
+    url: `/api/auth/callback?${new URLSearchParams({ state, code, iss: provider.issuer }).toString()}`,
+    headers: { cookie: `__Host-moin_signin=${binding}` },
+  });
+  expect(response.statusCode).toBe(302);
+  return sessionCookiesFromCallback(response.headers);
 }
 
 function contexts(): RequestContextService {
@@ -217,19 +279,24 @@ describe('signing out other devices (P06.06.05)', () => {
       const who = await person();
       await member(who.id, ORG_A);
       const first = await signedInCookieAs(who);
-      const second = await signedInCookieAs(who);
+      const second = await signedInCookiesAs(who);
       // A fresh sign-in supersedes the old family, so this endpoint's own count is the one other
       // live session of this account.
       const answer = await app.inject({
         method: 'POST',
         url: '/api/auth/sign-out-others',
-        headers: { cookie: second },
+        headers: csrfHeaders(second),
       });
       expect(answer.statusCode).toBe(200);
       expect(answer.json()).toStrictEqual({ revoked: 1 });
       expect(
-        (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: second } }))
-          .statusCode,
+        (
+          await app.inject({
+            method: 'GET',
+            url: '/probe',
+            headers: { cookie: second.header },
+          })
+        ).statusCode,
       ).toBe(200);
       // The superseded first cookie fails either way now.
       expect(
@@ -265,6 +332,111 @@ describe('signing out other devices (P06.06.05)', () => {
     expect(
       (await app.inject({ method: 'GET', url: '/probe', headers: { cookie } })).statusCode,
     ).toBe(401);
+  });
+});
+
+describe('CSRF synchronizer token plus Origin check (P06.06.06)', () => {
+  evidenceTest('a POST without the token fails closed with 403 csrf-required', async () => {
+    // No header at all (classic forged form POST)...
+    const cookie = await signedInCookie();
+    const noHeader = await app.inject({
+      method: 'POST',
+      url: '/probe',
+      headers: { cookie },
+    });
+    expect(noHeader.statusCode).toBe(403);
+    // ...and no header even when the cookie IS present (the mutant that checks only the cookie).
+    const cookies = await signedInCookies();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/probe',
+      headers: { cookie: `${cookies.header}; ${cookies.csrfCookie}` },
+    });
+    expect(response.statusCode).toBe(403);
+    expect(response.headers['content-type']).toMatch(/^application\/problem\+json/);
+    expect(response.json()).toStrictEqual({
+      type: '/problems/csrf-required',
+      title: 'CSRF proof is required',
+      status: 403,
+    });
+    expect(response.headers['cache-control']).toBe('no-store');
+  });
+
+  evidenceTest('a POST with a forged token fails: the header must echo the cookie', async () => {
+    const cookies = await signedInCookies();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/probe',
+      headers: { ...csrfHeaders(cookies), 'x-csrf-token': 'A'.repeat(43) },
+    });
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toStrictEqual({
+      type: '/problems/csrf-required',
+      title: 'CSRF proof is required',
+      status: 403,
+    });
+  });
+
+  evidenceTest('a POST from a foreign origin fails even with a valid token', async () => {
+    const cookies = await signedInCookies();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/probe',
+      headers: { ...csrfHeaders(cookies), origin: 'https://evil.example' },
+    });
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toStrictEqual({
+      type: '/problems/csrf-required',
+      title: 'CSRF proof is required',
+      status: 403,
+    });
+  });
+
+  evidenceTest('a POST with token plus origin succeeds', async () => {
+    const cookies = await signedInCookies();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/probe',
+      headers: csrfHeaders(cookies),
+    });
+    expect(response.statusCode).toBe(201);
+  });
+
+  evidenceTest('a CSRF-less POST mints no session side effects (FS-16 adjacent)', async () => {
+    // The guard rejects before the handler: no organisation is resolved, no write happens.
+    const cookie = await signedInCookie();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/auth/sign-out-others',
+      headers: { cookie },
+    });
+    expect(response.statusCode).toBe(403);
+    expect(
+      (await app.inject({ method: 'GET', url: '/probe', headers: { cookie } })).statusCode,
+    ).toBe(200);
+  });
+
+  evidenceTest('the callback issues the synchronizer cookie with the session', async () => {
+    const who = await person();
+    await member(who.id, ORG_A);
+    const started = await app.inject({ method: 'GET', url: '/api/auth/login' });
+    const binding = /^__Host-moin_signin=([A-Za-z0-9_-]{43});/.exec(
+      String(started.headers['set-cookie']),
+    )?.[1];
+    if (binding === undefined) throw new Error('no binding');
+    const { code, state } = provider.authorize(String(started.headers.location), {
+      subject: who.subject,
+      email: who.email,
+    });
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/auth/callback?${new URLSearchParams({ state, code, iss: provider.issuer }).toString()}`,
+      headers: { cookie: `__Host-moin_signin=${binding}` },
+    });
+    expect(response.statusCode).toBe(302);
+    const all = setCookies(response.headers);
+    const csrf = all.find((c) => c.startsWith('__Host-moin_csrf='));
+    expect(CSRF_COOKIE_CONTRACT.test(csrf ?? '')).toBe(true);
   });
 });
 
@@ -424,7 +596,8 @@ describe('the session + membership gate', () => {
   });
 
   evidenceTest('GET reuses a resolution within 30 s, mutations always resolve fresh', async () => {
-    const cookie = await signedInCookie();
+    const cookies = await signedInCookies();
+    const cookie = cookies.header;
     contexts().clearCache();
     const before = contexts().lookups;
     expect(
@@ -436,11 +609,23 @@ describe('the session + membership gate', () => {
     ).toBe(200);
     expect(contexts().lookups).toBe(before + 1);
     expect(
-      (await app.inject({ method: 'POST', url: '/probe', headers: { cookie } })).statusCode,
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/probe',
+          headers: csrfHeaders(cookies),
+        })
+      ).statusCode,
     ).toBe(201);
     expect(contexts().lookups).toBe(before + 2);
     expect(
-      (await app.inject({ method: 'POST', url: '/probe', headers: { cookie } })).statusCode,
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/probe',
+          headers: csrfHeaders(cookies),
+        })
+      ).statusCode,
     ).toBe(201);
     expect(contexts().lookups).toBe(before + 3);
   });
@@ -848,11 +1033,10 @@ describe('the step-up gate (P06.06.04)', () => {
       url: `/api/auth/callback?${new URLSearchParams({ state, code, iss: provider.issuer }).toString()}`,
       headers: { cookie: `__Host-moin_signin=${binding}` },
     });
-    const oldToken = SESSION_COOKIE_CONTRACT.exec(
-      setCookies(callback.headers).find((c) => c.startsWith('__Host-moin_sid=')) ?? '',
-    )?.[1];
-    if (oldToken === undefined) throw new Error('no session cookie');
-    const oldCookie = `__Host-moin_sid=${oldToken}`;
+    const oldCookies = sessionCookiesFromCallback(callback.headers);
+    const oldCookie = oldCookies.header;
+    const oldToken = /^__Host-moin_sid=([A-Za-z0-9_-]{43})$/.exec(oldCookie)?.[1];
+    if (oldToken === undefined) throw new Error('no old token');
     // Age the stamp past the window so the gate refuses before the round-trip.
     const { digestOf } = await import('./domain/secret-values.ts');
     await admin.query(
@@ -869,7 +1053,7 @@ describe('the step-up gate (P06.06.04)', () => {
     const begun = await app.inject({
       method: 'POST',
       url: '/api/auth/step-up',
-      headers: { cookie: oldCookie },
+      headers: csrfHeaders(oldCookies),
     });
     expect(begun.statusCode).toBe(302);
     expect(String(begun.headers.location)).toContain('max_age=0');
@@ -914,11 +1098,12 @@ describe('the step-up gate (P06.06.04)', () => {
     await member(holder.id, ORG_A);
     const other = await person();
     await member(other.id, ORG_A);
-    const cookie = await signedInCookieAs(holder);
+    const holderCookies = await signedInCookiesAs(holder);
+    const cookie = holderCookies.header;
     const begun = await app.inject({
       method: 'POST',
       url: '/api/auth/step-up',
-      headers: { cookie },
+      headers: csrfHeaders(holderCookies),
     });
     expect(begun.statusCode).toBe(302);
     const upBinding = /^__Host-moin_signin=([A-Za-z0-9_-]{43});/.exec(
@@ -976,11 +1161,12 @@ describe('the step-up gate (P06.06.04)', () => {
     // The callback rotates the presented session: without the session cookie there is no
     // presented session, so the round-trip must refuse and rotate nothing — even though the
     // provider flow itself completed. The holder's session is untouched.
-    const cookie = await signedInCookie();
+    const cookies = await signedInCookies();
+    const cookie = cookies.header;
     const begun = await app.inject({
       method: 'POST',
       url: '/api/auth/step-up',
-      headers: { cookie },
+      headers: csrfHeaders(cookies),
     });
     expect(begun.statusCode).toBe(302);
     const upBinding = /^__Host-moin_signin=([A-Za-z0-9_-]{43});/.exec(

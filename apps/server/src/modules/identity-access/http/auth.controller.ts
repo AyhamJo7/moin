@@ -19,10 +19,12 @@ import { Controller, Get, Headers, Inject, Post, Query, Res, UseGuards } from '@
 import type { FastifyReply } from 'fastify';
 import {
   AUTH_TRANSACTION_TTL_MS,
+  CSRF_COOKIE,
   SESSION_COOKIE,
   SIGN_IN_COOKIE,
 } from '../domain/session-policy.ts';
 import { SignInError, type SignInFailure } from '../application/sign-in.service.ts';
+import { randomSecret } from '../domain/secret-values.ts';
 import type { SessionService } from '../application/session.service.ts';
 import { SESSIONS, SIGN_IN, type SignInGate } from '../identity-access.tokens.ts';
 import { clearCookie, readCookie, serializeCookie } from './cookies.ts';
@@ -120,11 +122,16 @@ export class AuthController {
         readCookie(cookieHeader, SIGN_IN_COOKIE),
         readCookie(cookieHeader, SESSION_COOKIE),
       );
+      // The synchronizer token rides a readable cookie (double-submit, P06.06.06): script
+      // echoes it into the header on mutations, and the guard compares the two. Fresh on every
+      // completion, same lifetime as the session cookie; cleared with the sign-in cookie it is not.
+      const csrfToken = randomSecret();
       await reply
         .code(302)
         .header('location', completed.location)
         .header('set-cookie', [
           serializeCookie(SESSION_COOKIE, completed.sessionToken, completed.cookieMaxAgeSeconds),
+          serializeCookie(CSRF_COOKIE, csrfToken, completed.cookieMaxAgeSeconds),
           clearCookie(SIGN_IN_COOKIE),
         ])
         .send();

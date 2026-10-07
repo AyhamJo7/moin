@@ -960,5 +960,70 @@
       "fullName": "session revocation (P06.06.05) > an open revocation holds the per-user advisory lock (MEDIUM-2)"
     },
     "project": "integration"
+  },
+  {
+    "id": "C1-missing-token-accepted",
+    "invariant": "P06.06.06: a mutation without the synchronizer token fails closed",
+    "expected": "A POST carrying only the victim's cookies (no header at all) would be admitted: the token layer would check only that a cookie exists.",
+    "file": "apps/server/src/modules/identity-access/http/csrf.ts",
+    "find": "  if (options.cookie === undefined || !csrfTokenValid(options.token, options.cookie)) {\n    return { ok: false, reason: 'token-invalid' };\n  }",
+    "replace": "  if (options.cookie === undefined) {\n    return { ok: false, reason: 'token-invalid' };\n  }",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/session-membership.integration.test.ts",
+      "fullName": "CSRF synchronizer token plus Origin check (P06.06.06) > a POST without the token fails closed with 403 csrf-required"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "C2-forged-token-accepted",
+    "invariant": "P06.06.06: the header must echo the cookie",
+    "expected": "Any 43-char string in the header would pass: the comparison is the whole control.",
+    "file": "apps/server/src/modules/identity-access/http/csrf.ts",
+    "find": "  if (options.cookie === undefined || !csrfTokenValid(options.token, options.cookie)) {\n    return { ok: false, reason: 'token-invalid' };\n  }",
+    "replace": "  if (options.cookie === undefined) {\n    return { ok: false, reason: 'token-invalid' };\n  }",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/session-membership.integration.test.ts",
+      "fullName": "CSRF synchronizer token plus Origin check (P06.06.06) > a POST with a forged token fails: the header must echo the cookie"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "C3-foreign-origin-accepted",
+    "invariant": "P06.06.06: a mismatched Origin fails even with a valid token",
+    "expected": "A cross-site request naming the attacker's origin would pass on the token alone.",
+    "file": "apps/server/src/modules/identity-access/http/csrf.ts",
+    "find": "  if (options.origin !== undefined && parsed !== options.expectedOrigin) {\n    return { ok: false, reason: 'origin-mismatch' };\n  }",
+    "replace": "  if (options.origin !== undefined && parsed === undefined) {\n    return { ok: false, reason: 'origin-mismatch' };\n  }",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/session-membership.integration.test.ts",
+      "fullName": "CSRF synchronizer token plus Origin check (P06.06.06) > a POST from a foreign origin fails even with a valid token"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "C4-guard-skips-csrf-on-mutations",
+    "invariant": "P06.06.06: every guarded mutation passes the CSRF check",
+    "expected": "Removing the guard call leaves every POST unprotected while GETs look unchanged.",
+    "file": "apps/server/src/modules/identity-access/http/session-membership.guard.ts",
+    "find": "    request.sessionContext = outcome.context;\n    if (requiresCsrfProtection(request.method)) {",
+    "replace": "    request.sessionContext = outcome.context;\n    if (requiresCsrfProtection(request.method) && false) {",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/session-membership.integration.test.ts",
+      "fullName": "CSRF synchronizer token plus Origin check (P06.06.06) > a POST without the token fails closed with 403 csrf-required"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "C7-trailing-slash-origin-accepted",
+    "invariant": "P06.06.06: the configured origin is canonical before comparison",
+    "expected": "A configured origin with a trailing slash would never equal a browser Origin, 403ing every mutation while looking configured.",
+    "file": "apps/server/src/config/env.ts",
+    "find": ".transform((value) => new URL(value).origin)",
+    "replace": ".transform((value) => value)",
+    "killingTest": {
+      "file": "apps/server/src/config/env.test.ts",
+      "fullName": "configuration loader (P02.03.03) > normalises APP_ORIGIN so equivalent spellings compare equal"
+    },
+    "project": "unit"
   }
 ]

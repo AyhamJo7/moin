@@ -25,6 +25,8 @@ import { resolveTokenCipher } from './infrastructure/token-cipher.ts';
 const LOCAL_KEY = 'local-v1:local-development-only';
 const SESSION_COOKIE_CONTRACT =
   /^__Host-moin_sid=([A-Za-z0-9_-]{43}); Max-Age=(\d+); Path=\/; HttpOnly; Secure; SameSite=Lax$/;
+const CSRF_COOKIE_CONTRACT =
+  /^__Host-moin_csrf=([A-Za-z0-9_-]{43}); Max-Age=(\d+); Path=\/; Secure; SameSite=Lax$/;
 const CLEARED_SIGN_IN = '__Host-moin_signin=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax';
 
 const clock = fixedClock(new Date());
@@ -44,6 +46,7 @@ function config(env: Record<string, string> = {}) {
   return loadConfig({
     NODE_ENV: 'test',
     SERVER_ROLE: 'api',
+    APP_ORIGIN: 'http://localhost:3000',
     LOG_LEVEL: 'info',
     DATABASE_URL: database.appUrl,
     OIDC_PROVIDER: 'keycloak',
@@ -178,9 +181,12 @@ describe('signing in', () => {
     expect(response.headers['referrer-policy']).toBe('no-referrer');
     expect(response.body).toBe('');
     const cookies = setCookies(response.headers);
-    expect(cookies).toHaveLength(2);
+    expect(cookies).toHaveLength(3);
     expect(cookies[0]).toMatch(SESSION_COOKIE_CONTRACT);
-    expect(cookies[1]).toBe(CLEARED_SIGN_IN);
+    // The synchronizer token rides with the session (P06.06.06): script echoes it into the
+    // header on mutations, and the guard compares the two.
+    expect(cookies[1]).toMatch(CSRF_COOKIE_CONTRACT);
+    expect(cookies[2]).toBe(CLEARED_SIGN_IN);
     expect(Number(SESSION_COOKIE_CONTRACT.exec(cookies[0] ?? '')?.[2])).toBe(7 * 24 * 3600);
 
     const resolved = await sessions().resolve(token);

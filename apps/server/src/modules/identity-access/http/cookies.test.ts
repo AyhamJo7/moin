@@ -1,6 +1,6 @@
 import { evidenceTest } from '@moin/testing';
 import { describe, expect, it } from 'vitest';
-import { SESSION_COOKIE, SIGN_IN_COOKIE } from '../domain/session-policy.ts';
+import { CSRF_COOKIE, SESSION_COOKIE, SIGN_IN_COOKIE } from '../domain/session-policy.ts';
 import { randomSecret } from '../domain/secret-values.ts';
 import { clearCookie, readCookie, serializeCookie } from './cookies.ts';
 
@@ -48,5 +48,25 @@ describe('the session cookie', () => {
     expect(readCookie(`${SESSION_COOKIE}=attacker-chosen`, SESSION_COOKIE)).toBeUndefined();
     expect(readCookie(`x${SESSION_COOKIE}=${token}`, SESSION_COOKIE)).toBeUndefined();
     expect(readCookie(undefined, SESSION_COOKIE)).toBeUndefined();
+  });
+});
+
+describe('the synchronizer-token cookie', () => {
+  evidenceTest('is readable by script but still __Host-bound, Secure, Lax and Path=/', () => {
+    const token = randomSecret();
+    const header = serializeCookie(CSRF_COOKIE, token, 604_800);
+    expect(header).toBe(`__Host-moin_csrf=${token}; Max-Age=604800; Path=/; Secure; SameSite=Lax`);
+    const attributes = header.split('; ').slice(1);
+    expect(attributes).not.toContain('HttpOnly');
+    expect(attributes).toContain('Secure');
+    expect(attributes).toContain('SameSite=Lax');
+    expect(attributes).toContain('Path=/');
+    expect(attributes.some((attribute) => /^domain=/i.test(attribute))).toBe(false);
+  });
+
+  it('clears with the readable attributes, so the browser matches it', () => {
+    expect(clearCookie(CSRF_COOKIE)).toBe(
+      '__Host-moin_csrf=; Max-Age=0; Path=/; Secure; SameSite=Lax',
+    );
   });
 });

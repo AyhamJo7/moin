@@ -102,6 +102,7 @@ describe('the identity store factory', () => {
     const config = loadConfig({
       NODE_ENV: 'test',
       SERVER_ROLE: 'api',
+      APP_ORIGIN: 'http://localhost:3000',
       LOG_LEVEL: 'info',
       DATABASE_URL: database.appUrl,
       IDENTITY_DATABASE_URL: database.identityUrl,

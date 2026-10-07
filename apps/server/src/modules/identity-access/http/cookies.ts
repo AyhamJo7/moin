@@ -16,12 +16,20 @@
  * context and accept Secure cookies there. Nothing is weakened for it.
  */
 
-import { type SESSION_COOKIE, type SIGN_IN_COOKIE } from '../domain/session-policy.ts';
+import { CSRF_COOKIE, type SESSION_COOKIE, type SIGN_IN_COOKIE } from '../domain/session-policy.ts';
 import { isSecretValue } from '../domain/secret-values.ts';
 
-export type CookieName = typeof SESSION_COOKIE | typeof SIGN_IN_COOKIE;
+export type CookieName = typeof SESSION_COOKIE | typeof SIGN_IN_COOKIE | typeof CSRF_COOKIE;
 
 const ATTRIBUTES = 'Path=/; HttpOnly; Secure; SameSite=Lax';
+
+/**
+ * The synchronizer-token cookie is readable by same-origin script on purpose: the script echoes
+ * it into the header, and the server compares the two. Everything else about it matches the
+ * session cookie (`__Host-`, Secure, `Path=/`, no Domain, `SameSite=Lax`) so it cannot be
+ * planted from another origin and is never sent cross-site except on top-level navigation.
+ */
+const CSRF_ATTRIBUTES = 'Path=/; Secure; SameSite=Lax';
 
 export function serializeCookie(name: CookieName, value: string, maxAgeSeconds: number): string {
   if (!isSecretValue(value)) {
@@ -30,11 +38,13 @@ export function serializeCookie(name: CookieName, value: string, maxAgeSeconds: 
   if (!Number.isInteger(maxAgeSeconds) || maxAgeSeconds <= 0) {
     throw new RangeError('cookie lifetime must be a positive whole number of seconds');
   }
-  return `${name}=${value}; Max-Age=${String(maxAgeSeconds)}; ${ATTRIBUTES}`;
+  const attributes = name === CSRF_COOKIE ? CSRF_ATTRIBUTES : ATTRIBUTES;
+  return `${name}=${value}; Max-Age=${String(maxAgeSeconds)}; ${attributes}`;
 }
 
 export function clearCookie(name: CookieName): string {
-  return `${name}=; Max-Age=0; ${ATTRIBUTES}`;
+  const attributes = name === CSRF_COOKIE ? CSRF_ATTRIBUTES : ATTRIBUTES;
+  return `${name}=; Max-Age=0; ${attributes}`;
 }
 
 /**
