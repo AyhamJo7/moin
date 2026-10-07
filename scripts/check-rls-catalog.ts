@@ -132,7 +132,7 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
     'd9071fdb7c7cb2487fef261194db83bf',
   'app.rotate_session(bytea, bytea, uuid, text)': 'f73e3aa4ae6c66b031451899652551d6',
   'app.rotate_session(bytea, bytea, uuid, text, timestamp with time zone)':
-    '7831716936056bfd2e7e86ece666933e',
+    'a6158abf64196e357060054092488756',
   'app.resolve_session': '3b06721c6c8d393e60ff0bcfaa70477d',
   'app.revoke_session': 'a4a30b649c5abf56fab3563d20576aa8',
   'app.resolve_request_context': '43fe239ef436231069f7058a197202c8',
