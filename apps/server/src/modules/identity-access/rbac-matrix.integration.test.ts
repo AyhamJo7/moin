@@ -342,6 +342,25 @@ describe('last-owner protection (P06.07.04)', () => {
     );
   }
 
+  evidenceTest('a disabled owner does not cover demoting the last active owner', async () => {
+    const active = await person();
+    const dormant = await person();
+    const org = await soloOrg();
+    await soloMember(active.id, org);
+    await admin.query(
+      'insert into memberships (organisation_id, id, user_id, role, status) values ($1, $2, $3, $4, $5)',
+      [org, randomUUID(), dormant.id, 'owner', 'disabled'],
+    );
+    // One active owner, one disabled: demoting the active one still fails — the disabled row
+    // cannot act, so it cannot cover. Kills the mutant that drops the status predicate.
+    await expect(
+      withTenant(database.pool(), org, async (gate) => {
+        // eslint-disable-next-line no-restricted-syntax -- membership writes in this file go through the tenant wrapper; the rule SET-session pattern matches UPDATE ... SET verb text.
+        await gate.query("update memberships set role = 'admin' where user_id = $1", [active.id]);
+      }),
+    ).rejects.toMatchObject({ code: '23000' });
+  });
+
   evidenceTest('removing the last active owner fails with 23000', async () => {
     const who = await person();
     const org = await soloOrg();

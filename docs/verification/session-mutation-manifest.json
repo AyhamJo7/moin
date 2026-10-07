@@ -1077,5 +1077,57 @@
       "fullName": "the request-context lookup (P06.06.03) > admits no membership-less session even when the session itself is live (P06.06.07)"
     },
     "project": "integration"
+  },
+  {
+    "id": "B1-last-owner-delete-allowed",
+    "invariant": "P06.07.04: removing the last active owner fails",
+    "expected": "An organisation could be left with no active owner: orphaned tenant, unrecoverable without operator intervention.",
+    "file": "packages/db/migrations/0017_last_owner_protection.sql",
+    "find": "      AND m.role = 'owner'\n      AND m.status = 'active';",
+    "replace": "      AND m.role = 'owner';",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/rbac-matrix.integration.test.ts",
+      "fullName": "last-owner protection (P06.07.04) > removing the last active owner fails with 23000"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "B2-last-owner-trigger-disabled",
+    "invariant": "P06.07.04: the trigger itself cannot silently go missing",
+    "expected": "A disabled owner would count as cover: demoting the last ACTIVE owner passes while a disabled row exists, leaving nobody who can act.",
+    "file": "packages/db/migrations/0017_last_owner_protection.sql",
+    "find": "      AND m.role = 'owner'\n      AND m.status = 'active';",
+    "replace": "      AND m.role = 'owner';",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/rbac-matrix.integration.test.ts",
+      "fullName": "last-owner protection (P06.07.04) > a disabled owner does not cover demoting the last active owner"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "B3-role-guard-skipped",
+    "invariant": "P06.07.02: the role guard enforces declared capabilities",
+    "expected": "A staff member would pass an owner route: the matrix as decoration.",
+    "file": "apps/server/src/modules/identity-access/http/require-role.guard.ts",
+    "find": "      capabilities.every((capability) => may(session.role, session.permissions, capability));",
+    "replace": "      capabilities.every((capability) => may(session.role, session.permissions, capability)) && true;",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/rbac-matrix.integration.test.ts",
+      "fullName": "the role matrix, every route × every role (P06.07.05) > staff fail every decorated route with 403 forbidden"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "B4-matrix-widened",
+    "invariant": "P06.07.01: staff hold no management capability",
+    "expected": "Widening staff to users:manage would silently promote every staff member.",
+    "file": "apps/server/src/modules/identity-access/domain/roles.ts",
+    "find": "'users:manage': { roles: ['owner', 'admin'] },",
+    "replace": "'users:manage': { roles: ['owner', 'admin', 'staff'] },",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/domain/roles.test.ts",
+      "fullName": "the RBAC decision table (P06.07.01) > staff hold sessions only"
+    },
+    "project": "unit"
   }
 ]
