@@ -318,6 +318,17 @@ describe('the session lifecycle, end to end (P06.06.07)', () => {
     const victim = await person();
     const victimPair = await signInPair(victim);
     const first = await signInPair(who);
+    // A login presenting ANOTHER person's cookie supersedes nothing: the victim survives.
+    const attack = await signInPair(who, victimPair.header);
+    contexts().clearCache();
+    expect(
+      (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: victimPair.header } }))
+        .statusCode,
+    ).toBe(200);
+    expect(
+      (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: attack.header } }))
+        .statusCode,
+    ).toBe(200);
     const second = await signInPair(who, first.header);
     expect(second.header).not.toBe(first.header);
     contexts().clearCache();
