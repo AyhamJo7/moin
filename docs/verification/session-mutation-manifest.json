@@ -1025,5 +1025,57 @@
       "fullName": "configuration loader (P02.03.03) > normalises APP_ORIGIN so equivalent spellings compare equal"
     },
     "project": "unit"
+  },
+  {
+    "id": "L1-lifecycle-csrf-guard-removed",
+    "invariant": "P06.06.07: the acceptance story fails when the CSRF guard is removed",
+    "expected": "Removing the guard call from the session gate re-admits CSRF-less POSTs; the lifecycle suite names the step.",
+    "file": "apps/server/src/modules/identity-access/http/session-membership.guard.ts",
+    "find": "    request.sessionContext = outcome.context;\n    if (requiresCsrfProtection(request.method)) {",
+    "replace": "    request.sessionContext = outcome.context;\n    if (requiresCsrfProtection(request.method) \\&\\& false) {",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/session-lifecycle.integration.test.ts",
+      "fullName": "the session lifecycle, end to end (P06.06.07) > a CSRF-less POST is refused before the handler"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "L2-lifecycle-idle-expiry-ignored",
+    "invariant": "P06.06.07: the acceptance story fails when idle expiry is ignored",
+    "expected": "An idle-expired session would be admitted; the lifecycle suite names the step.",
+    "file": "packages/db/migrations/0016_session_revocation.sql",
+    "find": "      AND s.revoked_at IS NULL\n      AND s.idle_expires_at > v_now\n      AND s.absolute_expires_at > v_now\n      AND u.status = 'active'\n      AND m.status = 'active';",
+    "replace": "      AND s.revoked_at IS NULL\n      AND s.absolute_expires_at > v_now\n      AND u.status = 'active'\n      AND m.status = 'active';",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/session-lifecycle.integration.test.ts",
+      "fullName": "the session lifecycle, end to end (P06.06.07) > an idle-expired session is refused on the next request"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "L3-lifecycle-supersede-unscoped",
+    "invariant": "P06.06.07: the acceptance story fails when supersession loses its user scope",
+    "expected": "A sign-in would supersede other users families; the lifecycle rotation step names it.",
+    "file": "packages/db/migrations/0016_session_revocation.sql",
+    "find": "    WHERE s.family_id = v_family AND s.user_id = v_user AND s.revoked_at IS NULL;",
+    "replace": "    WHERE s.family_id = v_family AND s.revoked_at IS NULL;",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/session-lifecycle.integration.test.ts",
+      "fullName": "the session lifecycle, end to end (P06.06.07) > rotation retires the predecessor: fixation prevented by rotation"
+    },
+    "project": "integration"
+  },
+  {
+    "id": "L4-lifecycle-removed-member-admitted",
+    "invariant": "P06.06.07: the acceptance story fails when removed members are admitted",
+    "expected": "A removed member (no membership row) would resolve again; the FS-16 step names it.",
+    "file": "packages/db/migrations/0016_session_revocation.sql",
+    "find": "      AND u.status = 'active'\n      AND m.status = 'active';",
+    "replace": "      AND u.status = 'active';",
+    "killingTest": {
+      "file": "apps/server/src/modules/identity-access/session-lifecycle.integration.test.ts",
+      "fullName": "the session lifecycle, end to end (P06.06.07) > a removed member's next request fails (FS-16), including step-up"
+    },
+    "project": "integration"
   }
 ]
