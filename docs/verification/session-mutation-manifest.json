@@ -1068,10 +1068,10 @@
   {
     "id": "L4-lifecycle-removed-member-admitted",
     "invariant": "P06.06.07: the acceptance story fails when removed members are admitted",
-    "expected": "A removed member (no membership row) would resolve again; the FS-16 step names it.",
+    "expected": "Without the inner join a removed member (no membership row) would still resolve; the FS-16 step names it.",
     "file": "packages/db/migrations/0016_session_revocation.sql",
-    "find": "      AND u.status = 'active'\n      AND m.status = 'active';",
-    "replace": "      AND u.status = 'active';",
+    "find": "    JOIN public.memberships m ON m.user_id = s.user_id",
+    "replace": "    LEFT JOIN public.memberships m ON m.user_id = s.user_id",
     "killingTest": {
       "file": "apps/server/src/modules/identity-access/session-lifecycle.integration.test.ts",
       "fullName": "the session lifecycle, end to end (P06.06.07) > a removed member's next request fails (FS-16), including step-up"

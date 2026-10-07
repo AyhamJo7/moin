@@ -311,8 +311,12 @@ describe('the session lifecycle, end to end (P06.06.07)', () => {
 
   evidenceTest('rotation retires the predecessor: fixation prevented by rotation', async () => {
     // A fresh sign-in supersedes the presented family: the old cookie dies with it, so a
-    // planted token can never survive the login it rode in on.
+    // planted token can never survive the login it rode in on. The supersede is scoped to the
+    // authenticated user: a second person's session in another family survives (M1 pins the
+    // scope at DB level; this pins it in the acceptance story).
     const who = await person();
+    const victim = await person();
+    const victimPair = await signInPair(victim);
     const first = await signInPair(who);
     const second = await signInPair(who, first.header);
     expect(second.header).not.toBe(first.header);
@@ -323,6 +327,10 @@ describe('the session lifecycle, end to end (P06.06.07)', () => {
     ).toBe(401);
     expect(
       (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: second.header } }))
+        .statusCode,
+    ).toBe(200);
+    expect(
+      (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: victimPair.header } }))
         .statusCode,
     ).toBe(200);
   });
