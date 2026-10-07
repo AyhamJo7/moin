@@ -148,7 +148,11 @@ function directCalls(subject: string, tokenHash: Buffer): [string, string, unkno
     ],
     ['revoke_session', 'select app.revoke_session($1::bytea)', [tokenHash]],
     ['revoke_session(bytea,text)', "select app.revoke_session($1::bytea, 'others')", [tokenHash]],
-    ['revoke_session(uuid,text)', "select app.revoke_session($1::uuid, 'mfa_reset')", [randomUUID()]],
+    [
+      'revoke_session(uuid,text)',
+      "select app.revoke_session($1::uuid, 'mfa_reset')",
+      [randomUUID()],
+    ],
   ];
 }
 
@@ -2166,7 +2170,7 @@ describe('session revocation (P06.06.05)', () => {
       expect(await store.revokeOtherSessions(theirHash)).toBe(1);
       // Only the stranger's other session ended: nothing of ours, and nothing of the helper's.
       const stray = await admin.query<{ n: string }>(
-        "select count(*)::text as n from sessions where user_id = $1 and revoked_at is not null",
+        'select count(*)::text as n from sessions where user_id = $1 and revoked_at is not null',
         [person.id],
       );
       expect(stray.rows[0]?.n).toBe('0');
@@ -2175,27 +2179,25 @@ describe('session revocation (P06.06.05)', () => {
     },
   );
 
-  evidenceTest(
-    'a dead presented session answers NULL, not a zero count',
-    async () => {
-      // The NULL/number split is the endpoint's 401/200 branch: 0 would read as "signed out,
-      // nobody else was signed in". Proved at the store level because the endpoint answers the
-      // store's NULL with the same 401 the guard gives an invalid session.
-      const { person } = await membershiped();
-      const live = await signIn(person.sub);
-      expect(await store.revokeOtherSessions(live.tokenHash)).toBe(1);
-      const row = await admin.query<{ revoked_at: Date | null }>(
-        'select revoked_at from sessions where token_hash = $1',
-        [live.tokenHash],
-      );
-      expect(row.rows[0]?.revoked_at).toBeNull();
-      // Now the presented session itself is dead: the next call must answer NULL, not 0.
-      await admin.query('update sessions set idle_expires_at = clock_timestamp() where token_hash = $1', [
-        live.tokenHash,
-      ]);
-      expect(await store.revokeOtherSessions(live.tokenHash)).toBeUndefined();
-    },
-  );
+  evidenceTest('a dead presented session answers NULL, not a zero count', async () => {
+    // The NULL/number split is the endpoint's 401/200 branch: 0 would read as "signed out,
+    // nobody else was signed in". Proved at the store level because the endpoint answers the
+    // store's NULL with the same 401 the guard gives an invalid session.
+    const { person } = await membershiped();
+    const live = await signIn(person.sub);
+    expect(await store.revokeOtherSessions(live.tokenHash)).toBe(1);
+    const row = await admin.query<{ revoked_at: Date | null }>(
+      'select revoked_at from sessions where token_hash = $1',
+      [live.tokenHash],
+    );
+    expect(row.rows[0]?.revoked_at).toBeNull();
+    // Now the presented session itself is dead: the next call must answer NULL, not 0.
+    await admin.query(
+      'update sessions set idle_expires_at = clock_timestamp() where token_hash = $1',
+      [live.tokenHash],
+    );
+    expect(await store.revokeOtherSessions(live.tokenHash)).toBeUndefined();
+  });
 
   evidenceTest('password and MFA resets end every session with their own reason', async () => {
     for (const reason of ['password_reset', 'mfa_reset'] as const) {

@@ -211,28 +211,32 @@ beforeEach(() => {
 });
 
 describe('signing out other devices (P06.06.05)', () => {
-  evidenceTest('POST /api/auth/sign-out-others ends the other sessions and keeps this one', async () => {
-    const who = await person();
-    await member(who.id, ORG_A);
-    const first = await signedInCookieAs(who);
-    const second = await signedInCookieAs(who);
-    // A fresh sign-in supersedes the old family, so this endpoint's own count is the one other
-    // live session of this account.
-    const answer = await app.inject({
-      method: 'POST',
-      url: '/api/auth/sign-out-others',
-      headers: { cookie: second },
-    });
-    expect(answer.statusCode).toBe(200);
-    expect(answer.json()).toStrictEqual({ revoked: 1 });
-    expect(
-      (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: second } })).statusCode,
-    ).toBe(200);
-    // The superseded first cookie fails either way now.
-    expect(
-      (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: first } })).statusCode,
-    ).toBe(401);
-  });
+  evidenceTest(
+    'POST /api/auth/sign-out-others ends the other sessions and keeps this one',
+    async () => {
+      const who = await person();
+      await member(who.id, ORG_A);
+      const first = await signedInCookieAs(who);
+      const second = await signedInCookieAs(who);
+      // A fresh sign-in supersedes the old family, so this endpoint's own count is the one other
+      // live session of this account.
+      const answer = await app.inject({
+        method: 'POST',
+        url: '/api/auth/sign-out-others',
+        headers: { cookie: second },
+      });
+      expect(answer.statusCode).toBe(200);
+      expect(answer.json()).toStrictEqual({ revoked: 1 });
+      expect(
+        (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: second } }))
+          .statusCode,
+      ).toBe(200);
+      // The superseded first cookie fails either way now.
+      expect(
+        (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: first } })).statusCode,
+      ).toBe(401);
+    },
+  );
 
   evidenceTest('a role change ends the sessions it was issued for (P06.06.05)', async () => {
     const who = await person();
