@@ -1070,8 +1070,8 @@
     "invariant": "P06.06.07: the acceptance story fails when removed members are admitted",
     "expected": "Without the inner join a removed member (no membership row) would still resolve; the FS-16 step names it.",
     "file": "packages/db/migrations/0016_session_revocation.sql",
-    "find": "    JOIN public.memberships m ON m.user_id = s.user_id",
-    "replace": "    LEFT JOIN public.memberships m ON m.user_id = s.user_id",
+    "find": "    FROM public.sessions s\n    JOIN public.users u ON u.id = s.user_id\n    JOIN public.memberships m ON m.user_id = s.user_id\n    WHERE s.token_hash = p_token_hash",
+    "replace": "    FROM public.sessions s\n    JOIN public.users u ON u.id = s.user_id\n    LEFT JOIN public.memberships m ON m.user_id = s.user_id\n    WHERE s.token_hash = p_token_hash",
     "killingTest": {
       "file": "apps/server/src/modules/identity-access/session-lifecycle.integration.test.ts",
       "fullName": "the session lifecycle, end to end (P06.06.07) > a removed member's next request fails (FS-16), including step-up"
