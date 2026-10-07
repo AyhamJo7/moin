@@ -1032,7 +1032,7 @@
     "expected": "Removing the guard call from the session gate re-admits CSRF-less POSTs; the lifecycle suite names the step.",
     "file": "apps/server/src/modules/identity-access/http/session-membership.guard.ts",
     "find": "    request.sessionContext = outcome.context;\n    if (requiresCsrfProtection(request.method)) {",
-    "replace": "    request.sessionContext = outcome.context;\n    if (requiresCsrfProtection(request.method) \\&\\& false) {",
+    "replace": "    request.sessionContext = outcome.context;\n    if (requiresCsrfProtection(request.method) && false) {",
     "killingTest": {
       "file": "apps/server/src/modules/identity-access/session-lifecycle.integration.test.ts",
       "fullName": "the session lifecycle, end to end (P06.06.07) > a CSRF-less POST is refused before the handler"
