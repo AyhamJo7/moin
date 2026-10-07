@@ -337,11 +337,20 @@ describe('signing out other devices (P06.06.05)', () => {
 
 describe('CSRF synchronizer token plus Origin check (P06.06.06)', () => {
   evidenceTest('a POST without the token fails closed with 403 csrf-required', async () => {
+    // No header at all (classic forged form POST)...
     const cookie = await signedInCookie();
-    const response = await app.inject({
+    const noHeader = await app.inject({
       method: 'POST',
       url: '/probe',
       headers: { cookie },
+    });
+    expect(noHeader.statusCode).toBe(403);
+    // ...and no header even when the cookie IS present (the mutant that checks only the cookie).
+    const cookies = await signedInCookies();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/probe',
+      headers: { cookie: `${cookies.header}; ${cookies.csrfCookie}` },
     });
     expect(response.statusCode).toBe(403);
     expect(response.headers['content-type']).toMatch(/^application\/problem\+json/);
