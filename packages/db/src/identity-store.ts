@@ -249,11 +249,12 @@ export function createIdentityStore(pool: Pool): IdentityStore {
     },
 
     async revokeSession(tokenHash) {
-      const result = await pool.query<{ revoked: boolean }>(
+      // Single sign-out (the default scope): 1 row ended reads 1, an already-dead session 0.
+      const result = await pool.query<{ revoked: number }>(
         'select app.revoke_session($1::bytea) as revoked',
         [digest(tokenHash)],
       );
-      return result.rows[0]?.revoked === true;
+      return (result.rows[0]?.revoked ?? 0) === 1;
     },
 
     async revokeOtherSessions(tokenHash) {

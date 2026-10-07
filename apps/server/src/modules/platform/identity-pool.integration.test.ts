@@ -60,11 +60,39 @@ describe('verifying the identity pool before the store exists', () => {
 
   evidenceTest('refuses moin_identity once it loses a session function', async () => {
     const admin = database.fixturePool();
-    await admin.query('revoke execute on function app.revoke_session(bytea) from moin_identity');
+    // The 1-arg form is an INVOKER shim; revoking it changes no DEFINER name. Revoke both
+    // same-name DEFINER overloads: the name drops out of moin_identity's DEFINER set entirely.
+    await admin.query(
+      'revoke execute on function app.revoke_session(bytea, text) from moin_identity',
+    );
+    await admin.query(
+      'revoke execute on function app.revoke_session(uuid, text) from moin_identity',
+    );
     try {
       expect(await verify(database.identityUrl ?? '')).toBeInstanceOf(ConfigurationError);
     } finally {
-      await admin.query('grant execute on function app.revoke_session(bytea) to moin_identity');
+      await admin.query(
+        'grant execute on function app.revoke_session(bytea, text) to moin_identity',
+      );
+      await admin.query(
+        'grant execute on function app.revoke_session(uuid, text) to moin_identity',
+      );
+    }
+  });
+
+  evidenceTest('the new revocation overloads stay shut to moin_app', async () => {
+    // P06.06.05: `revoke_session(bytea, text)` (sign-out-others) and `revoke_session(uuid,
+    // text)` (reset) grant EXECUTE to moin_identity only. The catalog check's session
+    // boundary pins that; this is the direct negative control. (The production probe names
+    // the 0015 surface so old hosts keep verifying during the rollout.)
+    const admin = database.fixturePool();
+    for (const sig of ['app.revoke_session(bytea, text)', 'app.revoke_session(uuid, text)']) {
+      const before = await admin.query<{ id: boolean; app: boolean }>(
+        `select has_function_privilege('moin_identity', $1, 'EXECUTE') as id,
+                has_function_privilege('moin_app', $1, 'EXECUTE') as app`,
+        [sig],
+      );
+      expect(before.rows[0]).toMatchObject({ id: true, app: false });
     }
   });
 });

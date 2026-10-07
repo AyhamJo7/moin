@@ -72,7 +72,40 @@ describe('the identity pool readiness probe', () => {
              ) d
        where r.rolname = current_user`,
     );
-    expect(oldProbe.rows[0]?.ok).toBe(true);
+    // 0016 adds two DEFINER rows (the sign-out-others core and the reset overload) that no
+    // pre-0016 host can name, so its frozen total = 7 no longer verifies this schema: ok === false
+    // is the honest signal, and the scoped count below pins what such a host can still verify.
+    expect(oldProbe.rows[0]?.ok).toBe(false);
+    // Six 0015-era DEFINER signatures executable by moin_identity (regprocedure renders without
+    // spaces). The 1-arg revoke and the 6-arg begin_sign_in are INVOKER shims and not counted;
+    // the three 0016 DEFINERs (sign-out-others core, reset overload) are pinned by the catalog
+    // check's session boundary instead.
+    const scoped = await idPool.query<{ n: string }>(
+      `select count(*)::text as n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = 'app' and p.prosecdef and has_function_privilege(p.oid, 'EXECUTE')
+         and p.oid::regprocedure::text in ('app.begin_sign_in(bytea,bytea,bytea,bytea,text,text)',
+           'app.begin_sign_in(bytea,bytea,bytea,bytea,text,text,uuid)',
+           'app.consume_sign_in(bytea,bytea)',
+           'app.begin_session(text,bytea,uuid,bytea,text,bytea,timestamp with time zone)',
+           'app.rotate_session(bytea,bytea,uuid,text,timestamp with time zone)',
+           'app.resolve_session(bytea)','app.resolve_request_context(bytea)',
+           'app.revoke_session(bytea)')`,
+    );
+    expect(scoped.rows[0]?.n).toBe('6');
+  });
+
+  evidenceTest('new revocation entry points shut out moin_app as well', async () => {
+    // The two 0016 overloads grant EXECUTE to moin_identity only; the frozen probe above cannot
+    // name what a pre-0016 host never knew, so this direct check pins their grants.
+    const idPool = database.identityPool();
+    for (const sig of ['app.revoke_session(bytea, text)', 'app.revoke_session(uuid, text)']) {
+      const grants = await idPool.query<{ id: boolean; app: boolean }>(
+        `select has_function_privilege('moin_identity', $1, 'EXECUTE') as id,
+                has_function_privilege('moin_app', $1, 'EXECUTE') as app`,
+        [sig],
+      );
+      expect(grants.rows[0]).toMatchObject({ id: true, app: false });
+    }
   });
 
   evidenceTest(

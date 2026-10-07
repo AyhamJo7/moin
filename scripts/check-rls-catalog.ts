@@ -134,13 +134,13 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.rotate_session(bytea, bytea, uuid, text, timestamp with time zone)':
     'a6158abf64196e357060054092488756',
   'app.resolve_session': '3b06721c6c8d393e60ff0bcfaa70477d',
-  'app.revoke_session': 'a4a30b649c5abf56fab3563d20576aa8',
   'app.resolve_request_context': '3e250049a4d4da3be09204c3dc756125',
   // Revocation (P06.06.05): the one implementation, its two entry points and the trigger that
   // calls it on every membership change. A body that returned without revoking would keep every
   // name, owner, signature and grant, and every session would outlive the change that ended it.
   'app.revoke_user_sessions': 'e0be457ef52462b1ec66b2e395ceec0e',
-  'app.revoke_session(bytea, text)': 'c96f3909b3a87d4bab0ef678b33ec11b',
+  'app.revoke_session(bytea)': '73bcf41e304f25de88177ec25cc6a0e7',
+  'app.revoke_session(bytea, text)': 'a7fada2daeac2e30e801d6aaeff97b2e',
   'app.revoke_session(uuid, text)': '5e600197d52d7d4f18abe1bf272578b7',
   'app.revoke_sessions_on_access_change': '7eaf25b9c8c9e0e77307b009507a1553',
 };
@@ -244,12 +244,6 @@ const APPROVED_DEFINERS: Readonly<
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
     executeGrantees: ['moin_identity'],
   },
-  'app.revoke_session': {
-    arguments: 'bytea',
-    owners: ['moin_migrator', 'moin_owner'],
-    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
-    executeGrantees: ['moin_identity'],
-  },
   'app.resolve_request_context': {
     arguments: 'bytea',
     owners: ['moin_migrator', 'moin_owner'],
@@ -258,6 +252,12 @@ const APPROVED_DEFINERS: Readonly<
   },
   // Revocation (P06.06.05). Two more overloads of `revoke_session` — the bare name, so the
   // seven-name identity set that every host's readiness probe counts does not change mid-rollout.
+  'app.revoke_session(bytea)': {
+    arguments: 'bytea',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: ['moin_identity'],
+  },
   'app.revoke_session(bytea, text)': {
     arguments: 'bytea, text',
     owners: ['moin_migrator', 'moin_owner'],
@@ -820,7 +820,8 @@ export async function inspect(
         const invokerAllowed =
           key === 'app.begin_sign_in(bytea, bytea, bytea, bytea, text, text)' ||
           key === 'app.begin_session(text, bytea, uuid, bytea, text, bytea)' ||
-          key === 'app.rotate_session(bytea, bytea, uuid, text)';
+          key === 'app.rotate_session(bytea, bytea, uuid, text)' ||
+          key === 'app.revoke_session(bytea)';
         if (!fn.security_definer && !invokerAllowed) {
           findings.push({
             rule: 'reviewed-function-not-security-definer',

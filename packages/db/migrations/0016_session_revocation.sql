@@ -127,6 +127,14 @@ $$;
 -- ---------------------------------------------------------------------------------------------
 -- 3. "Sign out other devices".
 -- ---------------------------------------------------------------------------------------------
+-- 'others' lives on the 2-arg core: callers pass 'others', old hosts call the 1-arg
+-- INVOKER shim below and get single sign-out. The shim keeps the frozen `revoke_session(bytea)`
+-- name alive for old-host probes and calls; the core is the only revoke DEFINER besides the
+-- reset overload, so the readiness distinct-name seven do not move. DROP-then-CREATE (not OR
+-- REPLACE): the 0012 1-arg DEFINER and this 2-arg form are different signatures, and CREATE
+-- alone would leave both behind. Strict arities (no defaults): a defaulted 2nd argument would
+-- make every 1-arg call ambiguous between the shim and the core (42725).
+DROP FUNCTION IF EXISTS app.revoke_session(bytea);
 CREATE FUNCTION app.revoke_session(
   p_token_hash bytea,
   p_scope text
@@ -138,8 +146,15 @@ AS $$
 DECLARE
   v_user uuid;
 BEGIN
-  IF p_scope IS DISTINCT FROM 'others' THEN
-    RAISE EXCEPTION 'revocation scope must be others' USING ERRCODE = 'invalid_parameter_value';
+  IF p_scope IS NULL OR p_scope NOT IN ('self', 'others') THEN
+    RAISE EXCEPTION 'revocation scope must be self or others' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF p_scope = 'self' THEN
+    UPDATE public.sessions s
+    SET revoked_at = clock_timestamp(), revocation_reason = 'signed_out',
+        provider_tokens_sealed = NULL, provider_tokens_key_id = NULL
+    WHERE s.token_hash = p_token_hash AND s.revoked_at IS NULL;
+    RETURN CASE WHEN FOUND THEN 1 ELSE 0 END;
   END IF;
   -- user_id never changes after creation (the session trigger forbids it), so this unlocked read
   -- can only name the right owner; validity is judged under the helper's locks.
@@ -154,6 +169,10 @@ $$;
 -- ---------------------------------------------------------------------------------------------
 -- 4. Reset: every session of a user.
 -- ---------------------------------------------------------------------------------------------
+-- Reset (password/MFA) cannot ride the bytea signature: a uuid and a digest are different
+-- types, so this overload coexists without changing any existing signature. Same owner, path
+-- and moin_identity-only grant as every other session function; the catalog pins it by
+-- signature. Old hosts never call it (P06.09 flows are new), so no shim is needed.
 CREATE FUNCTION app.revoke_session(
   p_user_id uuid,
   p_reason text
@@ -323,13 +342,31 @@ END
 $$;
 
 -- ---------------------------------------------------------------------------------------------
--- Execution. The two public overloads: moin_identity only, by exact signature. The helper and the
+-- Shim for old hosts (rolling window, contracted with the 0015 shims): INVOKER, so it runs
+-- as moin_identity and does not inflate the DEFINER seven. Delegates with the 'self' scope.
+CREATE FUNCTION app.revoke_session(
+  p_token_hash bytea
+) RETURNS integer
+  LANGUAGE plpgsql
+  SECURITY INVOKER
+  SET search_path = pg_catalog, public, app, pg_temp
+AS $$
+BEGIN
+  RETURN app.revoke_session(p_token_hash, 'self');
+END
+$$;
+
+-- ---------------------------------------------------------------------------------------------
+-- Execution. The core and the reset overload: moin_identity only, by exact signature. The shim:
+-- moin_identity only as well (it runs as its caller, which is moin_identity). The helper and the
 -- trigger function: nobody — they run only as the owner, called from the functions above.
 -- ---------------------------------------------------------------------------------------------
 REVOKE ALL ON FUNCTION app.revoke_session(bytea, text) FROM PUBLIC, moin_app;
 REVOKE ALL ON FUNCTION app.revoke_session(uuid, text) FROM PUBLIC, moin_app;
+REVOKE ALL ON FUNCTION app.revoke_session(bytea) FROM PUBLIC, moin_app;
 GRANT EXECUTE ON FUNCTION app.revoke_session(bytea, text) TO moin_identity;
 GRANT EXECUTE ON FUNCTION app.revoke_session(uuid, text) TO moin_identity;
+GRANT EXECUTE ON FUNCTION app.revoke_session(bytea) TO moin_identity;
 
 REVOKE ALL ON FUNCTION app.revoke_user_sessions(uuid, bytea, text) FROM PUBLIC, moin_app, moin_identity;
 REVOKE ALL ON FUNCTION app.revoke_sessions_on_access_change() FROM PUBLIC, moin_app, moin_identity;
