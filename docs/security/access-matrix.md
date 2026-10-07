@@ -4,19 +4,19 @@ Decision: ADR-0005 · Enforcement: guards → services → RLS · Review: QG-09
 
 ## The matrix
 
-| Capability                    | Owner | Admin | Staff | +IntegrationAdmin | +BillingAdmin |
-| ----------------------------- | ----- | ----- | ----- | ----------------- | ------------- |
-| `session:step-up`             | yes   | yes   | yes   | —                 | —             |
-| `session:sign-out-others`     | yes   | yes   | yes   | —                 | —             |
-| `users:manage`                | yes   | yes   | no    | —                 | —             |
-| `users:manage-owners`         | yes   | no    | no    | —                 | —             |
-| `integrations:manage`         | yes   | no    | no    | yes               | —             |
-| `billing:manage`              | yes   | no    | no    | —                 | yes           |
-| `knowledge:edit`              | yes   | yes   | no    | —                 | —             |
-| `knowledge:approve`           | yes   | yes   | no    | —                 | —             |
-| `data:export-erase`           | yes   | yes   | no    | —                 | —             |
-| `tenant:terminate`            | yes   | no    | no    | —                 | —             |
-| `support:grant`               | yes   | yes   | no    | —                 | —             |
+| Capability                | Owner | Admin | Staff | +IntegrationAdmin | +BillingAdmin |
+| ------------------------- | ----- | ----- | ----- | ----------------- | ------------- |
+| `session:step-up`         | yes   | yes   | yes   | —                 | —             |
+| `session:sign-out-others` | yes   | yes   | yes   | —                 | —             |
+| `users:manage`            | yes   | yes   | no    | —                 | —             |
+| `users:manage-owners`     | yes   | no    | no    | —                 | —             |
+| `integrations:manage`     | yes   | no    | no    | yes               | —             |
+| `billing:manage`          | yes   | no    | no    | —                 | yes           |
+| `knowledge:edit`          | yes   | yes   | no    | —                 | —             |
+| `knowledge:approve`       | yes   | yes   | no    | —                 | —             |
+| `data:export-erase`       | yes   | yes   | no    | —                 | —             |
+| `tenant:terminate`        | yes   | no    | no    | —                 | —             |
+| `support:grant`           | yes   | yes   | no    | —                 | —             |
 
 The table is code (`domain/roles.ts`, pinned by `roles.test.ts`). Sensitive rows additionally
 require fresh MFA via the step-up guard (P06.06.04); this table answers "may this role" and never
