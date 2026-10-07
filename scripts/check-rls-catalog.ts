@@ -107,7 +107,7 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   // The append-only and register guards, and the two chain-integrity guards.
   'app.reject_audit_mutation': '42ea8b78a19fbe7aeb537d96a6087e14',
   'app.reject_registry_mutation': '60ee49a225936633fc8512cfa1d85049',
-  'app.reject_last_owner_loss': 'bd6dfe4786effe23e91818d8b73dbe24',
+  'app.reject_last_owner_loss': '5c330c446fd61f052b611d9054a02334',
   'app.reject_audit_head_rewrite': 'c9278e84aa3190487818218e3ca4f761',
   'app.reject_unlinked_audit_event': '7c2302af293e06986eb4fbec32b90362',
   'app.register_audit_chain': '221bd18d0326d55150a2405786768fa8',
@@ -280,6 +280,13 @@ const APPROVED_DEFINERS: Readonly<
     executeGrantees: [],
   },
   'app.revoke_sessions_on_membership_change': {
+    arguments: '',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: [],
+  },
+  // Nobody executes it: the empty grantee list is the assertion. Runs only as the table trigger.
+  'app.reject_last_owner_loss': {
     arguments: '',
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',

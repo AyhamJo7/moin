@@ -1785,6 +1785,13 @@ describe('the request-context membership lock (MWAIT)', () => {
         'insert into memberships (organisation_id, id, user_id, role, status) values ($1, $2, $3, $4, $5)',
         [org, randomUUID(), person.id, 'owner', 'active'],
       );
+      // A second owner absorbs last-owner protection (P06.07.04): these tests disable the
+      // person's row and must not trip the structural backstop.
+      const keeper1 = await user();
+      await admin.query(
+        'insert into memberships (organisation_id, id, user_id, role, status) values ($1, $2, $3, $4, $5)',
+        [org, randomUUID(), keeper1.id, 'owner', 'active'],
+      );
       const appGate = database.pool();
       const gate = await appGate.connect();
       const waiter = await identity.connect();
@@ -1856,6 +1863,13 @@ describe('the request-context membership lock (MWAIT)', () => {
       await admin.query(
         'insert into memberships (organisation_id, id, user_id, role, status) values ($1, $2, $3, $4, $5)',
         [org, randomUUID(), person.id, 'owner', 'active'],
+      );
+      // A second owner absorbs last-owner protection (P06.07.04): these tests disable the
+      // person's row and must not trip the structural backstop.
+      const keeper2 = await user();
+      await admin.query(
+        'insert into memberships (organisation_id, id, user_id, role, status) values ($1, $2, $3, $4, $5)',
+        [org, randomUUID(), keeper2.id, 'owner', 'active'],
       );
       const holder = await identity.connect();
       const writer = await admin.connect();
@@ -1972,6 +1986,12 @@ describe('the request-context membership lock (MWAIT)', () => {
       'insert into memberships (organisation_id, id, user_id, role, status) values ($1, $2, $3, $4, $5)',
       [org, randomUUID(), person.id, 'owner', 'active'],
     );
+    // A second owner absorbs last-owner protection (P06.07.04).
+    const keeper3 = await user();
+    await admin.query(
+      'insert into memberships (organisation_id, id, user_id, role, status) values ($1, $2, $3, $4, $5)',
+      [org, randomUUID(), keeper3.id, 'owner', 'active'],
+    );
     const appGate = database.pool();
     const gate = await appGate.connect();
     const waiter = await identity.connect();
@@ -2026,6 +2046,13 @@ describe('session revocation (P06.06.05)', () => {
     await admin.query(
       'insert into memberships (organisation_id, id, user_id, role, status) values ($1, $2, $3, $4, $5)',
       [org, randomUUID(), person.id, 'owner', 'active'],
+    );
+    // A second owner absorbs last-owner protection (P06.07.04): these tests exercise revocation
+    // on the person's own row, and must not trip the structural backstop.
+    const keeper = await user();
+    await admin.query(
+      'insert into memberships (organisation_id, id, user_id, role, status) values ($1, $2, $3, $4, $5)',
+      [org, randomUUID(), keeper.id, 'owner', 'active'],
     );
     return { person, tokenHash, org };
   }

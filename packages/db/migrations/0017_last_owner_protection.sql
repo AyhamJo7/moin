@@ -31,21 +31,34 @@ DECLARE
   v_organisation uuid;
   v_owners integer;
 BEGIN
-  FOR v_organisation IN
-    SELECT DISTINCT o.id FROM (SELECT OLD.organisation_id AS id
-                               UNION SELECT NEW.organisation_id) o
-    WHERE o.id IS NOT NULL
-  LOOP
-    SELECT count(*) INTO v_owners
-    FROM public.memberships m
-    WHERE m.organisation_id = v_organisation
-      AND m.role = 'owner'
-      AND m.status = 'active';
-    IF v_owners = 0 THEN
-      RAISE EXCEPTION 'an organisation keeps at least one active owner (P06.07.04)'
-        USING ERRCODE = 'integrity_constraint_violation';
-    END IF;
-  END LOOP;
+  -- The count runs as this DEFINER's owner (`moin_migrator`, NOBYPASSRLS) under FORCE RLS, so
+  -- without the lookup marker it would see no rows and refuse every write. The marker is the
+  -- same scoped exemption the per-request lookup uses: it applies only while `current_user`
+  -- is the migrator or owner, and only to SELECT, and it is reset on every path (the EXCEPTION
+  -- block re-resets before re-raising, so no error can leak it into the caller's transaction
+  -- where a later read as the function owner would inherit the exemption).
+  BEGIN
+    PERFORM set_config('app.request_lookup', 'resolve_request_context', true);
+    FOR v_organisation IN
+      SELECT DISTINCT o.id FROM (SELECT OLD.organisation_id AS id
+                                 UNION SELECT NEW.organisation_id) o
+      WHERE o.id IS NOT NULL
+    LOOP
+      SELECT count(*) INTO v_owners
+      FROM public.memberships m
+      WHERE m.organisation_id = v_organisation
+        AND m.role = 'owner'
+        AND m.status = 'active';
+      IF v_owners = 0 THEN
+        RAISE EXCEPTION 'an organisation keeps at least one active owner (P06.07.04)'
+          USING ERRCODE = 'integrity_constraint_violation';
+      END IF;
+    END LOOP;
+    PERFORM set_config('app.request_lookup', '', true);
+  EXCEPTION WHEN OTHERS THEN
+    PERFORM set_config('app.request_lookup', '', true);
+    RAISE;
+  END;
   IF TG_OP = 'DELETE' THEN
     RETURN OLD;
   END IF;
