@@ -106,7 +106,9 @@ CREATE FUNCTION app.accept_invitation(
   p_invitation_id uuid,
   p_token_hash bytea,
   p_subject text,
-  p_email citext
+  p_email citext,
+  p_actor_id uuid,
+  p_event_id uuid
 ) RETURNS TABLE (membership_id uuid, user_id uuid, outcome text)
   LANGUAGE plpgsql
   SECURITY DEFINER
@@ -116,6 +118,7 @@ DECLARE
   v_inv invitations%ROWTYPE;
   v_user_id uuid;
   v_membership_id uuid;
+  v_audit_seq bigint;
 BEGIN
   IF p_invitation_id IS NULL OR p_token_hash IS NULL OR p_subject IS NULL OR p_email IS NULL THEN
     RAISE EXCEPTION 'invitation, token, subject and email are required'
@@ -195,10 +198,19 @@ BEGIN
 
   UPDATE public.invitations SET accepted_at = clock_timestamp() WHERE id = v_inv.id;
 
+  -- The acceptance audit lands in the same commit as the consume (INV-10): an accepted
+  -- invitation without its audit row, or an audit row without the consume, is a half-state no
+  -- retry can distinguish. `already_accepted` retries do NOT re-audit: the first accept wrote
+  -- the row, and a second row would claim the membership was created twice.
+  v_audit_seq := app.append_audit_event(
+    COALESCE(p_event_id, gen_random_uuid()), p_actor_id, 'api', 'invitation.accept',
+    'invitation', v_inv.id, '{}', '{}', '{}', 'succeeded', NULL, NULL, NULL
+  );
+
   RETURN QUERY SELECT v_membership_id, v_user_id, 'accepted'::text;
 END
 $$;
 
-REVOKE ALL ON FUNCTION app.accept_invitation(uuid, bytea, text, citext)
+REVOKE ALL ON FUNCTION app.accept_invitation(uuid, bytea, text, citext, uuid, uuid)
   FROM PUBLIC, moin_identity, moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting;
-GRANT EXECUTE ON FUNCTION app.accept_invitation(uuid, bytea, text, citext) TO moin_app;
+GRANT EXECUTE ON FUNCTION app.accept_invitation(uuid, bytea, text, citext, uuid, uuid) TO moin_app;

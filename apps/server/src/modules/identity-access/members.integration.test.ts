@@ -372,45 +372,42 @@ describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
     expect(wrong.outcome).toBe('not_found');
   });
 
-  evidenceTest('expiry is judged at the lock moment, not the snapshot start (HIGH2)', async () => {
-    // now() is fixed at the transaction's first statement; clock_timestamp() moves. The
-    // function must use the latter. Proof in two halves: first a direct demonstration that the
-    // two clocks disagree across a short deadline (a now() comparison would admit past it);
-    // second, the function refuses once the deadline has passed.
-    const issued = await issue();
-    await admin.query(
-      "update invitations set created_at = clock_timestamp() - interval '7 days' + interval '4 seconds', expires_at = clock_timestamp() + interval '4 seconds' where id = $1",
-      [issued.invitationId],
-    );
-    const gate = await database.fixturePool().connect();
-    try {
-      await gate.query('begin');
-      // First statement: fixes now() for this transaction here, ~4 s before the deadline.
-      await gate.query('select pg_sleep(0)');
-      await new Promise((resolve) => setTimeout(resolve, 5000));
-      const expiry = (
-        await admin.query<{ e: string }>(
-          'select expires_at::text as e from invitations where id = $1',
-          [issued.invitationId],
-        )
-      ).rows[0]?.e;
-      const verdict = await gate.query<{ snap: boolean; wall: boolean }>(
-        'select ($1::timestamptz <= now()) as snap, ($1::timestamptz <= clock_timestamp()) as wall',
-        [expiry],
+  evidenceTest(
+    'a waiter on the invitation lock judges expiry at its own lock time (HIGH2)',
+    async () => {
+      // Genuine lock-wait across the deadline: one transaction holds the invitation row (and its
+      // advisory serialisation lock) while the deadline passes; the consumer starts before the
+      // deadline, waits on both locks, then judges expiry at its own lock moment. A now()
+      // comparison would read the snapshot fixed at its first statement — before the deadline —
+      // and admit.
+      const issued = await issue();
+      await admin.query(
+        "update invitations set created_at = clock_timestamp() - interval '7 days' + interval '4 seconds', expires_at = clock_timestamp() + interval '4 seconds' where id = $1",
+        [issued.invitationId],
       );
-      // Sanity: the two clocks really disagree — the snapshot predates the deadline, the wall
-      // clock is past it. If they agree, the test proves nothing.
-      expect(verdict.rows[0]).toStrictEqual({ snap: false, wall: true });
-      await gate.query('rollback');
-    } finally {
-      gate.release();
-    }
-    // And the function refuses: the deadline passed while the snapshot was open.
-    expect(
-      (await accept(issued.org, issued.invitationId, issued.token, randomUUID(), issued.email))
-        .outcome,
-    ).toBe('expired');
-  });
+      const holder = await database.fixturePool().connect();
+      try {
+        await holder.query('begin');
+        // Same serialisation order as the function: advisory lock first, then the row lock.
+        await holder.query("select pg_advisory_xact_lock(hashtext('invitation:' || $1::text))", [
+          issued.invitationId,
+        ]);
+        await holder.query('select * from invitations where id = $1 for update', [
+          issued.invitationId,
+        ]);
+        // Consumer starts now — ~4 s before the deadline — and blocks on the held locks.
+        const late = withTenant(database.pool(), issued.org, (client) =>
+          acceptInvitation(client, issued.invitationId, issued.token, randomUUID(), issued.email),
+        );
+        // Hold past the deadline, then release: the waiter proceeds and must refuse.
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+        await holder.query('rollback');
+        expect((await late).outcome).toBe('expired');
+      } finally {
+        holder.release();
+      }
+    },
+  );
 
   evidenceTest('every mutation writes its audit row in the same commit (HIGH3)', async () => {
     // Scoped to this test's own rows: earlier tests already wrote audit rows.
@@ -427,7 +424,7 @@ describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
     await postAs(pair, '/api/members/transfer-ownership', { userId: successor.id });
     const ops = await admin.query<{ operation: string; n: string }>(
       `select operation, count(*)::text as n from audit_events
-        where (operation = 'invitation.issue' and target_id = $1)
+        where (operation in ('invitation.issue', 'invitation.accept') and target_id = $1)
            or (target_id = $2 and operation in ('member.disable', 'member.remove'))
            or (operation = 'member.transfer_ownership' and target_id = $3)
         group by operation order by operation`,
@@ -435,6 +432,7 @@ describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
     );
     expect(new Map(ops.rows.map((row) => [row.operation, row.n]))).toStrictEqual(
       new Map([
+        ['invitation.accept', '1'],
         ['invitation.issue', '1'],
         ['member.disable', '1'],
         ['member.remove', '1'],

@@ -139,7 +139,8 @@ export async function issueInvitation(
  * Accept an invitation: consume the token, bind the verified identity, create the membership.
  * The subject and verified email come from the provider-neutral identity (verified-email-only);
  * the function matches the address exactly and enforces single use, revocation and expiry by
- * the database clock. Runs inside the acceptor's `withTenant`.
+ * the database clock, and writes the `invitation.accept` audit row in the same commit
+ * (INV-10). Runs inside the acceptor's `withTenant`.
  */
 export async function acceptInvitation(
   client: Pick<TenantClient, 'query'>,
@@ -147,6 +148,7 @@ export async function acceptInvitation(
   token: string,
   subject: string,
   verifiedEmail: string,
+  audit?: { actorId?: string; eventId?: string },
 ): Promise<AcceptedInvitation> {
   if (!isSecretValue(token)) return { outcome: 'not_found' };
   const email = normalisedEmail(verifiedEmail);
@@ -155,8 +157,8 @@ export async function acceptInvitation(
     user_id: string | null;
     outcome: AcceptOutcome;
   }>(
-    'select membership_id, user_id, outcome from app.accept_invitation($1::uuid, $2::bytea, $3::text, $4::citext)',
-    [invitationId, digestOf(token), subject, email],
+    'select membership_id, user_id, outcome from app.accept_invitation($1::uuid, $2::bytea, $3::text, $4::citext, $5::uuid, $6::uuid)',
+    [invitationId, digestOf(token), subject, email, audit?.actorId ?? null, audit?.eventId ?? null],
   );
   const row = result.rows[0];
   if (row === undefined) throw new InvitationError('invitation accept returned no row');
