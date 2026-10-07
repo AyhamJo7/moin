@@ -1083,8 +1083,8 @@
     "invariant": "P06.07.04: removing the last active owner fails",
     "expected": "An organisation could be left with no active owner: orphaned tenant, unrecoverable without operator intervention.",
     "file": "packages/db/migrations/0017_last_owner_protection.sql",
-    "find": "      AND m.role = 'owner'\n      AND m.status = 'active';",
-    "replace": "      AND m.role = 'owner';",
+    "find": "        AND m.role = 'owner'\n        AND m.status = 'active';",
+    "replace": "        AND m.role = 'owner';",
     "killingTest": {
       "file": "apps/server/src/modules/identity-access/rbac-matrix.integration.test.ts",
       "fullName": "last-owner protection (P06.07.04) > removing the last active owner fails with 23000"
@@ -1096,8 +1096,8 @@
     "invariant": "P06.07.04: the trigger itself cannot silently go missing",
     "expected": "A disabled owner would count as cover: demoting the last ACTIVE owner passes while a disabled row exists, leaving nobody who can act.",
     "file": "packages/db/migrations/0017_last_owner_protection.sql",
-    "find": "      AND m.role = 'owner'\n      AND m.status = 'active';",
-    "replace": "      AND m.role = 'owner';",
+    "find": "        AND m.role = 'owner'\n        AND m.status = 'active';",
+    "replace": "        AND m.role = 'owner';",
     "killingTest": {
       "file": "apps/server/src/modules/identity-access/rbac-matrix.integration.test.ts",
       "fullName": "last-owner protection (P06.07.04) > a disabled owner does not cover demoting the last active owner"
