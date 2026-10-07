@@ -45,6 +45,9 @@ function problemsFor(env: NodeJS.ProcessEnv): readonly string[] {
   return expect.unreachable('configuration must be rejected');
 }
 
+/** Deployed environments need an HTTPS origin for the CSRF check (P06.06.06). */
+const HTTPS_ORIGIN = { APP_ORIGIN: 'https://app.example.de' } satisfies NodeJS.ProcessEnv;
+
 describe('the OIDC provider switch', () => {
   it('maps every environment to exactly one provider', () => {
     expect(OIDC_PROVIDER_BY_ENVIRONMENT).toStrictEqual({
@@ -68,7 +71,7 @@ describe('the OIDC provider switch', () => {
   });
 
   it.each(['staging', 'production'] as const)('resolves Cognito in %s', (NODE_ENV) => {
-    const oidc = resolveFor({ ...COGNITO, NODE_ENV });
+    const oidc = resolveFor({ ...COGNITO, ...HTTPS_ORIGIN, NODE_ENV });
     expect(oidc).toMatchObject({
       provider: 'cognito',
       issuer: COGNITO.OIDC_ISSUER_URL,
@@ -81,14 +84,19 @@ describe('the OIDC provider switch', () => {
 
   it('gives both providers the same configuration shape', () => {
     const local = resolveFor({ ...KEYCLOAK, NODE_ENV: 'development' });
-    const deployed = resolveFor({ ...COGNITO, NODE_ENV: 'production' });
+    const deployed = resolveFor({ ...COGNITO, ...HTTPS_ORIGIN, NODE_ENV: 'production' });
     expect(Object.keys(local).sort()).toStrictEqual(Object.keys(deployed).sort());
     expect(local.scopes).toStrictEqual(deployed.scopes);
   });
 
   it.each(['staging', 'production'] as const)('refuses the local provider in %s', (NODE_ENV) => {
     // Even with a Cognito-shaped issuer and an HTTPS callback: the provider itself is wrong.
-    const problems = problemsFor({ ...COGNITO, OIDC_PROVIDER: 'keycloak', NODE_ENV });
+    const problems = problemsFor({
+      ...COGNITO,
+      ...HTTPS_ORIGIN,
+      OIDC_PROVIDER: 'keycloak',
+      NODE_ENV,
+    });
     expect(problems.join(' ')).toContain('OIDC_PROVIDER');
     expect(() => resolveFor({ ...KEYCLOAK, NODE_ENV })).toThrow(ConfigurationError);
   });
@@ -146,7 +154,7 @@ describe('the OIDC provider switch', () => {
         ['cognito', COGNITO],
       ] as const) {
         try {
-          resolveFor({ ...provider, NODE_ENV });
+          resolveFor({ ...provider, ...HTTPS_ORIGIN, NODE_ENV });
           accepted.push(`${NODE_ENV}:${name}`);
         } catch (error) {
           expect(error).toBeInstanceOf(ConfigurationError);
@@ -194,9 +202,10 @@ describe('the OIDC provider switch', () => {
   });
 
   it('refuses a provider that is neither of the two', () => {
-    expect(problemsFor({ ...COGNITO, OIDC_PROVIDER: 'auth0', NODE_ENV: 'production' }).length).toBe(
-      1,
-    );
+    expect(
+      problemsFor({ ...COGNITO, ...HTTPS_ORIGIN, OIDC_PROVIDER: 'auth0', NODE_ENV: 'production' })
+        .length,
+    ).toBe(1);
   });
 
   it('fails closed when sign-in asks for OIDC and none is configured', () => {
@@ -210,7 +219,7 @@ describe('the OIDC provider switch', () => {
 
 describe('the client secret boundary', () => {
   evidenceTest('cannot be printed from the resolved configuration', () => {
-    const oidc = resolveFor({ ...COGNITO, NODE_ENV: 'production' });
+    const oidc = resolveFor({ ...COGNITO, ...HTTPS_ORIGIN, NODE_ENV: 'production' });
     const secret = COGNITO.OIDC_CLIENT_SECRET;
     expect(JSON.stringify(oidc)).not.toContain(secret);
     expect(inspect(oidc, { depth: 10, showHidden: true })).not.toContain(secret);
