@@ -1493,6 +1493,29 @@ describe('the session table guard', () => {
 });
 
 describe('the request-context lookup (P06.06.03)', () => {
+  evidenceTest(
+    'admits no membership-less session even when the session itself is live (P06.06.07)',
+    async () => {
+      // Removal normally revokes the session first (trigger, P06.06.05), which would mask this
+      // control. Seed the session directly so only the membership JOIN stands between it and
+      // admission: with the JOIN intact nothing resolves; the LEFT JOIN mutant resolves a
+      // null-organisation row.
+      const person = await user();
+      const tokenHash = hash();
+      await admin.query(
+        `with t as (select clock_timestamp() as now)
+         insert into sessions (token_hash, id, family_id, user_id, rotation_reason, created_at,
+          last_seen_at, idle_expires_at, absolute_expires_at, provider_tokens_sealed,
+          provider_tokens_key_id)
+         select $1, $2, $2, $3, 'login', t.now, t.now,
+           t.now + interval '12 hours', t.now + interval '7 days', $4, 'test-v1'
+         from t`,
+        [tokenHash, randomUUID(), person.id, sealed()],
+      );
+      expect(await store.resolveRequestContext(tokenHash)).toBeUndefined();
+    },
+  );
+
   evidenceTest('returns the active membership of a valid session', async () => {
     const person = await user();
     const { tokenHash } = await signIn(person.sub);
