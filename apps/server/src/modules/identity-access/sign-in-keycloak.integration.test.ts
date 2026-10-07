@@ -38,6 +38,8 @@ const REDIRECT_URI = 'http://localhost:3000/api/auth/callback';
 const LOCAL_KEY = 'local-v1:local-development-only';
 const SESSION_COOKIE_CONTRACT =
   /^__Host-moin_sid=([A-Za-z0-9_-]{43}); Max-Age=(\d+); Path=\/; HttpOnly; Secure; SameSite=Lax$/;
+const CSRF_COOKIE_CONTRACT =
+  /^__Host-moin_csrf=([A-Za-z0-9_-]{43}); Max-Age=(\d+); Path=\/; Secure; SameSite=Lax$/;
 
 const realmSchema = z.object({
   clients: z.array(z.looseObject({ clientId: z.string(), secret: z.string().optional() })),
@@ -243,7 +245,9 @@ describe('the moin-web Authorization Code + PKCE flow against local Keycloak', (
         const cookies = setCookies(response.headers);
         const token = SESSION_COOKIE_CONTRACT.exec(cookies[0] ?? '')?.[1];
         expect(token).toBeDefined();
-        expect(cookies[1]).toBe(
+        // The synchronizer token rides with the session (P06.06.06).
+        expect(CSRF_COOKIE_CONTRACT.test(cookies[1] ?? '')).toBe(true);
+        expect(cookies[2]).toBe(
           '__Host-moin_signin=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax',
         );
 
