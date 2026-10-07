@@ -1005,8 +1005,8 @@
     "invariant": "P06.06.06: every guarded mutation passes the CSRF check",
     "expected": "Removing the guard call leaves every POST unprotected while GETs look unchanged.",
     "file": "apps/server/src/modules/identity-access/http/session-membership.guard.ts",
-    "find": "    request.sessionContext = outcome.context;\n    if (requiresCsrfProtection(request.method ?? 'GET')) {",
-    "replace": "    request.sessionContext = outcome.context;\n    if (requiresCsrfProtection(request.method ?? 'GET') && false) {",
+    "find": "    request.sessionContext = outcome.context;\n    if (requiresCsrfProtection(request.method)) {",
+    "replace": "    request.sessionContext = outcome.context;\n    if (requiresCsrfProtection(request.method) && false) {",
     "killingTest": {
       "file": "apps/server/src/modules/identity-access/session-membership.integration.test.ts",
       "fullName": "CSRF synchronizer token plus Origin check (P06.06.06) > a POST without the token fails closed with 403 csrf-required"
