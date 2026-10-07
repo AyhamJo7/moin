@@ -11,7 +11,6 @@ import { evidenceTest } from '@moin/testing';
 import type { ExecutionContext } from '@nestjs/common';
 import type { SessionContext } from '../application/request-context.service.ts';
 import { RequireRoleGuard } from './require-role.guard.ts';
-import { CAPABILITIES_KEY } from './role.ts';
 
 function session(overrides: Partial<SessionContext> = {}): SessionContext {
   return {
