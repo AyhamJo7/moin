@@ -13,6 +13,7 @@
 | Reviewer | pending QG-09 triad at final SHA (security, architecture, invariant) |
 
 | Mutation sweep | KILLED: members.integration.test.ts detects the fix (fails without, passes with; mutation-check working-tree mode, this session) |
+| Review fix 2 | accept-audit in commit (actor + idempotency-key event id into the DEFINER, no re-audit on already_accepted) + genuine lock-wait HIGH2 (holder keeps advisory+row locks across the deadline, waiter judges at its lock moment) |
 | Review fix | ed4ca21 closes HIGH1 (single-txn row-locked disable/remove, FOR UPDATE before role read, audit same commit), HIGH2 (clock_timestamp expiry at lock + divergence test), HIGH3 (atomic audit on all five mutations, accept included via DEFINER-adjacent caller commit; refused writes leave no trace), MEDIUM (owner existence 404 incl. invite-owner 404); full gates 14/14 |
 | Scope note | No HTTP accept route: the invitee has no `users` row and sign-in refuses unknown subjects by design, so no session exists to authenticate the call; the organisation is unknown until the token is read (INV-02). `acceptInvitation` / `app.accept_invitation` are built and store-layer tested; the entry path is an open design decision (PROGRESS.md). Real email delivery rides P14 (EXT-09 SES): the German template is issuer-delivered until then. Task assignment return-to-unassigned is out of scope: no tasks table exists yet. |
 | QG-09 status | NOT re-run at this SHA. Required before READY_FOR_REVIEW. |
