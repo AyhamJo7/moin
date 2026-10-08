@@ -11,8 +11,28 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { type TenantClient, withTenant } from '@moin/db';
 import type { Pool } from '@moin/db/pool';
+import { randomUUID } from 'node:crypto';
+import { currentRequestContext } from '@moin/observability';
 import { TENANT_POOL } from './tenant-pool.module.ts';
 import { currentTenantScope } from './tenant-scope.ts';
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The id every audit row of this request carries (INV-10, P06.10.03). `audit_events.correlation_id`
+ * is a uuid, but an inbound `x-correlation-id` may be any safe token: a caller-supplied value is
+ * used when it is a uuid, otherwise the request id (always a uuid, never caller-chosen) — so
+ * every row of one request is findable by one id and a malformed header can never fail an audit
+ * write.
+ */
+function auditCorrelationId(): string | undefined {
+  // Tests build the Nest app without bootstrap's onRequest hook, so no request context exists
+  // there; production always has one. Fall back to a fresh uuid (never NULL, never caller
+  // input) so the audit write cannot fail for lack of correlation anywhere.
+  const context = currentRequestContext();
+  if (context === undefined) return randomUUID();
+  return UUID.test(context.correlationId) ? context.correlationId : context.requestId;
+}
 
 @Injectable()
 export class MemberQueries {
@@ -35,7 +55,10 @@ export class MemberQueries {
     if (this.dbPool === null) {
       throw new Error('no tenant pool');
     }
-    return withTenant(this.dbPool, scope.organisationId, fn, { actorId: scope.actorId });
+    return withTenant(this.dbPool, scope.organisationId, fn, {
+      actorId: scope.actorId,
+      correlationId: auditCorrelationId(),
+    });
   }
 
   /** Runs `fn` inside the named organisation: the accept flow's invitation row owns it. */
@@ -43,6 +66,6 @@ export class MemberQueries {
     if (this.dbPool === null) {
       throw new Error('no tenant pool');
     }
-    return withTenant(this.dbPool, organisationId, fn);
+    return withTenant(this.dbPool, organisationId, fn, { correlationId: auditCorrelationId() });
   }
 }

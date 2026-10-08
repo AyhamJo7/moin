@@ -77,6 +77,36 @@ describe('withTenant', () => {
     expect(after.rows[0]?.n).toBe(0);
   });
 
+  // P06.10.03: in-database audit writers read the correlation back from the transaction. A uuid
+  // correlation_id must survive the round trip; an unset one must read back empty (NULLIF at
+  // the read site turns it into NULL), never fail the write.
+  it('carries the audit correlation through the transaction', async () => {
+    const correlation = '33333333-3333-4333-8333-333333333333';
+    const seen = await withTenant(
+      app,
+      ORG_A,
+      async (c) =>
+        (
+          await c.query<{ v: string }>(
+            "select NULLIF(current_setting('app.correlation_id', true), '') as v",
+          )
+        ).rows[0]?.v,
+      { correlationId: correlation },
+    );
+    expect(seen).toBe(correlation);
+    const empty = await withTenant(
+      app,
+      ORG_A,
+      async (c) =>
+        (
+          await c.query<{ v: string | null }>(
+            "select NULLIF(current_setting('app.correlation_id', true), '') as v",
+          )
+        ).rows[0]?.v,
+    );
+    expect(empty).toBeNull();
+  });
+
   it('commits on return', async () => {
     const id = '33333333-3333-4333-8333-333333333333';
     await withTenant(app, ORG_A, async (c) =>
