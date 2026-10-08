@@ -423,19 +423,81 @@ describe('DB layer: every tenant table isolates A from B (P06.13.03)', () => {
       world.b.auditEventId,
       'audit_events select',
     );
-    // DELETE where granted: B's location and membership rows survive A's delete.
-    const locDeleted = await withTenant(pool, world.a.organisationId, (client) =>
-      client
-        .query('delete from locations where id = $1::uuid', [world.b.locationId])
-        .then((r) => r.rowCount ?? 0),
-    );
-    expect(locDeleted, 'locations delete').toBe(0);
-    const memberDeleted = await withTenant(pool, world.a.organisationId, (client) =>
-      client
-        .query('delete from memberships where id = $1::uuid', [world.b.ownerMembershipId])
-        .then((r) => r.rowCount ?? 0),
-    );
-    expect(memberDeleted, 'memberships delete').toBe(0);
+    // DELETE on every table: 0 rows where the grant exists (policy hides B's row),
+    // 42501 where it does not (no grant to abuse). Either way nothing of B's is
+    // touched through A's context — and a later-added DELETE grant fails loudly
+    // here instead of silently widening the blast radius.
+    const deletes = [
+      {
+        table: 'locations',
+        sql: 'delete from locations where id = $1::uuid',
+        id: world.b.locationId,
+        grant: true as const,
+      },
+      {
+        table: 'memberships',
+        sql: 'delete from memberships where id = $1::uuid',
+        id: world.b.ownerMembershipId,
+        grant: true as const,
+      },
+      {
+        table: 'organisations',
+        sql: 'delete from organisations where id = $1::uuid',
+        id: world.b.organisationId,
+        grant: false as const,
+      },
+      {
+        table: 'tenant_setup',
+        sql: 'delete from tenant_setup where organisation_id = $1::uuid',
+        id: world.b.organisationId,
+        grant: false as const,
+      },
+      {
+        table: 'owner_invitation_requests',
+        sql: 'delete from owner_invitation_requests where organisation_id = $1::uuid',
+        id: world.b.organisationId,
+        grant: false as const,
+      },
+      {
+        table: 'audit_heads',
+        sql: 'delete from audit_heads where organisation_id = $1::uuid',
+        id: world.b.organisationId,
+        grant: false as const,
+      },
+      {
+        table: 'audit_events',
+        sql: 'delete from audit_events where id = $1::uuid',
+        id: world.b.auditEventId,
+        grant: false as const,
+      },
+      {
+        table: 'invitations',
+        sql: 'delete from invitations where id = $1::uuid',
+        id: world.b.invitationId,
+        grant: false as const,
+      },
+      {
+        table: 'support_access_grants',
+        sql: 'delete from support_access_grants where id = $1::uuid',
+        id: world.b.grantId,
+        grant: false as const,
+      },
+    ] as const;
+    for (const { table, sql, id, grant } of deletes) {
+      if (grant) {
+        const deleted = await withTenant(pool, world.a.organisationId, (client) =>
+          client.query(sql, [id]).then((r) => r.rowCount ?? 0),
+        );
+        expect(deleted, `${table} delete`).toBe(0);
+      } else {
+        // No DELETE grant by design (DEFINER-managed or read-only for app): refused
+        // at the privilege layer, same shape as the support read-function proof.
+        await expect(
+          withTenant(pool, world.a.organisationId, (client) => client.query(sql, [id])),
+          `${table} delete`,
+        ).rejects.toMatchObject({ code: '42501' });
+      }
+    }
     // B's world is untouched: every seeded row still fully visible to B.
     const bCounts = await withTenant(pool, world.b.organisationId, (client) =>
       client
