@@ -12,6 +12,7 @@
  * deleted.
  */
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
+import { createRequire } from 'node:module';
 
 export interface AbsentSurface {
   readonly name: string;
@@ -28,9 +29,13 @@ function routePaths(app: NestFastifyApplication): string[] {
   return printed.split('\n');
 }
 
+const require = createRequire(import.meta.url);
+
 function moduleSource(marker: string): string {
-  // Executable absence, not prose: the import must RESOLVE for the surface to
-  // exist. A file that cannot even be required is absent by construction.
+  // Executable absence, not prose: the specifier must RESOLVE for the surface to
+  // exist. `createRequire` from `node:module` — bare `require` does not exist in
+  // ESM and would throw ReferenceError on every call, reporting every surface
+  // absent vacuously. A specifier that cannot be resolved is absent by construction.
   try {
     return require.resolve(marker);
   } catch {
