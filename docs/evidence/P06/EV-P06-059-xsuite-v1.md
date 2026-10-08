@@ -9,7 +9,7 @@
 | Environment | local |
 | Command / procedure | pnpm exec vitest run --project integration apps/server/src/modules/xsuite/ (10 passed) + routes.test.ts unit (1 passed); gates run integration PASS 20261008T054232Z-run.json; mutation-check KILLED |
 | Result | PASS |
-| CI run / artifact | pending |
+| CI run / artifact | verify run 37795794912 success at `1e2224a` (PR #50): `xsuite:report` + `xsuite-coverage` artifact in verify.yml |
 | Reviewer | pending |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).
