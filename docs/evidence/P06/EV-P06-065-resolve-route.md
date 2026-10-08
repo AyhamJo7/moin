@@ -1,15 +1,15 @@
-# EV-P06-065: Global number_routes (0026) with resolve_route(e164) DEFINER returning org+location only; 6 store-layer tests green (active resolves, quarantined/released/unknown empty, cross-tenant isolation, no-tenant globality, FK unrepresentable, E.164 rejected); mutation KILLED; DEFINER allowlist + digest pin + QG-09 contract; global-tables registered; privacy inventory extended. Annotation only, NOT ticked
+# EV-P06-065: Global number_routes (0026) with resolve_route(e164) DEFINER returning org+location only; 6 store-layer tests green; mutation KILLED (suite fails without the new test file, passes with it); DEFINER allowlist + digest pin + QG-09 contract; global-tables registered; privacy inventory extended; CI 16/16 green on PR57 head 8859b9a, merged as e73482d. Annotation only, NOT ticked
 
 | Field | Value |
 |---|---|
 | Evidence ID | EV-P06-065 |
 | Item | P06.03.04 |
-| Date (UTC) | 2026-10-08 19:36 UTC |
-| Commit | `14106e97abb0d78a2c9da484df2cd590234293ff` |
-| Environment | local |
-| Command / procedure | `.claude/bin/gates.py fast`: `python3 .claude/bin/control_plane_check.py && python3 -m unittest discover -s .claude/tests -t .claude/tests` → pass (exit 0, 29.1 s); `node scripts/check-conventional-commit.ts --self-test && node scripts/check-no-ai-mentions.ts --self-test` → pass (exit 0, 0.2 s); `node scripts/check-adr-coverage.ts && node scripts/check-domain-coverage.ts && node scripts/check-dfd-coverage.ts && node scripts/check-threat-model-refs.ts && node scripts/check-data-classification.ts && node scripts/check-subprocessors.ts && node scripts/check-brand-strings.ts` → pass (exit 0, 1.9 s); `pnpm exec prettier --check .` → skipped (exit None, 0.0 s); `pnpm lint` → skipped (exit None, 0.0 s); `pnpm typecheck` → skipped (exit None, 0.0 s); `pnpm test` → skipped (exit None, 0.0 s) |
-| Result | PASS (SKIPPED-UNVERIFIED: format, lint, typecheck, unit) |
-| CI run / artifact | pending |
-| Reviewer | pending |
+| Date (UTC) | 2026-10-09 05:50 UTC |
+| Commit | `8859b9a6248ada93d9b2d5e2ba25b809d331793c` |
+| Environment | local (direct runs) and GitHub Actions CI |
+| Command / procedure | Local direct runs (this worktree; `gates.py` code gates are pnpm-gated and skipped there, so they are UNVERIFIED locally and verified by CI below): `node ./node_modules/vitest/vitest.mjs run --project integration packages/db/src/resolve-route.integration.test.ts` → 6 tests passed (exit 0): active number resolves to its organisation and location; quarantined/unknown resolve to nothing and release is a row DELETE freeing the number for reassignment (same E.164 re-routed to a new tenant with no trace of the old link); two tenants resolve their own numbers; resolution needs no tenant context (global by design); cross-tenant location pointer unrepresentable (23503); malformed E.164 rejected (23514); `node ./node_modules/vitest/vitest.mjs run --project integration scripts/check-rls-catalog.integration.test.ts` → 44 passed (exit 0), covering the `app.resolve_route` allowlist row, body-digest pin `c3601d8e` and QG-09 contract entry; mutation: `.claude/bin/mutation_check.py --fix-paths packages/db/src/resolve-route.integration.test.ts` → KILLED (without the new test file: FAIL exit 1; with it: PASS exit 0; restored byte-identical); `pnpm exec eslint` and `pnpm exec prettier --check` on the touched files → clean. Review fixes recorded: `route_organisation_id` column naming so the RLS helper cannot attach a tenant policy; release reconciled to row DELETE (CHECK is active/quarantined only); P11.01.01, data-dictionary row 916, global-tables, allowlist and inventory contracts all state release-is-DELETE |
+| Result | PASS locally for the direct runs above; `gates.py` format, lint, typecheck, unit skipped locally (UNVERIFIED there, covered by CI) |
+| CI run / artifact | PR57 head `8859b9a`: 16/16 checks green via `gh pr checks 57`, run heads confirmed `8859b9a` by `gh run view`. verify run 37837072595 (format/lint/typecheck/boundaries/docs job 113516717818, unit tests job 113516718046, integration tests (real postgres) job 113516721724, RLS catalog check job 113516721853, build job 113516718028, OpenAPI drift job 113516718271, end-to-end job 113516718238, verify job 113517408123); container-scan run 37837072570; security-scan run 37837072566 (dependency audit and licences, secret scan, semgrep/actionlint/shellcheck, trivy filesystem and SBOM); pr-title run 37837072567. PR57 squash-merged to main as `e73482dc0a960620f3e556166f09bdc84c79ab01` |
+| Reviewer | pending (founder verifies) |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).
