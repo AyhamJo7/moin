@@ -8,7 +8,9 @@ import { CONFIG } from '../../config/config.module.ts';
 import { ConfigurationError, loadConfig } from '../../config/env.ts';
 import { buildSignInGate } from './identity-access.module.ts';
 import { AuthController } from './http/auth.controller.ts';
+import { AuthThrottleGuard } from './http/auth-throttle.guard.ts';
 import { SessionMembershipGuard } from './http/session-membership.guard.ts';
+import { AuthThrottleStore } from '../platform/auth-throttle-store.ts';
 import { REQUEST_CONTEXTS, SESSIONS, SIGN_IN } from './identity-access.tokens.ts';
 import { LOGGER } from '../../observability/logger.module.ts';
 
@@ -98,6 +100,14 @@ describe('the sign-in routes without sign-in', () => {
         { provide: SESSIONS, useValue: null },
         { provide: CONFIG, useValue: loadConfig(LOCAL) },
         SessionMembershipGuard,
+        AuthThrottleGuard,
+        {
+          provide: AuthThrottleStore,
+          useValue: {
+            take: () => Promise.resolve({ allowed: true, retryAfterMs: 0 }),
+            recordEvent: () => Promise.resolve(),
+          },
+        },
         { provide: REQUEST_CONTEXTS, useValue: null },
         { provide: LOGGER, useValue: logger },
       ],

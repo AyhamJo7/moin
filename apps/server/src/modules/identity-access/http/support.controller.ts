@@ -46,6 +46,7 @@ import { MemberQueries } from '../../platform/member-queries.ts';
 import { RequireStepUpGuard } from './require-step-up.guard.ts';
 import { RequireRoleGuard } from './require-role.guard.ts';
 import { Require } from './role.ts';
+import { AuthThrottleGuard } from './auth-throttle.guard.ts';
 import { SessionMembershipGuard } from './session-membership.guard.ts';
 import { TenantContextInterceptor } from './tenant-context.interceptor.ts';
 
@@ -64,7 +65,7 @@ function fail(reply: FastifyReply, status: number, type: string, title: string) 
 }
 
 @Controller('api/support')
-@UseGuards(SessionMembershipGuard, RequireRoleGuard)
+@UseGuards(AuthThrottleGuard, SessionMembershipGuard, RequireRoleGuard)
 @UseInterceptors(TenantContextInterceptor)
 export class SupportController {
   constructor(

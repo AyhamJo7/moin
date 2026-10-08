@@ -15,8 +15,8 @@
  * membership gate — an unauthenticated caller learns nothing beyond the 401.
  */
 
-import { Controller, Get, Headers, Inject, Post, Query, Res, UseGuards } from '@nestjs/common';
-import type { FastifyReply } from 'fastify';
+import { Controller, Get, Headers, Inject, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import {
   AUTH_TRANSACTION_TTL_MS,
   CSRF_COOKIE,
@@ -24,10 +24,20 @@ import {
   SIGN_IN_COOKIE,
 } from '../domain/session-policy.ts';
 import { SignInError, type SignInFailure } from '../application/sign-in.service.ts';
+import {
+  reasonClassOf,
+  securitySourceDigest,
+  type SecurityClass,
+  type SecurityReason,
+} from '../application/security-events.ts';
 import { randomSecret } from '../domain/secret-values.ts';
 import type { SessionService } from '../application/session.service.ts';
 import { SESSIONS, SIGN_IN, type SignInGate } from '../identity-access.tokens.ts';
 import { clearCookie, readCookie, serializeCookie } from './cookies.ts';
+import { AuthThrottleStore } from '../../platform/auth-throttle-store.ts';
+import { CONFIG } from '../../../config/config.module.ts';
+import type { Config } from '../../../config/env.ts';
+import { AuthThrottleGuard } from './auth-throttle.guard.ts';
 import { SessionMembershipGuard } from './session-membership.guard.ts';
 
 const MS_PER_SECOND = 1000;
@@ -74,11 +84,33 @@ function single(query: Record<string, unknown>, key: string): string | undefined
 }
 
 @Controller('api/auth')
+@UseGuards(AuthThrottleGuard)
 export class AuthController {
   constructor(
     @Inject(SIGN_IN) private readonly gate: SignInGate,
     @Inject(SESSIONS) private readonly sessions: SessionService | null,
+    private readonly throttleStore: AuthThrottleStore,
+    @Inject(CONFIG) private readonly config: Config,
   ) {}
+
+  /** Best-effort security event: never fails the request it reports on (P06.12.02). */
+  #event(
+    request: { ip?: string },
+    cls: SecurityClass,
+    outcome: 'accepted' | 'refused',
+    reason: string,
+    newFamily?: boolean,
+  ): Promise<void> {
+    const key = this.config.AUTH_LOCAL_TOKEN_KEY;
+    if (key === undefined) return Promise.resolve();
+    const ip = typeof request.ip === 'string' ? request.ip : 'invalid';
+    const resolved: SecurityReason =
+      reason === 'ok' || reason === 'rate_limited' || reason === 'reset'
+        ? reason
+        : reasonClassOf(reason);
+    const digest = securitySourceDigest(key, `ip:${ip}`);
+    return this.throttleStore.recordEvent(outcome, cls, resolved, digest, newFamily ?? false);
+  }
 
   @Get('login')
   async login(@Query() query: Record<string, unknown>, @Res() reply: FastifyReply): Promise<void> {
@@ -105,6 +137,7 @@ export class AuthController {
   async callback(
     @Query() query: Record<string, unknown>,
     @Headers('cookie') cookieHeader: string | undefined,
+    @Req() request: FastifyRequest,
     @Res() reply: FastifyReply,
   ): Promise<void> {
     void reply.header('cache-control', 'no-store').header('referrer-policy', 'no-referrer');
@@ -125,6 +158,9 @@ export class AuthController {
       // The synchronizer token rides a readable cookie (double-submit, P06.06.06): script
       // echoes it into the header on mutations, and the guard compares the two. Fresh on every
       // completion, same lifetime as the session cookie; cleared with the sign-in cookie it is not.
+      // Accepted sign-in: new family (no superseded predecessor) is the new-device
+      // heuristic — documented as such, not a fingerprint.
+      await this.#event(request, 'sign_in', 'accepted', 'ok', completed.steppedUp !== true);
       const csrfToken = randomSecret();
       await reply
         .code(302)
@@ -137,6 +173,9 @@ export class AuthController {
         .send();
     } catch (error) {
       void reply.header('set-cookie', clearCookie(SIGN_IN_COOKIE));
+      if (error instanceof SignInError) {
+        await this.#event(request, 'sign_in', 'refused', error.failure);
+      }
       await this.#problem(reply, error);
     }
   }

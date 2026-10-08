@@ -111,6 +111,8 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.set_user_status': 'c5c9be0702df0f70271f0b245ef1cdda',
   'app.revoke_member_sessions': 'b48a5d42fdbb17ae72377ef873e27067',
   'app.accept_invitation': 'a1d0a2c50a4245314119d580fcd25e18',
+  'app.take_signin_bucket': 'bab52b77ba452cd8e71512336b87a441',
+  'app.write_signin_event': 'bc65e2433de7603be03149ed8a755e69',
   'app.live_support_grant': 'b82400b4dcbf9ef726f75efde1c619ee',
   'app.create_support_grant': '36ac2bbfe4214a0e017b899cb6411707',
   'app.revoke_support_grant': 'a7f4ef52e1b5f0b4e949415424f10385',
@@ -359,6 +361,18 @@ const APPROVED_DEFINERS: Readonly<
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
     // P06.11.01 gates this: no EXECUTE until the trusted operator identity + emergency auth check exist.
     executeGrantees: [],
+  },
+  'app.take_signin_bucket': {
+    arguments: 'text, bytea, double precision, double precision, double precision',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: ['moin_app'],
+  },
+  'app.write_signin_event': {
+    arguments: 'text, text, text, bytea, boolean',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: ['moin_app'],
   },
   'app.accept_invitation': {
     arguments: 'uuid, bytea, text, citext, uuid, uuid',
