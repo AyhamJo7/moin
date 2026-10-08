@@ -14,7 +14,10 @@
  * Synthetic data only (INV-16): fixed UUIDs and `@example.test` addresses.
  */
 import { randomUUID } from 'node:crypto';
-import type { Pool } from '@moin/db/pool';
+import type { TestDatabase } from '@moin/testing';
+
+/** The migration-role fixture pool: stage setup and result inspection, never behaviour. */
+type FixturePool = ReturnType<TestDatabase['fixturePool']>;
 
 export const TENANT_A = '11111111-1111-4111-8111-111111111111';
 export const TENANT_B = '22222222-2222-4222-8222-222222222222';
@@ -55,7 +58,7 @@ function person(prefix: string): SeededPerson {
  * once per file in `beforeAll`. Every insert is migration-role DDL-adjacent fixture
  * setup, never application traffic.
  */
-export async function seedTwoTenants(admin: Pool): Promise<SeededWorld> {
+export async function seedTwoTenants(admin: FixturePool): Promise<SeededWorld> {
   const ownerA = person('xsuite-a-owner');
   const adminA = person('xsuite-a-admin');
   const ownerB = person('xsuite-b-owner');

@@ -22,7 +22,6 @@
  * migration-role pool; every probe runs through HTTP as `moin_app`, exactly as traffic.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { Controller, Get, UseGuards, UseInterceptors } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { createTestDatabase, evidenceTest, type TestDatabase } from '@moin/testing';
@@ -35,8 +34,6 @@ import { LoggerModule } from '../../observability/logger.module.ts';
 import { TenantPoolModule } from '../platform/tenant-pool.module.ts';
 import { IdentityAccessModule } from '../identity-access/identity-access.module.ts';
 import { CONTEXT_CLOCK, IDENTITY_CLOCK } from '../identity-access/identity-access.tokens.ts';
-import { SessionMembershipGuard } from '../identity-access/http/session-membership.guard.ts';
-import { TenantContextInterceptor } from '../identity-access/http/tenant-context.interceptor.ts';
 import { registerCorrelation } from '../../observability/correlation.ts';
 import { HealthModule } from '../../health/health.module.ts';
 import { VoiceModule } from '../voice/voice.module.ts';
@@ -46,11 +43,11 @@ import { seedTwoTenants, type SeededWorld } from './seed.ts';
 import { ABSENT_SURFACES, assertSurfacesAbsent } from './surface.ts';
 
 /**
- * Routes served by the test app that are NOT product API surface: the file-local
- * probe (other suites mount their own) and the voice relay WebSocket (a transport
- * handshake, not a tenant-data route — its frames carry a per-call token).
+ * Routes served by the test app that are NOT product API surface: the voice relay
+ * WebSocket (a transport handshake mounted by VoiceModule, not a tenant-data route —
+ * its frames carry a per-call token).
  */
-const NON_PRODUCT_ROUTES = new Set(['GET /probe', 'GET /voice/relay']);
+const NON_PRODUCT_ROUTES = new Set(['GET /voice/relay']);
 
 const LOCAL_KEY = 'local-v1:local-development-only';
 const APP_ORIGIN = 'http://localhost:3000';
@@ -67,16 +64,6 @@ function identityUrl(): string {
   const url = database.identityUrl;
   if (url === undefined) throw new Error('TEST_DATABASE_IDENTITY_URL is required');
   return url;
-}
-
-@Controller('probe')
-@UseGuards(SessionMembershipGuard)
-@UseInterceptors(TenantContextInterceptor)
-class ProbeController {
-  @Get()
-  read(): { ok: true } {
-    return { ok: true };
-  }
 }
 
 async function build(): Promise<NestFastifyApplication> {
@@ -104,7 +91,7 @@ async function build(): Promise<NestFastifyApplication> {
       HealthModule,
       VoiceModule,
     ],
-    controllers: [ProbeController],
+    controllers: [],
     providers: [],
   })
     .overrideProvider(IDENTITY_CLOCK)
@@ -221,9 +208,13 @@ describe('route inventory covers the whole API surface (P06.13.02)', () => {
   });
 
   evidenceTest('unknown routes answer 404, never tenant data', async () => {
+    // No file-local probe: the path sits under the real MembersController, so the
+    // 404 comes from the product router — through HTTP only, no guard imports.
     const session = await mintSession(world.a.owner.id, true);
     const response = await authed(session, 'GET', '/api/members/no-such-route');
     expect(response.statusCode).toBe(404);
+    expect(response.body).not.toContain('xsuite-alpha');
+    expect(response.body).not.toContain('xsuite-beta');
   });
 });
 
