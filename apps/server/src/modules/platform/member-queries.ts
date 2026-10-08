@@ -14,6 +14,7 @@ import type { Pool } from '@moin/db/pool';
 import { randomUUID } from 'node:crypto';
 import { currentRequestContext } from '@moin/observability';
 import { TENANT_POOL } from './tenant-pool.module.ts';
+import { SUPPORT_POOL } from './support-pool.module.ts';
 import { currentTenantScope } from './tenant-scope.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -36,7 +37,10 @@ function auditCorrelationId(): string | undefined {
 
 @Injectable()
 export class MemberQueries {
-  constructor(@Inject(TENANT_POOL) private readonly dbPool: Pool | null) {}
+  constructor(
+    @Inject(TENANT_POOL) private readonly dbPool: Pool | null,
+    @Inject(SUPPORT_POOL) private readonly supportDbPool: Pool | null,
+  ) {}
 
   /** The raw pool, for handlers that open their own `withTenant` on the guard scope. */
   tenantPool(): Pool {
@@ -59,6 +63,14 @@ export class MemberQueries {
       actorId: scope.actorId,
       correlationId: auditCorrelationId(),
     });
+  }
+
+  /** The raw support pool, for grant-gated DEFINER calls (P06.11.03 test + tooling). */
+  supportPool(): Pool {
+    if (this.supportDbPool === null) {
+      throw new Error('no support pool');
+    }
+    return this.supportDbPool;
   }
 
   /** Runs `fn` inside the named organisation: the accept flow's invitation row owns it. */
