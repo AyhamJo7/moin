@@ -42,6 +42,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { appendAuditEvent } from '@moin/db';
 import type { Logger } from '@moin/observability';
@@ -82,9 +83,11 @@ export class RecoveryController {
   ) {}
 
   /**
-   * Disable the account and end every session at once (P06.09.02). The `users` row is locked
-   * first; the membership role is read from the locked membership row in the same commit, so a
-   * concurrent owner-promotion cannot slip between the check and the act (HIGH1 shape).
+   * Disable the account and end every session at once (P06.09.02). Caller-tenant membership
+   * first (HIGH1): the target must hold a membership in the CALLER's organisation — locked row,
+   * same commit — so a known user id from another tenant (or none) is unreachable. The role
+   * read decides owner-vs-other; owner-existence stays 404 (P06.07.03). Status flip, revocation
+   * and audit land in one setter call, one commit.
    */
   @Post('disable-user')
   @Require('users:manage')
@@ -106,48 +109,36 @@ export class RecoveryController {
       return fail(reply, 409, '/problems/recovery-rejected', 'Recovery action rejected');
     }
     const outcome: Outcome = await this.members.inScope(async (client) => {
-      // Capability first, against the locked membership row: the target may belong to this
-      // tenant or to none — the role read decides owner-vs-other, and owner-existence stays
-      // 404 either way (P06.07.03). No users-table read: moin_app holds no grant on it.
+      // HIGH1: the membership must be in THIS organisation — the guard-resolved tenant, never
+      // a caller claim. A user id from another tenant has no row here: unreachable, 404, and
+      // the setter (which touches only the account row) is never reached for them.
       const target = await client
-        .query<{ role: string | null }>(
+        .query<{ role: string }>(
           `select m.role from memberships m
-             where m.user_id = $1::uuid for update`,
-          [parsed.data.userId],
+             where m.organisation_id = $1::uuid and m.user_id = $2::uuid for update`,
+          [scope.organisationId, parsed.data.userId],
         )
         .then((result) => result.rows[0]);
-      // No membership here does NOT mean no user: the target may be a member of another
-      // tenant (or of none). Fall through to the setter, which returns false without
-      // revealing which — the DEFINER touches only the account row, never tenant data.
-      if (target !== undefined) {
-        try {
-          requireCapability(
-            scope.role,
-            scope.permissions,
-            target.role === 'owner' ? 'users:manage-owners' : 'users:manage',
-          );
-        } catch {
-          if (target.role === 'owner') return 'missing';
-          return 'denied';
-        }
+      if (target === undefined) return 'missing';
+      try {
+        requireCapability(
+          scope.role,
+          scope.permissions,
+          target.role === 'owner' ? 'users:manage-owners' : 'users:manage',
+        );
+      } catch {
+        return target.role === 'owner' ? 'missing' : 'denied';
       }
-      // One call: status flip + revocation with the reset reason, all inside the setter's
-      // transaction — no second connection, no cross-connection wait on the user row.
+      // One call: status flip + revocation with the reset reason + audit, all inside the
+      // setter's transaction — no second connection, no cross-connection wait on the user row.
       const settled = await client
         .query<{ changed: boolean; revoked: number }>(
-          'select * from app.set_user_status($1::uuid, $2::text, $3::text)',
-          [parsed.data.userId, 'disabled', parsed.data.reason],
+          'select * from app.set_user_status($1::uuid, $2::text, $3::text, $4::uuid, $5::uuid)',
+          [parsed.data.userId, 'disabled', parsed.data.reason, scope.actorId, randomUUID()],
         )
         .then((result) => result.rows[0]);
       if (!settled?.changed) return 'missing';
       const revoked = settled.revoked;
-      await appendAuditEvent(client, {
-        source: 'api',
-        operation: 'account.disable',
-        targetKind: 'user',
-        targetId: parsed.data.userId,
-        result: 'succeeded',
-      });
       this.logger.info(
         { outcome: 'account_disabled', revoked },
         'disabled an account and revoked its sessions',
@@ -162,7 +153,9 @@ export class RecoveryController {
   /**
    * Re-enable a disabled account (P06.09.02 recovery tail). Explicit, audited, step-up-gated:
    * access returns only through this action, never by re-sign-in alone. Revoked sessions stay
-   * revoked — new ones mint fresh after this.
+   * revoked — new ones mint fresh after this. Same caller-tenant membership gate as disable
+   * (HIGH1): the target must belong to THIS organisation, with the owner-capability check on
+   * the locked row.
    */
   @Post('enable-user')
   @Require('users:manage')
@@ -176,6 +169,23 @@ export class RecoveryController {
     const scope = currentTenantScope();
     if (scope === undefined) throw new Error('no tenant scope');
     const enabled = await this.members.inScope(async (client) => {
+      const target = await client
+        .query<{ role: string }>(
+          `select m.role from memberships m
+             where m.organisation_id = $1::uuid and m.user_id = $2::uuid for update`,
+          [scope.organisationId, parsed.data.userId],
+        )
+        .then((result) => result.rows[0]);
+      if (target === undefined) return false;
+      try {
+        requireCapability(
+          scope.role,
+          scope.permissions,
+          target.role === 'owner' ? 'users:manage-owners' : 'users:manage',
+        );
+      } catch {
+        return false;
+      }
       const changed = await client
         .query<{ changed: boolean }>('select app.set_user_status($1::uuid, $2::text) as changed', [
           parsed.data.userId,
@@ -218,39 +228,34 @@ export class RecoveryController {
     }
     const scope = currentTenantScope();
     if (scope === undefined) throw new Error('no tenant scope');
-    const sessions = this.sessions;
-    const outcome: Outcome = await this.members.inScope(async (client) => {
-      const target = await client
-        .query<{ role: string }>(
-          'select m.role from memberships m where m.user_id = $1::uuid for update',
-          [parsed.data.userId],
+    const outcome: 'missing' | 'denied' | 'done' = await this.members.inScope(async (client) => {
+      // One DEFINER call: caller-tenant gate (locked row) + revocation (0016 order) + audit,
+      // one commit. The controller never touches the identity pool here — HIGH3.
+      const settled = await client
+        .query<{ outcome: string; revoked: number }>(
+          'select * from app.revoke_member_sessions($1::uuid, $2::text, $3::text[], $4::uuid, $5::text, $6::uuid, $7::uuid)',
+          [
+            scope.organisationId,
+            scope.role,
+            `{${scope.permissions.join(',')}}`,
+            parsed.data.userId,
+            parsed.data.reason,
+            scope.actorId,
+            randomUUID(),
+          ],
         )
         .then((result) => result.rows[0]);
-      if (target === undefined) return 'missing';
-      try {
-        requireCapability(
-          scope.role,
-          scope.permissions,
-          target.role === 'owner' ? 'users:manage-owners' : 'users:manage',
+      if (settled?.outcome === 'done') {
+        this.logger.info(
+          { outcome: 'sessions_revoked', revoked: settled.revoked },
+          'revoked every session of a member',
         );
-      } catch {
-        return target.role === 'owner' ? 'missing' : 'denied';
+        return 'done' as const;
       }
-      const revoked = await sessions.revokeAll(parsed.data.userId, parsed.data.reason);
-      await appendAuditEvent(client, {
-        source: 'api',
-        operation: 'account.revoke_sessions',
-        targetKind: 'user',
-        targetId: parsed.data.userId,
-        result: 'succeeded',
-      });
-      this.logger.info(
-        { outcome: 'sessions_revoked', revoked },
-        'revoked every session of a member',
-      );
-      return 'done';
+      return settled?.outcome === 'denied' ? 'denied' : 'missing';
     });
     if (outcome === 'done') return { revoked: true, containment: 'partial' as const };
+    // Missing, denied on a non-owner, and owner-existence share one 404 (P06.07.03).
     return fail(reply, 404, '/problems/not-found', 'Not found');
   }
 }

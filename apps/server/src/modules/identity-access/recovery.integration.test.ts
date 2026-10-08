@@ -362,6 +362,96 @@ describe('account disable and re-enable (P06.09.02)', () => {
     },
   );
 
+  evidenceTest(
+    'a known user id from another tenant is unreachable: 404, still active, nothing audited (HIGH1)',
+    async () => {
+      // Cross-tenant target: a staff member of org B, acted on from org A. The old code fell
+      // through to the account setter (which touches only the account row) and disabled them.
+      const { pair } = await ownerPair();
+      const otherOrg = randomUUID();
+      await admin.query('insert into organisations (id, slug, name) values ($1, $2, $3)', [
+        otherOrg,
+        `x-${otherOrg.slice(0, 8)}`,
+        'Other Org',
+      ]);
+      const stranger = await person();
+      await member(stranger.id, otherOrg, 'staff');
+      const response = await postAs(pair, '/api/recovery/disable-user', {
+        userId: stranger.id,
+        reason: 'mfa_reset',
+      });
+      expect(response.statusCode).toBe(404);
+      const row = await admin.query<{ status: string }>('select status from users where id = $1', [
+        stranger.id,
+      ]);
+      expect(row.rows[0]?.status).toBe('active');
+      const audits = await admin.query<{ n: string }>(
+        "select count(*)::text as n from audit_events where target_id = $1 and operation = 'account.disable'",
+        [stranger.id],
+      );
+      expect(audits.rows[0]?.n).toBe('0');
+    },
+  );
+
+  evidenceTest('enable-user on another tenant is 404 and changes nothing (HIGH1)', async () => {
+    const { pair } = await ownerPair();
+    const otherOrg = randomUUID();
+    await admin.query('insert into organisations (id, slug, name) values ($1, $2, $3)', [
+      otherOrg,
+      `y-${otherOrg.slice(0, 8)}`,
+      'Other Org',
+    ]);
+    const stranger = await person();
+    await member(stranger.id, otherOrg, 'staff');
+    await admin.query("update users set status = 'disabled' where id = $1", [stranger.id]);
+    const response = await postAs(pair, '/api/recovery/enable-user', {
+      userId: stranger.id,
+      reason: 'mfa_reset',
+    });
+    expect(response.statusCode).toBe(404);
+    const row = await admin.query<{ status: string }>('select status from users where id = $1', [
+      stranger.id,
+    ]);
+    expect(row.rows[0]?.status).toBe('disabled');
+  });
+
+  evidenceTest(
+    'revoke-sessions on another tenant is 404 and revokes nothing (HIGH1/HIGH3)',
+    async () => {
+      const { pair } = await ownerPair();
+      const otherOrg = randomUUID();
+      await admin.query('insert into organisations (id, slug, name) values ($1, $2, $3)', [
+        otherOrg,
+        `z-${otherOrg.slice(0, 8)}`,
+        'Other Org',
+      ]);
+      const stranger = await person();
+      await member(stranger.id, otherOrg, 'staff');
+      const strangerPair = await signInPair(stranger);
+      contexts().clearCache();
+      const response = await postAs(pair, '/api/recovery/revoke-sessions', {
+        userId: stranger.id,
+        reason: 'password_reset',
+      });
+      expect(response.statusCode).toBe(404);
+      // Nothing revoked: the stranger's session still works.
+      contexts().clearCache();
+      expect(
+        (
+          await postAs(strangerPair, '/api/members/invite', {
+            email: 'x@example.test',
+            role: 'staff',
+          })
+        ).statusCode,
+      ).toBe(403);
+      const audits = await admin.query<{ n: string }>(
+        "select count(*)::text as n from audit_events where target_id = $1 and operation = 'account.revoke_sessions'",
+        [stranger.id],
+      );
+      expect(audits.rows[0]?.n).toBe('0');
+    },
+  );
+
   evidenceTest('disabling yourself is refused 409', async () => {
     const { pair, owner } = await ownerPair();
     expect(
