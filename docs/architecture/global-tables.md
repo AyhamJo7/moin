@@ -26,6 +26,7 @@ does not count as registered**: the reason is the point of the file.
 | `sessions`                     | A session is resolved before any tenant applies: it identifies a person, and which organisation they act for is checked separately against memberships (P06.06.03). Keyed by a token digest; provider tokens are ciphertext.                   | No runtime table grant. Reached only through `app.begin_session`, `app.rotate_session`, `app.resolve_session` and `app.revoke_session`; a guard trigger keeps identity and absolute expiry fixed and revocation final, even for the owner.                             |
 | `auth_throttle_buckets`        | Throttle state exists before any tenant applies: login and callback have no session, so per-IP buckets cannot name an organisation. Keyed by HMAC digest of IP/account, never the value (INV-12); counts and timestamps only.                  | No runtime table grant at all — reached only through `app.take_signin_bucket` (EXECUTE to `moin_app`), which also sweeps rows idle > 24 h (100/call cap), bounding the table at ~a day of distinct sources.                                                            |
 | `auth_security_events`         | Security outcomes exist before any tenant applies: failed logins happen with no session. Coarse outcome + reason class + HMAC digest only — no IPs, subjects, details (INV-12). Owner notification PENDING until P14.                          | `moin_app` SELECT/INSERT through `app.write_signin_event` only; no UPDATE/DELETE except migrator-owned retention (P16).                                                                                                                                                |
+| `number_routes`                | Tenant resolution precedes tenancy: a dialled E.164 maps to an organisation, so the mapping cannot itself be tenant-scoped (P06.03.04, P11.01.01). Ids only (e164, organisation, location, status) — no payload.                               | No runtime table grant at all. Reached only through `app.resolve_route(text)` (EXECUTE to `moin_app`), which returns exactly `(organisation_id, location_id)` for active rows and zero rows for quarantined/released/unknown numbers.                                  |
 
 ## Tables PLAN expects to join this register
 
@@ -33,7 +34,7 @@ Listed now so that adding one is a conscious act rather than a discovery. Each s
 added above, with its reason, in the migration that creates it.
 
 `templates` · `template_versions` · `plans` · `prices` · `public_holidays` · `subprocessors` ·
-`feature_flag_definitions` · `number_routes` · `provider_inbox` · `outbox` ·
+`feature_flag_definitions` · `provider_inbox` · `outbox` ·
 `job_runs` · `timers`
 
 Three of those deserve their reason written before they exist, because each is a place where a
