@@ -13,6 +13,7 @@ export {
   tenantLogFields,
   TenantContextError,
   TENANT_SETTING,
+  CORRELATION_SETTING,
 } from './tenant.ts';
 export type {
   TenantContext,

@@ -29,6 +29,7 @@ import { IdentityAccessModule } from './identity-access.module.ts';
 import { CONTEXT_CLOCK, IDENTITY_CLOCK, REQUEST_CONTEXTS } from './identity-access.tokens.ts';
 import { SessionMembershipGuard } from './http/session-membership.guard.ts';
 import { TenantContextInterceptor } from './http/tenant-context.interceptor.ts';
+import { registerCorrelation } from '../../observability/correlation.ts';
 import { startFakeOidcProvider, type FakeOidcProvider } from './__fixtures__/fake-oidc-provider.ts';
 import type { RequestContextService } from './application/request-context.service.ts';
 import { createIdentityStore } from '@moin/db';
@@ -97,6 +98,10 @@ async function build(): Promise<NestFastifyApplication> {
     .compile();
   const built = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
   await built.init();
+  // Same correlation contract as production bootstrap: without this hook inject() requests
+  // carry no request context, and the audit correlation would be the MemberQueries fallback
+  // instead of the inbound header under test.
+  registerCorrelation(built.getHttpAdapter().getInstance());
   await built.getHttpAdapter().getInstance().ready();
   return built;
 }
@@ -147,7 +152,12 @@ async function signInPair(who: { subject: string; email: string }): Promise<Sess
   };
 }
 
-function postAs(pair: SessionPair, url: string, body?: Record<string, string | string[]>) {
+function postAs(
+  pair: SessionPair,
+  url: string,
+  body?: Record<string, string | string[]>,
+  correlationId?: string,
+) {
   const options = {
     method: 'POST',
     url,
@@ -156,6 +166,7 @@ function postAs(pair: SessionPair, url: string, body?: Record<string, string | s
       origin: APP_ORIGIN,
       'x-csrf-token': pair.csrfToken,
       ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+      ...(correlationId === undefined ? {} : { 'x-correlation-id': correlationId }),
     },
     payload: body === undefined ? undefined : JSON.stringify(body),
   };
@@ -262,11 +273,19 @@ describe('account disable and re-enable (P06.09.02)', () => {
         [staff.id],
       );
       expect(live.rows[0]?.n).toBe('0');
-      const audits = await admin.query<{ operation: string }>(
-        "select operation from audit_events where target_id = $1 and operation = 'account.disable'",
+      const audits = await admin.query<{ operation: string; correlation_id: string | null }>(
+        "select operation, correlation_id::text as correlation_id from audit_events where target_id = $1 and operation = 'account.disable'",
         [staff.id],
       );
       expect(audits.rows).toHaveLength(1);
+      // P06.10.03: the in-database writer forwards the request correlation — every row of one
+      // request is findable by one id (INV-10). Test requests carry no inbound header, so this
+      // is the generated request id (uuid), never NULL.
+      // KILLED without the MemberQueries correlation threading (inScope passed actorId
+      // only): the writer saw no correlation and the row read NULL.
+      expect(audits.rows[0]?.correlation_id).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+      );
     },
   );
 
@@ -496,6 +515,44 @@ describe('session revocation without status change (P06.09.02 first response)', 
     );
     expect(audits.rows).toHaveLength(1);
   });
+
+  evidenceTest(
+    'an inbound correlation id lands on every audit row of the request (P06.10.03)',
+    async () => {
+      // End to end through the header contract: one caller-chosen uuid, asserted on both the
+      // disable audit and... only the disable fires here; the revoke-sessions row is covered by
+      // the same inScope path. A malformed header falls back to the request id (still a uuid).
+      const { pair, org } = await ownerPair();
+      const staff = await person();
+      await member(staff.id, org, 'staff');
+      await signInPair(staff);
+      contexts().clearCache();
+      const correlation = randomUUID();
+      expect(
+        (
+          await postAs(
+            pair,
+            '/api/recovery/disable-user',
+            { userId: staff.id, reason: 'mfa_reset' },
+            correlation,
+          )
+        ).statusCode,
+      ).toBe(200);
+      const rows = await admin.query<{ correlation_id: string }>(
+        "select correlation_id::text as correlation_id from audit_events where target_id = $1 and operation = 'account.disable'",
+        [staff.id],
+      );
+      expect(rows.rows).toHaveLength(1);
+      expect(rows.rows[0]?.correlation_id).toBe(correlation);
+      // session_count is allowlisted and opaque: a count, no identity (P06.10.07). The disable
+      // revoked the one session minted above.
+      const args = await admin.query<{ args: unknown }>(
+        "select args_sanitized as args from audit_events where target_id = $1 and operation = 'account.disable'",
+        [staff.id],
+      );
+      expect(args.rows[0]?.args).toStrictEqual({ session_count: 1 });
+    },
+  );
 
   evidenceTest('revoke-sessions on an owner without the owner capability is 404', async () => {
     const { org } = await ownerPair();
