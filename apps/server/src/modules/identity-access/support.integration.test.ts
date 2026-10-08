@@ -400,15 +400,14 @@ describe('read functions gated until trusted operator identity exists (HIGH, P06
   evidenceTest(
     'lock first, expiry judged at lock time: waiter past the deadline still refused (MEDIUM)',
     async () => {
-      // Genuine lock-wait across the deadline (HIGH2 shape): hold the grant row, let the
-      // deadline pass, release; the gate waiter judges expiry at its own lock moment via
-      // clock_timestamp(), not at snapshot start. A pre-lock predicate check would admit.
+      // Live grant with room: the deadline is rewritten to lapse DURING the proven wait
+      // (CWAIT shape), so no wall-clock race between setup and waiter start.
       const { pair } = await ownerPair();
       const grantId = await grant(pair);
-      await admin.query(
-        "update support_access_grants set created_at = clock_timestamp() - interval '4 seconds', expires_at = clock_timestamp() + interval '4 seconds' where id = $1",
-        [grantId],
-      );
+      // Holder + waiter share the fixture pool (max 2, exactly filled — RLS-blind, so
+      // both see the row; the app pool cannot lock it: RLS hides it without a tenant).
+      // The sync query reuses the holder connection (pg_locks/pg_stat_activity take no row
+      // lock, so querying from inside the lock-holding transaction is safe).
       const holder = await database.fixturePool().connect();
       try {
         await holder.query('begin');
@@ -417,6 +416,12 @@ describe('read functions gated until trusted operator identity exists (HIGH, P06
         ]);
         // Waiter: lock the row, THEN judge expiry at lock time — the gate's own shape.
         // A pre-lock predicate check would admit (snapshot predates the deadline).
+        // Deadline 2 s out (CWAIT shape): sync on the lock, THEN rewrite the deadline to
+        // lapse during the wait and hold past it with pg_sleep inside the holder — total
+        // blocked time ~2.5 s, inside every timeout. The app pool (moin_app) CANNOT lock
+        // this row: RLS hides it without a tenant — so the waiter runs on the fixture pool
+        // (migrationUrl, max 2: holder + waiter exactly fill it; the sync query below runs
+        // on admin... no, admin IS the fixture pool. Sync on database.pool() (app pool).
         const late = (async () => {
           const gate = await database.fixturePool().connect();
           try {
@@ -434,9 +439,33 @@ describe('read functions gated until trusted operator identity exists (HIGH, P06
             gate.release();
           }
         })();
-        await new Promise((resolve) => setTimeout(resolve, 5000));
-        await holder.query('rollback');
-        // Deadline passed while waiting: lock-time judgement refuses.
+        // Synchronise: prove the waiter is BLOCKED on the row lock while the grant is still
+        // live — otherwise a late start (waiter begins after release) would pass even with a
+        // pre-lock check, and the test proves nothing. pg_stat_activity cluster-wide for this
+        // database (CWAIT shape — the same query the session suites use).
+        const deadline = Date.now() + 5_000;
+        let waiting = '0';
+        while (waiting !== '1' && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          const result = await holder.query<{ n: string }>(
+            "select count(*)::text as n from pg_stat_activity where wait_event_type = 'Lock' and datname = $1",
+            [database.name],
+          );
+          waiting = result.rows[0]?.n ?? '0';
+        }
+        expect(waiting, 'gate waiter waits on the grant row lock while still live').toBe('1');
+        // Rewrite the deadline to lapse DURING the proven wait, hold past it inside the
+        // holder (pg_sleep keeps the lock held server-side), then COMMIT both the new
+        // expiry and the lock release together: the waiter proceeds past a lapsed deadline
+        // and lock-time judgement refuses. (A rollback would undo the rewrite — the waiter
+        // would see the original hours-out expiry and admit. That is exactly the CWAIT shape:
+        // the holder commits the lapsed deadline it slept past.)
+        await holder.query(
+          "update support_access_grants set expires_at = clock_timestamp() + interval '2 seconds' where id = $1",
+          [grantId],
+        );
+        await holder.query('select pg_sleep(2.5)');
+        await holder.query('commit');
         expect(await late).toBe(false);
       } finally {
         holder.release();
