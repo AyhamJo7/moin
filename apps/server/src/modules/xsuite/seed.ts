@@ -14,6 +14,7 @@
  * Synthetic data only (INV-16): fixed UUIDs and `@example.test` addresses.
  */
 import { randomUUID } from 'node:crypto';
+import { withTenant } from '@moin/db';
 import type { TestDatabase } from '@moin/testing';
 
 /** The migration-role fixture pool: stage setup and result inspection, never behaviour. */
@@ -37,6 +38,8 @@ export interface SeededTenant {
   readonly locationId: string;
   readonly invitationId: string;
   readonly grantId: string;
+  readonly ownerMembershipId: string;
+  readonly auditEventId: string;
 }
 
 export interface SeededWorld {
@@ -58,7 +61,10 @@ function person(prefix: string): SeededPerson {
  * once per file in `beforeAll`. Every insert is migration-role DDL-adjacent fixture
  * setup, never application traffic.
  */
-export async function seedTwoTenants(admin: FixturePool): Promise<SeededWorld> {
+export async function seedTwoTenants(
+  admin: FixturePool,
+  appPool: FixturePool,
+): Promise<SeededWorld> {
   const ownerA = person('xsuite-a-owner');
   const adminA = person('xsuite-a-admin');
   const ownerB = person('xsuite-b-owner');
@@ -89,11 +95,12 @@ export async function seedTwoTenants(admin: FixturePool): Promise<SeededWorld> {
       locationId,
       `${name} HQ`,
     ]);
+    const ownerMembershipId = randomUUID();
     await admin.query(
       'insert into memberships (organisation_id, id, user_id, role, status) values ($1, $2, $3, $4, $5), ($6, $7, $8, $9, $10)',
       [
         organisationId,
-        randomUUID(),
+        ownerMembershipId,
         owner.id,
         'owner',
         'active',
@@ -142,7 +149,30 @@ export async function seedTwoTenants(admin: FixturePool): Promise<SeededWorld> {
        values ($1, $2)`,
       [organisationId, `owner-${slug}@example.test`],
     );
-    return { organisationId, slug, owner, admin: adminPerson, locationId, invitationId, grantId };
+    // One audit event through the writer under test (empty args: no allowlist row
+    // needed). Seeded through withTenant on the app pool — the writer reads the
+    // tenant from app.current_org(), so a raw admin insert would land nowhere.
+    // Needs the app-role pool, passed in by the suite (stage setup, never behaviour).
+    const auditEventId = randomUUID();
+    await withTenant(appPool, organisationId, (client) =>
+      client.query(
+        `select app.append_audit_event(
+           $1::uuid, $2::uuid, 'api', 'xsuite.seed', 'tenant', $3::uuid,
+           '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 'succeeded', NULL, NULL, NULL)`,
+        [auditEventId, owner.id, organisationId],
+      ),
+    );
+    return {
+      organisationId,
+      slug,
+      owner,
+      admin: adminPerson,
+      locationId,
+      invitationId,
+      grantId,
+      ownerMembershipId,
+      auditEventId,
+    };
   }
 
   const a = await seedTenant(TENANT_A, 'xsuite-alpha', 'Xsuite Alpha GmbH', ownerA, adminA);

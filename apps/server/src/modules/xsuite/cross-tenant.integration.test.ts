@@ -176,7 +176,7 @@ function authed(
 beforeAll(async () => {
   database = await createTestDatabase('xsuite');
   admin = database.fixturePool();
-  world = await seedTwoTenants(admin);
+  world = await seedTwoTenants(admin, database.pool());
   app = await build();
   clock.set(new Date());
 }, 60_000);
@@ -238,10 +238,13 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
           ? { ...(route.body ?? {}), userId: foreign }
           : (route.body ?? { reason: 'cross-tenant probe' });
       const response = await authed(session, route.method, url, body);
+      // Exact 404: P06.07.03 — cross-tenant and not-permitted both read as not-found, so
+      // existence never leaks. A 403 here would be a regression (it confirms the id
+      // exists but is forbidden); a 400 would mean the probe body stopped being valid.
       expect(
-        [400, 403, 404].includes(response.statusCode),
+        response.statusCode,
         `${route.method} ${route.path} → ${response.statusCode}: ${response.body}`,
-      ).toBe(true);
+      ).toBe(404);
       // Never B's data: the body names no foreign id, no foreign address, no B row.
       expect(response.body).not.toContain(world.b.invitationId);
       expect(response.body).not.toContain(world.b.grantId);
@@ -251,30 +254,55 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
   });
 
   evidenceTest('create routes land in the caller tenant, never the foreign one', async () => {
-    // Invite takes an email, not an id: the leak to rule out is creation landing in (or
-    // reading from) the wrong tenant. Invite as A, then prove the row is in A and NOT in B.
+    // Both tenant-create routes (invite + grant create) take caller-scoped input, not an
+    // id: the leak to rule out is creation landing in (or reading from) the wrong
+    // tenant. Create as A on each, then prove the row is in A and NOT in B.
     const session = await mintSession(world.a.owner.id, true);
+    const pool = database.pool();
     const email = `xsuite-probe-${Date.now()}@example.test`;
-    const response = await authed(session, 'POST', '/api/members/invite', {
+    const invited = await authed(session, 'POST', '/api/members/invite', {
       email,
       role: 'staff',
     });
-    expect(response.statusCode, response.body).toBe(201);
-    const created = response.json<{ invitationId: string }>().invitationId;
-    expect(typeof created).toBe('string');
-    const pool = database.pool();
-    const inA = await withTenant(pool, world.a.organisationId, (client) =>
+    expect(invited.statusCode, invited.body).toBe(201);
+    const invitationId = invited.json<{ invitationId: string }>().invitationId;
+    expect(typeof invitationId).toBe('string');
+    const inviteInA = await withTenant(pool, world.a.organisationId, (client) =>
       client
-        .query('select count(*)::int as n from invitations where id = $1::uuid', [created])
+        .query('select count(*)::int as n from invitations where id = $1::uuid', [invitationId])
         .then((r) => (r.rows[0] as { n: number }).n),
     );
-    expect(inA).toBe(1);
-    const inB = await withTenant(pool, world.b.organisationId, (client) =>
+    expect(inviteInA).toBe(1);
+    const inviteInB = await withTenant(pool, world.b.organisationId, (client) =>
       client
-        .query('select count(*)::int as n from invitations where id = $1::uuid', [created])
+        .query('select count(*)::int as n from invitations where id = $1::uuid', [invitationId])
         .then((r) => (r.rows[0] as { n: number }).n),
     );
-    expect(inB).toBe(0);
+    expect(inviteInB).toBe(0);
+    const granted = await authed(session, 'POST', '/api/support/grants', {
+      operatorSubject: `xsuite-probe-${Date.now()}`,
+      scope: 'readonly',
+      reason: 'cross-tenant probe grant creation',
+    });
+    expect(granted.statusCode, granted.body).toBe(201);
+    const grantId = granted.json<{ grantId: string }>().grantId;
+    expect(typeof grantId).toBe('string');
+    const grantInA = await withTenant(pool, world.a.organisationId, (client) =>
+      client
+        .query('select count(*)::int as n from support_access_grants where id = $1::uuid', [
+          grantId,
+        ])
+        .then((r) => (r.rows[0] as { n: number }).n),
+    );
+    expect(grantInA).toBe(1);
+    const grantInB = await withTenant(pool, world.b.organisationId, (client) =>
+      client
+        .query('select count(*)::int as n from support_access_grants where id = $1::uuid', [
+          grantId,
+        ])
+        .then((r) => (r.rows[0] as { n: number }).n),
+    );
+    expect(grantInB).toBe(0);
   });
 
   evidenceTest('list routes show only the caller tenant rows', async () => {
@@ -321,48 +349,112 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
 
 describe('DB layer: every tenant table isolates A from B (P06.13.03)', () => {
   evidenceTest('tenant tables expose no foreign rows to the app role', async () => {
+    // All 9 tenant tables (every apply_tenant_rls call site): as A, B's row selects
+    // nothing. DELETE is probed only where the app role holds it (locations,
+    // memberships — the DEFINER-managed tables refuse the grant, which the 42501
+    // assertion below pins separately). Table names are migration-inventory
+    // literals, never caller input: one literal statement per table, no template
+    // expression ever carries a table name.
     const pool = database.pool();
-    // SELECT/DELETE per table, through withTenant as traffic runs: as A, B's row id
-    // selects nothing and deletes nothing. (Grants differ per table by design —
-    // invitations and support_access_grants are DEFINER-managed, so the app role
-    // holds no DELETE there: the assertion is rowCount 0 whether by policy or by
-    // refused grant. Either way nothing of B's is touched through A's context.)
-    const idTables = [
-      { table: 'locations', id: world.b.locationId },
-      { table: 'invitations', id: world.b.invitationId },
-      { table: 'support_access_grants', id: world.b.grantId },
-    ] as const;
-    for (const { table, id } of idTables) {
-      // Table names are migration-inventory literals, never caller input: selected by
-      // an explicit branch, so no template expression ever carries a table name.
-      const selectSql =
-        table === 'locations'
-          ? 'select count(*)::int as n from locations where id = $1::uuid'
-          : table === 'invitations'
-            ? 'select count(*)::int as n from invitations where id = $1::uuid'
-            : 'select count(*)::int as n from support_access_grants where id = $1::uuid';
+    async function unseen(sql: string, id: string, label: string): Promise<void> {
       const seen = await withTenant(pool, world.a.organisationId, (client) =>
-        client.query(selectSql, [id]).then((r) => (r.rows[0] as { n: number }).n),
+        client.query(sql, [id]).then((r) => (r.rows[0] as { n: number }).n),
       );
-      expect(seen, `${table} select`).toBe(0);
-      const deleteSql =
-        table === 'locations'
-          ? 'delete from locations where id = $1::uuid'
-          : table === 'invitations'
-            ? 'delete from invitations where id = $1::uuid'
-            : 'delete from support_access_grants where id = $1::uuid';
-      const deleted = await withTenant(pool, world.a.organisationId, (client) =>
-        client.query(deleteSql, [id]).then((r) => r.rowCount ?? 0),
-      ).catch(() => 0);
-      expect(deleted, `${table} delete`).toBe(0);
+      expect(seen, label).toBe(0);
     }
-    // B's rows are untouched: still fully visible to B.
-    const bSees = await withTenant(pool, world.b.organisationId, (client) =>
+    // organisations: the tenant itself — B's org row invisible to A.
+    await unseen(
+      'select count(*)::int as n from organisations where id = $1::uuid',
+      world.b.organisationId,
+      'organisations select',
+    );
+    // locations / invitations / grants: B's seeded row ids.
+    await unseen(
+      'select count(*)::int as n from locations where id = $1::uuid',
+      world.b.locationId,
+      'locations select',
+    );
+    await unseen(
+      'select count(*)::int as n from invitations where id = $1::uuid',
+      world.b.invitationId,
+      'invitations select',
+    );
+    await unseen(
+      'select count(*)::int as n from support_access_grants where id = $1::uuid',
+      world.b.grantId,
+      'support_access_grants select',
+    );
+    // memberships: B owner membership id.
+    await unseen(
+      'select count(*)::int as n from memberships where id = $1::uuid',
+      world.b.ownerMembershipId,
+      'memberships select',
+    );
+    // tenant_setup / owner_invitation_requests: single-row-per-tenant tables keyed by
+    // organisation_id — B's org selects nothing under A's context.
+    const setupSeen = await withTenant(pool, world.a.organisationId, (client) =>
       client
-        .query('select count(*)::int as n from locations')
+        .query('select count(*)::int as n from tenant_setup where organisation_id = $1::uuid', [
+          world.b.organisationId,
+        ])
         .then((r) => (r.rows[0] as { n: number }).n),
     );
-    expect(bSees).toBe(1);
+    expect(setupSeen, 'tenant_setup select').toBe(0);
+    const requestSeen = await withTenant(pool, world.a.organisationId, (client) =>
+      client
+        .query(
+          'select count(*)::int as n from owner_invitation_requests where organisation_id = $1::uuid',
+          [world.b.organisationId],
+        )
+        .then((r) => (r.rows[0] as { n: number }).n),
+    );
+    expect(requestSeen, 'owner_invitation_requests select').toBe(0);
+    // audit_heads / audit_events: the writer's rows isolate per tenant.
+    const headSeen = await withTenant(pool, world.a.organisationId, (client) =>
+      client
+        .query('select count(*)::int as n from audit_heads where organisation_id = $1::uuid', [
+          world.b.organisationId,
+        ])
+        .then((r) => (r.rows[0] as { n: number }).n),
+    );
+    expect(headSeen, 'audit_heads select').toBe(0);
+    await unseen(
+      'select count(*)::int as n from audit_events where id = $1::uuid',
+      world.b.auditEventId,
+      'audit_events select',
+    );
+    // DELETE where granted: B's location and membership rows survive A's delete.
+    const locDeleted = await withTenant(pool, world.a.organisationId, (client) =>
+      client
+        .query('delete from locations where id = $1::uuid', [world.b.locationId])
+        .then((r) => r.rowCount ?? 0),
+    );
+    expect(locDeleted, 'locations delete').toBe(0);
+    const memberDeleted = await withTenant(pool, world.a.organisationId, (client) =>
+      client
+        .query('delete from memberships where id = $1::uuid', [world.b.ownerMembershipId])
+        .then((r) => r.rowCount ?? 0),
+    );
+    expect(memberDeleted, 'memberships delete').toBe(0);
+    // B's world is untouched: every seeded row still fully visible to B.
+    const bCounts = await withTenant(pool, world.b.organisationId, (client) =>
+      client
+        .query(
+          `select (select count(*)::int from locations) as locations,
+                  (select count(*)::int from invitations) as invitations,
+                  (select count(*)::int as n from support_access_grants) as grants,
+                  (select count(*)::int from memberships) as memberships,
+                  (select count(*)::int from audit_events) as events`,
+        )
+        .then((r) => r.rows[0] as Record<string, number>),
+    );
+    expect(bCounts).toStrictEqual({
+      locations: 1,
+      invitations: 1,
+      grants: 1,
+      memberships: 2,
+      events: 1,
+    });
   });
 
   evidenceTest('a forged organisation setting cannot escape the tenant', async () => {

@@ -28,6 +28,16 @@ function routePaths(app: NestFastifyApplication): string[] {
   return printed.split('\n');
 }
 
+function moduleSource(marker: string): string {
+  // Executable absence, not prose: the import must RESOLVE for the surface to
+  // exist. A file that cannot even be required is absent by construction.
+  try {
+    return require.resolve(marker);
+  } catch {
+    return '';
+  }
+}
+
 export const ABSENT_SURFACES: readonly AbsentSurface[] = [
   {
     name: 'sse',
@@ -43,14 +53,23 @@ export const ABSENT_SURFACES: readonly AbsentSurface[] = [
       'No shared cache layer exists (the 30 s request-context cache is process-local ' +
       'and keyed by token digest, never by tenant id). When a shared cache lands, ' +
       'assert keys are tenant-namespaced and a foreign key reads nothing.',
-    check: () => true,
+    // Tripwire: fails the day a cache client becomes importable. Valkey/Redis
+    // clients resolve through these specifiers; today none of them do.
+    check: () =>
+      [moduleSource('ioredis'), moduleSource('redis'), moduleSource('@valkey/client')].every(
+        (resolved) => resolved === '',
+      ),
   },
   {
     name: 's3-prefixes',
     reason:
       'No S3 client exists. When object storage lands, assert every key is confined ' +
       'to the tenant prefix and a foreign prefix lists nothing.',
-    check: () => true,
+    // Tripwire: fails the day an S3 client becomes importable.
+    check: () =>
+      [moduleSource('@aws-sdk/client-s3'), moduleSource('aws-sdk')].every(
+        (resolved) => resolved === '',
+      ),
   },
 ];
 

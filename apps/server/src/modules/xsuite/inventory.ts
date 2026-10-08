@@ -98,8 +98,19 @@ export const INVENTORY: readonly InventoriedRoute[] = [
     foreignId: 'user',
     body: { reason: 'password_reset' },
   },
-  // support — grants list shows the caller's own live grants only; revoke of B's id 404s.
-  { method: 'POST', path: '/api/support/grants', class: 'tenant-list' },
+  // support — creating a grant writes into the CALLER's tenant (tenant-create, like
+  // invite: the leak to rule out is landing in the wrong tenant); list shows the
+  // caller's own live grants only; revoke of B's id 404s.
+  {
+    method: 'POST',
+    path: '/api/support/grants',
+    class: 'tenant-create',
+    body: {
+      operatorSubject: 'xsuite-probe-operator',
+      scope: 'readonly',
+      reason: 'cross-tenant probe grant creation',
+    },
+  },
   {
     method: 'POST',
     path: '/api/support/grants/:id/revoke',
