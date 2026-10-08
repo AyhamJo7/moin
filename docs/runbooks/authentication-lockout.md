@@ -39,9 +39,12 @@ What this means in practice:
 - Hammering the form during a lockout neither helps nor hurts: those attempts are refused
   without touching the backoff counter. Tell the user to **stop trying for 15 minutes** —
   that alone resets the counter.
-- Local development and automated tests never see this: Keycloak is the local provider
-  (ADR-0045) and has no equivalent lockout. Cognito lockout is verified against Cognito,
-  never claimed from local evidence.
+- Local development and automated tests never see this: the local Keycloak realm does not
+  enable brute-force detection (no `bruteForceProtected` in
+  `docker/keycloak/realm-moin-local.json`; Keycloak's protection is opt-in — see the
+  [brute force protection](https://www.keycloak.org/docs/latest/server_admin/#brute-force-mitigation)
+  section of the Server Administration Guide). Cognito lockout is verified against
+  Cognito, never claimed from local evidence.
 
 UNVERIFIED: whether the pool enables Cognito's advanced-security adaptive authentication
 (block vs notify vs none) and its exact thresholds — decided at P06.05.01 provisioning,
