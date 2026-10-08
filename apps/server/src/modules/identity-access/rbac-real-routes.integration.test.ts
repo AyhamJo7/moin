@@ -266,6 +266,32 @@ function join(prefix: string, path: string | string[]): string {
 
 const ROUTES: readonly RouteSpec[] = readRoutes();
 
+/**
+ * The expected route→capability table, hand-kept from the RBAC decision table
+ * (`domain/roles.ts`). The pin test below asserts the live controller metadata matches
+ * this EXACTLY — a removed `@Require`, a weakened capability (owner-only → users:manage),
+ * or an undecorated new route fails loudly instead of the role loops silently deriving
+ * their expectations from the same weakened metadata. Update this table deliberately when
+ * the matrix changes, never to make a failing pin pass without a PLAN reason.
+ */
+const EXPECTED: readonly {
+  method: 'GET' | 'POST';
+  url: string;
+  capabilities: readonly Capability[];
+}[] = [
+  { method: 'POST', url: '/api/members/invite', capabilities: ['users:manage'] },
+  { method: 'POST', url: '/api/members/invitations/:id/revoke', capabilities: ['users:manage'] },
+  { method: 'POST', url: '/api/members/disable', capabilities: ['users:manage'] },
+  { method: 'POST', url: '/api/members/remove', capabilities: ['users:manage'] },
+  { method: 'POST', url: '/api/members/transfer-ownership', capabilities: ['users:manage-owners'] },
+  { method: 'POST', url: '/api/recovery/disable-user', capabilities: ['users:manage'] },
+  { method: 'POST', url: '/api/recovery/enable-user', capabilities: ['users:manage'] },
+  { method: 'POST', url: '/api/recovery/revoke-sessions', capabilities: ['users:manage'] },
+  { method: 'POST', url: '/api/support/grants', capabilities: ['support:grant'] },
+  { method: 'POST', url: '/api/support/grants/:id/revoke', capabilities: ['support:grant'] },
+  { method: 'GET', url: '/api/support/grants', capabilities: ['support:grant'] },
+];
+
 /** Minimal valid body per route; `:id` params resolve against the actor's own org. */
 function bodyFor(url: string, targetId: string): Record<string, unknown> | undefined {
   const leaf = url.split('/').pop() ?? '';
@@ -309,22 +335,22 @@ async function issueLiveIds(pair: SessionPair): Promise<{ invitationId: string; 
   };
 }
 
-evidenceTest('route metadata covers every real product route', () => {
-  expect(ROUTES.map((route) => `${route.method} ${route.url}`).sort()).toStrictEqual(
-    [
-      'GET /api/support/grants',
-      'POST /api/members/disable',
-      'POST /api/members/invitations/:id/revoke',
-      'POST /api/members/invite',
-      'POST /api/members/remove',
-      'POST /api/members/transfer-ownership',
-      'POST /api/recovery/disable-user',
-      'POST /api/recovery/enable-user',
-      'POST /api/recovery/revoke-sessions',
-      'POST /api/support/grants',
-      'POST /api/support/grants/:id/revoke',
-    ].sort(),
-  );
+evidenceTest('live controller metadata matches the expected capability table', () => {
+  // Fails on: a route added without a row here, a route removed, a `@Require` removed
+  // (live capabilities go empty → mismatch), or a capability weakened (owner-only →
+  // users:manage → mismatch). Sorted comparison so ordering never matters, only content.
+  const live = ROUTES.map(
+    (route) => `${route.method} ${route.url} [${[...route.capabilities].sort().join(',')}]`,
+  ).sort();
+  const expected = EXPECTED.map(
+    (route) => `${route.method} ${route.url} [${[...route.capabilities].sort().join(',')}]`,
+  ).sort();
+  expect(live).toStrictEqual(expected);
+  // No undecorated product route: every row must name at least one capability, so a
+  // `@Require`-less route can never slip through the matrix untested.
+  for (const route of EXPECTED) {
+    expect(route.capabilities.length, `${route.method} ${route.url}`).toBeGreaterThan(0);
+  }
 });
 
 describe('the role matrix on real routes, every route × every role (P06.07.05)', () => {
@@ -357,16 +383,17 @@ describe('the role matrix on real routes, every route × every role (P06.07.05)'
   }
 
   evidenceTest('owners pass every decorated product route', async () => {
-    for (const route of ROUTES) {
-      if (route.capabilities.length === 0) continue;
+    // Loops run over EXPECTED (the pinned table), not ROUTES (live metadata): the pin
+    // test above proves they are identical, so a weakened live route fails there first
+    // instead of this loop silently re-deriving a weaker expectation.
+    for (const route of EXPECTED) {
       const { status } = await callAs('owner', route);
       expect(status, `${route.method} ${route.url}`).toBeLessThan(300);
     }
   });
 
   evidenceTest('admins pass users:manage routes, fail owner-only routes', async () => {
-    for (const route of ROUTES) {
-      if (route.capabilities.length === 0) continue;
+    for (const route of EXPECTED) {
       // Admins cannot issue the live ids the :id routes need (invite is users:manage —
       // they can; grant create is support:grant — they hold it too). Both holder
       // capabilities, so issueLiveIds succeeds for admins as well.
@@ -381,8 +408,7 @@ describe('the role matrix on real routes, every route × every role (P06.07.05)'
   });
 
   evidenceTest('staff fail every decorated product route with 403 forbidden', async () => {
-    for (const route of ROUTES) {
-      if (route.capabilities.length === 0) continue;
+    for (const route of EXPECTED) {
       // Staff cannot issue live ids — but the guard refuses before the handler reads
       // any id, so an unknown UUID proves the same verdict without a holder's help.
       const { pair, targetId } = await world('staff');
