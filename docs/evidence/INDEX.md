@@ -183,3 +183,4 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P06-056 | P06.10.03 | 2026-10-08 | `ccb8e1fd911b` | Audit writer adoption: correlation threading, recovery allowlist, honest session deferral | [EV-P06-056-audit-writer-adoption.md](P06/EV-P06-056-audit-writer-adoption.md) |
 | EV-P06-057 | P06.11.02 | 2026-10-08 | `393089abcd0d` | Support access grants: lifecycle, grant-gated reads, audit, emergency access | [EV-P06-057-support-access-grants.md](P06/EV-P06-057-support-access-grants.md) |
 | EV-P06-058 | P06.12.03 | 2026-10-08 | `cee45a591c7b` | P06.12 throttles and security events: full gates 14/14 | [EV-P06-058-abuse-protection.md](P06/EV-P06-058-abuse-protection.md) |
+| EV-P06-059 | P06.13.02 | 2026-10-08 | `74b2cd7537e2` | P06.13 cross-tenant suite v1: route inventory 100%, 10+1 tests green; job half BLOCKED on P06.03.03; CI patch pending | [EV-P06-059-xsuite-v1.md](P06/EV-P06-059-xsuite-v1.md) |
