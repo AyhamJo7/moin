@@ -1603,20 +1603,34 @@ describe('the step-up stamp (P06.06.04)', () => {
         'select step_up_at from sessions where token_hash = $1',
         [tokenHash],
       );
-      const stepped = hash();
-      expect(
-        await store.rotateSession(tokenHash, stepped, randomUUID(), 'step_up', new Date()),
-      ).toBeDefined();
-      const afterStep = await admin.query<{ step_up_at: Date }>(
+      // Retry-safe: sign-in and rotation clocks can land in the same millisecond
+      // on a fast machine. Chain step_up rotations forward (bounded) until the
+      // successor stamp advances past the sign-in stamp. Strict > is kept: the
+      // mutant that inherits instead of refreshing fails, because equal stamps
+      // never satisfy > and the loop exhausts. The privilege-change tail runs on
+      // the winner, proving inheritance of a genuinely refreshed stamp.
+      const beforeTime = before.rows[0]?.step_up_at.getTime() ?? 0;
+      let current = tokenHash;
+      let afterStep = await admin.query<{ step_up_at: Date }>(
         'select step_up_at from sessions where token_hash = $1',
-        [stepped],
+        [current],
       );
-      // Refresh means strictly after the predecessor's stamp: the rotation clock runs after
-      // the sign-in clock, so inherit-instead-of-refresh (SU2) fails here rather than hiding
-      // inside a >= that two same-millisecond stamps would satisfy.
-      expect(afterStep.rows[0]?.step_up_at.getTime()).toBeGreaterThan(
-        before.rows[0]?.step_up_at.getTime() ?? 0,
-      );
+      let stepped = hash();
+      let advanced = false;
+      for (let attempt = 0; attempt < 10 && !advanced; attempt++) {
+        const candidate = hash();
+        expect(
+          await store.rotateSession(current, candidate, randomUUID(), 'step_up', new Date()),
+        ).toBeDefined();
+        afterStep = await admin.query<{ step_up_at: Date }>(
+          'select step_up_at from sessions where token_hash = $1',
+          [candidate],
+        );
+        current = candidate;
+        stepped = candidate;
+        advanced = (afterStep.rows[0]?.step_up_at.getTime() ?? 0) > beforeTime;
+      }
+      expect(advanced).toBe(true);
       const changed = hash();
       expect(
         await store.rotateSession(stepped, changed, randomUUID(), 'privilege_change'),
