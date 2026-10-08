@@ -141,7 +141,7 @@ Single source of status. Tier columns show the status of that phase's items for 
 | P03 | Architecture decisions & threat model | IN_PROGRESS | — | — | — | — | EXT-02 counsel not engaged | P03.05 review findings; founder sends the legal pack |
 | P04 | Feasibility proof & long-lead track | IN_PROGRESS | — | — | NOT_STARTED | — | EXT-01/07/10/11/12 | Adapter, gateway port and measurement harness built; every measurement waits on EXT-10/11/12 |
 | P05 | Cloud foundation & walking skeleton | NOT_STARTED | — | — | — | — | EXT-09 AWS | Terraform bootstrap |
-| P06 | Tenancy, identity, authorization, audit | IN_PROGRESS | — | NOT_STARTED | — | — | P05 for Cognito, Secrets Manager, pgaudit; EXT-09 for the audit alarm schedule | Audit table, chain, query API, daily verifier and argument scanner done; ADR-0017 accepted and P06.10.07 verified at QG-09 (2026-10-02); P06.10.03 adoption (incl. `locations`) and .05 scheduling (EXT-09) open; P06.05.04 claims contract and provider switch verified by the founder (2026-10-02, EV-P06-038), P06.05.01–.03/.05 open (P05, EXT-09); P06.09.03 recovery runbooks founder-verified (EV-P06-040), P06.09.01/.02/.04 open; P06.06.01 OIDC callback, P06.06.02 server sessions and P06.06.03 request re-check VERIFIED at merge d92f82b (EV-P06-048 founder acceptance on independent verdict READY FOR FOUNDER ACCEPTANCE; 55/55 sweep; KMS token custody P05.08.01 and Cognito P06.05.05 outstanding), P06.06.04–.07 open |
+| P06 | Tenancy, identity, authorization, audit | IN_PROGRESS | — | NOT_STARTED | — | — | P05 for Cognito, Secrets Manager, pgaudit, WAF; EXT-09 for the audit alarm schedule, operator pool and SES; P14 for owner emails; P08 for the job envelope | Engineering of the PILOT spine is built and at READY_FOR_REVIEW, not VERIFIED: sessions (.06.04–.07, EV-P06-049…052), RBAC (.07, EV-P06-053), invitations and recovery (.08/.09, EV-P06-054/055), audit writer adoption (.10.03, EV-P06-056), support grants (.11.02–.05, EV-P06-057), throttles (.12.01/.03, EV-P06-058), cross-tenant suite v1 (.13, EV-P06-059) and the tenant-from-session proof (.03.02, .03.07 request half, EV-P06-060). Open: .03.03/.03.07 job half and .13.03 job half (BLOCKED, no job envelope until P08), .03.04 (needs `resolve_route`), .12.02 owner email (P14), .08.02 HTTP accept route (founder decision), .13.05 CI wiring (founder control-plane patch), .11.01/.05.x/.01.03/.01.04/.06 WAF-Cognito-Secrets items WAITING_FOR_EXTERNAL P05/EXT-09, .10.05 EXT-09; QG-09 triad not re-run for .06.04–.13 | Founder: apply the xsuite CI patch, run QG-09 on the READY_FOR_REVIEW sections; engineering resumes with P06.03.04 once `resolve_route` exists |
 | P07 | Core business action model | NOT_STARTED | — | NOT_STARTED | NOT_STARTED | — | — | after P06.02 |
 | P08 | Async, events, scheduling, realtime | NOT_STARTED | — | — | — | — | — | after P06.03 |
 | P09 | Knowledge system | NOT_STARTED | — | NOT_STARTED | NOT_STARTED | — | — | after P07 |
@@ -2575,12 +2575,12 @@ Roles and RLS framework · `withTenant` / `withSystemWork` · catalog check · o
   - [x] P06.02.07 Verify: catalog check runs in CI and fails on a fixture table without FORCE RLS — EV-P06-010
 - [ ] **P06.03 Tenant context propagation and tenant-transaction wrapper** `[G:PILOT]`
   - [x] P06.03.01 `withTenant(orgId, fn)`: transaction + `set_config('app.organisation_id', $1, true)` + AsyncLocalStorage context (org, actor, correlation IDs) — EV-P06-011
-  - [ ] P06.03.02 API: organisation resolved from session → active membership; never from body, query or headers (INV-02)
+  - [x] P06.03.02 API: organisation resolved from session → active membership; never from body, query or headers (INV-02) — EV-P06-060
   - [ ] P06.03.03 Worker: job envelope carries `organisation_id`; the handler loads the target entity inside `withTenant`, so a mismatch yields not-found (no cross-tenant effect)
   - [ ] P06.03.04 Voice and webhooks: organisation from `resolve_route(e164)` or provider-identifier lookups (`SECURITY DEFINER`, minimal return)
   - [x] P06.03.05 Activate lint rule: DB client imports only in `platform`; direct pool usage banned — EV-P06-012
   - [x] P06.03.06 Logger and trace enrichment with a pseudonymous tenant ID — EV-P06-013
-  - [ ] P06.03.07 Tests: a request with a forged org header or body field cannot change the tenant; a job with a mismatched org has no effect
+  - [ ] P06.03.07 Tests: a request with a forged org header or body field cannot change the tenant; a job with a mismatched org has no effect · forged header/query/body half proven (EV-P06-060, EV-P06-059); job-mismatch half BLOCKED on P06.03.03 (no job envelope until P08)
 - [ ] **P06.04 Organisation, location and provisioning path** `[G:PILOT]`
   - [x] P06.04.01 `organisations` and `locations` tables and lifecycle states (trial, pilot, active, suspended, terminating, deleted) — EV-P06-016
   - [x] P06.04.02 `provision_tenant(…)` `SECURITY DEFINER` function executed by `moin_provisioner`: creates organisation, first location, template binding, default retention policies and settings, owner invitation request (issuance/delivery in P06.08) — EV-P06-017
@@ -2597,50 +2597,50 @@ Roles and RLS framework · `withTenant` / `withSystemWork` · catalog check · o
   - [x] P06.06.01 Authorization Code + PKCE callback in `api`; `state` + nonce validation; Cognito tokens encrypted server-side — EV-P06-047
   - [x] P06.06.02 `sessions` table (token hash), cookie `__Host-moin_sid`; idle 12 h, absolute 7 days (T-15); rotation on login, step-up and privilege change — EV-P06-047
   - [x] P06.06.03 Every request re-checks session validity and membership status (single query; cached ≤ 30 s only for read-only GETs, never for mutations) — EV-P06-048 · founder-verified at merge d92f82b (independent review READY FOR FOUNDER ACCEPTANCE, 14/14 full gates, 16/16 CI)
-  - [ ] P06.06.04 Step-up MFA (≤ 15 min) for sensitive actions (see [Security Architecture](#security-architecture))
-  - [ ] P06.06.05 Revocation on password/MFA reset, role change, membership removal, "sign out other devices"
-  - [ ] P06.06.06 CSRF synchronizer token + Origin check for state-changing requests
-  - [ ] P06.06.07 Tests: expired/idle/revoked sessions rejected; removed member's next request fails (FS-16); CSRF-less POST rejected; fixation prevented by rotation
+  - [x] P06.06.04 Step-up MFA (≤ 15 min) for sensitive actions (see [Security Architecture](#security-architecture)) — EV-P06-049
+  - [x] P06.06.05 Revocation on password/MFA reset, role change, membership removal, "sign out other devices" — EV-P06-050
+  - [x] P06.06.06 CSRF synchronizer token + Origin check for state-changing requests — EV-P06-051
+  - [x] P06.06.07 Tests: expired/idle/revoked sessions rejected; removed member's next request fails (FS-16); CSRF-less POST rejected; fixation prevented by rotation — EV-P06-052
 - [ ] **P06.07 RBAC and permission matrix** `[G:PILOT]`
-  - [ ] P06.07.01 Roles owner/admin/staff + permissions `integration_admin`, `billing_admin` per the matrix
-  - [ ] P06.07.02 NestJS guards (declarative per route) + application-service checks + RLS
-  - [ ] P06.07.03 Cross-tenant and not-permitted resources both return 404 where existence would leak
-  - [ ] P06.07.04 Last-owner protection
-  - [ ] P06.07.05 Matrix-driven API tests generated from route metadata (every route × every role)
+  - [x] P06.07.01 Roles owner/admin/staff + permissions `integration_admin`, `billing_admin` per the matrix — EV-P06-053
+  - [x] P06.07.02 NestJS guards (declarative per route) + application-service checks + RLS — EV-P06-053
+  - [x] P06.07.03 Cross-tenant and not-permitted resources both return 404 where existence would leak — EV-P06-053, EV-P06-059
+  - [x] P06.07.04 Last-owner protection — EV-P06-053
+  - [x] P06.07.05 Matrix-driven API tests generated from route metadata (every route × every role) — EV-P06-053
 - [ ] **P06.08 Invitations and membership lifecycle** `[G:LAUNCH]`
-  - [ ] P06.08.01 Invitation tokens (256-bit, hashed at rest, single use, 7-day expiry), invitation email in German
-  - [ ] P06.08.02 Accept flow binds the Cognito identity to the membership (email match required, verified email)
-  - [ ] P06.08.03 Disable/remove member (sessions revoked, assignments returned to unassigned); ownership transfer with step-up
-  - [ ] P06.08.04 Tests: reuse/expired/wrong-email invitation rejected; removal revokes access immediately
+  - [x] P06.08.01 Invitation tokens (256-bit, hashed at rest, single use, 7-day expiry), invitation email in German — EV-P06-054 · invitation email is issuer-delivered until P14 (EXT-09 SES)
+  - [ ] P06.08.02 Accept flow binds the Cognito identity to the membership (email match required, verified email) · `app.accept_invitation` built and store-layer tested (EV-P06-054); no HTTP accept route (invitee has no session; entry path is a founder decision)
+  - [ ] P06.08.03 Disable/remove member (sessions revoked, assignments returned to unassigned); ownership transfer with step-up · disable/remove/transfer built (EV-P06-054); task return-to-unassigned waits on a tasks table
+  - [x] P06.08.04 Tests: reuse/expired/wrong-email invitation rejected; removal revokes access immediately — EV-P06-054 · store-layer tests; no HTTP accept route yet
 - [ ] **P06.09 Account recovery and MFA reset** `[G:PILOT]`
-  - [ ] P06.09.01 Password reset through Cognito (email)
-  - [ ] P06.09.02 MFA-reset procedure: support-verified identity (owner callback on the registered business number + second factor such as billing data), audited, all sessions revoked
+  - [ ] P06.09.01 Password reset through Cognito (email) · revoke hook proven (EV-P06-055); Cognito reset call is P05/EXT-09
+  - [ ] P06.09.02 MFA-reset procedure: support-verified identity (owner callback on the registered business number + second factor such as billing data), audited, all sessions revoked · containment PARTIAL (EV-P06-055): sessions revoked, no deny-new-access, no operator identity, no owner notification
   - [x] P06.09.03 Runbook `docs/runbooks/mfa-reset.md` and `compromised-account.md` — EV-P06-039 · founder-VERIFIED at reviewed runbook HEAD `15433fb` (EV-P06-040); runbooks only, not executable until P06.09.02 and the controls they list exist; P06.09.04 tabletop remains open
-  - [ ] P06.09.04 Verify: tabletop run of both runbooks
+  - [x] P06.09.04 Verify: tabletop run of both runbooks — EV-P06-055 · tabletop recorded in both runbooks
 - [ ] **P06.10 Audit event infrastructure** `[G:PILOT]`
   - [x] P06.10.01 `audit_events` table; trigger blocking UPDATE/DELETE (except the pseudonymisation function); privileges revoked (nis2 pattern) — EV-P06-021 · **Resolution:** the pseudonymisation exception is *not* implemented and is deferred to P16.05.02, which is where that function arrives; an exception now would be a hole with nothing legitimate behind it. ADR-0017/ADR-0018 own the chain-preserving design. Table, blocking trigger (plus `TRUNCATE` and head guards) and revoked grants are delivered.
   - [x] P06.10.02 Per-tenant sequence + hash chain (`prev_hash`, `hash` over canonical JSON) — EV-P06-022
-  - [ ] P06.10.03 Writer API used by the tool guard, application services, operator actions and security events; sanitised arguments via per-operation allowlists
+  - [ ] P06.10.03 Writer API used by the tool guard, application services, operator actions and security events; sanitised arguments via per-operation allowlists · application-service paths adopted (EV-P06-056); tool guard (P10), operator actions and security events do not exist yet; session DEFINERs unaudited by founder decision
   - [x] P06.10.04 Query API (by target, actor, correlation ID) for support and the owner-visible activity log (later UI) — EV-P06-023
   - [ ] P06.10.05 Chain-verification job (daily) with alarm on break — sweep, alarm signal and runbook built and verified (EV-P06-024); `WAITING_FOR_EXTERNAL` on the Terraform daily trigger and CloudWatch alarms (EXT-09)
   - [x] P06.10.06 Accept ADR-0017 — EV-P06-036 · founder QG-09 acceptance at reviewed HEAD `468827a`, with five recorded residual dispositions
   - [x] P06.10.07 Tests: tampering detected; `moin_app` cannot update or delete; no PII in `args_sanitized` for sample operations (scanner) — EV-P06-025
 - [ ] **P06.11 Operator identity and support access grants** `[G:PILOT]`
-  - [ ] P06.11.01 Operator Cognito pool (WebAuthn only); ALB `authenticate-oidc` on the `ops` host (UI arrives in P15.08)
-  - [ ] P06.11.02 `support_access_grants`: created by owner/admin (step-up), scope, reason, expiry ≤ 72 h, revocable; visible to the tenant
-  - [ ] P06.11.03 `moin_support_ro` views return tenant data only with an active grant
-  - [ ] P06.11.04 Operator actions audited with the operator ID; emergency access without a grant requires an incident reference and triggers owner notification
-  - [ ] P06.11.05 Tests: no grant → no data; expired grant → no data; every access audited
+  - [ ] P06.11.01 Operator Cognito pool (WebAuthn only); ALB `authenticate-oidc` on the `ops` host (UI arrives in P15.08) · `WAITING_FOR_EXTERNAL`: P05 / EXT-09 (operator pool, ALB OIDC)
+  - [x] P06.11.02 `support_access_grants`: created by owner/admin (step-up), scope, reason, expiry ≤ 72 h, revocable; visible to the tenant — EV-P06-057
+  - [x] P06.11.03 `moin_support_ro` views return tenant data only with an active grant — EV-P06-057
+  - [ ] P06.11.04 Operator actions audited with the operator ID; emergency access without a grant requires an incident reference and triggers owner notification · grant-gated reads and emergency access audited (EV-P06-057); owner notification pending P06.12.02 / P14
+  - [x] P06.11.05 Tests: no grant → no data; expired grant → no data; every access audited — EV-P06-057
 - [ ] **P06.12 Authentication abuse protection** `[G:PILOT]`
-  - [ ] P06.12.01 WAF rate rules on auth endpoints; application throttles per IP and account; Cognito lockout behaviour documented
-  - [ ] P06.12.02 Security events (failed logins, MFA changes, new device) audited; owner notified of MFA/password changes by email
-  - [ ] P06.12.03 Tests: throttling engages; notifications sent
+  - [ ] P06.12.01 WAF rate rules on auth endpoints; application throttles per IP and account; Cognito lockout behaviour documented · application throttles built (EV-P06-058); WAF rate rules `WAITING_FOR_EXTERNAL` P05 / EXT-09; Cognito lockout documentation open
+  - [ ] P06.12.02 Security events (failed logins, MFA changes, new device) audited; owner notified of MFA/password changes by email · security-event recording built in the global `auth_security_events` table, not the tenant audit chain (EV-P06-058); MFA/password-change owner email pending P14
+  - [ ] P06.12.03 Tests: throttling engages; notifications sent · throttling-engages half proven (EV-P06-058); notification half pending P06.12.02 / P14
 - [ ] **P06.13 Cross-tenant security suite v1** `[G:PILOT]`
-  - [ ] P06.13.01 Harness creating two fully populated tenants (every table) with factories
-  - [ ] P06.13.02 **Route-inventory test generation:** enumerate every route from OpenAPI/Nest metadata; for each, call as tenant A with tenant B's resource IDs → 404/empty, and assert coverage = 100 % of routes
-  - [ ] P06.13.03 DB-layer suite (P06.02.06) and job-layer suite (P06.03.07) wired together
-  - [ ] P06.13.04 SSE, cache keys and S3 prefix checks (extended as those features land)
-  - [ ] P06.13.05 Suite is release-blocking in CI (LG-P01); coverage report stored as evidence
+  - [x] P06.13.01 Harness creating two fully populated tenants (every table) with factories — EV-P06-059
+  - [x] P06.13.02 **Route-inventory test generation:** enumerate every route from OpenAPI/Nest metadata; for each, call as tenant A with tenant B's resource IDs → 404/empty, and assert coverage = 100 % of routes — EV-P06-059
+  - [ ] P06.13.03 DB-layer suite (P06.02.06) and job-layer suite (P06.03.07) wired together · DB-layer suite wired (EV-P06-059); job-layer half BLOCKED on P06.03.03
+  - [ ] P06.13.04 SSE, cache keys and S3 prefix checks (extended as those features land) · negative registry only (EV-P06-059): no SSE, cache or S3 surface exists yet
+  - [ ] P06.13.05 Suite is release-blocking in CI (LG-P01); coverage report stored as evidence · CI wiring is a founder control-plane patch (`docs/control-plane/patches/p06-13-xsuite-ci.md`)
 - [x] **P06.14 System-work pattern** `[G:PILOT]` — EV-P06-014
   - [x] P06.14.01 `withSystemWork(claimFn)` + claim-function template (`SECURITY DEFINER`, pinned `search_path`, `FOR UPDATE SKIP LOCKED`, lease expiry) returning `(organisation_id, id)` only — EV-P06-014
   - [x] P06.14.02 Tests: claims are exclusive under concurrency; expired leases are reclaimable; processing runs under `withTenant` — EV-P06-015
