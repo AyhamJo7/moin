@@ -108,6 +108,7 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.reject_audit_mutation': '42ea8b78a19fbe7aeb537d96a6087e14',
   'app.reject_registry_mutation': '60ee49a225936633fc8512cfa1d85049',
   'app.reject_last_owner_loss': 'e1740991527052f99b632df9de89e767',
+  'app.set_user_status': '9867d3a900d2f3dc5fe9215d4894eb53',
   'app.accept_invitation': 'a8730179be2296bd4cbec6332efb8616',
   'app.reject_audit_head_rewrite': 'c9278e84aa3190487818218e3ca4f761',
   'app.reject_unlinked_audit_event': '7c2302af293e06986eb4fbec32b90362',
@@ -292,6 +293,12 @@ const APPROVED_DEFINERS: Readonly<
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
     executeGrantees: [],
+  },
+  'app.set_user_status': {
+    arguments: 'uuid, text, text',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: ['moin_app'],
   },
   'app.accept_invitation': {
     arguments: 'uuid, bytea, text, citext, uuid, uuid',

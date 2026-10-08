@@ -201,6 +201,14 @@ it. A reset request that turns out to be an attempted takeover is handled under
 
 ## Verification of this runbook
 
-Not yet verified. P06.09.04 is a tabletop of this runbook and of
-[compromised account](compromised-account.md); staging proof that old sessions fail and that MFA
-re-enrolment is forced depends on P06.05.05 and P06.06.07.
+Tabletop recorded 2026-10-08 (EV-P06-055, P06.09.04): walked sections 1–8 against the controls
+that exist. Verified by test, not by assertion: `account.disable` ends every session at once
+(recovery.integration.test.ts, `password_reset` and `mfa_reset` reasons, sealed tokens wiped);
+a disabled account mints no new session and re-enable restores sign-in without resurrecting
+revoked sessions; every mutation audits in the same commit. Stop-conditions exercised honestly:
+fresh sign-in while disabled is refused at `begin_session`, but no deny-new-access state exists
+— containment is PARTIAL (sessions revoked, new sign-in not denied for a still-active user),
+and recovery-only authentication is unwired. Provider operations (pool, factor removal,
+re-enrolment), operator identity (P06.11), owner notification (P06.12.02) and the additional
+verification factor remain REQUIRED CONTROLs — implementation pending, procedure stops there in
+production. Staging proof of forced MFA re-enrolment depends on P06.05.05.

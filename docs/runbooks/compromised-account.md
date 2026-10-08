@@ -251,6 +251,11 @@ other deadline.
 
 ## Verification of this runbook
 
-Not yet verified. P06.09.04 is a tabletop of this runbook and of [MFA reset](mfa-reset.md). Staging
-proof of revocation, disabled-member access and forced re-enrolment depends on P06.05.05, P06.06.07
-and P06.08.04.
+Tabletop recorded 2026-10-08 (EV-P06-055, P06.09.04): walked sections 1–9 against the controls
+that exist. Verified by test: existing sessions revoked on demand (`account.revoke_sessions`,
+`account.disable`), disabled-member access refused on the next mutation, membership revocation
+audited same-commit. Containment control B (deny new access) does NOT exist — containment is
+PARTIAL and the runbook's own stop-condition fires: without B the account is recorded as NOT
+contained, never closed by improvisation. Open REQUIRED CONTROLs: deny-new-access mechanism and
+lifecycle (P06.09.02), operator identity and support grants (P06.11), security events and owner
+notification (P06.12.02), forced re-enrolment staging proof (P06.05.05).
