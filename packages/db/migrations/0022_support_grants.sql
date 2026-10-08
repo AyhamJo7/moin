@@ -87,13 +87,22 @@ AS $$
 DECLARE
   v_grant uuid;
 BEGIN
+  -- Lock FIRST, then judge expiry at the lock moment (HIGH2 shape): the predicate lock
+  -- takes the row; clock_timestamp() is read after it is held. A waiter that started before
+  -- the deadline and waited past it still refuses — a now()/pre-lock check would admit.
   SELECT g.id INTO v_grant FROM public.support_access_grants g
     WHERE g.organisation_id = p_organisation_id
       AND g.operator_subject = p_operator_subject
       AND g.scope = p_scope
       AND g.revoked_at IS NULL
-      AND g.expires_at > clock_timestamp()
     FOR UPDATE;
+  IF v_grant IS NULL THEN
+    RETURN NULL;
+  END IF;
+  IF (SELECT g.expires_at FROM public.support_access_grants g WHERE g.id = v_grant)
+     <= clock_timestamp() THEN
+    RETURN NULL;
+  END IF;
   RETURN v_grant;
 END
 $$;
@@ -226,7 +235,9 @@ $$;
 
 REVOKE ALL ON FUNCTION app.support_read_memberships(uuid, text, uuid, uuid)
   FROM PUBLIC, moin_app, moin_identity, moin_provisioner, moin_dispatcher, moin_reporting;
-GRANT EXECUTE ON FUNCTION app.support_read_memberships(uuid, text, uuid, uuid) TO moin_support_ro;
+-- P06.11.01 gates this: no EXECUTE until the trusted operator identity +
+-- emergency auth check exist. Callable by the owner (migrator) alone until then.
+-- GRANT EXECUTE ON FUNCTION app.support_read_memberships(uuid, text, uuid, uuid) TO moin_support_ro;  -- PENDING P06.11.01
 
 CREATE FUNCTION app.support_read_invitations(
   p_organisation_id uuid,
@@ -267,7 +278,9 @@ $$;
 
 REVOKE ALL ON FUNCTION app.support_read_invitations(uuid, text, uuid, uuid)
   FROM PUBLIC, moin_app, moin_identity, moin_provisioner, moin_dispatcher, moin_reporting;
-GRANT EXECUTE ON FUNCTION app.support_read_invitations(uuid, text, uuid, uuid) TO moin_support_ro;
+-- P06.11.01 gates this: no EXECUTE until the trusted operator identity +
+-- emergency auth check exist. Callable by the owner (migrator) alone until then.
+-- GRANT EXECUTE ON FUNCTION app.support_read_invitations(uuid, text, uuid, uuid) TO moin_support_ro;  -- PENDING P06.11.01
 
 CREATE FUNCTION app.support_read_audit_events(
   p_organisation_id uuid,
@@ -306,7 +319,9 @@ $$;
 
 REVOKE ALL ON FUNCTION app.support_read_audit_events(uuid, text, uuid, uuid, integer)
   FROM PUBLIC, moin_app, moin_identity, moin_provisioner, moin_dispatcher, moin_reporting;
-GRANT EXECUTE ON FUNCTION app.support_read_audit_events(uuid, text, uuid, uuid, integer) TO moin_support_ro;
+-- P06.11.01 gates this: no EXECUTE until the trusted operator identity +
+-- emergency auth check exist. Callable by the owner (migrator) alone until then.
+-- GRANT EXECUTE ON FUNCTION app.support_read_audit_events(uuid, text, uuid, uuid, integer) TO moin_support_ro;  -- PENDING P06.11.01
 
 -- ---------------------------------------------------------------------------------------------
 -- Emergency access without a grant (P06.11.04): incident reference required, audited with it,
@@ -358,4 +373,6 @@ $$;
 
 REVOKE ALL ON FUNCTION app.support_emergency_read_memberships(uuid, text, uuid, uuid, text)
   FROM PUBLIC, moin_app, moin_identity, moin_provisioner, moin_dispatcher, moin_reporting;
-GRANT EXECUTE ON FUNCTION app.support_emergency_read_memberships(uuid, text, uuid, uuid, text) TO moin_support_ro;
+-- P06.11.01 gates this: no EXECUTE until the trusted operator identity +
+-- emergency auth check exist. Callable by the owner (migrator) alone until then.
+-- GRANT EXECUTE ON FUNCTION app.support_emergency_read_memberships(uuid, text, uuid, uuid, text) TO moin_support_ro;  -- PENDING P06.11.01

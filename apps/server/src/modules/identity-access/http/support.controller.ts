@@ -137,6 +137,7 @@ export class SupportController {
 
   @Get('grants')
   @Require('support:grant')
+  @UseGuards(RequireStepUpGuard)
   @HttpCode(200)
   async listGrants() {
     const scope = currentTenantScope();
