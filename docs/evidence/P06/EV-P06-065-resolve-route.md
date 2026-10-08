@@ -1,4 +1,4 @@
-# EV-P06-065: Global number_routes (0026) with resolve_route(e164) DEFINER returning org+location only; 6 store-layer tests green; mutation KILLED (suite fails without the new test file, passes with it); DEFINER allowlist + digest pin + QG-09 contract; global-tables registered; privacy inventory extended; CI 16/16 green on PR57 head 8859b9a, merged as e73482d. Annotation only, NOT ticked
+# EV-P06-065: Global number_routes (0026) with resolve_route(e164) DEFINER returning org+location only; 6 store-layer tests green; active-filter mutant KILLED 1 fail / 5 pass, restored, 6/6; DEFINER allowlist + digest pin + QG-09 contract; global-tables registered; privacy inventory extended; CI 16/16 green on PR57 head 8859b9a, merged as e73482d. Annotation only, NOT ticked
 
 | Field | Value |
 |---|---|
