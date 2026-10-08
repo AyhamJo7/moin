@@ -54,6 +54,7 @@ import { SESSIONS } from '../identity-access.tokens.ts';
 import { RequireStepUpGuard } from './require-step-up.guard.ts';
 import { RequireRoleGuard } from './require-role.guard.ts';
 import { Require } from './role.ts';
+import { AccountThrottleGuard, AuthThrottleGuard } from './auth-throttle.guard.ts';
 import { SessionMembershipGuard } from './session-membership.guard.ts';
 import { TenantContextInterceptor } from './tenant-context.interceptor.ts';
 
@@ -72,7 +73,7 @@ function fail(reply: FastifyReply, status: number, type: string, title: string) 
 }
 
 @Controller('api/recovery')
-@UseGuards(SessionMembershipGuard, RequireRoleGuard)
+@UseGuards(AuthThrottleGuard, SessionMembershipGuard, AccountThrottleGuard, RequireRoleGuard)
 @UseInterceptors(TenantContextInterceptor)
 export class RecoveryController {
   constructor(
