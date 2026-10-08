@@ -292,6 +292,12 @@ describe('account disable and re-enable (P06.09.02)', () => {
         (await postAs(pair, '/api/recovery/enable-user', { userId: staff.id, reason: 'mfa_reset' }))
           .statusCode,
       ).toBe(200);
+      // Exactly one enable audit: the setter writes it; the controller must not double-audit.
+      const enables = await admin.query<{ n: string }>(
+        "select count(*)::text as n from audit_events where target_id = $1 and operation = 'account.enable'",
+        [staff.id],
+      );
+      expect(enables.rows[0]?.n).toBe('1');
       const live = await admin.query<{ n: string }>(
         'select count(*)::text as n from sessions where user_id = $1 and revoked_at is null',
         [staff.id],

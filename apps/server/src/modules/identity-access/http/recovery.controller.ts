@@ -44,7 +44,6 @@ import {
 import type { FastifyReply } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { appendAuditEvent } from '@moin/db';
 import type { Logger } from '@moin/observability';
 import { LOGGER } from '../../../observability/logger.module.ts';
 import { currentTenantScope } from '../../platform/tenant-scope.ts';
@@ -186,21 +185,17 @@ export class RecoveryController {
       } catch {
         return false;
       }
-      const changed = await client
-        .query<{ changed: boolean }>('select app.set_user_status($1::uuid, $2::text) as changed', [
-          parsed.data.userId,
-          'active',
-        ])
-        .then((result) => result.rows[0]?.changed ?? false);
-      if (!changed) return false;
-      await appendAuditEvent(client, {
-        source: 'api',
-        operation: 'account.enable',
-        targetKind: 'user',
-        targetId: parsed.data.userId,
-        result: 'succeeded',
-      });
-      return true;
+      // One call, one audit path: status flip + audit land in the same setter commit. The
+      // setter returns (changed, revoked); a scalar select of the composite would misread —
+      // always SELECT * and read .changed. No controller-side audit: the setter already
+      // wrote it, and a second write would double-audit every re-enable.
+      const settled = await client
+        .query<{ changed: boolean; revoked: number }>(
+          'select * from app.set_user_status($1::uuid, $2::text, $3::text, $4::uuid, $5::uuid)',
+          [parsed.data.userId, 'active', parsed.data.reason, scope.actorId, randomUUID()],
+        )
+        .then((result) => result.rows[0]);
+      return settled?.changed ?? false;
     });
     if (!enabled) {
       return fail(reply, 404, '/problems/not-found', 'Not found');
