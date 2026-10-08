@@ -14,6 +14,7 @@
 
 | Mutation sweep | KILLED: recovery.integration.test.ts detects the MemberQueries correlation threading (fails without, passes with; single-fix-path mutation-check, this session) |
 | Scope note | Tenant mutations already audited same-commit (members controller, provisioning trigger, invitation/recovery DEFINERs — verified, not re-proven). Session issue/rotate/revoke stay unaudited BY DECISION (founder-approved): those DEFINERs run with no tenant set and the writer requires one; no global audit row workaround. Operator actions (P06.11), security-event audit (P06.12.02) and tool-guard paths (P10) do not exist yet — nothing to adopt. |
+| Review fix | c3ddbed closes the PR45 MEDIUM (0021 forward migration: acceptance audit forwards app.correlation_id; 0018 untouched per base-applied immutability; digest re-pinned; correlation test) |
 | QG-09 status | NOT re-run at this SHA. Required before READY_FOR_REVIEW. |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).
