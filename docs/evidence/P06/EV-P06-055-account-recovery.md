@@ -14,6 +14,7 @@
 
 | Mutation sweep | KILLED: recovery.integration.test.ts detects the fix (fails without, passes with; mutation-check working-tree mode, this session) |
 | Scope note | P06.09.03 runbooks VERIFIED earlier (EV-P06-040) — this session recorded the P06.09.04 tabletop in both runbooks, not the procedures. Containment is PARTIAL by construction: sessions revoked, fresh sign-in not denied (no deny-new-access mechanism); no operator identity (P06.11), no provider calls (Cognito P05/EXT-09), no owner notification (P06.12.02). P06.09.01 provider flow unwired; our revoke hook proven. |
+| Review fix | e2097f5 closes HIGH1 (caller-tenant locked membership gate on all three routes + owner check on enable + 3 cross-tenant tests), HIGH2 (advisory-before-row lock, 0016 order), HIGH3 (revoke_member_sessions DEFINER: gate+revoke+audit one commit; setter audit in-commit; no identity-pool path); full gates 14/14 |
 | QG-09 status | NOT re-run at this SHA. Required before READY_FOR_REVIEW. |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).
