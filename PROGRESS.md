@@ -5,7 +5,7 @@ mode: autonomous
 phase: P06
 tier: PILOT
 plan: docs/phases/P06-plan.md
-next: founder applies the xsuite CI patch (P06.13.05) and runs QG-09 on the READY_FOR_REVIEW sections (P06.06.04–.07, .07, .08, .09, .10.03, .11, .12, .13, .03.02); engineering resumes at P06.03.03/.03.07 job half when P08 provides the job envelope, and P06.03.04 when resolve_route exists; EXT-09/P05 gate P06.05, P06.10.05, P06.11.01, WAF
+next: founder runs QG-09 on the READY_FOR_REVIEW sections (P06.06.04–.07, .07, .08, .09, .10.03, .11, .12, .13, .03.02); engineering resumes at P06.03.03/.03.07 job half when P08 provides the job envelope, and P06.03.04 when resolve_route exists; EXT-09/P05 gate P06.05, P06.10.05, P06.11.01, WAF
 updated: 2026-10-08
 ---
 
@@ -199,7 +199,7 @@ Rules
 | P06.10.03 | READY_FOR_REVIEW | 393089a | EV-P06-056 | Audit writer adoption, PR #45. PARTIAL: tool guard (P10), operator and security-event paths do not exist; session DEFINERs unaudited by founder decision. Not ticked in PLAN |
 | P06.11 | READY_FOR_REVIEW | cee45a5 | EV-P06-057 | Support access grants, PR #46: .02/.03/.05 ticked; .04 owner notification pending P06.12.02/P14; .01 WAITING_FOR_EXTERNAL P05/EXT-09 (counterparty AWS, founder-owned, expected with P05 cloud foundation, fallback none: operator identity is an opaque subject until then) |
 | P06.12 | READY_FOR_REVIEW | 5635d44 | EV-P06-058 | Application throttles and security-event recording, PR #47: .03 throttling half ticked; .01 WAF rules WAITING_FOR_EXTERNAL P05/EXT-09; .02 owner email pending P14 |
-| P06.13 | READY_FOR_REVIEW | d5815a3 | EV-P06-059 | Cross-tenant suite v1, PR #48: .01/.02 ticked; .03 job half BLOCKED on P06.03.03; .04 negative registry only; .05 CI wiring is a founder control-plane patch |
+| P06.13.05 | READY_FOR_REVIEW | 1e2224a | EV-P06-059 | CI wiring verified on main (PR #50, verify run 37795794912 success): `xsuite:report` script + `xsuite-coverage` artifact step in verify.yml, release-blocking via LG-P01 |
 | P06.11.03 | READY_FOR_REVIEW | cee45a5 | EV-P06-057 | Corrects the PLAN tick (PR #49 review): all four support read functions have NO runtime EXECUTE grant (42501) until a trusted operator identity exists (P06.11.01), so a grant-gated read is not proven; only the grant lifecycle and the gate predicate are. PLAN item unticked |
 | P06.11.05 | READY_FOR_REVIEW | cee45a5 | EV-P06-057 | Corrects the PLAN tick: no-grant, expired and revoked cases are proven at the gate predicate, grant create/revoke audit is proven, no read is executed; unticked. P06.11.04 also incomplete |
 | P06.07.05 | READY_FOR_REVIEW | af2a320 | EV-P06-053 | Corrects the PLAN tick: the matrix is generated from a test probe controller, not the product routes; unticked |
