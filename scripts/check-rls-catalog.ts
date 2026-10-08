@@ -156,6 +156,7 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.revoke_session(bytea, text)': 'a7fada2daeac2e30e801d6aaeff97b2e',
   'app.revoke_session(uuid, text)': '5e600197d52d7d4f18abe1bf272578b7',
   'app.revoke_sessions_on_membership_change': '7327cf1abdbb5e1b9a08452780f82c44',
+  'app.unassign_member_tasks': 'a3b165fb4ab8fd567dd0916b74c5135c',
 };
 
 /** Reviewed QG-09 contract. Documentation registration alone cannot change privileges. */
@@ -299,6 +300,13 @@ const APPROVED_DEFINERS: Readonly<
   },
   // Nobody executes it: the empty grantee list is the assertion. Runs only as the table trigger.
   'app.reject_last_owner_loss': {
+    arguments: '',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: [],
+  },
+  // Nobody executes it: the empty grantee list is the assertion. Runs only as the table trigger.
+  'app.unassign_member_tasks': {
     arguments: '',
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
@@ -592,6 +600,18 @@ const LAST_OWNER_TRIGGER = {
   table: 'memberships',
   trigger: 'memberships_last_owner',
   fn: 'app.reject_last_owner_loss()',
+  triggerType: 25, // row (1) + update (16) + delete (8); AFTER, so no before bit (2)
+} as const;
+
+/**
+ * The trigger that returns a departing member's tasks to unassigned (P06.08.03). Disabled, it
+ * reads as installed and unassigns nothing: a removal or disable would leave work assigned
+ * to someone who can no longer act.
+ */
+const UNASSIGN_TRIGGER = {
+  table: 'memberships',
+  trigger: 'memberships_unassign_tasks',
+  fn: 'app.unassign_member_tasks()',
   triggerType: 25, // row (1) + update (16) + delete (8); AFTER, so no before bit (2)
 } as const;
 
@@ -1063,6 +1083,30 @@ export async function inspect(
             'the trigger that keeps at least one active owner is absent, disabled, not ' +
             'ENABLE ALWAYS (so replica mode skips it), covers different events, or points at a ' +
             'different function, so the last owner could be removed, demoted or disabled.',
+        });
+      }
+    }
+
+    if (present.has(UNASSIGN_TRIGGER.table) && present.has('tasks')) {
+      const triggers = (
+        await pool.query<AuditTriggerRow>(AUDIT_TRIGGER_QUERY, [
+          UNASSIGN_TRIGGER.table,
+          UNASSIGN_TRIGGER.fn,
+        ])
+      ).rows;
+      const guard = triggers.find((trigger) => trigger.name === UNASSIGN_TRIGGER.trigger);
+      if (
+        guard?.enabled !== TRIGGER_ALWAYS ||
+        guard.trigger_type !== UNASSIGN_TRIGGER.triggerType ||
+        !guard.correct_function
+      ) {
+        findings.push({
+          rule: 'unassign-trigger-unsafe',
+          subject: UNASSIGN_TRIGGER.table,
+          detail:
+            'the trigger that returns a departing member’s tasks to unassigned is absent, ' +
+            'disabled, not ENABLE ALWAYS (so replica mode skips it), covers different events, ' +
+            'or points at a different function, so a removal or disable would leave work assigned.',
         });
       }
     }
