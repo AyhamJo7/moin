@@ -14,6 +14,7 @@
 
 | Mutation sweep | KILLED: support.integration.test.ts detects the fix (fails without, passes with; mutation-check working-tree mode, this session) |
 | Scope note | P06.11.01 operator pool + ALB OIDC WAITING_FOR_EXTERNAL (P05/EXT-09): the operator is an opaque subject named by the owner, unauthenticated here. Owner notification on grant/emergency PENDING (P06.12.02/P14 unwired) — emergency audit carries flags, never the reference text, and claims no notification. Support reads exclude sessions/tokens/secrets by construction. |
+| Review fix | eefae29 closes HIGH (all 4 read functions lose every runtime EXECUTE grant until P06.11.01 trusted identity + emergency auth check; refusal proven at privilege layer 42501 with no rows/audit), MEDIUM lock-first gate (row lock before clock_timestamp expiry judgement + lock-wait test), MEDIUM step-up on grant listing; full gates 14/14 |
 | QG-09 status | NOT re-run at this SHA. Required before READY_FOR_REVIEW. |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).
