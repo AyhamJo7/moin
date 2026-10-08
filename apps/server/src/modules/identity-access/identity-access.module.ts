@@ -27,6 +27,7 @@ import { SignInService } from './application/sign-in.service.ts';
 import { CALLBACK_PATH } from './domain/session-policy.ts';
 import { AuthController } from './http/auth.controller.ts';
 import { MembersController } from './http/members.controller.ts';
+import { RecoveryController } from './http/recovery.controller.ts';
 import { MemberQueries } from '../platform/member-queries.ts';
 import { RequireRoleGuard } from './http/require-role.guard.ts';
 import { RequireStepUpGuard } from './http/require-step-up.guard.ts';
@@ -79,7 +80,7 @@ export function buildSignInGate(
 
 @Module({
   imports: [IdentityPoolModule, TenantPoolModule],
-  controllers: [AuthController, MembersController],
+  controllers: [AuthController, MembersController, RecoveryController],
   providers: [
     { provide: IDENTITY_CLOCK, useValue: systemClock },
     {
