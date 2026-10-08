@@ -8,7 +8,7 @@ import { CONFIG } from '../../config/config.module.ts';
 import { ConfigurationError, loadConfig } from '../../config/env.ts';
 import { buildSignInGate } from './identity-access.module.ts';
 import { AuthController } from './http/auth.controller.ts';
-import { AuthThrottleGuard } from './http/auth-throttle.guard.ts';
+import { AccountThrottleGuard, AuthThrottleGuard } from './http/auth-throttle.guard.ts';
 import { SessionMembershipGuard } from './http/session-membership.guard.ts';
 import { AuthThrottleStore } from '../platform/auth-throttle-store.ts';
 import { REQUEST_CONTEXTS, SESSIONS, SIGN_IN } from './identity-access.tokens.ts';
@@ -101,6 +101,7 @@ describe('the sign-in routes without sign-in', () => {
         { provide: CONFIG, useValue: loadConfig(LOCAL) },
         SessionMembershipGuard,
         AuthThrottleGuard,
+        AccountThrottleGuard,
         {
           provide: AuthThrottleStore,
           useValue: {

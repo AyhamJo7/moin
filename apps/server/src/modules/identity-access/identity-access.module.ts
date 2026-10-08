@@ -32,7 +32,7 @@ import { SupportController } from './http/support.controller.ts';
 import { RecoveryController } from './http/recovery.controller.ts';
 import { AuthThrottleStore } from '../platform/auth-throttle-store.ts';
 import { MemberQueries } from '../platform/member-queries.ts';
-import { AuthThrottleGuard } from './http/auth-throttle.guard.ts';
+import { AccountThrottleGuard, AuthThrottleGuard } from './http/auth-throttle.guard.ts';
 import { RequireRoleGuard } from './http/require-role.guard.ts';
 import { RequireStepUpGuard } from './http/require-step-up.guard.ts';
 import { SessionMembershipGuard } from './http/session-membership.guard.ts';
@@ -112,6 +112,7 @@ export function buildSignInGate(
     RequireRoleGuard,
     RequireStepUpGuard,
     AuthThrottleGuard,
+    AccountThrottleGuard,
     TenantContextInterceptor,
     AuthThrottleStore,
     MemberQueries,

@@ -37,7 +37,7 @@ import { clearCookie, readCookie, serializeCookie } from './cookies.ts';
 import { AuthThrottleStore } from '../../platform/auth-throttle-store.ts';
 import { CONFIG } from '../../../config/config.module.ts';
 import type { Config } from '../../../config/env.ts';
-import { AuthThrottleGuard } from './auth-throttle.guard.ts';
+import { AccountThrottleGuard, AuthThrottleGuard } from './auth-throttle.guard.ts';
 import { SessionMembershipGuard } from './session-membership.guard.ts';
 
 const MS_PER_SECOND = 1000;
@@ -186,7 +186,7 @@ export class AuthController {
    * to the provider on success, RFC 9457 otherwise — never the session's state.
    */
   @Post('step-up')
-  @UseGuards(SessionMembershipGuard)
+  @UseGuards(SessionMembershipGuard, AccountThrottleGuard)
   async stepUp(
     @Headers('cookie') cookieHeader: string | undefined,
     @Res() reply: FastifyReply,
@@ -217,7 +217,7 @@ export class AuthController {
    * up to that long in the process that cached it; mutations on those sessions fail at once.
    */
   @Post('sign-out-others')
-  @UseGuards(SessionMembershipGuard)
+  @UseGuards(SessionMembershipGuard, AccountThrottleGuard)
   async signOutOthers(
     @Headers('cookie') cookieHeader: string | undefined,
     @Res() reply: FastifyReply,

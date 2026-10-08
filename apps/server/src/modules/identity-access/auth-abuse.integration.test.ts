@@ -20,6 +20,7 @@ import { LoggerModule } from '../../observability/logger.module.ts';
 import { TenantPoolModule } from '../platform/tenant-pool.module.ts';
 import { IdentityAccessModule } from './identity-access.module.ts';
 import { CONTEXT_CLOCK, IDENTITY_CLOCK } from './identity-access.tokens.ts';
+import { AccountThrottleGuard } from './http/auth-throttle.guard.ts';
 import { SessionMembershipGuard } from './http/session-membership.guard.ts';
 import { TenantContextInterceptor } from './http/tenant-context.interceptor.ts';
 import { startFakeOidcProvider, type FakeOidcProvider } from './__fixtures__/fake-oidc-provider.ts';
@@ -41,7 +42,7 @@ function identityUrl(): string {
 }
 
 @Controller('probe')
-@UseGuards(SessionMembershipGuard)
+@UseGuards(SessionMembershipGuard, AccountThrottleGuard)
 @UseInterceptors(TenantContextInterceptor)
 class ProbeController {
   @Get()
@@ -80,6 +81,10 @@ async function build(): Promise<NestFastifyApplication> {
     .useValue(clock)
     .overrideProvider(CONTEXT_CLOCK)
     .useValue(clock)
+    .overrideGuard(AccountThrottleGuard)
+    .useValue({
+      canActivate: () => Promise.resolve(true),
+    })
     .compile();
   const built = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
   await built.init();
@@ -176,5 +181,38 @@ describe('throttling engages (P06.12.01, P06.12.03)', () => {
     const again = await app.inject({ method: 'GET', url: '/api/auth/login' });
     expect(again.statusCode).toBe(429);
     expect(again.headers['retry-after']).toBeDefined();
+  });
+
+  evidenceTest('moin_app holds no direct table grant on the bucket table', async () => {
+    // MEDIUM fix: buckets advance only through the DEFINER. The app pool (moin_app role)
+    // must be refused at the privilege layer (42501) on direct reads — like the support
+    // read-function proof in support.integration.test.ts.
+    const appPool = database.pool();
+    await expect(appPool.query('select count(*) from auth_throttle_buckets')).rejects.toMatchObject(
+      { code: '42501' },
+    );
+  });
+
+  evidenceTest('stale buckets are swept: a day-idle row disappears on the next take', async () => {
+    // HIGH fix: bounded growth. Insert a stale row (untouched > 24 h), take an unrelated
+    // bucket, assert the stale row is gone while the live bucket works.
+    const stale = Buffer.alloc(32, 7);
+    await admin.query(
+      `insert into auth_throttle_buckets (scope, key_digest, tokens, capacity, refill_per_second, updated_at)
+       values ('ip', $1::bytea, 200, 200, 1, clock_timestamp() - interval '25 hours')`,
+      [stale],
+    );
+    const before = await admin.query<{ n: string }>(
+      'select count(*)::text as n from auth_throttle_buckets where key_digest = $1::bytea',
+      [stale],
+    );
+    expect(before.rows[0]?.n).toBe('1');
+    const response = await app.inject({ method: 'GET', url: '/api/auth/login' });
+    expect([302, 429]).toContain(response.statusCode);
+    const after = await admin.query<{ n: string }>(
+      'select count(*)::text as n from auth_throttle_buckets where key_digest = $1::bytea',
+      [stale],
+    );
+    expect(after.rows[0]?.n).toBe('0');
   });
 });

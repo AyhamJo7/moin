@@ -15,9 +15,10 @@
 -- this table carries NO organisation_id and is on the global register with that reason. What
 -- it stores is deliberately unlinkable: a keyed HMAC-SHA256 digest of (IP or account id),
 -- never the IP or id itself (INV-12) — a reader of this table learns counts and timestamps,
--- never who or where. Rows live minutes (statement timeout on the writer, short TTLs), and
--- a sweeper is unnecessary: upserts refresh in place, and stale rows are overwritten, never
--- read after their window.
+-- never who or where. Rows live at most a day past their last touch: every take opportunistically
+-- sweeps stale rows (updated_at older than 24 h), capped at 100 per call so one busy request never
+-- pays for the whole table; a rotating scanner's one-shot rows therefore cap the table at roughly
+-- a day of distinct sources, not forever. No scheduler, no new infrastructure.
 --
 -- ## Scopes and ceilings
 --
@@ -29,8 +30,8 @@
 -- take primitive. `take_signin_bucket` takes N tokens or refuses with the retry delay — one
 -- round trip, no read-then-write race.
 --
--- No RLS (global by design, registered), no runtime UPDATE/DELETE (buckets advance only
--- through the DEFINER), tight grants below.
+-- No RLS (global by design, registered), no runtime table access at all (buckets advance
+-- only through the DEFINER, which also sweeps stale rows), tight grants below.
 
 CREATE TABLE auth_throttle_buckets (
   scope       text        NOT NULL CHECK (scope IN ('ip', 'account')),
@@ -38,18 +39,20 @@ CREATE TABLE auth_throttle_buckets (
   tokens      double precision NOT NULL CHECK (tokens >= 0 AND tokens <= 100000),
   capacity    double precision NOT NULL CHECK (capacity > 0 AND capacity <= 100000),
   refill_per_second double precision NOT NULL CHECK (refill_per_second >= 0),
-  updated_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at  timestamptz NOT NULL DEFAULT clock_timestamp(),
   PRIMARY KEY (scope, key_digest)
 );
 
 COMMENT ON TABLE auth_throttle_buckets IS
-  'Token buckets for authentication throttling (P06.12.01). Global: keyed by HMAC digest of IP/account, never the value (INV-12). Advanced only through take_signin_bucket.';
+  'Token buckets for authentication throttling (P06.12.01). Global: keyed by HMAC digest of IP/account, never the value (INV-12). Advanced only through take_signin_bucket; stale rows swept by the same function.';
+
+-- Index for the opportunistic stale-row sweep (updated_at older than 24 h). Same-migration
+-- table, new and empty — see the migration-check allow line above.
+CREATE INDEX auth_throttle_buckets_sweep_idx ON auth_throttle_buckets (updated_at);
 
 REVOKE ALL ON TABLE auth_throttle_buckets
   FROM PUBLIC, moin_app, moin_identity, moin_provisioner, moin_dispatcher, moin_support_ro,
        moin_reporting;
-
-GRANT SELECT, INSERT, UPDATE ON auth_throttle_buckets TO moin_app;
 
 -- ---------------------------------------------------------------------------------------------
 -- take_signin_bucket: refill-then-take, atomically.
@@ -61,6 +64,11 @@ GRANT SELECT, INSERT, UPDATE ON auth_throttle_buckets TO moin_app;
 -- (a refused call must not drain what a later allowed one needs). Advisory lock per bucket
 -- serialises concurrent takes holding nothing else — same shape as the per-invitation lock
 -- in 0018. Capacity/refill changes take effect on next call (no separate config path).
+-- Before taking, the function opportunistically deletes up to 100 rows untouched for over
+-- 24 h (capped so one request never pays for the whole table): rotating-source rows bound
+-- the table to roughly a day of distinct keys. A full bucket is itself untouched for a day
+-- only when idle that long — deleting it then costs nothing, since the take below recreates
+-- it full on next use.
 
 CREATE FUNCTION app.take_signin_bucket(
   p_scope text,
@@ -90,6 +98,14 @@ BEGIN
     RAISE EXCEPTION 'bucket parameters out of range' USING ERRCODE = 'invalid_parameter_value';
   END IF;
   PERFORM pg_advisory_xact_lock(hashtext(p_scope || ':' || encode(p_key_digest, 'hex')));
+  -- Opportunistic sweep: rows untouched for over a day are dead weight (their bucket would
+  -- refill full long before). Capped at 100 per call — bounded cost on the request path.
+  DELETE FROM public.auth_throttle_buckets
+    WHERE ctid IN (
+      SELECT ctid FROM public.auth_throttle_buckets
+        WHERE updated_at < v_now - INTERVAL '24 hours'
+        LIMIT 100
+    );
   -- Refill against the STORED capacity (the ceiling that earned the current balance), then
   -- adopt the caller's capacity for the take below: a caller passing a SMALLER capacity than
   -- stored must not shrink the balance it never earned, and a caller passing a LARGER one
