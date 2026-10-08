@@ -157,6 +157,7 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.revoke_session(uuid, text)': '5e600197d52d7d4f18abe1bf272578b7',
   'app.revoke_sessions_on_membership_change': '7327cf1abdbb5e1b9a08452780f82c44',
   'app.unassign_member_tasks': 'a3b165fb4ab8fd567dd0916b74c5135c',
+  'app.resolve_route': 'c3601d8e5093f32bfc1da1a2220f31ed',
 };
 
 /** Reviewed QG-09 contract. Documentation registration alone cannot change privileges. */
@@ -311,6 +312,12 @@ const APPROVED_DEFINERS: Readonly<
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
     executeGrantees: [],
+  },
+  'app.resolve_route': {
+    arguments: 'text',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: ['moin_app'],
   },
   'app.set_user_status': {
     arguments: 'uuid, text, text, uuid, uuid',
