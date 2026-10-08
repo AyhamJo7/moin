@@ -139,6 +139,17 @@ describe('return-to-unassigned on membership change (P06.08.03)', () => {
     expect(await assigneeOf(orgB, taskB)).toBe(personId);
   });
 
+  evidenceTest('titles over 72 chars are rejected', async () => {
+    const orgId = await org(`b-${randomUUID().slice(0, 8)}`);
+    const who = await person();
+    await member(orgId, who);
+    await expect(task(orgId, 'x'.repeat(73), who)).rejects.toMatchObject({ code: '23514' });
+    // The boundary itself stays writable: exactly 72 chars lands.
+    expect(await task(orgId, 'y'.repeat(72), who)).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    );
+  });
+
   evidenceTest('tasks carry FORCE RLS: owner sees rows only with tenant set', async () => {
     const orgId = await org(`r-${randomUUID().slice(0, 8)}`);
     const who = await person();

@@ -32,7 +32,7 @@
 CREATE TABLE tasks (
   organisation_id uuid        NOT NULL REFERENCES organisations (id) ON DELETE CASCADE,
   id              uuid        NOT NULL PRIMARY KEY,
-  title           text        NOT NULL CHECK (length(title) BETWEEN 1 AND 300),
+  title           text        NOT NULL CHECK (length(title) BETWEEN 1 AND 72),
   status          text        NOT NULL DEFAULT 'open'
     CHECK (status IN ('open', 'in_progress', 'waiting', 'done', 'cancelled')),
   assignee_user_id uuid,
