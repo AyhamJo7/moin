@@ -15,10 +15,14 @@
 --
 -- ## Statuses (P11.01.01)
 --
--- `active` routes resolve. `quarantined` (abuse hold or number in porting limbo) and
--- `released` (returned to the pool) resolve to nothing — the voice layer answers its
--- neutral unassigned message (P11.01.03), never another tenant. Status changes are
--- UPDATEs, never row deletes: the history of which tenant a number served stays queryable.
+-- `active` routes resolve. `quarantined` (abuse hold or number in porting limbo) resolves
+-- to nothing — the voice layer answers its neutral unassigned message (P11.01.03), never
+-- another tenant. `released` is not a stored state: releasing a number to the pool is a row
+-- DELETE, which frees the E.164 primary key for reassignment and erases the tenant link
+-- (pool return erases history — the privacy inventory says hard delete with the row).
+-- Keeping a `released` row would block recycling (PK collision) while proving nothing the
+-- audit trail does not already record; P11 owns number lifecycle governance including any
+-- quarantine-expiry job.
 --
 -- ## Same-tenant location guard
 --
@@ -40,14 +44,14 @@ CREATE TABLE number_routes (
   route_organisation_id uuid NOT NULL REFERENCES organisations (id) ON DELETE CASCADE,
   location_id     uuid        NOT NULL,
   status          text        NOT NULL DEFAULT 'active'
-    CHECK (status IN ('active', 'quarantined', 'released')),
+    CHECK (status IN ('active', 'quarantined')),
   created_at      timestamptz NOT NULL DEFAULT now(),
   updated_at      timestamptz NOT NULL DEFAULT now(),
   FOREIGN KEY (route_organisation_id, location_id) REFERENCES locations (organisation_id, id)
 );
 
 COMMENT ON TABLE number_routes IS
-  'Dialled number → tenant (P06.03.04, P11.01.01). Global by necessity (resolution precedes tenancy): ids only, DEFINER-only reads, active rows resolve, quarantined/released resolve to nothing.';
+  'Dialled number → tenant (P06.03.04, P11.01.01). Global by necessity (resolution precedes tenancy): ids only, DEFINER-only reads, active rows resolve, quarantined/unknown resolve to nothing; release is a row DELETE freeing the number for reassignment.';
 
 -- ---------------------------------------------------------------------------------------------
 -- Grants: none. Like the session tables (0012): no runtime role reads the mapping directly.
@@ -62,9 +66,9 @@ REVOKE ALL ON TABLE number_routes
 -- resolve_route: the one reader (P06.03.04). Minimal return by construction.
 -- ---------------------------------------------------------------------------------------------
 --
--- Exact match on the normalised number, active rows only. Quarantined, released and unknown
+-- Exact match on the normalised number, active rows only. Quarantined and unknown
 -- numbers return zero rows — the caller distinguishes "no route" from a tenant, never one
--- tenant from another. Returns exactly (organisation_id, location_id): the status, the
+-- tenant from another. (Released numbers have no row: release is DELETE.) Returns exactly (organisation_id, location_id): the status, the
 -- timestamps and every other number's existence stay inside. No logging of the input
 -- (INV-12): a dialled number is caller personal data.
 --
@@ -84,7 +88,7 @@ AS $$
 $$;
 
 COMMENT ON FUNCTION app.resolve_route(text) IS
-  'Tenant resolution for inbound voice/webhooks (P06.03.04): exact E.164 match, active rows only. Returns (organisation_id, location_id) and nothing else; quarantined/released/unknown yield zero rows.';
+  'Tenant resolution for inbound voice/webhooks (P06.03.04): exact E.164 match, active rows only. Returns (organisation_id, location_id) and nothing else; quarantined/unknown yield zero rows (released numbers have no row).';
 
 REVOKE ALL ON FUNCTION app.resolve_route(text) FROM PUBLIC;
 

@@ -2,10 +2,9 @@
  * Tenant resolution for inbound voice/webhooks (P06.03.04, P11.01.01).
  *
  * `app.resolve_route(e164)` maps a dialled number to its tenant: exact match, active rows
- * only, returning exactly (organisation_id, location_id). Quarantined, released and unknown
- * numbers resolve to nothing — the voice layer answers its neutral message (P11.01.03),
- * never another tenant. Runs as the application role through the DEFINER; a direct table
- * read is revoked, so these tests prove the only reader.
+ * only, returning exactly (organisation_id, location_id). Quarantined and unknown numbers
+ * resolve to nothing; release is a row DELETE freeing the number for reassignment.
+ * Runs as the application role through the DEFINER; a direct table read is revoked, so these tests prove the only reader.
  *
  * Synthetic numbers only (INV-16): +49 30 Berlin range, never real subscriber numbers.
  */
@@ -77,17 +76,26 @@ describe('resolve_route (P06.03.04)', () => {
     expect(await resolve(e164)).toStrictEqual([{ org: orgId, location }]);
   });
 
-  evidenceTest('quarantined, released and unknown numbers resolve to nothing', async () => {
-    const { org: orgId, location } = await org(`q-${randomUUID().slice(0, 8)}`);
-    const quarantined = number();
-    const released = number();
-    const unknown = number();
-    await route(quarantined, orgId, location, 'quarantined');
-    await route(released, orgId, location, 'released');
-    expect(await resolve(quarantined)).toStrictEqual([]);
-    expect(await resolve(released)).toStrictEqual([]);
-    expect(await resolve(unknown)).toStrictEqual([]);
-  });
+  evidenceTest(
+    'quarantined and unknown numbers resolve to nothing; release is DELETE',
+    async () => {
+      const { org: orgId, location } = await org(`q-${randomUUID().slice(0, 8)}`);
+      const quarantined = number();
+      const recycled = number();
+      const unknown = number();
+      await route(quarantined, orgId, location, 'quarantined');
+      await route(recycled, orgId, location);
+      expect(await resolve(quarantined)).toStrictEqual([]);
+      expect(await resolve(unknown)).toStrictEqual([]);
+      // Release frees the number for reassignment: DELETE, then the same E.164 routes
+      // to its new tenant with no trace of the old link (pool return erases history).
+      const other = await org(`q2-${randomUUID().slice(0, 8)}`);
+      await admin.query('delete from number_routes where e164 = $1', [recycled]);
+      expect(await resolve(recycled)).toStrictEqual([]);
+      await route(recycled, other.org, other.location);
+      expect(await resolve(recycled)).toStrictEqual([{ org: other.org, location: other.location }]);
+    },
+  );
 
   evidenceTest('two tenants resolve their own numbers, never each other’s', async () => {
     const a = await org(`a-${randomUUID().slice(0, 8)}`);
