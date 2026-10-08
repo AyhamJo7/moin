@@ -246,9 +246,13 @@ describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
     token: string,
     subject: string,
     email: string,
+    correlationId?: string,
   ) {
-    return withTenant(database.pool(), org, (client) =>
-      acceptInvitation(client, invitationId, token, subject, email),
+    return withTenant(
+      database.pool(),
+      org,
+      (client) => acceptInvitation(client, invitationId, token, subject, email),
+      correlationId === undefined ? {} : { correlationId },
     );
   }
 
@@ -290,6 +294,31 @@ describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
     );
     expect(rows.rows[0]).toStrictEqual({ role: 'staff', status: 'active' });
   });
+
+  evidenceTest(
+    'acceptance audit forwards the transaction correlation (P06.10.03, Codex PR45)',
+    async () => {
+      // The finding: accept_invitation passed NULL while the recovery writers forwarded
+      // app.correlation_id. KILLED without the 0018 forwarding (row reads NULL).
+      const issued = await issue();
+      const correlation = randomUUID();
+      const result = await accept(
+        issued.org,
+        issued.invitationId,
+        issued.token,
+        randomUUID(),
+        issued.email,
+        correlation,
+      );
+      expect(result.outcome).toBe('accepted');
+      const audits = await admin.query<{ correlation_id: string | null }>(
+        "select correlation_id::text as correlation_id from audit_events where target_id = $1 and operation = 'invitation.accept'",
+        [issued.invitationId],
+      );
+      expect(audits.rows).toHaveLength(1);
+      expect(audits.rows[0]?.correlation_id).toBe(correlation);
+    },
+  );
 
   evidenceTest('reuse of a consumed invitation is refused', async () => {
     const issued = await issue();

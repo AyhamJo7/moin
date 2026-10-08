@@ -110,7 +110,7 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.reject_last_owner_loss': 'e1740991527052f99b632df9de89e767',
   'app.set_user_status': 'c5c9be0702df0f70271f0b245ef1cdda',
   'app.revoke_member_sessions': 'b48a5d42fdbb17ae72377ef873e27067',
-  'app.accept_invitation': 'a8730179be2296bd4cbec6332efb8616',
+  'app.accept_invitation': 'a1d0a2c50a4245314119d580fcd25e18',
   'app.reject_audit_head_rewrite': 'c9278e84aa3190487818218e3ca4f761',
   'app.reject_unlinked_audit_event': '7c2302af293e06986eb4fbec32b90362',
   'app.register_audit_chain': '221bd18d0326d55150a2405786768fa8',
