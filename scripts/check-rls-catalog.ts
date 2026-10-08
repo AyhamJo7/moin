@@ -111,6 +111,13 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.set_user_status': 'c5c9be0702df0f70271f0b245ef1cdda',
   'app.revoke_member_sessions': 'b48a5d42fdbb17ae72377ef873e27067',
   'app.accept_invitation': 'a1d0a2c50a4245314119d580fcd25e18',
+  'app.live_support_grant': 'b82400b4dcbf9ef726f75efde1c619ee',
+  'app.create_support_grant': '36ac2bbfe4214a0e017b899cb6411707',
+  'app.revoke_support_grant': 'a7f4ef52e1b5f0b4e949415424f10385',
+  'app.support_read_memberships': '5bd98e08aa79ba2040b6fd1435d40f9c',
+  'app.support_read_invitations': '32223553918c6f990711b1fc1fe5da05',
+  'app.support_read_audit_events': 'bee24f295a297558550d1c3e55353442',
+  'app.support_emergency_read_memberships': '4bb973cb5304a126902fb9fd285c6ee6',
   'app.reject_audit_head_rewrite': 'c9278e84aa3190487818218e3ca4f761',
   'app.reject_unlinked_audit_event': '7c2302af293e06986eb4fbec32b90362',
   'app.register_audit_chain': '221bd18d0326d55150a2405786768fa8',
@@ -306,6 +313,52 @@ const APPROVED_DEFINERS: Readonly<
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
     executeGrantees: ['moin_app'],
+  },
+  'app.live_support_grant': {
+    arguments: 'uuid, text, text',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: [],
+  },
+  'app.create_support_grant': {
+    arguments: 'uuid, text, text, text, integer, uuid, uuid',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: ['moin_app'],
+  },
+  'app.revoke_support_grant': {
+    arguments: 'uuid, uuid, uuid',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: ['moin_app'],
+  },
+  'app.support_read_memberships': {
+    arguments: 'uuid, text, uuid, uuid',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    // P06.11.01 gates this: no EXECUTE until the trusted operator identity + emergency auth check exist.
+    executeGrantees: [],
+  },
+  'app.support_read_invitations': {
+    arguments: 'uuid, text, uuid, uuid',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    // P06.11.01 gates this: no EXECUTE until the trusted operator identity + emergency auth check exist.
+    executeGrantees: [],
+  },
+  'app.support_read_audit_events': {
+    arguments: 'uuid, text, uuid, uuid, integer',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    // P06.11.01 gates this: no EXECUTE until the trusted operator identity + emergency auth check exist.
+    executeGrantees: [],
+  },
+  'app.support_emergency_read_memberships': {
+    arguments: 'uuid, text, uuid, uuid, text',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    // P06.11.01 gates this: no EXECUTE until the trusted operator identity + emergency auth check exist.
+    executeGrantees: [],
   },
   'app.accept_invitation': {
     arguments: 'uuid, bytea, text, citext, uuid, uuid',

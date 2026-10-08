@@ -21,12 +21,14 @@ import { resolveOidcConfig } from '../../config/oidc.ts';
 import { LOGGER } from '../../observability/logger.module.ts';
 import { IDENTITY_STORE, IdentityPoolModule } from '../platform/identity-pool.module.ts';
 import { TenantPoolModule } from '../platform/tenant-pool.module.ts';
+import { SupportPoolModule } from '../platform/support-pool.module.ts';
 import { SessionService } from './application/session.service.ts';
 import { RequestContextService } from './application/request-context.service.ts';
 import { SignInService } from './application/sign-in.service.ts';
 import { CALLBACK_PATH } from './domain/session-policy.ts';
 import { AuthController } from './http/auth.controller.ts';
 import { MembersController } from './http/members.controller.ts';
+import { SupportController } from './http/support.controller.ts';
 import { RecoveryController } from './http/recovery.controller.ts';
 import { MemberQueries } from '../platform/member-queries.ts';
 import { RequireRoleGuard } from './http/require-role.guard.ts';
@@ -79,8 +81,8 @@ export function buildSignInGate(
 }
 
 @Module({
-  imports: [IdentityPoolModule, TenantPoolModule],
-  controllers: [AuthController, MembersController, RecoveryController],
+  imports: [IdentityPoolModule, TenantPoolModule, SupportPoolModule],
+  controllers: [AuthController, MembersController, SupportController, RecoveryController],
   providers: [
     { provide: IDENTITY_CLOCK, useValue: systemClock },
     {
