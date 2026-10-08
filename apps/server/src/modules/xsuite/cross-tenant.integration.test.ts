@@ -159,11 +159,13 @@ function authed(
   method: 'GET' | 'POST',
   url: string,
   body?: Record<string, unknown>,
+  extraHeaders: Record<string, string> = {},
 ) {
   return app.inject({
     method,
     url,
     headers: {
+      ...extraHeaders,
       cookie: `${session.header}; ${session.csrfCookie}`,
       origin: APP_ORIGIN,
       [CSRF_HEADER]: session.csrfToken,
@@ -344,6 +346,130 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
         true,
       );
     }
+  });
+});
+
+/**
+ * Every spelling of "this request is for organisation X" a client could plausibly try. The
+ * tenant is resolved server-side from session → active membership (INV-02); none of these
+ * may move it. A mutation that reads any one of them (header, query or body) must fail the
+ * tests below — see the mutation record in EV-P06-060.
+ */
+const FORGED_HEADERS = (organisationId: string): Record<string, string> => ({
+  'x-organisation-id': organisationId,
+  'x-organization-id': organisationId,
+  'x-tenant-id': organisationId,
+  'x-org-id': organisationId,
+});
+const forgedQuery = (organisationId: string): string =>
+  `organisationId=${organisationId}&organization_id=${organisationId}&org=${organisationId}&tenant=${organisationId}`;
+const forgedBody = (organisationId: string): Record<string, unknown> => ({
+  organisationId,
+  organisation_id: organisationId,
+  organizationId: organisationId,
+  tenantId: organisationId,
+});
+
+async function countIn(organisationId: string, sql: string, id: string): Promise<number> {
+  return withTenant(database.pool(), organisationId, (client) =>
+    client.query(sql, [id]).then((r) => (r.rows[0] as { n: number }).n),
+  );
+}
+
+describe('the tenant comes from the session, never from the request (P06.03.02, P06.03.07)', () => {
+  evidenceTest(
+    'forged org header, query and body on a write land in the session tenant',
+    async () => {
+      const session = await mintSession(world.a.owner.id, true);
+      const email = `forged-${Date.now()}@example.test`;
+      const invited = await authed(
+        session,
+        'POST',
+        `/api/members/invite?${forgedQuery(world.b.organisationId)}`,
+        { email, role: 'staff', ...forgedBody(world.b.organisationId) },
+        FORGED_HEADERS(world.b.organisationId),
+      );
+      expect(invited.statusCode, invited.body).toBe(201);
+      const invitationId = invited.json<{ invitationId: string }>().invitationId;
+      const sql = 'select count(*)::int as n from invitations where id = $1::uuid';
+      expect(await countIn(world.a.organisationId, sql, invitationId)).toBe(1);
+      expect(await countIn(world.b.organisationId, sql, invitationId)).toBe(0);
+
+      const granted = await authed(
+        session,
+        'POST',
+        `/api/support/grants?${forgedQuery(world.b.organisationId)}`,
+        {
+          operatorSubject: `forged-${Date.now()}`,
+          scope: 'readonly',
+          reason: 'forged tenant selectors must be ignored',
+          ...forgedBody(world.b.organisationId),
+        },
+        FORGED_HEADERS(world.b.organisationId),
+      );
+      expect(granted.statusCode, granted.body).toBe(201);
+      const grantId = granted.json<{ grantId: string }>().grantId;
+      const grantSql = 'select count(*)::int as n from support_access_grants where id = $1::uuid';
+      expect(await countIn(world.a.organisationId, grantSql, grantId)).toBe(1);
+      expect(await countIn(world.b.organisationId, grantSql, grantId)).toBe(0);
+    },
+  );
+
+  evidenceTest(
+    'forged org header and query on a read still show only the session tenant',
+    async () => {
+      const asA = await mintSession(world.a.owner.id, true);
+      const fromA = await authed(
+        asA,
+        'GET',
+        `/api/support/grants?${forgedQuery(world.b.organisationId)}`,
+        undefined,
+        FORGED_HEADERS(world.b.organisationId),
+      );
+      expect(fromA.statusCode).toBe(200);
+      expect(fromA.body).toContain(world.a.grantId);
+      expect(fromA.body).not.toContain(world.b.grantId);
+      // Symmetric: B's session naming A still resolves to B.
+      const asB = await mintSession(world.b.owner.id, true);
+      const fromB = await authed(
+        asB,
+        'GET',
+        `/api/support/grants?${forgedQuery(world.a.organisationId)}`,
+        undefined,
+        FORGED_HEADERS(world.a.organisationId),
+      );
+      expect(fromB.statusCode).toBe(200);
+      expect(fromB.body).toContain(world.b.grantId);
+      expect(fromB.body).not.toContain(world.a.grantId);
+    },
+  );
+
+  evidenceTest('a forged org selector cannot reach a foreign resource id either', async () => {
+    const session = await mintSession(world.a.owner.id, true);
+    const response = await authed(
+      session,
+      'POST',
+      `/api/support/grants/${world.b.grantId}/revoke?${forgedQuery(world.b.organisationId)}`,
+      forgedBody(world.b.organisationId),
+      FORGED_HEADERS(world.b.organisationId),
+    );
+    expect(response.statusCode).toBe(404);
+    const live = await countIn(
+      world.b.organisationId,
+      'select count(*)::int as n from support_access_grants where id = $1::uuid and revoked_at is null',
+      world.b.grantId,
+    );
+    expect(live).toBe(1);
+  });
+
+  evidenceTest('a forged org selector without a session grants no tenant at all', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/support/grants?${forgedQuery(world.a.organisationId)}`,
+      headers: FORGED_HEADERS(world.a.organisationId),
+    });
+    expect(response.statusCode).toBe(401);
+    expect(response.body).not.toContain(world.a.grantId);
   });
 });
 
