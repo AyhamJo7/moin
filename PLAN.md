@@ -913,7 +913,7 @@ CREATE POLICY tasks_tenant ON tasks
 | billing | `subscriptions`, `entitlements`, `billing_events` | Stripe IDs UNIQUE; entitlements materialised from plan + overrides |
 | privacy | `retention_policies`, `dsar_requests`, `erasure_jobs`, `consents`, `avv_records`, `subprocessors` (global) | Bounded per-category retention; request lifecycle; evidence refs |
 | integrations | `integrations` | `provider`, `status` (connected, degraded, expired, revoked, disconnected), `secret_arn`, scopes, `last_success_at`, `error_code` |
-| voice | `number_routes` (global) | `e164` UNIQUE, `organisation_id`, `location_id`, `status` (active, quarantined, released), `quarantine_until` |
+| voice | `number_routes` (global) | `e164` UNIQUE, `route_organisation_id`, `location_id`, `status` (active, quarantined; release is a row DELETE, not a stored status) |
 | platform | `outbox` | `aggregate`, `event_type`, ID-only payload, `dispatched_at`, `attempts` |
 | platform | `provider_inbox` | UNIQUE `(provider, provider_event_id)`, `resolved_org`, `payload` (retention 30 days), `status` |
 | platform | `idempotency_keys` | UNIQUE `(organisation_id, operation, key)`, `request_hash`, stored response, `expires_at` (24 h) |
