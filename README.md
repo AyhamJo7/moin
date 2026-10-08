@@ -93,4 +93,8 @@ production (INV-16). The demo tenants "Musterrestaurant" and "Musterbetrieb SHK"
 
 ## Licence
 
-Proprietary. All rights reserved.
+Proprietary. All rights reserved. This is **not** open source: no licence is granted to
+use, copy, modify or distribute this software, and no reuse of any kind is permitted
+(see `LICENSE`). The repository is public for operational reasons (public repos receive
+free CI minutes), not as a grant of rights — the source is visible only, and visibility
+is not permission.
