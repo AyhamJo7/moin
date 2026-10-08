@@ -3189,7 +3189,7 @@ Voice module · number routing · TwiML generator with disclosure invariant · r
 
 ### Checklist
 - [ ] **P11.01 Number routing and tenant resolution** `[G:PILOT]`
-  - [ ] P11.01.01 `number_routes` (global) with statuses active/quarantined/released; `resolve_route(e164)` returns `(organisation_id, location_id)` only
+  - [ ] P11.01.01 `number_routes` (global) with statuses active/quarantined (release is a row DELETE freeing the number, not a stored status); `resolve_route(e164)` returns `(organisation_id, location_id)` only
   - [ ] P11.01.02 Voice config snapshot per tenant (business name for disclosure, enabled intents, template binding, limits, flags), cached in process with version check (≤ 60 s staleness)
   - [ ] P11.01.03 Unknown or quarantined number → neutral message TwiML ("Diese Rufnummer ist derzeit nicht vergeben") + metric; never another tenant
   - [ ] P11.01.04 Tests: routing correctness, quarantined numbers, cache invalidation on config change
