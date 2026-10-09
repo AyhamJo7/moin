@@ -351,6 +351,45 @@ describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
     expect(count.rows[0]?.n).toBe('1');
   });
 
+  evidenceTest('accept never resurrects a disabled member or user (H1)', async () => {
+    const issued = await issue();
+    const subject = randomUUID();
+    const preUser = await person();
+    await member(preUser.id, 'staff', 'active', issued.org);
+    await admin.query('update memberships set status = $1 where user_id = $2', [
+      'disabled',
+      preUser.id,
+    ]);
+    const disabledMember = await accept(
+      issued.org,
+      issued.invitationId,
+      issued.token,
+      preUser.subject,
+      issued.email,
+    );
+    expect(disabledMember.outcome).toBe('rejected');
+    const disabledUser = await person();
+    await member(disabledUser.id, 'staff', 'active', issued.org);
+    await admin.query('update users set status = $1 where id = $2', ['disabled', disabledUser.id]);
+    const issued2 = await issue();
+    const rejectedUser = await accept(
+      issued2.org,
+      issued2.invitationId,
+      issued2.token,
+      disabledUser.subject,
+      issued2.email,
+    );
+    expect(rejectedUser.outcome).toBe('rejected');
+    const happy = await accept(
+      issued.org,
+      issued.invitationId,
+      issued.token,
+      subject,
+      issued.email,
+    );
+    expect(happy.outcome).toBe('accepted');
+  });
+
   evidenceTest('a retry by the winner is idempotent, not a duplicate (INV-11)', async () => {
     const issued = await issue();
     const subject = randomUUID();
