@@ -26,6 +26,7 @@ import { CONTEXT_CLOCK, IDENTITY_CLOCK, REQUEST_CONTEXTS } from './identity-acce
 import { MembersController } from './http/members.controller.ts';
 import { RecoveryController } from './http/recovery.controller.ts';
 import { SupportController } from './http/support.controller.ts';
+import { AuthController } from './http/auth.controller.ts';
 import { CAPABILITIES_KEY } from './http/role.ts';
 import { startFakeOidcProvider, type FakeOidcProvider } from './__fixtures__/fake-oidc-provider.ts';
 import type { RequestContextService } from './application/request-context.service.ts';
@@ -229,7 +230,12 @@ interface RouteSpec {
   readonly capabilities: readonly Capability[];
 }
 
-const CONTROLLERS = [MembersController, RecoveryController, SupportController] as const;
+const CONTROLLERS = [
+  MembersController,
+  RecoveryController,
+  SupportController,
+  AuthController,
+] as const;
 
 function readRoutes(): readonly RouteSpec[] {
   const out: RouteSpec[] = [];
@@ -290,7 +296,16 @@ const EXPECTED: readonly {
   { method: 'POST', url: '/api/support/grants', capabilities: ['support:grant'] },
   { method: 'POST', url: '/api/support/grants/:id/revoke', capabilities: ['support:grant'] },
   { method: 'GET', url: '/api/support/grants', capabilities: ['support:grant'] },
+  { method: 'POST', url: '/api/auth/step-up', capabilities: ['session:step-up'] },
+  { method: 'POST', url: '/api/auth/sign-out-others', capabilities: ['session:sign-out-others'] },
+  { method: 'GET', url: '/api/auth/login', capabilities: [] },
+  { method: 'GET', url: '/api/auth/callback', capabilities: [] },
 ];
+
+/** Routes every role holds by design (matrix grants session:* to all three roles). */
+const SESSION_ROUTES = new Set(['/api/auth/step-up', '/api/auth/sign-out-others']);
+/** Public entry points: no session, no capability. */
+const PUBLIC_ROUTES = new Set(['/api/auth/login', '/api/auth/callback']);
 
 /** Minimal valid body per route; `:id` params resolve against the actor's own org. */
 function bodyFor(url: string, targetId: string): Record<string, unknown> | undefined {
@@ -349,6 +364,7 @@ evidenceTest('live controller metadata matches the expected capability table', (
   // No undecorated product route: every row must name at least one capability, so a
   // `@Require`-less route can never slip through the matrix untested.
   for (const route of EXPECTED) {
+    if (PUBLIC_ROUTES.has(route.url)) continue;
     expect(route.capabilities.length, `${route.method} ${route.url}`).toBeGreaterThan(0);
   }
 });
@@ -387,13 +403,27 @@ describe('the role matrix on real routes, every route × every role (P06.07.05)'
     // test above proves they are identical, so a weakened live route fails there first
     // instead of this loop silently re-deriving a weaker expectation.
     for (const route of EXPECTED) {
+      // Session routes answer per-session (302/200), not per-role — covered below.
+      // Public entry routes need no session at all.
+      if (SESSION_ROUTES.has(route.url) || PUBLIC_ROUTES.has(route.url)) continue;
       const { status } = await callAs('owner', route);
       expect(status, `${route.method} ${route.url}`).toBeLessThan(300);
     }
   });
 
+  evidenceTest('session routes answer per-session, not per-role', async () => {
+    for (const role of ['owner', 'admin', 'staff'] as const) {
+      const { pair } = await world(role);
+      const stepUp = await postAs(pair, '/api/auth/step-up');
+      expect(stepUp.statusCode, `step-up as ${role}`).toBe(302);
+      const signOut = await postAs(pair, '/api/auth/sign-out-others');
+      expect(signOut.statusCode, `sign-out-others as ${role}`).toBe(200);
+    }
+  });
+
   evidenceTest('admins pass users:manage routes, fail owner-only routes', async () => {
     for (const route of EXPECTED) {
+      if (SESSION_ROUTES.has(route.url) || PUBLIC_ROUTES.has(route.url)) continue;
       // Admins cannot issue the live ids the :id routes need (invite is users:manage —
       // they can; grant create is support:grant — they hold it too). Both holder
       // capabilities, so issueLiveIds succeeds for admins as well.
@@ -409,6 +439,7 @@ describe('the role matrix on real routes, every route × every role (P06.07.05)'
 
   evidenceTest('staff fail every decorated product route with 403 forbidden', async () => {
     for (const route of EXPECTED) {
+      if (SESSION_ROUTES.has(route.url) || PUBLIC_ROUTES.has(route.url)) continue;
       // Staff cannot issue live ids — but the guard refuses before the handler reads
       // any id, so an unknown UUID proves the same verdict without a holder's help.
       const { pair, targetId } = await world('staff');

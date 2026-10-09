@@ -74,8 +74,9 @@ export function isPermission(value: unknown): value is Permission {
  * exhaust it without a database.
  */
 export function may(role: string, permissions: readonly string[], capability: Capability): boolean {
+  if (!isRole(role)) return false;
   const grant = MATRIX[capability];
-  if (grant.roles.includes(role as Role)) return true;
+  if (grant.roles.includes(role)) return true;
   const extended = grant.permissions;
   if (extended === undefined) return false;
   return permissions.some(
