@@ -1061,7 +1061,7 @@
     "replace": "    WHERE s.family_id = v_family AND s.revoked_at IS NULL;",
     "killingTest": {
       "file": "apps/server/src/modules/identity-access/session-lifecycle.integration.test.ts",
-      "fullName": "the session lifecycle, end to end (P06.06.07) > rotation retires the predecessor: fixation prevented by rotation"
+      "fullName": "the session lifecycle, end to end (P06.06.07) > rotation retires the predecessor: re-login supersedes the presented session"
     },
     "project": "integration"
   },
