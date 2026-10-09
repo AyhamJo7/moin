@@ -108,7 +108,7 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.reject_audit_mutation': '42ea8b78a19fbe7aeb537d96a6087e14',
   'app.reject_registry_mutation': '60ee49a225936633fc8512cfa1d85049',
   'app.reject_last_owner_loss': 'e1740991527052f99b632df9de89e767',
-  'app.set_user_status': 'c5c9be0702df0f70271f0b245ef1cdda',
+  'app.set_user_status': 'c087ba790b5a24501e25aaf488c3149e',
   'app.revoke_member_sessions': 'b48a5d42fdbb17ae72377ef873e27067',
   'app.accept_invitation': 'a1d0a2c50a4245314119d580fcd25e18',
   'app.take_signin_bucket': 'c4f2a268dd9cfacb9b2d5936de8925c7',
@@ -151,7 +151,7 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   // Revocation (P06.06.05): the one implementation, its two entry points and the trigger that
   // calls it on every membership change. A body that returned without revoking would keep every
   // name, owner, signature and grant, and every session would outlive the change that ended it.
-  'app.revoke_user_sessions': '80650c9e6230be901acf10aa0ac5e65e',
+  'app.revoke_user_sessions': '39c35b1434e5aedd17c9799dbcbe4eb5',
   'app.revoke_session(bytea)': '73bcf41e304f25de88177ec25cc6a0e7',
   'app.revoke_session(bytea, text)': 'a7fada2daeac2e30e801d6aaeff97b2e',
   'app.revoke_session(uuid, text)': '5e600197d52d7d4f18abe1bf272578b7',
