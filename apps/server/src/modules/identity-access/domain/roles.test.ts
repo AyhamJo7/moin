@@ -60,6 +60,8 @@ describe('the RBAC decision table (P06.07.01)', () => {
   evidenceTest('unknown roles and permissions fail closed', () => {
     expect(may('superadmin', [], 'session:step-up')).toBe(false);
     expect(may('', [], 'session:step-up')).toBe(false);
+    expect(may('superadmin', ['billing_admin'], 'billing:manage')).toBe(false);
+    expect(may('superadmin', ['integration_admin'], 'integrations:manage')).toBe(false);
     expect(may('owner', ['root'], 'tenant:terminate')).toBe(true);
     expect(may('staff', ['root'], 'tenant:terminate')).toBe(false);
     expect(isRole('owner')).toBe(true);
