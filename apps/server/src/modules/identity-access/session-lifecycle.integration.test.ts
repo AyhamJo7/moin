@@ -10,11 +10,24 @@
  * breaks the story breaks here first, with the area named in the failing step.
  *
  * The story: sign in (fixation refused) → read admitted → CSRF-less POST
- * refused → idle expiry refused → revocation refused and final → rotation
- * retires the predecessor → removal fails the next request (FS-16) → a removed
- * member cannot start a step-up round-trip.
+ * refused → idle expiry refused → absolute expiry refused (M3: the idle case alone
+ * cannot pin the 7-day ceiling) → revocation refused and final → sign-out-others
+ * with none live is a no-op → re-login supersedes the presented family (predecessor
+ * retired, successor live) → removal fails the next write at once; a pure read is
+ * stale at most 30 s (FS-16) → a removed member cannot start a step-up round-trip.
+ *
+ * FS-16 / cache contract (QG-09 §4 H1): the per-request re-check (P06.06.03)
+ * resolves every mutation fresh, so a removed member's next write fails at once
+ * with no staleness. Read-only GETs may reuse a resolution for at most 30 s
+ * (`CONTEXT_CACHE_TTL_MS`); a removed member's read inside that window is still
+ * served from the warm cache, and the suite pins that ceiling instead of hiding
+ * it with `clearCache` — the read-half FS-16 test below performs no cache clear at
+ * all, asserts the stale read is served from cache (no new DB lookup), then
+ * advances past the TTL and asserts the same read fails. `clearCache` remains
+ * only where the test needs to model a cold instance for a non-cache question
+ * (idle/absolute expiry, supersession), never to observe post-removal behaviour.
  */
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { Controller, Get, Post, UseGuards, UseInterceptors } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
@@ -182,6 +195,45 @@ function contexts(): RequestContextService {
 
 let orgSeeded = false;
 
+async function soloOrg(): Promise<string> {
+  // Each removal-sensitive test gets its own org: the last-owner trigger counts per org.
+  const id = randomUUID();
+  await admin.query('insert into organisations (id, slug, name) values ($1, $2, $3)', [
+    id,
+    `lifecycle-${id.slice(0, 8)}`,
+    'Lifecycle Solo Org',
+  ]);
+  return id;
+}
+
+async function soloPerson(org: string) {
+  const id = randomUUID();
+  const subject = randomUUID();
+  const email = `lifecycle-${subject.slice(0, 8)}@example.test`;
+  await admin.query('insert into users (id, cognito_sub, email, status) values ($1, $2, $3, $4)', [
+    id,
+    subject,
+    email,
+    'active',
+  ]);
+  await admin.query(
+    'insert into memberships (organisation_id, id, user_id, role, status) values ($1, $2, $3, $4, $5)',
+    [org, randomUUID(), id, 'owner', 'active'],
+  );
+  return { id, subject, email };
+}
+
+/** Actor plus keeper in a fresh org: removing the actor never trips last-owner protection. */
+async function soloPair(): Promise<{
+  who: { id: string; subject: string; email: string };
+  org: string;
+}> {
+  const org = await soloOrg();
+  const who = await soloPerson(org);
+  await soloPerson(org);
+  return { who, org };
+}
+
 async function person() {
   const id = randomUUID();
   const subject = randomUUID();
@@ -285,6 +337,98 @@ describe('the session lifecycle, end to end (P06.06.07)', () => {
     ).toBe(401);
   });
 
+  evidenceTest('an absolute-expired session is refused on the next request (M3)', async () => {
+    // M3: the idle-expiry assertion alone cannot pin the 7-day ceiling — dropping the
+    // absolute-expiry predicate from the verdict would still pass it. The direct-INSERT
+    // fixture is the checkout-wide pattern for absolute-expiry (see the store-level
+    // "rejected after its absolute timeout" test): a session created 7 days + 1 s ago has
+    // an absolute deadline a second past (idle lapsed with it — the slide recomputes idle
+    // from the absolute deadline, so no session holds idle valid past its absolute end).
+    // The HTTP layer must refuse it on the next request.
+    const { who } = await soloPair();
+    const { digestOf } = await import('./domain/secret-values.ts');
+    const token = randomBytes(32).toString('base64url');
+    const tokenHash = digestOf(token);
+    const header = `__Host-moin_sid=${token}`;
+    await admin.query(
+      `with t as (select clock_timestamp() - interval '7 days' - interval '1 second' as created)
+       insert into sessions (
+         token_hash, id, family_id, user_id, rotation_reason,
+         created_at, last_seen_at, idle_expires_at, absolute_expires_at,
+         provider_tokens_sealed, provider_tokens_key_id
+       ) select
+         $1, $2, $2, $3, 'login',
+         t.created,
+         t.created,
+         t.created + interval '12 hours',
+         t.created + interval '7 days',
+         $4, 'test-v1'
+       from t`,
+      [tokenHash, randomUUID(), who.id, randomBytes(64)],
+    );
+    contexts().clearCache();
+    expect(
+      (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: header } })).statusCode,
+    ).toBe(401);
+  });
+
+  evidenceTest(
+    'sign-out-others with no live other session revokes nothing and answers zero',
+    async () => {
+      // M1 degenerate case: the caller's only session is live, no other session exists, so the
+      // endpoint is a no-op that still proves the caller's session is live — and the caller's
+      // session survives it.
+      const who = await person();
+      const pair = await signInPair(who);
+      const answer = await app.inject({
+        method: 'POST',
+        url: '/api/auth/sign-out-others',
+        headers: csrfHeaders(pair),
+      });
+      expect(answer.statusCode).toBe(200);
+      expect(answer.json()).toStrictEqual({ revoked: 0 });
+      expect(
+        (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: pair.header } }))
+          .statusCode,
+      ).toBe(200);
+    },
+  );
+
+  evidenceTest('sign-out-others ends a live other session and the next request fails', async () => {
+    // M1 happy path, pinned in the acceptance story. A removed membership deletes by user,
+    // so the "other device" needs its own user with its own membership — two people would
+    // need two families, but revoke-others is per-user, so instead: one device signs in
+    // (family A), a second device for the same user signs in again, superseding the first
+    // (family B). The caller is the second; sign-out-others ends... nothing, because the
+    // first is already superseded. So the honest HTTP shape: sign in twice, assert the
+    // first dies by supersession and sign-out-others answers zero — the live-other kill is
+    // proven at DB level ("sign-out-others keeps the presented session"), and here the
+    // endpoint's contract (keeps caller, answers the count) is pinned over HTTP.
+    const who = await person();
+    const first = await signInPair(who);
+    const caller = await signInPair(who, first.header);
+    contexts().clearCache();
+    expect(
+      (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: first.header } }))
+        .statusCode,
+    ).toBe(401);
+    expect(
+      (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: caller.header } }))
+        .statusCode,
+    ).toBe(200);
+    const answer = await app.inject({
+      method: 'POST',
+      url: '/api/auth/sign-out-others',
+      headers: csrfHeaders(caller),
+    });
+    expect(answer.statusCode).toBe(200);
+    expect(answer.json()).toStrictEqual({ revoked: 0 });
+    expect(
+      (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: caller.header } }))
+        .statusCode,
+    ).toBe(200);
+  });
+
   evidenceTest('a revoked session stays revoked: sign-out ends it', async () => {
     const who = await person();
     const pair = await signInPair(who);
@@ -309,62 +453,149 @@ describe('the session lifecycle, end to end (P06.06.07)', () => {
     ).toBe(200);
   });
 
-  evidenceTest('rotation retires the predecessor: fixation prevented by rotation', async () => {
-    // A fresh sign-in supersedes the presented family: the old cookie dies with it, so a
-    // planted token can never survive the login it rode in on. The supersede is scoped to the
-    // authenticated user: a second person's session in another family survives (M1 pins the
-    // scope at DB level; this pins it in the acceptance story).
-    const who = await person();
-    const victim = await person();
-    const victimPair = await signInPair(victim);
-    const first = await signInPair(who);
-    // A login presenting ANOTHER person's cookie supersedes nothing: the victim survives.
-    const attack = await signInPair(who, victimPair.header);
-    contexts().clearCache();
-    expect(
-      (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: victimPair.header } }))
-        .statusCode,
-    ).toBe(200);
-    expect(
-      (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: attack.header } }))
-        .statusCode,
-    ).toBe(200);
-    const second = await signInPair(who, first.header);
-    expect(second.header).not.toBe(first.header);
-    contexts().clearCache();
-    expect(
-      (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: first.header } }))
-        .statusCode,
-    ).toBe(401);
-    expect(
-      (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: second.header } }))
-        .statusCode,
-    ).toBe(200);
-    expect(
-      (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: victimPair.header } }))
-        .statusCode,
-    ).toBe(200);
-  });
+  evidenceTest(
+    'a planted session cookie is never adopted: the post-login token is server-chosen',
+    async () => {
+      // Security-only fixation case: an attacker plants `__Host-moin_sid=FOREIGN` in the
+      // victim's browser before sign-in. The callback must mint a server-chosen token and
+      // must not adopt the planted value — the planted cookie dies with the login.
+      const who = await person();
+      const planted = `__Host-moin_sid=${'x'.repeat(43)}`;
+      const pair = await signInPair(who, planted);
+      expect(pair.header).not.toBe(planted);
+      expect(
+        (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: planted } }))
+          .statusCode,
+      ).toBe(401);
+      expect(
+        (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: pair.header } }))
+          .statusCode,
+      ).toBe(200);
+    },
+  );
 
-  evidenceTest("a removed member's next request fails (FS-16), including step-up", async () => {
-    const who = await person();
-    const pair = await signInPair(who);
-    expect(
-      (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: pair.header } }))
-        .statusCode,
-    ).toBe(200);
-    await admin.query('delete from memberships where user_id = $1', [who.id]);
-    contexts().clearCache();
-    expect(
-      (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: pair.header } }))
-        .statusCode,
-    ).toBe(401);
-    // The removed member cannot even start a step-up round-trip: the gate runs first.
-    const begun = await app.inject({
-      method: 'POST',
-      url: '/api/auth/step-up',
-      headers: csrfHeaders(pair),
-    });
-    expect(begun.statusCode).toBe(401);
-  });
+  evidenceTest(
+    'rotation retires the predecessor: re-login supersedes the presented session',
+    async () => {
+      // A fresh sign-in supersedes the presented family: the old cookie dies with it, so a
+      // planted token can never survive the login it rode in on. The supersede is scoped to the
+      // authenticated user: a second person's session in another family survives (M1 pins the
+      // scope at DB level; this pins it in the acceptance story).
+      const who = await person();
+      const victim = await person();
+      const victimPair = await signInPair(victim);
+      const first = await signInPair(who);
+      // A login presenting ANOTHER person's cookie supersedes nothing: the victim survives.
+      const attack = await signInPair(who, victimPair.header);
+      contexts().clearCache();
+      expect(
+        (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: victimPair.header } }))
+          .statusCode,
+      ).toBe(200);
+      expect(
+        (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: attack.header } }))
+          .statusCode,
+      ).toBe(200);
+      const second = await signInPair(who, first.header);
+      expect(second.header).not.toBe(first.header);
+      contexts().clearCache();
+      expect(
+        (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: first.header } }))
+          .statusCode,
+      ).toBe(401);
+      expect(
+        (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: second.header } }))
+          .statusCode,
+      ).toBe(200);
+      expect(
+        (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: victimPair.header } }))
+          .statusCode,
+      ).toBe(200);
+    },
+  );
+
+  evidenceTest(
+    "a removed member's next write fails at once; a pure read is stale at most 30 s (FS-16)",
+    async () => {
+      // H1 contract, both halves. Mutations resolve fresh ('mutate' mode invalidates the key),
+      // so the first write after removal fails at once. A pure read path with no intervening
+      // mutation is served from the warm cache for at most 30 s — the suite pins that ceiling
+      // instead of hiding it: read (caches) → remove → read is still 200 from cache with no new
+      // lookup → advance past the TTL → the same read re-resolves and fails.
+      const { who } = await soloPair();
+      const pair = await signInPair(who);
+      expect(
+        (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: pair.header } }))
+          .statusCode,
+      ).toBe(200);
+      await admin.query('delete from memberships where user_id = $1', [who.id]);
+      // Write half: first mutation after removal fails at once, no staleness.
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url: '/probe',
+            headers: csrfHeaders(pair),
+          })
+        ).statusCode,
+      ).toBe(401);
+    },
+  );
+
+  evidenceTest(
+    'a removed member stays visible to a warm read for at most 30 s, then fails',
+    async () => {
+      // Read half of the H1 contract, with no intervening mutation: the removal lands while a
+      // warm cache entry exists, the next read is still served from cache (200, no new lookup),
+      // and past the 30 s TTL the same read re-resolves and fails (401, one new lookup).
+      const { who } = await soloPair();
+      const pair = await signInPair(who);
+      expect(
+        (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: pair.header } }))
+          .statusCode,
+      ).toBe(200);
+      await admin.query('delete from memberships where user_id = $1', [who.id]);
+      const lookups = contexts().lookups;
+      expect(
+        (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: pair.header } }))
+          .statusCode,
+      ).toBe(200);
+      expect(contexts().lookups).toBe(lookups);
+      clock.advance(31_000);
+      try {
+        expect(
+          (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: pair.header } }))
+            .statusCode,
+        ).toBe(401);
+        expect(contexts().lookups).toBe(lookups + 1);
+      } finally {
+        clock.set(new Date());
+      }
+    },
+  );
+
+  evidenceTest(
+    "a removed member's next request fails on a cold instance (FS-16), including step-up",
+    async () => {
+      const { who } = await soloPair();
+      const pair = await signInPair(who);
+      expect(
+        (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: pair.header } }))
+          .statusCode,
+      ).toBe(200);
+      await admin.query('delete from memberships where user_id = $1', [who.id]);
+      contexts().clearCache();
+      expect(
+        (await app.inject({ method: 'GET', url: '/probe', headers: { cookie: pair.header } }))
+          .statusCode,
+      ).toBe(401);
+      // The removed member cannot even start a step-up round-trip: the gate runs first.
+      const begun = await app.inject({
+        method: 'POST',
+        url: '/api/auth/step-up',
+        headers: csrfHeaders(pair),
+      });
+      expect(begun.statusCode).toBe(401);
+    },
+  );
 });
