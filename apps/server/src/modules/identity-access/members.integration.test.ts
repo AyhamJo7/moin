@@ -225,6 +225,15 @@ async function ownerPair(): Promise<{ pair: SessionPair; owner: { id: string }; 
 }
 
 describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
+  async function staleStepUp(pair: SessionPair) {
+    const token = /__Host-moin_sid=([A-Za-z0-9_-]{43})/.exec(pair.header)?.[1] ?? '';
+    await admin.query(
+      "update sessions set step_up_at = clock_timestamp() - interval '16 minutes' where token_hash = $1",
+      [digestOf(token)],
+    );
+    contexts().clearCache();
+  }
+
   /** An invitation issued over HTTP, plus the raw token the issuer receives once. */
   async function issue(role = 'staff') {
     const email = `neu-${randomUUID().slice(0, 8)}@example.test`;
@@ -480,6 +489,44 @@ describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
       (await accept(issued.org, issued.invitationId, issued.token, randomUUID(), issued.email))
         .outcome,
     ).toBe('revoked');
+  });
+
+  evidenceTest('invite needs fresh step-up: a stale session is refused 403', async () => {
+    const { pair } = await ownerPair();
+    await staleStepUp(pair);
+    const response = await postAs(pair, '/api/members/invite', {
+      email: `neu-${randomUUID().slice(0, 8)}@example.test`,
+      role: 'staff',
+    });
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toMatchObject({ type: '/problems/step-up-required' });
+  });
+
+  evidenceTest('revoke needs fresh step-up: a stale session is refused 403', async () => {
+    const issued = await issue();
+    await staleStepUp(issued.pair);
+    const response = await postAs(
+      issued.pair,
+      `/api/members/invitations/${issued.invitationId}/revoke`,
+    );
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toMatchObject({ type: '/problems/step-up-required' });
+  });
+
+  evidenceTest('revoking an owner invitation needs the owner capability', async () => {
+    const issued = await issue('owner');
+    const adminUser = await person();
+    await member(adminUser.id, 'admin', 'active', issued.org);
+    const adminPair = await signInPair(adminUser);
+    contexts().clearCache();
+    expect(
+      (await postAs(adminPair, `/api/members/invitations/${issued.invitationId}/revoke`))
+        .statusCode,
+    ).toBe(404);
+    expect(
+      (await postAs(issued.pair, `/api/members/invitations/${issued.invitationId}/revoke`))
+        .statusCode,
+    ).toBe(200);
   });
 
   evidenceTest('another tenant cannot consume the invitation (RLS)', async () => {
