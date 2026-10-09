@@ -26,6 +26,7 @@ import { CONTEXT_CLOCK, IDENTITY_CLOCK, REQUEST_CONTEXTS } from './identity-acce
 import { MembersController } from './http/members.controller.ts';
 import { RecoveryController } from './http/recovery.controller.ts';
 import { SupportController } from './http/support.controller.ts';
+import { AuthController } from './http/auth.controller.ts';
 import { CAPABILITIES_KEY } from './http/role.ts';
 import { startFakeOidcProvider, type FakeOidcProvider } from './__fixtures__/fake-oidc-provider.ts';
 import type { RequestContextService } from './application/request-context.service.ts';
@@ -229,7 +230,12 @@ interface RouteSpec {
   readonly capabilities: readonly Capability[];
 }
 
-const CONTROLLERS = [MembersController, RecoveryController, SupportController] as const;
+const CONTROLLERS = [
+  MembersController,
+  RecoveryController,
+  SupportController,
+  AuthController,
+] as const;
 
 function readRoutes(): readonly RouteSpec[] {
   const out: RouteSpec[] = [];
@@ -290,6 +296,8 @@ const EXPECTED: readonly {
   { method: 'POST', url: '/api/support/grants', capabilities: ['support:grant'] },
   { method: 'POST', url: '/api/support/grants/:id/revoke', capabilities: ['support:grant'] },
   { method: 'GET', url: '/api/support/grants', capabilities: ['support:grant'] },
+  { method: 'POST', url: '/api/auth/step-up', capabilities: ['session:step-up'] },
+  { method: 'POST', url: '/api/auth/sign-out-others', capabilities: ['session:sign-out-others'] },
 ];
 
 /** Minimal valid body per route; `:id` params resolve against the actor's own org. */
