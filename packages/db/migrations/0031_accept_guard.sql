@@ -135,7 +135,8 @@ BEGIN
   -- the row, and a second row would claim the membership was created twice.
   v_audit_seq := app.append_audit_event(
     COALESCE(p_event_id, gen_random_uuid()), p_actor_id, 'api', 'invitation.accept',
-    'invitation', v_inv.id, '{}', '{}', '{}', 'succeeded', NULL, NULL, NULL
+    'invitation', v_inv.id, '{}', '{}', '{}', 'succeeded', NULL,
+    NULLIF(current_setting('app.correlation_id', true), '')::uuid, NULL
   );
 
   RETURN QUERY SELECT v_membership_id, v_user_id, 'accepted'::text;
