@@ -571,6 +571,67 @@ describe('session revocation without status change (P06.09.02 first response)', 
       ).statusCode,
     ).toBe(404);
   });
+
+  evidenceTest(
+    'a forged organisation parameter fails closed at the database layer (H1/M1)',
+    async () => {
+      // Defence in depth: the controller passes the guarded session's tenant, but the DEFINER
+      // itself refuses a parameter that disagrees with the transaction's tenant GUC — so a
+      // caller that reaches the function directly with a forged org gets 'missing', never a
+      // revocation. KILLED without the 0032 GUC check (forged org proceeds to the gate).
+      const { org } = await ownerPair();
+      const staff = await person();
+      await member(staff.id, org, 'staff');
+      await signInPair(staff);
+      const forgedOrg = randomUUID();
+      const settled = await admin.query<{ outcome: string; revoked: number }>(
+        'select * from app.revoke_member_sessions($1::uuid, $2::text, $3::text[], $4::uuid, $5::text, null, null)',
+        [forgedOrg, 'owner', '{}', staff.id, 'password_reset'],
+      );
+      expect(settled.rows[0]?.outcome).toBe('missing');
+      expect(settled.rows[0]?.revoked).toBe(0);
+      // Nothing revoked, nothing audited: the staff session still lives.
+      const live = await admin.query<{ n: string }>(
+        'select count(*)::text as n from sessions where user_id = $1 and revoked_at is null',
+        [staff.id],
+      );
+      expect(live.rows[0]?.n).toBe('1');
+      const audits = await admin.query<{ n: string }>(
+        "select count(*)::text as n from audit_events where target_id = $1 and operation = 'account.revoke_sessions'",
+        [staff.id],
+      );
+      expect(audits.rows[0]?.n).toBe('0');
+    },
+  );
+
+  evidenceTest('revoke-sessions audit carries correlation and session count (L1)', async () => {
+    // Sibling recovery writers forward app.correlation_id and the revoked count; the
+    // revoke path passed NULLs before 0032. KILLED without the forwarding (row reads
+    // NULL / empty args).
+    const { pair, org } = await ownerPair();
+    const staff = await person();
+    await member(staff.id, org, 'staff');
+    await signInPair(staff);
+    contexts().clearCache();
+    const correlation = randomUUID();
+    expect(
+      (
+        await postAs(
+          pair,
+          '/api/recovery/revoke-sessions',
+          { userId: staff.id, reason: 'password_reset' },
+          correlation,
+        )
+      ).statusCode,
+    ).toBe(200);
+    const rows = await admin.query<{ correlation_id: string; args: unknown }>(
+      "select correlation_id::text as correlation_id, args_sanitized as args from audit_events where target_id = $1 and operation = 'account.revoke_sessions'",
+      [staff.id],
+    );
+    expect(rows.rows).toHaveLength(1);
+    expect(rows.rows[0]?.correlation_id).toBe(correlation);
+    expect(rows.rows[0]?.args).toStrictEqual({ session_count: 1 });
+  });
 });
 
 describe('password-reset revocation hook (P06.09.01, our side)', () => {
