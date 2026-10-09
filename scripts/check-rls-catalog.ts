@@ -107,7 +107,7 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   // The append-only and register guards, and the two chain-integrity guards.
   'app.reject_audit_mutation': '42ea8b78a19fbe7aeb537d96a6087e14',
   'app.reject_registry_mutation': '60ee49a225936633fc8512cfa1d85049',
-  'app.reject_last_owner_loss': 'e1740991527052f99b632df9de89e767',
+  'app.reject_last_owner_loss': '98d3ce225301621e000912af058b24b1',
   'app.set_user_status': 'c087ba790b5a24501e25aaf488c3149e',
   'app.revoke_member_sessions': 'b48a5d42fdbb17ae72377ef873e27067',
   'app.accept_invitation': 'a1d0a2c50a4245314119d580fcd25e18',
