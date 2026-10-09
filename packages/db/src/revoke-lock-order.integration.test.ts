@@ -2,10 +2,12 @@
  * Revocation lock order (P06.06.05 H1, migration 0027).
  *
  * Deterministic RED/GREEN concurrency regression: a gate transaction holds family+session
- * rows FOR UPDATE (the reader side of the old AB-BA), the revoker runs concurrently and
- * must block-then-proceed once the gate commits — with no 40P01 on either side. On the
- * OLD bodies (users row first) the same shape deadlocks; on the new bodies (families →
- * sessions → users last) every path traverses one lock direction.
+ * rows FOR UPDATE (the reader side of the old AB-BA), the revoker starts against those held
+ * locks, and the gate then requests the users row FOR UPDATE. On the OLD bodies the revoker
+ * takes users first (holds users, waits on sessions) while the gate holds sessions and waits
+ * on users: a true AB-BA cycle, 40P01 on one side. On the new bodies (families → sessions →
+ * users last) no path takes users before sessions, so the gate's users lock is granted, the
+ * gate commits, and the revoker proceeds — never 40P01 either side.
  *
  * Runs as the migration role through raw SQL (lock-order proof, not application
  * behaviour); synthetic data only (INV-16).
@@ -75,14 +77,20 @@ describe('revocation lock order (0027)', () => {
          order by s.id for update`,
         [id],
       );
-      // Revoker starts now: on the new bodies it blocks on the gate's session locks
-      // (same direction), then proceeds after commit — never 40P01 either side.
+      // Revoker starts now: on the old bodies it takes the users row first and blocks on
+      // the gate's session locks; the gate then asks for the users row (readers end with
+      // family → session → users) and blocks on the revoker: AB-BA, 40P01 on one side.
+      // On the new bodies the revoker takes no early users lock, so the gate's users
+      // lock is granted at once, the gate commits, and the revoker proceeds.
       const revoking = revoker.query('select app.revoke_user_sessions($1::uuid, null, $2::text)', [
         id,
         'membership_removed',
       ]);
-      // Let the revoker reach the blocked state, then release the gate.
+      // Let the revoker reach its first lock request (users on old bodies, sessions on new),
+      // then take the gate's users lock — the lock that closes the AB-BA cycle on old code.
       await new Promise((resolve) => setTimeout(resolve, 500));
+      const gating = gate.query('select 1 from users u where u.id = $1::uuid for update', [id]);
+      await gating;
       await gate.query('commit');
       const result = await revoking;
       const revoked = (result.rows[0] as { revoke_user_sessions: number }).revoke_user_sessions;
