@@ -48,11 +48,22 @@ async function seedGrant(
 }
 
 async function gate(forOrg: string, operator: string): Promise<string | null> {
-  const r = await admin.query<{ live_support_grant: string | null }>(
-    'select app.live_support_grant($1::uuid, $2, $3) as live_support_grant',
-    [forOrg, operator, 'readonly'],
-  );
-  return r.rows[0]?.live_support_grant ?? null;
+  const client = await admin.connect();
+  try {
+    await client.query('begin');
+    await client.query('select set_config($1, $2, true)', ['app.organisation_id', forOrg]);
+    const r = await client.query<{ live_support_grant: string | null }>(
+      'select app.live_support_grant($1::uuid, $2, $3) as live_support_grant',
+      [forOrg, operator, 'readonly'],
+    );
+    await client.query('commit');
+    return r.rows[0]?.live_support_grant ?? null;
+  } catch (error) {
+    await client.query('rollback');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function createGrant(
@@ -166,6 +177,7 @@ describe('support grant gate hardening (0028)', () => {
     const holder = createPool({ connectionString: database.migrationUrl, max: 1 });
     try {
       await holder.query('begin');
+      await holder.query('select set_config($1, $2, true)', ['app.organisation_id', org]);
       await holder.query('select app.live_support_grant($1::uuid, $2, $3)', [
         org,
         operator,
