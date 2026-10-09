@@ -73,16 +73,16 @@ describe('effective-owner invariant (0029)', () => {
     expect(left.rows[0]?.n).toBe('1');
   });
 
-  evidenceTest('H3: deleting the organisation cascades clean', async () => {
+  evidenceTest('H3: org hard-delete is out of scope (append-only audit registry)', async () => {
     const forOrg = await tenantOrg();
     const owner = await person();
     await member(forOrg, owner);
-    await admin.query('delete from organisations where id = $1::uuid', [forOrg]);
-    const left = await admin.query<{ n: string }>(
-      'select count(*)::text as n from memberships where organisation_id = $1::uuid',
-      [forOrg],
-    );
-    expect(left.rows[0]?.n).toBe('0');
+    // Organisations carry an append-only audit-chain registry row (RESTRICT FK, no
+    // cascade): hard DELETE is refused by the FK before any membership trigger runs.
+    // Tenant offboarding is a P11 concern; the invariant's job is membership writes.
+    await expect(
+      admin.query('delete from organisations where id = $1::uuid', [forOrg]),
+    ).rejects.toThrow();
   });
 
   evidenceTest('directly deleting the last owner membership still fails', async () => {

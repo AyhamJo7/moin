@@ -108,6 +108,7 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.reject_audit_mutation': '42ea8b78a19fbe7aeb537d96a6087e14',
   'app.reject_registry_mutation': '60ee49a225936633fc8512cfa1d85049',
   'app.reject_last_owner_loss': '98d3ce225301621e000912af058b24b1',
+  'app.reject_last_owner_loss_on_user_status': 'e8b5d788c2f88461563569ab6c35213c',
   'app.set_user_status': 'c087ba790b5a24501e25aaf488c3149e',
   'app.revoke_member_sessions': 'b48a5d42fdbb17ae72377ef873e27067',
   'app.accept_invitation': 'a1d0a2c50a4245314119d580fcd25e18',
@@ -301,6 +302,13 @@ const APPROVED_DEFINERS: Readonly<
   },
   // Nobody executes it: the empty grantee list is the assertion. Runs only as the table trigger.
   'app.reject_last_owner_loss': {
+    arguments: '',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: [],
+  },
+  // Nobody executes it: the empty grantee list is the assertion. Runs only as the users-table trigger.
+  'app.reject_last_owner_loss_on_user_status': {
     arguments: '',
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
@@ -608,6 +616,18 @@ const LAST_OWNER_TRIGGER = {
   trigger: 'memberships_last_owner',
   fn: 'app.reject_last_owner_loss()',
   triggerType: 25, // row (1) + update (16) + delete (8); AFTER, so no before bit (2)
+} as const;
+
+/**
+ * The companion that fires the effective-owner check on user-status flips (P06.07
+ * H1, second half): disabling the last owner's user row never touches memberships,
+ * so the memberships trigger alone never runs. Same no-execute assertion.
+ */
+const LAST_OWNER_USER_TRIGGER = {
+  table: 'users',
+  trigger: 'users_last_owner',
+  fn: 'app.reject_last_owner_loss_on_user_status()',
+  triggerType: 17, // row (1) + update (16); AFTER, so no before bit (2)
 } as const;
 
 /**
@@ -1090,6 +1110,30 @@ export async function inspect(
             'the trigger that keeps at least one active owner is absent, disabled, not ' +
             'ENABLE ALWAYS (so replica mode skips it), covers different events, or points at a ' +
             'different function, so the last owner could be removed, demoted or disabled.',
+        });
+      }
+    }
+
+    if (present.has(LAST_OWNER_USER_TRIGGER.table)) {
+      const triggers = (
+        await pool.query<AuditTriggerRow>(AUDIT_TRIGGER_QUERY, [
+          LAST_OWNER_USER_TRIGGER.table,
+          LAST_OWNER_USER_TRIGGER.fn,
+        ])
+      ).rows;
+      const guard = triggers.find((trigger) => trigger.name === LAST_OWNER_USER_TRIGGER.trigger);
+      if (
+        guard?.enabled !== TRIGGER_ALWAYS ||
+        guard.trigger_type !== LAST_OWNER_USER_TRIGGER.triggerType ||
+        !guard.correct_function
+      ) {
+        findings.push({
+          rule: 'last-owner-user-trigger-unsafe',
+          subject: LAST_OWNER_USER_TRIGGER.table,
+          detail:
+            'the trigger that fires the effective-owner check on user-status flips is absent, ' +
+            'disabled, not ENABLE ALWAYS, covers different events, or points at a different ' +
+            'function, so disabling the last active owner user would strand the tenant.',
         });
       }
     }
