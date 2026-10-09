@@ -102,7 +102,7 @@ BEGIN
       AND g.expires_at > clock_timestamp();
   IF v_live >= 5 THEN
     RAISE EXCEPTION 'grant quota exceeded for tenant'
-      USING ERRCODE = 'grant_quota_exceeded';
+      USING ERRCODE = 'P0001';
   END IF;
   -- H1 (second half): supersede prior live grants for the same operator+scope so no
   -- stale row can shadow the new one.

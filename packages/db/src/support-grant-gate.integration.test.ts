@@ -19,7 +19,12 @@ async function tenantOrg(): Promise<string> {
   return id;
 }
 
-async function seedGrant(forOrg: string, operator: string, hoursFromNow: number, createdAgoH: number) {
+async function seedGrant(
+  forOrg: string,
+  operator: string,
+  hoursFromNow: number,
+  createdAgoH: number,
+) {
   const id = randomUUID();
   const client = await admin.connect();
   try {
@@ -50,7 +55,11 @@ async function gate(forOrg: string, operator: string): Promise<string | null> {
   return r.rows[0]?.live_support_grant ?? null;
 }
 
-async function createGrant(forOrg: string, operator: string, reason = 'grant reason here'): Promise<string> {
+async function createGrant(
+  forOrg: string,
+  operator: string,
+  reason = 'grant reason here',
+): Promise<string> {
   const client = await admin.connect();
   try {
     await client.query('begin');
@@ -132,6 +141,7 @@ describe('support grant gate hardening (0028)', () => {
   evidenceTest('M1: 6th concurrent live grant refuses', async () => {
     const org2 = await tenantOrg();
     for (let i = 0; i < 5; i++) {
+      // eslint-disable-next-line no-restricted-syntax -- test fixture names only; values are parameterised below.
       await createGrant(org2, `cap-op-${i}`, `grant reason number ${i}`);
     }
     const client = await admin.connect();
