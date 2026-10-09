@@ -108,42 +108,13 @@ export class RecoveryController {
     if (parsed.data.userId === scope.actorId) {
       return fail(reply, 409, '/problems/recovery-rejected', 'Recovery action rejected');
     }
-    const outcome: Outcome = await this.members.inScope(async (client) => {
-      // HIGH1: the membership must be in THIS organisation — the guard-resolved tenant, never
-      // a caller claim. A user id from another tenant has no row here: unreachable, 404, and
-      // the setter (which touches only the account row) is never reached for them.
-      const target = await client
-        .query<{ role: string }>(
-          `select m.role from memberships m
-             where m.organisation_id = $1::uuid and m.user_id = $2::uuid for update`,
-          [scope.organisationId, parsed.data.userId],
-        )
-        .then((result) => result.rows[0]);
-      if (target === undefined) return 'missing';
-      try {
-        requireCapability(
-          scope.role,
-          scope.permissions,
-          target.role === 'owner' ? 'users:manage-owners' : 'users:manage',
-        );
-      } catch {
-        return target.role === 'owner' ? 'missing' : 'denied';
-      }
-      // One call: status flip + revocation with the reset reason + audit, all inside the
-      // setter's transaction — no second connection, no cross-connection wait on the user row.
-      const settled = await client
-        .query<{ changed: boolean; revoked: number }>(
-          'select * from app.set_user_status($1::uuid, $2::text, $3::text, $4::uuid, $5::uuid)',
-          [parsed.data.userId, 'disabled', parsed.data.reason, scope.actorId, randomUUID()],
-        )
-        .then((result) => result.rows[0]);
-      if (!settled?.changed) return 'missing';
-      const revoked = settled.revoked;
-      this.logger.info(
-        { outcome: 'account_disabled', revoked },
-        'disabled an account and revoked its sessions',
-      );
-      return 'done';
+    const outcome: Outcome = await this.members.disableAccount({
+      organisationId: scope.organisationId,
+      actorId: scope.actorId,
+      targetUserId: parsed.data.userId,
+      role: scope.role,
+      permissions: scope.permissions,
+      reason: parsed.data.reason,
     });
     if (outcome === 'done') return { disabled: true, containment: 'partial' as const };
     // Missing, denied on a non-owner, and owner-existence share one 404 (P06.07.03).

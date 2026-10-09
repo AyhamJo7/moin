@@ -13,6 +13,9 @@ import { type TenantClient, withTenant } from '@moin/db';
 import type { Pool } from '@moin/db/pool';
 import { randomUUID } from 'node:crypto';
 import { currentRequestContext } from '@moin/observability';
+import type { Logger } from '@moin/observability';
+import { LOGGER } from '../../observability/logger.module.ts';
+import { requireCapability } from '../identity-access/application/authorization.ts';
 import { TENANT_POOL } from './tenant-pool.module.ts';
 import { SUPPORT_POOL } from './support-pool.module.ts';
 import { currentTenantScope } from './tenant-scope.ts';
@@ -40,6 +43,7 @@ export class MemberQueries {
   constructor(
     @Inject(TENANT_POOL) private readonly dbPool: Pool | null,
     @Inject(SUPPORT_POOL) private readonly supportDbPool: Pool | null,
+    @Inject(LOGGER) private readonly logger: Logger,
   ) {}
 
   /** The raw pool, for handlers that open their own `withTenant` on the guard scope. */
@@ -79,5 +83,51 @@ export class MemberQueries {
       throw new Error('no tenant pool');
     }
     return withTenant(this.dbPool, organisationId, fn, { correlationId: auditCorrelationId() });
+  }
+
+  /** Disable an account with revocation + audit in one commit (P06.09.02, application service).
+   *
+   * Moved out of RecoveryController (arch-M1): the transaction orchestration lives here so
+   * operator workflows arriving later share one checked path instead of duplicating it.
+   * Returns 'done' | 'missing' | 'denied'; the controller maps to HTTP shapes. */
+  async disableAccount(input: {
+    organisationId: string;
+    actorId: string;
+    targetUserId: string;
+    role: string;
+    permissions: readonly string[];
+    reason: string;
+  }): Promise<'done' | 'missing' | 'denied'> {
+    return this.inScope(async (client) => {
+      const target = await client
+        .query<{ role: string }>(
+          `select m.role from memberships m
+             where m.organisation_id = $1::uuid and m.user_id = $2::uuid for update`,
+          [input.organisationId, input.targetUserId],
+        )
+        .then((result) => result.rows[0]);
+      if (target === undefined) return 'missing';
+      try {
+        requireCapability(
+          input.role,
+          input.permissions,
+          target.role === 'owner' ? 'users:manage-owners' : 'users:manage',
+        );
+      } catch {
+        return target.role === 'owner' ? 'missing' : 'denied';
+      }
+      const settled = await client
+        .query<{ changed: boolean; revoked: number }>(
+          'select * from app.set_user_status($1::uuid, $2::text, $3::text, $4::uuid, $5::uuid)',
+          [input.targetUserId, 'disabled', input.reason, input.actorId, randomUUID()],
+        )
+        .then((result) => result.rows[0]);
+      if (!settled?.changed) return 'missing';
+      this.logger.info(
+        { outcome: 'account_disabled', revoked: settled.revoked },
+        'disabled an account and revoked its sessions',
+      );
+      return 'done';
+    });
   }
 }
