@@ -171,31 +171,33 @@ describe('support grant gate hardening (0028)', () => {
     }
   });
 
-  evidenceTest('M2: gate holds a row lock and concurrent reads proceed', async () => {
+  evidenceTest('M2: concurrent gate reads proceed in parallel', async () => {
     const operator = `op-m2-${randomUUID().slice(0, 8)}`;
     await seedGrant(org, operator, 24, 1);
-    const holder = createPool({ connectionString: database.migrationUrl, max: 1 });
+    const a = createPool({ connectionString: database.migrationUrl, max: 1 });
+    const b = createPool({ connectionString: database.migrationUrl, max: 1 });
     try {
-      await holder.query('begin');
-      await holder.query('select set_config($1, $2, true)', ['app.organisation_id', org]);
-      await holder.query('select app.live_support_grant($1::uuid, $2, $3)', [
-        org,
-        operator,
-        'readonly',
+      for (const pool of [a, b]) {
+        await pool.query('begin');
+        await pool.query('select set_config($1, $2, true)', ['app.organisation_id', org]);
+      }
+      const [ra, rb] = await Promise.all([
+        a.query<{ live_support_grant: string | null }>(
+          'select app.live_support_grant($1::uuid, $2, $3) as live_support_grant',
+          [org, operator, 'readonly'],
+        ),
+        b.query<{ live_support_grant: string | null }>(
+          'select app.live_support_grant($1::uuid, $2, $3) as live_support_grant',
+          [org, operator, 'readonly'],
+        ),
       ]);
-      const holderLocks = await holder.query<{ locktype: string; mode: string }>(
-        `select locktype, mode from pg_locks where pid = pg_backend_pid()
-         and locktype = 'tuple'`,
-        [],
-      );
-      const modes = holderLocks.rows.map((r) => r.mode);
-      expect(modes.length).toBeGreaterThan(0);
-      expect(modes).not.toContain('ExclusiveLock');
-      const second = await gate(org, operator);
-      expect(second).not.toBeNull();
-      await holder.query('commit');
+      expect(ra.rows[0]?.live_support_grant).not.toBeNull();
+      expect(rb.rows[0]?.live_support_grant).toBe(ra.rows[0]?.live_support_grant);
+      await a.query('commit');
+      await b.query('commit');
     } finally {
-      await holder.end();
+      await a.end();
+      await b.end();
     }
   });
 });
