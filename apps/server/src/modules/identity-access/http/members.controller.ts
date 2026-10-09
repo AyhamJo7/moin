@@ -89,6 +89,7 @@ export class MembersController {
 
   @Post('invite')
   @Require('users:manage')
+  @UseGuards(RequireStepUpGuard)
   @HttpCode(201)
   async invite(@Body() raw: unknown, @Res({ passthrough: true }) reply: FastifyReply) {
     const parsed = inviteBody.safeParse(raw);
@@ -143,13 +144,16 @@ export class MembersController {
 
   @Post('invitations/:id/revoke')
   @Require('users:manage')
+  @UseGuards(RequireStepUpGuard)
   @HttpCode(200)
   async revokeInvite(@Param('id') id: string, @Res({ passthrough: true }) reply: FastifyReply) {
     if (!UUID.test(id)) {
       return fail(reply, 404, '/problems/not-found', 'Not found');
     }
+    const scope = currentTenantScope();
+    if (scope === undefined) throw new Error('no tenant scope');
     const revoked = await this.members.inScope((client) =>
-      revokeInvitation(client, id, (done) =>
+      revokeInvitation(client, id, scope.role, scope.permissions, (done) =>
         done
           ? appendAuditEvent(client, {
               source: 'api',

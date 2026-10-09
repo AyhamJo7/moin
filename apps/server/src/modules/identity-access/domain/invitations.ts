@@ -174,11 +174,34 @@ export async function acceptInvitation(
  * invitation must belong to the caller's organisation (RLS via withTenant); already-consumed
  * rows stay consumed — revocation never un-accepts.
  */
+import { requireCapability } from '../application/authorization.ts';
+
 export async function revokeInvitation(
   client: Pick<TenantClient, 'query'>,
   invitationId: string,
+  callerRole: string,
+  callerPermissions: readonly string[],
   audit: (revoked: boolean) => Promise<void>,
 ): Promise<boolean> {
+  const locked = await client.query<{ role: string }>(
+    `select role from invitations where id = $1::uuid for update`,
+    [invitationId],
+  );
+  const row = locked.rows[0];
+  if (row === undefined) {
+    await audit(false);
+    return false;
+  }
+  try {
+    requireCapability(
+      callerRole,
+      callerPermissions,
+      row.role === 'owner' ? 'users:manage-owners' : 'users:manage',
+    );
+  } catch {
+    await audit(false);
+    return false;
+  }
   const result = await client.query<{ n: number }>(
     `update invitations set revoked_at = clock_timestamp()
       where id = $1::uuid and accepted_at is null and revoked_at is null
