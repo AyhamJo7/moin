@@ -5,7 +5,6 @@
  * resolution ambiguous — the resolver records a candidate and links nobody, so the attacker's
  * number can never steal the victim's contact. CLIR (empty/withheld) resolves to `none`.
  */
-import { randomUUID } from 'node:crypto';
 import { createTestDatabase, evidenceTest, type TestDatabase } from '@moin/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { listAuditEvents } from './audit.ts';
@@ -244,11 +243,10 @@ describe('identity resolution', () => {
   evidenceTest(
     'concurrent ambiguous resolutions converge on one candidate and one task',
     async () => {
-      // No index-drop here: the legacy test above restores the index, and this race needs the
-      // real constraint to serialise the two INSERTs. Ambiguity without a second verified row is
-      // built by resolving through a kind the test controls: two unverified rows cannot collide,
-      // so instead race two resolutions of a value one contact owns twice... simpler: the race is
-      // on the candidate row itself — both see ambiguity via direct recordCandidate calls.
+      // Same legacy scaffolding as the test above (index dropped, second verified same-value
+      // row), but the race goes through the real resolver: two concurrent resolveCaller calls
+      // against the ambiguous value must return the same candidateId, one open candidate row,
+      // tasks delta 1, and both verdicts rule none with null contact.
       const contactA = await withTenant(app, ORG_A, (client) =>
         createContact(client, {
           displayName: 'Race A',
@@ -268,44 +266,24 @@ describe('identity resolution', () => {
       await withTenant(app, ORG_A, (client) =>
         verifyContactMethod(client, contactA.id, methodsA[0]?.id ?? '', 'migrated'),
       );
-      // Direct ambiguity injection: two verified hits on one value, bypassing the unique index
-      // via a deferred-constraint transaction is impossible — so simulate the resolver race at
-      // the row level: both transactions attempt the candidate INSERT for the same (kind, value)
-      // with distinct contact pairs; the unique index admits exactly one.
+      await admin.query(`drop index contact_methods_verified_unique_idx`);
+      await admin.query(
+        `update contact_methods set verification = 'verified', verified_via = 'migrated',
+           verified_at = now(), value = '+4930777010' where contact_id = $1`,
+        [contactB.id],
+      );
       const tasksBefore = await withTenant(app, ORG_A, (client) =>
         client.query<{ n: string }>(`select count(*)::text as n from tasks`),
       );
-      const attempt = () =>
-        withTenant(app, ORG_A, async (client) => {
-          const taskId = randomUUID();
-          await client.query(
-            `insert into tasks (organisation_id, id, title, status)
-           values (app.current_org(), $1, 'Dubletten prüfen', 'open')`,
-            [taskId],
-          );
-          const inserted = await client.query<{ id: string }>(
-            `insert into duplicate_candidates
-             (organisation_id, id, contact_a_id, contact_b_id, kind, value, status, review_task_id)
-           values (app.current_org(), gen_random_uuid(), $1, $2, 'phone', '+4930777010', 'open', $3)
-           on conflict (organisation_id, kind, value, status) do update
-             set review_task_id = duplicate_candidates.review_task_id
-           returning id::text`,
-            [contactA.id, contactB.id, taskId],
-          );
-          const id = inserted.rows[0]?.id;
-          if (id === undefined) throw new Error('no candidate id');
-          const owner = await client.query<{ n: string }>(
-            `select count(*)::text as n from duplicate_candidates where id = $1 and review_task_id = $2`,
-            [id, taskId],
-          );
-          if (owner.rows[0]?.n === '0') {
-            await client.query(`delete from tasks where id = $1`, [taskId]);
-          }
-          return id;
-        });
-      const [one, two] = await Promise.all([attempt(), attempt()]);
       try {
-        expect(one).toBe(two);
+        const [one, two] = await Promise.all([
+          withTenant(app, ORG_A, (client) => resolveCaller(client, 'call-race-1', '+49 30 777010')),
+          withTenant(app, ORG_A, (client) => resolveCaller(client, 'call-race-2', '+49 30 777010')),
+        ]);
+        expect(one.candidateId).not.toBeNull();
+        expect(two.candidateId).toBe(one.candidateId);
+        expect(one).toMatchObject({ rule: 'none', contactId: null });
+        expect(two).toMatchObject({ rule: 'none', contactId: null });
         const open = await withTenant(app, ORG_A, (client) =>
           client.query<{ n: string }>(
             `select count(*)::text as n from duplicate_candidates where value = '+4930777010' and status = 'open'`,
@@ -317,7 +295,11 @@ describe('identity resolution', () => {
         );
         expect(Number(tasksAfter.rows[0]?.n) - Number(tasksBefore.rows[0]?.n)).toBe(1);
       } finally {
-        await admin.query(`delete from duplicate_candidates where value = '+4930777010'`);
+        await admin.query(`delete from contact_methods where contact_id = $1`, [contactB.id]);
+        await admin.query(
+          `create unique index contact_methods_verified_unique_idx
+           on contact_methods (organisation_id, kind, value) where verification = 'verified'`,
+        );
       }
     },
   );
