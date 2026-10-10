@@ -284,5 +284,31 @@ describe('governance', () => {
         recordAction(client, { kind: 'reply', correlationId: 'not-a-uuid' }),
       ),
     ).rejects.toBeInstanceOf(RangeError);
+    // Malformed ambient correlation degrades to NULL, never a 22P02 abort of the business txn.
+    const degraded = await withTenant(
+      app,
+      ORG_A,
+      (client) => recordAction(client, { kind: 'reply' }),
+      { correlationId: 'not-a-uuid' },
+    );
+    expect(degraded.correlationId).toBeNull();
+  });
+
+  evidenceTest('run start and finish audits carry the stored run correlation', async () => {
+    const run = await withTenant(app, ORG_A, (client) => startRun(client, {}));
+    const done = await withTenant(app, ORG_A, (client) =>
+      finishRun(client, run.id, 'succeeded', run.version),
+    );
+    await withTenant(app, ORG_A, async (client) => {
+      const starts = await listAuditEvents(client, {
+        correlationId: run.correlationId,
+      });
+      expect(starts.map((e) => e.operation)).toContain('run.start');
+      expect(starts.find((e) => e.operation === 'run.start')?.target_id).toBe(run.id);
+      const finishes = await listAuditEvents(client, {
+        correlationId: done.correlationId,
+      });
+      expect(finishes.map((e) => e.operation)).toContain('run.finish');
+    });
   });
 });

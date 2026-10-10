@@ -57,16 +57,17 @@ const PROPOSAL_MARKER: Record<ProposalKind, number> = {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * Explicit correlation wins, ambient `withTenant` fills, NULL when neither. The explicit value
- * is validated (a 22P02 invalid-uuid would abort the business txn); the ambient one already
- * passed through the audit writer's own null-out, so it is used as-is.
+ * Explicit correlation wins, ambient `withTenant` fills, NULL when neither. Both sources are
+ * validated (a 22P02 invalid-uuid would abort the business txn); the audit writer null-outs
+ * malformed values the same way, so the two paths agree.
  */
 function resolveCorrelation(explicit: string | undefined): string | null {
   if (explicit !== undefined) {
     if (!UUID_RE.test(explicit)) throw new RangeError('correlation must be a uuid');
     return explicit;
   }
-  return currentTenant()?.correlationId ?? null;
+  const ambient = currentTenant()?.correlationId;
+  return ambient !== undefined && UUID_RE.test(ambient) ? ambient : null;
 }
 
 export interface WorkflowRun {
@@ -141,6 +142,7 @@ export async function startRun(
     targetId: id,
     argsSanitized: { has_conversation: input.conversationId === undefined ? 0 : 1 },
     result: 'succeeded',
+    correlationId: row.correlation_id,
   });
   return {
     id: row.id,
@@ -194,6 +196,7 @@ export async function finishRun(
     targetId: runId,
     argsSanitized: { to_status: status === 'succeeded' ? 1 : status === 'failed' ? 2 : 3 },
     result: 'succeeded',
+    correlationId: next.correlation_id,
   });
   return {
     id: next.id,
