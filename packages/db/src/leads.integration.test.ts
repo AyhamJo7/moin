@@ -5,6 +5,7 @@ import { createTestDatabase, evidenceTest, type TestDatabase } from '@moin/testi
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { listAuditEvents } from './audit.ts';
 import { createLead, getLead, listLeads, setLeadStatus, VersionConflictError } from './leads.ts';
+import type { TenantClient } from './tenant.ts';
 import { createPool, type Pool } from './pool.ts';
 import { withTenant } from './tenant.ts';
 
@@ -242,13 +243,11 @@ describe('leads', () => {
   });
 
   evidenceTest('locked re-read observes a concurrent status move: no heal', async () => {
-    // Guard-branch test: the heal decision reads status under the row lock, so a status move
-    // committed before the lock is honoured. Setup commits needs_action → contacted first;
-    // getLead then locks, re-reads contacted, and must return without healing. Without the
-    // locked re-check (healing on the pre-lock snapshot), this test creates a task.
-    // A txn-snapshot variant would be stronger but withTenant owns its transaction boundaries;
-    // raw-client snapshots cannot run getLead (it expects a tenant client), so the committed
-    // variant plus guard-removal sensitivity below is the honest coverage.
+    // Seam test for the locked re-read guard: getLead snapshots needs_action, then pauses at
+    // the FOR UPDATE gate while a second transaction moves the lead to contacted and commits.
+    // On resume the locked re-read sees contacted and must return without healing. The seam
+    // only pauses — it never changes query semantics — so a pass proves the re-read ran
+    // post-move. Without the guard (healing on the pre-lock snapshot) this test heals.
     const lead = await withTenant(app, ORG_A, (client) => createLead(client, { title: 'Guard' }));
     const moved = await withTenant(app, ORG_A, (client) =>
       setLeadStatus(client, lead.id, 'needs_action', lead.version),
@@ -257,21 +256,50 @@ describe('leads', () => {
     if (linkedTask === null) throw new Error('no task linked');
     // Kill the link so the heal path would trigger if status still qualified.
     await admin.query(`delete from tasks where id = $1`, [linkedTask]);
-    // Move out while the link is dead: contacted with a nulled task link.
+    let paused = false;
+    let gateResolve: () => void = () => {
+      throw new Error('gate used before initialisation');
+    };
+    const gate = new Promise<void>((resolve) => {
+      gateResolve = resolve;
+    });
+    const gateTimeout = (ms: number): Promise<void> =>
+      new Promise((_, reject) => {
+        setTimeout(() => {
+          reject(new Error('FOR UPDATE gate timed out'));
+        }, ms);
+      });
+    const { getLead } = await import('./leads.ts');
+    const readPromise = withTenant(app, ORG_A, async (client) => {
+      let released = false;
+      const pausing = {
+        query: async (sql: string, params?: readonly unknown[]) => {
+          if (sql.includes('for update') && !released) {
+            released = true;
+            paused = true;
+            await Promise.race([gate, gateTimeout(10_000)]);
+          }
+          return client.query(sql, params);
+        },
+      };
+      return getLead(pausing as unknown as TenantClient, lead.id);
+    });
+    // Wait for the pause, then move out in a separate committed transaction.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- mutated by the racing getLead; the linter sees only the initial false.
+    for (let i = 0; i < 100 && !paused; i += 1) {
+      await new Promise((r) => {
+        setTimeout(r, 50);
+      });
+    }
+    expect(paused).toBe(true);
     await withTenant(app, ORG_A, (client) =>
       setLeadStatus(client, lead.id, 'contacted', moved.version),
     );
     const tasksBefore = await withTenant(app, ORG_A, (client) =>
       client.query<{ n: string }>(`select count(*)::text as n from tasks`),
     );
-    // getLead locks the row (FOR UPDATE) and re-reads status under the lock: contacted,
-    // so the guard returns without healing — no task, no history, no audit.
-    // Sensitivity note: this committed variant passes even with the guard removed (the initial
-    // status check also sees contacted) — it pins the no-heal CONTRACT, not the branch. The
-    // branch itself is covered by code review of the three-line re-check; a true snapshot race
-    // would need manual txn control that withTenant does not offer (see comment above).
-    const { getLead } = await import('./leads.ts');
-    const read = await withTenant(app, ORG_A, (client) => getLead(client, lead.id));
+    gateResolve();
+    const read = await readPromise;
     expect(read.status).toBe('contacted');
     expect(read.taskId).toBeNull();
     const tasksAfter = await withTenant(app, ORG_A, (client) =>
@@ -283,8 +311,6 @@ describe('leads', () => {
         lead.id,
       ]),
     );
-    // Entry linkage only — the dead link was deleted with its task row (CASCADE on task delete
-    // removes the history row), and no heal wrote a second one.
     expect(history.rows[0]?.n).toBe('0');
   });
 });
