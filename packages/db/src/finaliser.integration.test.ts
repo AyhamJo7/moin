@@ -5,10 +5,15 @@
 import { createTestDatabase, evidenceTest, type TestDatabase } from '@moin/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { listAuditEvents } from './audit.ts';
-import { ingestCall, recordOutcome, startConversation } from './conversations.ts';
+import {
+  advanceCallStatus,
+  ingestCall,
+  recordOutcome,
+  startConversation,
+} from './conversations.ts';
 import { finaliseInteraction, orphanSeverity, reconcileOrphans } from './finaliser.ts';
 import { createPool, type Pool } from './pool.ts';
-import { listOpenTasks } from './tasks.ts';
+import { completeTask, listOpenTasks } from './tasks.ts';
 import { withTenant } from './tenant.ts';
 
 const ORG_A = '11111111-1111-4111-8111-111111111111';
@@ -105,10 +110,16 @@ describe('finaliser', () => {
         ingestCall(client, { providerCallSid: 'CA-killed-1', fromNumber: '+4930123456' }),
       );
       expect(ingested.created).toBe(true);
-      // Age it past the cutoff without touching the service (the process died, nothing updated it).
+      // Age both legs past the cutoff (the process died: no call advance, no conversation
+      // touch — the GREATEST clock reads old on both sides).
       await admin.query(
         `update conversations set updated_at = clock_timestamp() - make_interval(mins => 11)
        where id = $1`,
+        [ingested.call.conversationId],
+      );
+      await admin.query(
+        `update calls set updated_at = clock_timestamp() - make_interval(mins => 11)
+       where conversation_id = $1`,
         [ingested.call.conversationId],
       );
       const first = await reconcileOrphans(app, { olderThanMinutes: 10 });
@@ -179,5 +190,78 @@ describe('finaliser', () => {
     expect(orphanSeverity(new Set(), convo)).toBe('SEV2');
     expect(orphanSeverity(new Set([convo]), convo)).toBe('SEV1');
     expect(orphanSeverity(new Set(['bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb']), convo)).toBe('SEV2');
+  });
+
+  evidenceTest('closed fallback is repaired with a fresh open task', async () => {
+    const convo = await withTenant(app, ORG_A, (client) =>
+      startConversation(client, { channel: 'call' }),
+    );
+    const first = await withTenant(app, ORG_A, (client) => finaliseInteraction(client, convo.id));
+    expect(first.verdict).toBe('fallback-created');
+    // Close the fallback through the strict chain (open → … → done).
+    await withTenant(app, ORG_A, (client) => completeTask(client, first.taskId ?? '', 1));
+    const repaired = await withTenant(app, ORG_A, (client) =>
+      finaliseInteraction(client, convo.id),
+    );
+    expect(repaired.verdict).toBe('fallback-created');
+    expect(repaired.taskId).not.toBeNull();
+    expect(repaired.taskId).not.toBe(first.taskId);
+    const tasks = await withTenant(app, ORG_A, (client) => listOpenTasks(client));
+    const open = tasks.filter((t) => t.conversationId === convo.id);
+    expect(open).toHaveLength(1);
+    expect(open[0]?.id).toBe(repaired.taskId);
+  });
+
+  evidenceTest('live call activity keeps the conversation out of the orphan claim', async () => {
+    const ingested = await withTenant(app, ORG_A, (client) =>
+      ingestCall(client, { providerCallSid: 'CA-live-1', fromNumber: '+4930123456' }),
+    );
+    // Both legs aged (a stall with no activity anywhere), then the call advances — the
+    // GREATEST(call, conversation) clock is fresh again even though nothing touched
+    // conversations.updated_at directly.
+    await admin.query(
+      `update conversations set updated_at = clock_timestamp() - make_interval(mins => 11)
+       where id = $1`,
+      [ingested.call.conversationId],
+    );
+    await admin.query(
+      `update calls set updated_at = clock_timestamp() - make_interval(mins => 11)
+       where conversation_id = $1`,
+      [ingested.call.conversationId],
+    );
+    await withTenant(app, ORG_A, (client) =>
+      advanceCallStatus(client, ingested.call.id, 'in_progress'),
+    );
+    const report = await reconcileOrphans(app, { olderThanMinutes: 10 });
+    expect(report.orphans.map((o) => o.conversationId)).not.toContain(ingested.call.conversationId);
+  });
+
+  evidenceTest('throwing onOrphan neither rolls back work nor breaks the report', async () => {
+    const one = await withTenant(app, ORG_A, (client) =>
+      startConversation(client, { channel: 'call' }),
+    );
+    const two = await withTenant(app, ORG_A, (client) =>
+      startConversation(client, { channel: 'call' }),
+    );
+    await admin.query(
+      `update conversations set updated_at = clock_timestamp() - make_interval(mins => 11)
+       where id in ($1, $2)`,
+      [one.id, two.id],
+    );
+    let calls = 0;
+    const report = await reconcileOrphans(app, {
+      olderThanMinutes: 10,
+      onOrphan: () => {
+        calls += 1;
+        if (calls === 1) throw new Error('alarm wiring down');
+      },
+    });
+    expect(report.orphans.map((o) => o.conversationId)).toEqual(
+      expect.arrayContaining([one.id, two.id]),
+    );
+    expect(report.deliveryErrors).toBe(1);
+    const tasks = await withTenant(app, ORG_A, (client) => listOpenTasks(client));
+    expect(tasks.filter((t) => t.conversationId === one.id)).toHaveLength(1);
+    expect(tasks.filter((t) => t.conversationId === two.id)).toHaveLength(1);
   });
 });

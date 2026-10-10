@@ -19,6 +19,7 @@
  * audit-chain verifier's `onBreak`). Metric name the wiring must emit: `interactions.orphaned`.
  */
 
+import { randomUUID } from 'node:crypto';
 import { appendAuditEvent } from './audit.ts';
 import { getOutcome } from './conversations.ts';
 import { createTask } from './tasks.ts';
@@ -40,6 +41,12 @@ const VERDICT_MARKER: Record<FinaliseVerdict, number> = {
 
 const FALLBACK_TITLE = 'Rückruf – Anruf ohne Ergebnis';
 
+/** Follow-up title when the deterministic fallback row is already closed. */
+const FOLLOW_UP_TITLE = 'Erneuter Rückruf – vorherige Aufgabe geschlossen';
+
+/** Task rungs that cover an interaction (mirrors the open-task claim predicate). */
+const OPEN_TASK_STATUSES: ReadonlySet<string> = new Set(['open', 'in_progress', 'waiting']);
+
 function fallbackKey(conversationId: string): string {
   return `finaliser-fallback:${conversationId}`;
 }
@@ -60,6 +67,11 @@ async function openTaskExists(client: TenantClient, conversationId: string): Pro
  * idempotency key, so any interleaving (finaliser vs reconciler, double run) converges: the
  * loser's insert returns the winner's row. A conversation whose task link was severed by
  * erasure (SET NULL) is finalised again — a repaired task is better than a lost interaction.
+ *
+ * Closed-fallback repair: the idempotent create can return an already-closed fallback (the
+ * task was closed after a previous finalise, so no open task exists now). Returning it
+ * would report fallback-created while the interaction is still uncovered, so a closed
+ * return mints a fresh follow-up task under a new random key and returns that instead.
  */
 export async function finaliseInteraction(
   client: TenantClient,
@@ -96,6 +108,28 @@ export async function finaliseInteraction(
     conversationId,
     idempotencyKey: fallbackKey(conversationId),
   });
+  if (!OPEN_TASK_STATUSES.has(task.status)) {
+    // The deterministic row is closed: mint a fresh follow-up under a new random key so
+    // the interaction is covered again. The random suffix is per attempt by design — a
+    // deterministic key would return this same closed row forever. Type differs so the
+    // one-system-task-per-interaction-and-type unique holds alongside the closed row.
+    const followUp = await createTask(client, {
+      title: FOLLOW_UP_TITLE,
+      type: 'follow_up',
+      priority: 'high',
+      conversationId,
+      idempotencyKey: `${fallbackKey(conversationId)}:retry:${randomUUID()}`,
+    });
+    await appendAuditEvent(client, {
+      source: 'api',
+      operation: 'interaction.finalise',
+      targetKind: 'conversation',
+      targetId: conversationId,
+      argsSanitized: { verdict: VERDICT_MARKER['fallback-created'] },
+      result: 'succeeded',
+    });
+    return { conversationId, verdict: 'fallback-created', taskId: followUp.id };
+  }
   await appendAuditEvent(client, {
     source: 'api',
     operation: 'interaction.finalise',
@@ -142,6 +176,8 @@ export interface ReconcileReport {
   /** Orphaned interactions found (fallback-created or already-finalised-by-racer). */
   readonly orphaned: number;
   readonly orphans: readonly OrphanFinalised[];
+  /** onOrphan deliveries that threw after commit. Persisted work is intact; wiring must retry. */
+  readonly deliveryErrors: number;
 }
 
 export interface ReconcileOrphansOptions {
@@ -161,10 +197,20 @@ async function claimTenantOrphans(
   client: TenantClient,
   olderThanMinutes: number,
 ): Promise<string[]> {
+  // The age clock is the latest activity on EITHER leg: call advances touch only
+  // `calls.updated_at`, so a conversation whose call just moved must not read as orphaned
+  // because `conversations.updated_at` sat still (query-side GREATEST — no P07.05 touch).
   const found = await client.query<{ id: string }>(
     `select c.id::text as id from conversations c
      where c.status in ('open', 'needs_action')
-       and c.updated_at <= clock_timestamp() - make_interval(mins => $1)
+       and greatest(
+         c.updated_at,
+         coalesce(
+           (select max(k.updated_at) from calls k
+            where k.organisation_id = c.organisation_id and k.conversation_id = c.id),
+           c.updated_at
+         )
+       ) <= clock_timestamp() - make_interval(mins => $1)
        and not exists (
          select 1 from interaction_outcomes o
          where o.organisation_id = c.organisation_id and o.conversation_id = c.id
@@ -208,6 +254,10 @@ export async function reconcileOrphans(
   let tenants = 0;
   let finalised = 0;
   let failed = 0;
+  let deliveryErrors = 0;
+  // Callbacks collected in-txn but delivered only after commit: invoking onOrphan inside
+  // the tenant transaction would roll back the finalisations when the callback throws.
+  const pendingDelivery: OrphanFinalised[] = [];
   let after = '0';
   for (;;) {
     const page = await claimTenantPage(pool, pageSize, after, highWater);
@@ -226,7 +276,7 @@ export async function reconcileOrphans(
               verdict: done.verdict,
             };
             orphans.push(orphan);
-            options.onOrphan?.(orphan);
+            pendingDelivery.push(orphan);
           }
         });
       } catch {
@@ -235,7 +285,15 @@ export async function reconcileOrphans(
     }
     if (page.tenants.length < pageSize) break;
   }
-  return { tenants, finalised, failed, orphaned: orphans.length, orphans };
+  // Delivered after every commit: a throwing callback is counted, never rolled back.
+  for (const orphan of pendingDelivery) {
+    try {
+      options.onOrphan?.(orphan);
+    } catch {
+      deliveryErrors += 1;
+    }
+  }
+  return { tenants, finalised, failed, orphaned: orphans.length, orphans, deliveryErrors };
 }
 
 async function registerHighWater(pool: Pool): Promise<string> {
