@@ -29,7 +29,7 @@ CREATE TABLE conversations (
   created_at      timestamptz NOT NULL DEFAULT now(),
   updated_at      timestamptz NOT NULL DEFAULT now(),
   UNIQUE (organisation_id, id),
-  FOREIGN KEY (organisation_id, contact_id) REFERENCES contacts (organisation_id, id) ON DELETE SET NULL
+  FOREIGN KEY (organisation_id, contact_id) REFERENCES contacts (organisation_id, id) ON DELETE CASCADE
 );
 
 CREATE TABLE calls (
@@ -56,7 +56,7 @@ CREATE TABLE calls (
   UNIQUE (organisation_id, id),
   UNIQUE (organisation_id, provider_call_sid),
   FOREIGN KEY (organisation_id, conversation_id) REFERENCES conversations (organisation_id, id) ON DELETE CASCADE,
-  FOREIGN KEY (organisation_id, contact_id) REFERENCES contacts (organisation_id, id) ON DELETE SET NULL
+  FOREIGN KEY (organisation_id, contact_id) REFERENCES contacts (organisation_id, id) ON DELETE CASCADE
 );
 
 CREATE INDEX calls_conversation_idx ON calls (organisation_id, conversation_id);
@@ -109,8 +109,9 @@ CREATE TABLE interaction_outcomes (
                       'spam', 'wrong_number', 'unresolved'
                     )),
   template_intent text,
-  -- Facts validated against the versioned template schema named by facts_schema_version
-  -- (P07.09 registry; until it exists the version is recorded and the payload must be {}).
+  -- Facts validated against the versioned template schema named by facts_schema_version.
+  -- Until the P07.09 registry exists no validator can check a non-empty payload, so the DB admits
+  -- only the empty one; the service rejects any other version outright (RangeError).
   facts_schema_version text NOT NULL DEFAULT 'v0-none',
   facts           jsonb       NOT NULL DEFAULT '{}',
   handled_automatically boolean NOT NULL DEFAULT false,
@@ -118,7 +119,7 @@ CREATE TABLE interaction_outcomes (
   UNIQUE (organisation_id, id),
   UNIQUE (organisation_id, conversation_id),
   FOREIGN KEY (organisation_id, conversation_id) REFERENCES conversations (organisation_id, id) ON DELETE CASCADE,
-  CHECK (facts = '{}' OR facts_schema_version <> 'v0-none')
+  CHECK (facts_schema_version = 'v0-none' AND facts = '{}')
 );
 
 COMMENT ON TABLE interaction_outcomes IS 'Finaliser verdicts (P07.05.03, INV-06). One per conversation; facts validate against the declared schema version (P07.09).';
@@ -136,7 +137,10 @@ REVOKE ALL ON TABLE conversations, calls, call_events, messages, interaction_out
        moin_reporting;
 
 GRANT SELECT, INSERT, UPDATE, DELETE
-  ON conversations, calls, call_events, messages, interaction_outcomes TO moin_app;
+  ON conversations, calls, messages, interaction_outcomes TO moin_app;
+
+-- call_events is append-only: the runtime role may write and read, never rewrite or erase.
+GRANT SELECT, INSERT ON call_events TO moin_app;
 
 -- Reviewed audit argument keys (P06.10.03, P06.10.07, INV-12). Markers and counts only.
 INSERT INTO audit_argument_allowlist(operation, argument_key, value_kind, reason) VALUES

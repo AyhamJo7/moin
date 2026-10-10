@@ -135,8 +135,11 @@ export async function startConversation(
 }
 
 /**
- * Idempotent call ingest: the provider SID is the key, so a retried webhook returns the
- * existing row unchanged. Links the conversation's contact when the conversation has one.
+ * Idempotent call ingest: the provider SID is the key. The INSERT runs unconditionally and the
+ * per-tenant SID unique constraint serialises concurrent racers — the loser's conflicting row is
+ * discarded (ON CONFLICT DO NOTHING) and the existing row is read back, so a retried webhook
+ * returns the first row unchanged. The orphan conversation created alongside the lost call row
+ * is deleted in the same transaction (it references nothing).
  */
 export async function ingestCall(
   client: TenantClient,
@@ -148,13 +151,6 @@ export async function ingestCall(
 ): Promise<{ call: Call; created: boolean }> {
   const sid = input.providerCallSid.trim();
   if (sid.length === 0 || sid.length > 100) throw new RangeError('provider call SID is empty');
-  const existing = await client.query<CallRow>(
-    `select id, conversation_id, provider_call_sid, contact_id, status, version::text
-     from calls where provider_call_sid = $1`,
-    [sid],
-  );
-  const found = existing.rows[0];
-  if (found !== undefined) return { call: toCall(found), created: false };
   const conversationId = randomUUID();
   await client.query(
     `insert into conversations (organisation_id, id, channel)
@@ -165,11 +161,23 @@ export async function ingestCall(
     `insert into calls
        (organisation_id, id, conversation_id, provider_call_sid, from_number, to_number)
      values (app.current_org(), $1, $2, $3, $4, $5)
+     on conflict (organisation_id, provider_call_sid) do nothing
      returning id, conversation_id, provider_call_sid, contact_id, status, version::text`,
     [randomUUID(), conversationId, sid, input.fromNumber ?? null, input.toNumber ?? null],
   );
   const row = created.rows[0];
-  if (row === undefined) throw new Error('call insert returned no row');
+  if (row === undefined) {
+    // Lost the race (or a retry): drop the orphan conversation, return the winner's row.
+    await client.query(`delete from conversations where id = $1`, [conversationId]);
+    const existing = await client.query<CallRow>(
+      `select id, conversation_id, provider_call_sid, contact_id, status, version::text
+       from calls where provider_call_sid = $1`,
+      [sid],
+    );
+    const found = existing.rows[0];
+    if (found === undefined) throw new Error('conflicting call row vanished');
+    return { call: toCall(found), created: false };
+  }
   await client.query(
     `insert into call_events (organisation_id, id, call_id, kind, detail)
      values (app.current_org(), $1, $2, 'status_change', 0)`,
@@ -179,9 +187,11 @@ export async function ingestCall(
 }
 
 /**
- * Monotonic status advance: forward rungs (and any terminal from any rung) apply; a backward or
- * sideways move is kept as a `status_change` event but leaves the rung untouched. Returns whether
- * the rung moved.
+ * Monotonic status advance: forward rungs from a non-terminal rung apply, and any terminal from
+ * a non-terminal rung applies; terminal-to-terminal never moves (completed→failed is a second
+ * verdict, not a transition). Every attempt is kept as a `status_change` event; a rejected move
+ * leaves the rung untouched. The UPDATE is guarded on the read rung, so concurrent advancers
+ * serialise: the loser re-reads, records its event, and reports moved:false.
  */
 export async function advanceCallStatus(
   client: TenantClient,
@@ -197,13 +207,15 @@ export async function advanceCallStatus(
   if (row === undefined) throw new VersionConflictError(`call ${callId} not found`);
   const rung = row.status as CallStatus;
   const moves =
-    rung !== next && (TERMINAL.has(next) || CALL_LADDER.indexOf(next) > CALL_LADDER.indexOf(rung));
-  await client.query(
-    `insert into call_events (organisation_id, id, call_id, kind, detail)
-     values (app.current_org(), $1, $2, 'status_change', $3)`,
-    [randomUUID(), callId, CALL_LADDER.indexOf(next)],
-  );
+    rung !== next &&
+    !TERMINAL.has(rung) &&
+    (TERMINAL.has(next) || CALL_LADDER.indexOf(next) > CALL_LADDER.indexOf(rung));
   if (!moves) {
+    await client.query(
+      `insert into call_events (organisation_id, id, call_id, kind, detail)
+       values (app.current_org(), $1, $2, 'status_change', $3)`,
+      [randomUUID(), callId, CALL_LADDER.indexOf(next)],
+    );
     await appendAuditEvent(client, {
       source: 'api',
       operation: 'call.status',
@@ -216,12 +228,32 @@ export async function advanceCallStatus(
   }
   const moved = await client.query<CallRow>(
     `update calls set status = $2, updated_at = clock_timestamp(), version = version + 1
-     where id = $1
+     where id = $1 and status = $3
      returning id, conversation_id, provider_call_sid, contact_id, status, version::text`,
-    [callId, next],
+    [callId, next, rung],
   );
-  const next_row = moved.rows[0];
-  if (next_row === undefined) throw new Error('call update returned no row');
+  const nextRow = moved.rows[0];
+  if (nextRow === undefined) {
+    // Lost the race: re-read the winner's rung, record the event, report no move.
+    const reread = await client.query<CallRow>(
+      `select id, conversation_id, provider_call_sid, contact_id, status, version::text
+       from calls where id = $1`,
+      [callId],
+    );
+    const kept = reread.rows[0];
+    if (kept === undefined) throw new Error('call row vanished');
+    await client.query(
+      `insert into call_events (organisation_id, id, call_id, kind, detail)
+       values (app.current_org(), $1, $2, 'status_change', $3)`,
+      [randomUUID(), callId, CALL_LADDER.indexOf(next)],
+    );
+    return { call: toCall(kept), moved: false };
+  }
+  await client.query(
+    `insert into call_events (organisation_id, id, call_id, kind, detail)
+     values (app.current_org(), $1, $2, 'status_change', $3)`,
+    [randomUUID(), callId, CALL_LADDER.indexOf(next)],
+  );
   await appendAuditEvent(client, {
     source: 'api',
     operation: 'call.status',
@@ -230,7 +262,7 @@ export async function advanceCallStatus(
     argsSanitized: { status: CALL_LADDER.indexOf(next) },
     result: 'succeeded',
   });
-  return { call: toCall(next_row), moved: true };
+  return { call: toCall(nextRow), moved: true };
 }
 
 export async function recordCallEvent(
@@ -269,12 +301,13 @@ export async function recordOutcome(
 ): Promise<{ conversationId: string; resultCode: OutcomeResult }> {
   const version = input.factsSchemaVersion ?? 'v0-none';
   const facts = input.facts ?? {};
-  if (version === 'v0-none') {
-    if (Object.keys(facts).length > 0) {
-      throw new RangeError('facts need a schema version from the P07.09 registry');
-    }
-  } else if (version.trim().length === 0) {
-    throw new RangeError('facts schema version is empty');
+  // Until the P07.09 registry exists no validator can check a non-empty payload, so any other
+  // version is refused outright (the DB CHECK mirrors this: only v0-none rows exist).
+  if (version !== 'v0-none') {
+    throw new RangeError('facts schema versions need the P07.09 registry');
+  }
+  if (Object.keys(facts).length > 0) {
+    throw new RangeError('facts need a schema version from the P07.09 registry');
   }
   await client.query(
     `insert into interaction_outcomes

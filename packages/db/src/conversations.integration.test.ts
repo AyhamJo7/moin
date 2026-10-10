@@ -59,6 +59,27 @@ describe('conversations', () => {
     expect(stored.rows[0]?.from_number).toBe('+4930123456');
   });
 
+  evidenceTest('concurrent ingest by provider SID converges on one row', async () => {
+    const before = await withTenant(app, ORG_A, (client) =>
+      client.query<{ n: string }>(`select count(*)::text as n from calls`),
+    );
+    const [one, two] = await Promise.all([
+      withTenant(app, ORG_A, (client) =>
+        ingestCall(client, { providerCallSid: 'CA-race-1', fromNumber: '+4930111111' }),
+      ),
+      withTenant(app, ORG_A, (client) =>
+        ingestCall(client, { providerCallSid: 'CA-race-1', fromNumber: '+4930222222' }),
+      ),
+    ]);
+    expect(one.call.id).toBe(two.call.id);
+    expect([one.created, two.created].sort()).toStrictEqual([false, true]);
+    const after = await withTenant(app, ORG_A, (client) =>
+      client.query<{ n: string }>(`select count(*)::text as n from calls`),
+    );
+    expect(Number(after.rows[0]?.n) - Number(before.rows[0]?.n)).toBe(1);
+    expect([one, two].filter((r) => r.created).length).toBe(1);
+  });
+
   evidenceTest('status climbs the ladder and never goes back', async () => {
     const { call } = await withTenant(app, ORG_A, (client) =>
       ingestCall(client, { providerCallSid: 'CA-ladder-1' }),
@@ -83,19 +104,40 @@ describe('conversations', () => {
       advanceCallStatus(client, call.id, 'in_progress'),
     );
     expect(same.moved).toBe(false);
-    // Terminal from any rung applies.
+    // Terminal from a live rung applies; terminal-to-terminal never moves.
     const done = await withTenant(app, ORG_A, (client) =>
       advanceCallStatus(client, call.id, 'completed'),
     );
     expect(done.moved).toBe(true);
+    const terminalAgain = await withTenant(app, ORG_A, (client) =>
+      advanceCallStatus(client, call.id, 'failed'),
+    );
+    expect(terminalAgain.moved).toBe(false);
+    expect(terminalAgain.call.status).toBe('completed');
     const events = await withTenant(app, ORG_A, (client) =>
       client.query<{ n: string }>(
         `select count(*)::text as n from call_events where call_id = $1 and kind = 'status_change'`,
         [call.id],
       ),
     );
-    // ingest(1) + ringing + in_progress + rejected-ringing + rejected-same + completed = 6.
-    expect(events.rows[0]?.n).toBe('6');
+    // ingest + ringing + in_progress + rejected-ringing + rejected-same + completed + rejected-terminal = 7.
+    expect(events.rows[0]?.n).toBe('7');
+  });
+
+  evidenceTest('concurrent advances serialise: exactly one moves', async () => {
+    const { call } = await withTenant(app, ORG_A, (client) =>
+      ingestCall(client, { providerCallSid: 'CA-race-status-1' }),
+    );
+    await withTenant(app, ORG_A, (client) => advanceCallStatus(client, call.id, 'ringing'));
+    const [one, two] = await Promise.all([
+      withTenant(app, ORG_A, (client) => advanceCallStatus(client, call.id, 'in_progress')),
+      withTenant(app, ORG_A, (client) => advanceCallStatus(client, call.id, 'in_progress')),
+    ]);
+    expect([one.moved, two.moved].sort()).toStrictEqual([false, true]);
+    const kept = await withTenant(app, ORG_A, (client) =>
+      client.query<{ status: string }>(`select status from calls where id = $1`, [call.id]),
+    );
+    expect(kept.rows[0]?.status).toBe('in_progress');
   });
 
   evidenceTest('outcome writer accepts the closed set and rejects unvalidated facts', async () => {
@@ -112,7 +154,8 @@ describe('conversations', () => {
     expect(
       await withTenant(app, ORG_A, (client) => getOutcome(client, conversation.id)),
     ).toMatchObject({ resultCode: 'callback_requested', handledAutomatically: false });
-    // Facts without a schema version are refused.
+    // Facts without a schema version are refused; any other version is refused too
+    // (no validator exists until P07.09).
     await expect(
       withTenant(app, ORG_A, (client) =>
         recordOutcome(client, conversation.id, {
@@ -122,6 +165,27 @@ describe('conversations', () => {
         }),
       ),
     ).rejects.toBeInstanceOf(RangeError);
+    await expect(
+      withTenant(app, ORG_A, (client) =>
+        recordOutcome(client, conversation.id, {
+          resultCode: 'handled',
+          factsSchemaVersion: 'v9-custom',
+          facts: { name: 'Gast' },
+          handledAutomatically: true,
+        }),
+      ),
+    ).rejects.toBeInstanceOf(RangeError);
+    // The DB CHECK mirrors the service: a hand-written non-v0 row is rejected (23514).
+    await expect(
+      withTenant(app, ORG_A, (client) =>
+        client.query(
+          `insert into interaction_outcomes
+             (organisation_id, id, conversation_id, result_code, facts_schema_version, facts, handled_automatically)
+           values (app.current_org(), gen_random_uuid(), $1, 'handled', 'v9-custom', '{"a":1}', false)`,
+          [conversation.id],
+        ),
+      ),
+    ).rejects.toMatchObject({ code: '23514' });
     // Second outcome for the same conversation collides (one verdict each).
     await expect(
       withTenant(app, ORG_A, (client) =>
@@ -183,5 +247,39 @@ describe('conversations', () => {
     );
     // ingest status_change + one failure; the fractional detail never wrote.
     expect(count.rows[0]?.n).toBe('2');
+  });
+
+  evidenceTest('call_events is append-only: moin_app cannot UPDATE or DELETE', async () => {
+    const { call } = await withTenant(app, ORG_B, (client) =>
+      ingestCall(client, { providerCallSid: 'CA-readonly-1' }),
+    );
+    await expect(
+      withTenant(app, ORG_B, (client) =>
+        client.query(`update call_events set detail = 99 where call_id = $1`, [call.id]),
+      ),
+    ).rejects.toMatchObject({ code: '42501' });
+    await expect(
+      withTenant(app, ORG_B, (client) =>
+        client.query(`delete from call_events where call_id = $1`, [call.id]),
+      ),
+    ).rejects.toMatchObject({ code: '42501' });
+  });
+
+  evidenceTest('deleting a contact removes its conversations and calls', async () => {
+    const contact = await withTenant(app, ORG_B, async (client) => {
+      const { createContact } = await import('./contacts.ts');
+      return createContact(client, { displayName: 'Transient' });
+    });
+    const conversation = await withTenant(app, ORG_B, (client) =>
+      startConversation(client, { channel: 'call', contactId: contact.id }),
+    );
+    expect(conversation.contactId).toBe(contact.id);
+    await admin.query(`delete from contacts where id = $1`, [contact.id]);
+    const left = await withTenant(app, ORG_B, (client) =>
+      client.query<{ n: string }>(`select count(*)::text as n from conversations where id = $1`, [
+        conversation.id,
+      ]),
+    );
+    expect(left.rows[0]?.n).toBe('0');
   });
 });
