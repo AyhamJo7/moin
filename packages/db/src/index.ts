@@ -110,3 +110,12 @@ export type {
   RequestKind,
   RequestStatus,
 } from './appointment-requests.ts';
+export {
+  checkFactSchemaShape,
+  createNote,
+  deleteNote,
+  listNotes,
+  registerFactSchema,
+  validateFacts,
+} from './notes-facts.ts';
+export type { FactSchema, Note, NoteParent } from './notes-facts.ts';
