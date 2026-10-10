@@ -147,46 +147,35 @@ async function recordCandidate(
     [hits[0]?.method_id ?? null],
   );
   const value = valueRow.rows[0]?.value ?? '';
-  // Idempotent on the open candidate: a repeat resolution of the same ambiguous value returns the
-  // existing candidate and creates no second task. The task is written only when the candidate is
-  // new, in the same transaction — no orphan tasks, no phantom ids.
-  const existing = await client.query<{ id: string }>(
-    `select id::text from duplicate_candidates
-     where kind = $1 and value = $2 and status = 'open'`,
-    [kind, value],
-  );
-  const found = existing.rows[0]?.id;
-  if (found !== undefined) {
-    await client.query(
-      `insert into interaction_links
-         (organisation_id, id, interaction_ref, contact_id, method_id, rule, label_de)
-       values (app.current_org(), $1, $2, null, null, 'none', $3)
-       on conflict (organisation_id, interaction_ref) do update
-         set contact_id = null, method_id = null, rule = 'none', label_de = excluded.label_de`,
-      [randomUUID(), interactionRef, RULE_LABEL_DE.none],
-    );
-    return {
-      interactionRef,
-      rule: 'none',
-      labelDe: RULE_LABEL_DE.none,
-      contactId: null,
-      methodId: null,
-      candidateId: found,
-    };
-  }
-  const candidateId = randomUUID();
+  // Race-safe idempotency: the task + candidate INSERT runs first and the partial unique index
+  // (organisation_id, kind, value, status) serialises concurrent racers. The winner's row wins;
+  // the loser's ON CONFLICT returns the existing id, and its just-created orphan task is deleted
+  // — all in this transaction, so no orphan tasks and no phantom ids, whatever the interleaving.
   const taskId = randomUUID();
   await client.query(
     `insert into tasks (organisation_id, id, title, status)
      values (app.current_org(), $1, 'Dubletten prüfen', 'open')`,
     [taskId],
   );
-  await client.query(
+  const inserted = await client.query<{ id: string }>(
     `insert into duplicate_candidates
        (organisation_id, id, contact_a_id, contact_b_id, kind, value, status, review_task_id)
-     values (app.current_org(), $1, $2, $3, $4, $5, 'open', $6)`,
-    [candidateId, first, second, kind, value, taskId],
+     values (app.current_org(), $1, $2, $3, $4, $5, 'open', $6)
+     on conflict (organisation_id, kind, value, status) do update
+       set review_task_id = duplicate_candidates.review_task_id
+     returning id::text`,
+    [randomUUID(), first, second, kind, value, taskId],
   );
+  const candidateId = inserted.rows[0]?.id;
+  if (candidateId === undefined) throw new Error('candidate insert returned no row');
+  // A returned id that is NOT our task's candidate means we lost the race: drop the orphan.
+  const owner = await client.query<{ n: string }>(
+    `select count(*)::text as n from duplicate_candidates where id = $1 and review_task_id = $2`,
+    [candidateId, taskId],
+  );
+  if (owner.rows[0]?.n === '0') {
+    await client.query(`delete from tasks where id = $1`, [taskId]);
+  }
   await client.query(
     `insert into interaction_links
        (organisation_id, id, interaction_ref, contact_id, method_id, rule, label_de)
