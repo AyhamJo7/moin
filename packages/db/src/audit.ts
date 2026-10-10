@@ -19,6 +19,12 @@ export interface AuditEventInput {
   readonly result: 'succeeded' | 'failed' | 'rejected' | 'unknown';
   readonly approvalId?: string;
   readonly traceId?: string;
+  /**
+   * Explicit correlation override (a join target's id). Defaults to the ambient withTenant
+   * correlation; pass the run's correlation when the audit row belongs to a run created in an
+   * outer withTenant block, since ALS frames are fixed at withTenant entry.
+   */
+  readonly correlationId?: string | null | undefined;
 }
 
 /** Call in the same withTenant transaction as the business operation being recorded. */
@@ -28,6 +34,10 @@ export async function appendAuditEvent(
 ): Promise<string> {
   const context = currentTenant();
   if (context === undefined) throw new Error('audit writer requires tenant context');
+  // Explicit wins, ambient fills, NULL when neither: a bare correlation must never fail a write.
+  // Malformed values fall back to NULL (else a 22P02 invalid-uuid aborts the business txn).
+  const raw = event.correlationId === undefined ? context.correlationId : event.correlationId;
+  const correlation = raw == null || !UUID.test(raw) ? null : raw;
   const result = await client.query<{ seq: string }>(
     `select app.append_audit_event(
        $1::uuid, $2::uuid, $3::text, $4::text, $5::text, $6::uuid,
@@ -45,7 +55,7 @@ export async function appendAuditEvent(
       JSON.stringify(event.argsSanitized ?? {}),
       event.result,
       event.approvalId ?? null,
-      context.correlationId ?? null,
+      correlation,
       event.traceId ?? null,
     ],
   );

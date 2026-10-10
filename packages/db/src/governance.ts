@@ -11,7 +11,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { appendAuditEvent } from './audit.ts';
-import type { TenantClient } from './tenant.ts';
+import { currentTenant, type TenantClient } from './tenant.ts';
 
 export type RunStatus = 'running' | 'succeeded' | 'failed' | 'cancelled';
 export type ActionKind = 'reply' | 'tool_call' | 'escalate' | 'handoff' | 'summarise' | 'classify';
@@ -56,10 +56,30 @@ const PROPOSAL_MARKER: Record<ProposalKind, number> = {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/**
+ * Explicit correlation wins, ambient `withTenant` fills, NULL when neither. The explicit value
+ * is validated (a 22P02 invalid-uuid would abort the business txn); the ambient one already
+ * passed through the audit writer's own null-out, so it is used as-is.
+ */
+function resolveCorrelation(explicit: string | undefined): string | null {
+  if (explicit !== undefined) {
+    if (!UUID_RE.test(explicit)) throw new RangeError('correlation must be a uuid');
+    return explicit;
+  }
+  return currentTenant()?.correlationId ?? null;
+}
+
 export interface WorkflowRun {
   readonly id: string;
   readonly status: RunStatus;
   readonly conversationId: string | null;
+  /**
+   * Generated per run, never caller-supplied. Thread it into child work with
+   * `withTenant(pool, org, fn, { correlationId: run.correlationId })` — children then inherit
+   * it via `currentTenant()` and store it in their correlation_id columns; ALS frames are
+   * created at `withTenant` entry and cannot be mutated mid-flight, so a bare inner
+   * `withTenant` reuses the outer caller correlation instead.
+   */
   readonly correlationId: string;
   readonly version: number;
 }
@@ -68,6 +88,8 @@ export interface AiAction {
   readonly id: string;
   readonly kind: ActionKind;
   readonly workflowRunId: string | null;
+  /** Ambient `withTenant` correlation at insert time (null when the caller ran bare). */
+  readonly correlationId: string | null;
 }
 
 export interface ToolInvocation {
@@ -75,12 +97,16 @@ export interface ToolInvocation {
   readonly state: InvocationState;
   readonly aiActionId: string | null;
   readonly actorUserId: string | null;
+  /** Ambient `withTenant` correlation at insert time (null when the caller ran bare). */
+  readonly correlationId: string | null;
 }
 
 export interface HumanApproval {
   readonly id: string;
   readonly status: ApprovalStatus;
   readonly decidedBy: string | null;
+  /** Ambient `withTenant` correlation at insert time (null when the caller ran bare). */
+  readonly correlationId: string | null;
 }
 
 export async function startRun(
@@ -185,18 +211,22 @@ export async function recordAction(
     workflowRunId?: string | undefined;
     conversationId?: string | undefined;
     expiresAt?: Date | undefined;
+    /** Explicit correlation (a join target's id). Defaults to the ambient withTenant correlation, NULL when neither exists. The run still owns the chain: thread `run.correlationId` through `withTenant(..., { correlationId })` rather than relying on this. */
+    correlationId?: string | undefined;
   },
 ): Promise<AiAction> {
   const id = randomUUID();
+  const correlation = resolveCorrelation(input.correlationId);
   const result = await client.query<{ id: string }>(
-    `insert into ai_actions (organisation_id, id, kind, workflow_run_id, conversation_id, expires_at)
-     values (app.current_org(), $1, $2, $3, $4, $5)
+    `insert into ai_actions (organisation_id, id, kind, workflow_run_id, conversation_id, correlation_id, expires_at)
+     values (app.current_org(), $1, $2, $3, $4, $5, $6)
      returning id::text`,
     [
       id,
       input.kind,
       input.workflowRunId ?? null,
       input.conversationId ?? null,
+      correlation,
       input.expiresAt?.toISOString() ?? null,
     ],
   );
@@ -208,8 +238,14 @@ export async function recordAction(
     targetId: id,
     argsSanitized: { kind: KIND_MARKER[input.kind] },
     result: 'succeeded',
+    correlationId: correlation,
   });
-  return { id, kind: input.kind, workflowRunId: input.workflowRunId ?? null };
+  return {
+    id,
+    kind: input.kind,
+    workflowRunId: input.workflowRunId ?? null,
+    correlationId: correlation,
+  };
 }
 
 /**
@@ -223,6 +259,8 @@ export async function invokeTool(
     aiActionId?: string | undefined;
     actorUserId?: string | undefined;
     expiresAt?: Date | undefined;
+    /** Explicit correlation, else ambient; NULL when neither. */
+    correlationId?: string | undefined;
   },
 ): Promise<ToolInvocation> {
   const name = input.toolName.trim();
@@ -234,16 +272,18 @@ export async function invokeTool(
     throw new RangeError('actor must be a user id');
   }
   const id = randomUUID();
+  const correlation = resolveCorrelation(input.correlationId);
   const result = await client.query<{ id: string }>(
     `insert into tool_invocations
-       (organisation_id, id, ai_action_id, actor_user_id, tool_name, expires_at)
-     values (app.current_org(), $1, $2, $3, $4, $5)
+       (organisation_id, id, ai_action_id, actor_user_id, tool_name, correlation_id, expires_at)
+     values (app.current_org(), $1, $2, $3, $4, $5, $6)
      returning id::text`,
     [
       id,
       input.aiActionId ?? null,
       input.actorUserId ?? null,
       name,
+      correlation,
       input.expiresAt?.toISOString() ?? null,
     ],
   );
@@ -255,12 +295,14 @@ export async function invokeTool(
     targetId: id,
     argsSanitized: { by_ai: byAi ? 1 : 0 },
     result: 'succeeded',
+    correlationId: correlation,
   });
   return {
     id,
     state: 'unknown',
     aiActionId: input.aiActionId ?? null,
     actorUserId: input.actorUserId ?? null,
+    correlationId: correlation,
   };
 }
 
@@ -274,10 +316,11 @@ export async function reportInvocation(
     id: string;
     ai_action_id: string | null;
     actor_user_id: string | null;
+    correlation_id: string | null;
   }>(
     `update tool_invocations set state = $2, updated_at = clock_timestamp(), version = version + 1
      where id = $1 and state = 'unknown'
-     returning id::text, ai_action_id::text, actor_user_id::text`,
+     returning id::text, ai_action_id::text, actor_user_id::text, correlation_id::text`,
     [invocationId, state],
   );
   const row = moved.rows[0];
@@ -291,8 +334,15 @@ export async function reportInvocation(
     targetId: invocationId,
     argsSanitized: { state: STATE_MARKER[state] },
     result: 'succeeded',
+    correlationId: row.correlation_id,
   });
-  return { id: row.id, state, aiActionId: row.ai_action_id, actorUserId: row.actor_user_id };
+  return {
+    id: row.id,
+    state,
+    aiActionId: row.ai_action_id,
+    actorUserId: row.actor_user_id,
+    correlationId: row.correlation_id,
+  };
 }
 
 export async function requestApproval(
@@ -301,14 +351,23 @@ export async function requestApproval(
     proposalKind: ProposalKind;
     aiActionId?: string | undefined;
     expiresAt?: Date | undefined;
+    /** Explicit correlation, else ambient; NULL when neither. */
+    correlationId?: string | undefined;
   },
 ): Promise<HumanApproval> {
   const id = randomUUID();
+  const correlation = resolveCorrelation(input.correlationId);
   const result = await client.query<{ id: string }>(
-    `insert into human_approvals (organisation_id, id, proposal_kind, ai_action_id, expires_at)
-     values (app.current_org(), $1, $2, $3, $4)
+    `insert into human_approvals (organisation_id, id, proposal_kind, ai_action_id, correlation_id, expires_at)
+     values (app.current_org(), $1, $2, $3, $4, $5)
      returning id::text`,
-    [id, input.proposalKind, input.aiActionId ?? null, input.expiresAt?.toISOString() ?? null],
+    [
+      id,
+      input.proposalKind,
+      input.aiActionId ?? null,
+      correlation,
+      input.expiresAt?.toISOString() ?? null,
+    ],
   );
   if (result.rows[0] === undefined) throw new Error('approval insert returned no row');
   await appendAuditEvent(client, {
@@ -318,8 +377,9 @@ export async function requestApproval(
     targetId: id,
     argsSanitized: { proposal: PROPOSAL_MARKER[input.proposalKind] },
     result: 'succeeded',
+    correlationId: correlation,
   });
-  return { id, status: 'pending', decidedBy: null };
+  return { id, status: 'pending', decidedBy: null, correlationId: correlation };
 }
 
 /** Decide a pending approval: names who decided. Decided rows never move again. */
@@ -329,11 +389,15 @@ export async function decideApproval(
   input: { decision: Exclude<ApprovalStatus, 'pending'>; decidedBy: string; version: number },
 ): Promise<HumanApproval> {
   if (!UUID_RE.test(input.decidedBy)) throw new RangeError('decided_by must be a user id');
-  const moved = await client.query<{ id: string; decided_by: string | null }>(
+  const moved = await client.query<{
+    id: string;
+    decided_by: string | null;
+    correlation_id: string | null;
+  }>(
     `update human_approvals set status = $2, decided_by = $3, decided_at = clock_timestamp(),
        updated_at = clock_timestamp(), version = version + 1
      where id = $1 and status = 'pending' and version = $4
-     returning id::text, decided_by::text`,
+     returning id::text, decided_by::text, correlation_id::text`,
     [approvalId, input.decision, input.decidedBy, input.version],
   );
   const row = moved.rows[0];
@@ -347,8 +411,14 @@ export async function decideApproval(
     targetId: approvalId,
     argsSanitized: { decision: DECISION_MARKER[input.decision] },
     result: 'succeeded',
+    correlationId: row.correlation_id,
   });
-  return { id: row.id, status: input.decision, decidedBy: row.decided_by };
+  return {
+    id: row.id,
+    status: input.decision,
+    decidedBy: row.decided_by,
+    correlationId: row.correlation_id,
+  };
 }
 
 /**

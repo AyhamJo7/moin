@@ -235,4 +235,54 @@ describe('governance', () => {
     );
     expect(two.correlationId).not.toBe(one.correlationId);
   });
+
+  evidenceTest('children inherit the run correlation via withTenant threading', async () => {
+    const run = await withTenant(app, ORG_A, (client) => startRun(client, {}));
+    // A bare inner withTenant reuses the outer caller correlation — so children of a run must
+    // run in a withTenant block threaded with the run's correlation.
+    const action = await withTenant(
+      app,
+      ORG_A,
+      (client) => recordAction(client, { kind: 'tool_call', workflowRunId: run.id }),
+      { correlationId: run.correlationId },
+    );
+    expect(action.correlationId).toBe(run.correlationId);
+    const invoked = await withTenant(
+      app,
+      ORG_A,
+      (client) => invokeTool(client, { toolName: 'calendar.check', aiActionId: action.id }),
+      { correlationId: run.correlationId },
+    );
+    expect(invoked.correlationId).toBe(run.correlationId);
+    const approval = await withTenant(
+      app,
+      ORG_A,
+      (client) => requestApproval(client, { proposalKind: 'book' }),
+      { correlationId: run.correlationId },
+    );
+    expect(approval.correlationId).toBe(run.correlationId);
+    // The audit rows of the threaded children carry the run correlation too.
+    await withTenant(app, ORG_A, async (client) => {
+      for (const operation of ['action.record', 'tool.invoke', 'approval.request'] as const) {
+        const events = await listAuditEvents(client, {
+          correlationId: run.correlationId,
+        });
+        expect(events.map((e) => e.operation)).toContain(operation);
+      }
+    });
+    // Explicit input still wins over ambient (and malformed input is a RangeError, not a 22P02).
+    const other = '44444444-4444-4444-8444-444444444444';
+    const explicit = await withTenant(
+      app,
+      ORG_A,
+      (client) => recordAction(client, { kind: 'reply', correlationId: other }),
+      { correlationId: run.correlationId },
+    );
+    expect(explicit.correlationId).toBe(other);
+    await expect(
+      withTenant(app, ORG_A, (client) =>
+        recordAction(client, { kind: 'reply', correlationId: 'not-a-uuid' }),
+      ),
+    ).rejects.toBeInstanceOf(RangeError);
+  });
 });
