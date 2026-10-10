@@ -60,8 +60,11 @@ describe('conversations', () => {
   });
 
   evidenceTest('concurrent ingest by provider SID converges on one row', async () => {
-    const before = await withTenant(app, ORG_A, (client) =>
+    const callsBefore = await withTenant(app, ORG_A, (client) =>
       client.query<{ n: string }>(`select count(*)::text as n from calls`),
+    );
+    const convosBefore = await withTenant(app, ORG_A, (client) =>
+      client.query<{ n: string }>(`select count(*)::text as n from conversations`),
     );
     const [one, two] = await Promise.all([
       withTenant(app, ORG_A, (client) =>
@@ -73,10 +76,16 @@ describe('conversations', () => {
     ]);
     expect(one.call.id).toBe(two.call.id);
     expect([one.created, two.created].sort()).toStrictEqual([false, true]);
-    const after = await withTenant(app, ORG_A, (client) =>
+    const callsAfter = await withTenant(app, ORG_A, (client) =>
       client.query<{ n: string }>(`select count(*)::text as n from calls`),
     );
-    expect(Number(after.rows[0]?.n) - Number(before.rows[0]?.n)).toBe(1);
+    expect(Number(callsAfter.rows[0]?.n) - Number(callsBefore.rows[0]?.n)).toBe(1);
+    // No orphan conversations: the advisory lock serialises same-SID ingests, so the loser
+    // never writes (a data-modifying CTE would have left one behind per retry).
+    const convosAfter = await withTenant(app, ORG_A, (client) =>
+      client.query<{ n: string }>(`select count(*)::text as n from conversations`),
+    );
+    expect(Number(convosAfter.rows[0]?.n) - Number(convosBefore.rows[0]?.n)).toBe(1);
     expect([one, two].filter((r) => r.created).length).toBe(1);
   });
 

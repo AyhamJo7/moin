@@ -135,11 +135,12 @@ export async function startConversation(
 }
 
 /**
- * Idempotent call ingest: the provider SID is the key. The call INSERT runs first and the
- * per-tenant SID unique constraint serialises concurrent racers — the loser's conflicting row is
- * discarded (ON CONFLICT DO NOTHING) and the existing row is read back, so a retried webhook
- * returns the first row unchanged. The conversation is created only when the call row won, so
- * no orphan conversation (and no DELETE privilege) is ever needed.
+ * Idempotent call ingest: the provider SID is the key. A transaction-scoped advisory lock on the
+ * SID serialises same-SID ingests, so the SELECT-first flow is always correct: a retry finds the
+ * winner with no write at all, and a miss proceeds to the two INSERTs knowing no concurrent
+ * insert for this SID can interleave. No orphan conversation is ever created, and no DELETE
+ * privilege is needed. (A data-modifying CTE would NOT do: its inserts run to completion and
+ * ON CONFLICT discards only the conflicting row, leaving the CTE conversation behind.)
  */
 export async function ingestCall(
   client: TenantClient,
@@ -151,31 +152,43 @@ export async function ingestCall(
 ): Promise<{ call: Call; created: boolean }> {
   const sid = input.providerCallSid.trim();
   if (sid.length === 0 || sid.length > 100) throw new RangeError('provider call SID is empty');
-  const callId = randomUUID();
-  const created = await client.query<CallRow & { conversation_id: string }>(
-    `with new_conversation as (
-       insert into conversations (organisation_id, id, channel)
-       values (app.current_org(), $1, 'call')
-       returning id
-     )
-     insert into calls
+  // Serialise same-SID ingests for this transaction. hashtext is 32-bit: collisions across
+  // distinct SIDs merely serialise unrelated ingests, never misroute one (the key check below
+  // is still the exact SID).
+  await client.query(`select pg_advisory_xact_lock(hashtext($1))`, [sid]);
+  const existing = await client.query<CallRow>(
+    `select id, conversation_id, provider_call_sid, contact_id, status, version::text
+     from calls where provider_call_sid = $1`,
+    [sid],
+  );
+  const found = existing.rows[0];
+  if (found !== undefined) return { call: toCall(found), created: false };
+  const conversationId = randomUUID();
+  await client.query(
+    `insert into conversations (organisation_id, id, channel)
+     values (app.current_org(), $1, 'call')`,
+    [conversationId],
+  );
+  const created = await client.query<CallRow>(
+    `insert into calls
        (organisation_id, id, conversation_id, provider_call_sid, from_number, to_number)
-     select app.current_org(), $2, new_conversation.id, $3, $4, $5 from new_conversation
+     values (app.current_org(), $1, $2, $3, $4, $5)
      on conflict (organisation_id, provider_call_sid) do nothing
      returning id, conversation_id, provider_call_sid, contact_id, status, version::text`,
-    [randomUUID(), callId, sid, input.fromNumber ?? null, input.toNumber ?? null],
+    [randomUUID(), conversationId, sid, input.fromNumber ?? null, input.toNumber ?? null],
   );
   const row = created.rows[0];
   if (row === undefined) {
-    // Lost the race (or a retry): the CTE rolled back with the conflict, return the winner.
-    const existing = await client.query<CallRow>(
+    // Belt-and-braces: unreachable under the advisory lock unless the lock was bypassed
+    // (e.g. a hand-written INSERT). Return the winner rather than fail.
+    const winner = await client.query<CallRow>(
       `select id, conversation_id, provider_call_sid, contact_id, status, version::text
        from calls where provider_call_sid = $1`,
       [sid],
     );
-    const found = existing.rows[0];
-    if (found === undefined) throw new Error('conflicting call row vanished');
-    return { call: toCall(found), created: false };
+    const won = winner.rows[0];
+    if (won === undefined) throw new Error('conflicting call row vanished');
+    return { call: toCall(won), created: false };
   }
   await client.query(
     `insert into call_events (organisation_id, id, call_id, kind, detail)
