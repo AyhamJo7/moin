@@ -133,14 +133,18 @@ seasonal.
 
 ### Work
 
-| Field                                    | Category    | Personal?          | Retention                      | Method      | Subprocessor             |
-| ---------------------------------------- | ----------- | ------------------ | ------------------------------ | ----------- | ------------------------ |
-| `tasks.title`, `description`             | Task        | **yes, free text** | 12 months after closure (3–36) | hard delete | —                        |
-| `tasks.state`, `type`, `due_at`          | Task        | no                 | same                           | hard delete | —                        |
-| `notes.body`                             | Task        | **yes, free text** | same                           | hard delete | —                        |
-| `leads.*`                                | Lead        | yes (references)   | 12 months after closure (3–36) | hard delete | —                        |
-| `appointment_requests.requested_windows` | Appointment | no                 | 12 months                      | hard delete | —                        |
-| `appointments.*`                         | Appointment | yes (references)   | 12 months                      | hard delete | Google / Microsoft (P20) |
+| Field                                                        | Category    | Personal?                                                             | Retention                      | Method      | Subprocessor             |
+| ------------------------------------------------------------ | ----------- | --------------------------------------------------------------------- | ------------------------------ | ----------- | ------------------------ |
+| `tasks.title`, `description`                                 | Task        | **yes, free text**                                                    | 12 months after closure (3–36) | hard delete | —                        |
+| `tasks.state`, `type`, `due_at`                              | Task        | no                                                                    | same                           | hard delete | —                        |
+| `notes.body`                                                 | Task        | **yes, free text**                                                    | same                           | hard delete | —                        |
+| `leads.*`                                                    | Lead        | yes (references)                                                      | 12 months after closure (3–36) | hard delete | —                        |
+| `leads.title`                                                | Lead        | **yes, free text** (what the opportunity is about, may name a caller) | same                           | hard delete | —                        |
+| `leads.status`, `leads.lost_reason`                          | Lead        | no — fixed catalogue values (what stage/why lost, not whom)           | same                           | hard delete | —                        |
+| `leads.task_id`, `leads.contact_id`, `leads.conversation_id` | Lead        | yes (references)                                                      | same                           | hard delete | —                        |
+| `lead_tasks.lead_id`, `lead_tasks.task_id`                   | Lead        | yes (references)                                                      | same                           | hard delete | —                        |
+| `appointment_requests.requested_windows`                     | Appointment | no                                                                    | 12 months                      | hard delete | —                        |
+| `appointments.*`                                             | Appointment | yes (references)                                                      | 12 months                      | hard delete | Google / Microsoft (P20) |
 
 ### Knowledge
 
