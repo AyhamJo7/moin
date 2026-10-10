@@ -2753,10 +2753,10 @@ Kernel value objects · contacts module · conversations module (calls, messages
   - [ ] P07.10.02 Relationships to interactions and audit events via correlation IDs
   - [ ] P07.10.03 Tests: every executed tool has an AI action or user actor; TTL purge candidates computed correctly
 - [ ] **P07.11 No-lost-interaction invariant** `[G:PILOT]`
-  - [ ] P07.11.01 Finaliser: at interaction end, ensure an outcome exists or create a fallback task ("Rückruf – Anruf ohne Ergebnis") from any known callback data
-  - [ ] P07.11.02 Reconciler (every 5 min via `withSystemWork`): interactions without an outcome or open task after 10 min → finalise + metric `interactions.orphaned`
-  - [ ] P07.11.03 Alarm if orphaned > 0 after reconciliation (SEV2) or repeated (SEV1)
-  - [ ] P07.11.04 Tests: kill the process mid-call (simulated) → a task appears within 15 min; idempotent under double run
+  - [ ] P07.11.01 Finaliser: at interaction end, ensure an outcome exists or create a fallback task ("Rückruf – Anruf ohne Ergebnis") from any known callback data — EV-P07-010
+  - [ ] P07.11.02 Reconciler (every 5 min via register sweep): interactions without an outcome or open task after 10 min → finalise + metric `interactions.orphaned` — EV-P07-010
+  - [ ] P07.11.03 Alarm if orphaned > 0 after reconciliation (SEV2) or repeated (SEV1) — EV-P07-010
+  - [ ] P07.11.04 Tests: kill the process mid-call (simulated) → a task appears within 15 min; idempotent under double run — EV-P07-010
 - [ ] **P07.12 Search** `[G:LAUNCH]`
   - [ ] P07.12.01 FTS (`german` + `unaccent`) on contacts, tasks and notes; `pg_trgm` for names and phone digits
   - [ ] P07.12.02 Search API with cursor pagination; RLS-scoped
