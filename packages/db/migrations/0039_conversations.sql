@@ -138,7 +138,10 @@ REVOKE ALL ON TABLE conversations, calls, call_events, messages, interaction_out
   FROM PUBLIC, moin_app, moin_identity, moin_provisioner, moin_dispatcher, moin_support_ro,
        moin_reporting;
 
-GRANT SELECT, INSERT, UPDATE, DELETE
+-- No moin_app DELETE anywhere on the interaction chain: voice/webhook paths never delete
+-- interactions, and DELETE on a parent would cascade into call_events past its SELECT,INSERT-only
+-- grant. Erasure (P16) runs as a privileged role, not moin_app.
+GRANT SELECT, INSERT, UPDATE
   ON conversations, calls, messages, interaction_outcomes TO moin_app;
 
 -- call_events is append-only: the runtime role may write and read, never rewrite or erase.

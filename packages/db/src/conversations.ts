@@ -135,11 +135,11 @@ export async function startConversation(
 }
 
 /**
- * Idempotent call ingest: the provider SID is the key. The INSERT runs unconditionally and the
+ * Idempotent call ingest: the provider SID is the key. The call INSERT runs first and the
  * per-tenant SID unique constraint serialises concurrent racers — the loser's conflicting row is
  * discarded (ON CONFLICT DO NOTHING) and the existing row is read back, so a retried webhook
- * returns the first row unchanged. The orphan conversation created alongside the lost call row
- * is deleted in the same transaction (it references nothing).
+ * returns the first row unchanged. The conversation is created only when the call row won, so
+ * no orphan conversation (and no DELETE privilege) is ever needed.
  */
 export async function ingestCall(
   client: TenantClient,
@@ -151,24 +151,23 @@ export async function ingestCall(
 ): Promise<{ call: Call; created: boolean }> {
   const sid = input.providerCallSid.trim();
   if (sid.length === 0 || sid.length > 100) throw new RangeError('provider call SID is empty');
-  const conversationId = randomUUID();
-  await client.query(
-    `insert into conversations (organisation_id, id, channel)
-     values (app.current_org(), $1, 'call')`,
-    [conversationId],
-  );
-  const created = await client.query<CallRow>(
-    `insert into calls
+  const callId = randomUUID();
+  const created = await client.query<CallRow & { conversation_id: string }>(
+    `with new_conversation as (
+       insert into conversations (organisation_id, id, channel)
+       values (app.current_org(), $1, 'call')
+       returning id
+     )
+     insert into calls
        (organisation_id, id, conversation_id, provider_call_sid, from_number, to_number)
-     values (app.current_org(), $1, $2, $3, $4, $5)
+     select app.current_org(), $2, new_conversation.id, $3, $4, $5 from new_conversation
      on conflict (organisation_id, provider_call_sid) do nothing
      returning id, conversation_id, provider_call_sid, contact_id, status, version::text`,
-    [randomUUID(), conversationId, sid, input.fromNumber ?? null, input.toNumber ?? null],
+    [randomUUID(), callId, sid, input.fromNumber ?? null, input.toNumber ?? null],
   );
   const row = created.rows[0];
   if (row === undefined) {
-    // Lost the race (or a retry): drop the orphan conversation, return the winner's row.
-    await client.query(`delete from conversations where id = $1`, [conversationId]);
+    // Lost the race (or a retry): the CTE rolled back with the conflict, return the winner.
     const existing = await client.query<CallRow>(
       `select id, conversation_id, provider_call_sid, contact_id, status, version::text
        from calls where provider_call_sid = $1`,

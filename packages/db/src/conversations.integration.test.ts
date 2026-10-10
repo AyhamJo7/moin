@@ -318,4 +318,29 @@ describe('conversations', () => {
     );
     expect(left.rows[0]).toMatchObject({ n: '1', contact: null });
   });
+
+  evidenceTest('moin_app cannot DELETE conversations or calls; events survive', async () => {
+    const { call } = await withTenant(app, ORG_B, (client) =>
+      ingestCall(client, { providerCallSid: 'CA-nodelete-1' }),
+    );
+    const eventsBefore = await withTenant(app, ORG_B, (client) =>
+      client.query<{ n: string }>(`select count(*)::text as n from call_events`),
+    );
+    // DELETE on either parent is refused (42501) — a parent delete would cascade into
+    // call_events past its SELECT,INSERT-only grant.
+    await expect(
+      withTenant(app, ORG_B, (client) =>
+        client.query(`delete from calls where id = $1`, [call.id]),
+      ),
+    ).rejects.toMatchObject({ code: '42501' });
+    await expect(
+      withTenant(app, ORG_B, (client) =>
+        client.query(`delete from conversations where id = $1`, [call.conversationId]),
+      ),
+    ).rejects.toMatchObject({ code: '42501' });
+    const eventsAfter = await withTenant(app, ORG_B, (client) =>
+      client.query<{ n: string }>(`select count(*)::text as n from call_events`),
+    );
+    expect(eventsAfter.rows[0]?.n).toBe(eventsBefore.rows[0]?.n);
+  });
 });
