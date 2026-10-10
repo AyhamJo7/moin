@@ -78,18 +78,19 @@ and **whether it is defensible at all is an open EXT-02 question**.
 
 ### Contacts
 
-| Field                                  | Category | Personal?                                                 | Retention                                 | Method      | Subprocessor |
-| -------------------------------------- | -------- | --------------------------------------------------------- | ----------------------------------------- | ----------- | ------------ |
-| `contacts.display_name`                | Contact  | **yes**                                                   | while the business relationship continues | anonymise   | —            |
-| `contacts.notes`                       | Contact  | **yes, free text**                                        | same                                      | hard delete | —            |
-| `contact_methods.value` (phone, email) | Contact  | **yes**                                                   | same                                      | hard delete | —            |
-| `contact_methods.contact_id`           | Contact  | yes (references)                                          | same                                      | hard delete | —            |
-| `contact_methods.kind`                 | Contact  | yes in combination (what channel reaches the person)      | same                                      | hard delete | —            |
-| `contact_methods.verification`         | Contact  | no alone (workflow state about the value, not the person) | same                                      | hard delete | —            |
-| `contact_methods.is_tenant_owned`      | Contact  | no (about the business's own number, not a caller)        | same                                      | hard delete | —            |
-| `contact_methods.normalised`           | Contact  | yes (derived)                                             | same                                      | hard delete | —            |
-| `contacts.created_at`, `last_seen_at`  | Contact  | no alone                                                  | same                                      | anonymise   | —            |
-| `contact_merges.*`                     | Contact  | yes (references)                                          | 24 months after the merge                 | hard delete | —            |
+| Field                                  | Category | Personal?                                                   | Retention                                 | Method      | Subprocessor |
+| -------------------------------------- | -------- | ----------------------------------------------------------- | ----------------------------------------- | ----------- | ------------ |
+| `contacts.display_name`                | Contact  | **yes**                                                     | while the business relationship continues | anonymise   | —            |
+| `contacts.notes`                       | Contact  | **yes, free text**                                          | same                                      | hard delete | —            |
+| `contact_methods.value` (phone, email) | Contact  | **yes**                                                     | same                                      | hard delete | —            |
+| `contact_methods.contact_id`           | Contact  | yes (references)                                            | same                                      | hard delete | —            |
+| `contact_methods.kind`                 | Contact  | yes in combination (what channel reaches the person)        | same                                      | hard delete | —            |
+| `contact_methods.verification`         | Contact  | no alone (workflow state about the value, not the person)   | same                                      | hard delete | —            |
+| `contact_methods.verified_via`         | Contact  | no alone (how confirmation happened, not who was confirmed) | same                                      | hard delete | —            |
+| `contact_methods.is_tenant_owned`      | Contact  | no (about the business's own number, not a caller)          | same                                      | hard delete | —            |
+| `contact_methods.normalised`           | Contact  | yes (derived)                                               | same                                      | hard delete | —            |
+| `contacts.created_at`, `last_seen_at`  | Contact  | no alone                                                    | same                                      | anonymise   | —            |
+| `contact_merges.*`                     | Contact  | yes (references)                                            | 24 months after the merge                 | hard delete | —            |
 
 Anonymise rather than delete for the contact root: deleting it would orphan the tasks and leads that
 reference it, and the _shape_ of history — how many enquiries, over what period — is the business's

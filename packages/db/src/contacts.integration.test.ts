@@ -76,12 +76,16 @@ describe('contacts', () => {
     const firstMethod = firstMethods[0];
     if (firstMethod === undefined) throw new Error('no method created');
     const verified = await withTenant(app, ORG_A, (client) =>
-      verifyContactMethod(client, first.id, firstMethod.id),
+      verifyContactMethod(client, first.id, firstMethod.id, 'owner_confirmed_call'),
     );
     expect(verified.verification).toBe('verified');
+    expect(verified.verifiedVia).toBe('owner_confirmed_call');
+    expect(verified.verifiedAt).toBeInstanceOf(Date);
     // Re-verifying is a conflict, not a no-op: the transition already happened.
     await expect(
-      withTenant(app, ORG_A, (client) => verifyContactMethod(client, first.id, firstMethod.id)),
+      withTenant(app, ORG_A, (client) =>
+        verifyContactMethod(client, first.id, firstMethod.id, 'owner_confirmed_reply'),
+      ),
     ).rejects.toBeInstanceOf(VersionConflictError);
     // Same number verified on a second contact collides (23505).
     const second = await withTenant(app, ORG_A, (client) =>
@@ -96,9 +100,27 @@ describe('contacts', () => {
     const secondMethod = secondMethods[0];
     if (secondMethod === undefined) throw new Error('no method created');
     await expect(
-      withTenant(app, ORG_A, (client) => verifyContactMethod(client, second.id, secondMethod.id)),
+      withTenant(app, ORG_A, (client) =>
+        verifyContactMethod(client, second.id, secondMethod.id, 'imported_verified'),
+      ),
     ).rejects.toMatchObject({ code: '23505' });
     expect(first.id).not.toBe(second.id);
+  });
+
+  evidenceTest('verification records how, and unverified rows carry no provenance', async () => {
+    const contact = await withTenant(app, ORG_A, (client) =>
+      createContact(client, {
+        displayName: 'Provenance',
+        methods: [{ kind: 'email', value: 'prov@example.test' }],
+      }),
+    );
+    const before = await withTenant(app, ORG_A, (client) => listContactMethods(client, contact.id));
+    expect(before[0]).toMatchObject({ verifiedVia: null, verifiedAt: null });
+    const after = await withTenant(app, ORG_A, (client) =>
+      verifyContactMethod(client, contact.id, before[0]?.id ?? '', 'migrated'),
+    );
+    expect(after).toMatchObject({ verification: 'verified', verifiedVia: 'migrated' });
+    expect(after.verifiedAt).toBeInstanceOf(Date);
   });
 
   evidenceTest('two unverified same-value methods coexist on different contacts', async () => {

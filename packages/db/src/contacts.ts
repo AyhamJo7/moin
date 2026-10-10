@@ -16,6 +16,10 @@ import type { TenantClient } from './tenant.ts';
 export type ContactMethodKind = 'phone' | 'email' | 'external_id';
 export type MethodVerification = 'unverified' | 'verified' | 'suspicious' | 'withheld';
 
+/** How control of a method value was confirmed out-of-band (P07.02 round-2). */
+export type VerifiedVia =
+  'owner_confirmed_call' | 'owner_confirmed_reply' | 'imported_verified' | 'migrated';
+
 export interface Contact {
   readonly id: string;
   readonly displayName: string;
@@ -29,6 +33,8 @@ export interface ContactMethod {
   readonly kind: ContactMethodKind;
   readonly value: string;
   readonly verification: MethodVerification;
+  readonly verifiedVia: VerifiedVia | null;
+  readonly verifiedAt: Date | null;
   readonly isTenantOwned: boolean;
   readonly version: number;
 }
@@ -42,6 +48,13 @@ const METHOD_KIND_MARKER: Record<ContactMethodKind, number> = {
   phone: 0,
   email: 1,
   external_id: 2,
+};
+
+const VERIFIED_VIA_MARKER: Record<VerifiedVia, number> = {
+  owner_confirmed_call: 0,
+  owner_confirmed_reply: 1,
+  imported_verified: 2,
+  migrated: 3,
 };
 
 /** Normalise a method value to its canonical form, or throw RangeError. */
@@ -75,6 +88,8 @@ interface MethodRow extends Record<string, unknown> {
   kind: string;
   value: string;
   verification: string;
+  verified_via: string | null;
+  verified_at: Date | null;
   is_tenant_owned: boolean;
   version: string;
 }
@@ -86,6 +101,8 @@ function toMethod(row: MethodRow): ContactMethod {
     kind: row.kind as ContactMethodKind,
     value: row.value,
     verification: row.verification as MethodVerification,
+    verifiedVia: row.verified_via as VerifiedVia | null,
+    verifiedAt: row.verified_at,
     isTenantOwned: row.is_tenant_owned,
     version: Number(row.version),
   };
@@ -187,7 +204,8 @@ export async function addContactMethod(
     `insert into contact_methods
        (organisation_id, id, contact_id, kind, value, verification, is_tenant_owned)
      values (app.current_org(), $1, $2, $3, $4, 'unverified', $5)
-     returning id, contact_id, kind, value, verification, is_tenant_owned, version::text`,
+     returning id, contact_id, kind, value, verification, verified_via, verified_at,
+       is_tenant_owned, version::text`,
     [
       id,
       contactId,
@@ -213,15 +231,18 @@ export async function verifyContactMethod(
   client: TenantClient,
   contactId: string,
   methodId: string,
+  via: VerifiedVia,
 ): Promise<ContactMethod> {
   // Verification is a state transition the service owns, not a flag the caller sets: only an
-  // unverified method can become verified, and the unique index then enforces one owner.
+  // unverified method can become verified, and the unique index then enforces one owner. The
+  // caller records HOW control was confirmed out-of-band; the clock stamps when.
   const result = await client.query<MethodRow>(
-    `update contact_methods set verification = 'verified',
-       updated_at = clock_timestamp(), version = version + 1
+    `update contact_methods set verification = 'verified', verified_via = $3,
+       verified_at = clock_timestamp(), updated_at = clock_timestamp(), version = version + 1
      where id = $1 and contact_id = $2 and verification = 'unverified'
-     returning id, contact_id, kind, value, verification, is_tenant_owned, version::text`,
-    [methodId, contactId],
+     returning id, contact_id, kind, value, verification, verified_via, verified_at,
+       is_tenant_owned, version::text`,
+    [methodId, contactId, via],
   );
   const row = result.rows[0];
   if (row === undefined) {
@@ -232,7 +253,10 @@ export async function verifyContactMethod(
     operation: 'contact.method_verify',
     targetKind: 'contact',
     targetId: contactId,
-    argsSanitized: { method_kind: METHOD_KIND_MARKER[row.kind as ContactMethodKind] },
+    argsSanitized: {
+      method_kind: METHOD_KIND_MARKER[row.kind as ContactMethodKind],
+      verified_via: VERIFIED_VIA_MARKER[via],
+    },
     result: 'succeeded',
   });
   return toMethod(row);
@@ -291,7 +315,8 @@ export async function listContactMethods(
   contactId: string,
 ): Promise<ContactMethod[]> {
   const result = await client.query<MethodRow>(
-    `select id, contact_id, kind, value, verification, is_tenant_owned, version::text
+    `select id, contact_id, kind, value, verification, verified_via, verified_at,
+       is_tenant_owned, version::text
      from contact_methods where contact_id = $1 order by kind, value`,
     [contactId],
   );

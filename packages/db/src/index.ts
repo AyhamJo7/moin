@@ -54,5 +54,12 @@ export {
   normaliseMethodValue,
   removeContactMethod,
   updateContact,
+  verifyContactMethod,
 } from './contacts.ts';
-export type { Contact, ContactMethod, ContactMethodKind, MethodVerification } from './contacts.ts';
+export type {
+  Contact,
+  ContactMethod,
+  ContactMethodKind,
+  MethodVerification,
+  VerifiedVia,
+} from './contacts.ts';
