@@ -353,9 +353,9 @@ describe('conversations', () => {
     expect(eventsAfter.rows[0]?.n).toBe(eventsBefore.rows[0]?.n);
   });
 
-  evidenceTest('orphan cleanup removes only call-less conversations', async () => {
+  evidenceTest('orphan cleanup removes only unattached call-channel rows', async () => {
     // moin_app can INSERT conversations but not DELETE them; the guard function removes
-    // orphans only. Orphan: inserted directly, no call references it.
+    // ingest-shaped orphans only (call-channel, no call, no thread, no outcome).
     const orphanId = await withTenant(app, ORG_B, (client) =>
       client
         .query<{ id: string }>(
@@ -373,7 +373,7 @@ describe('conversations', () => {
       ]),
     );
     expect(gone.rows[0]?.n).toBe('0');
-    // Live: the ingested conversation has a call — the function deletes nothing.
+    // Live call: the ingested conversation has a call — the function deletes nothing.
     const live = await withTenant(app, ORG_B, (client) =>
       ingestCall(client, { providerCallSid: 'CA-orphan-live-1' }),
     );
@@ -386,5 +386,38 @@ describe('conversations', () => {
       ]),
     );
     expect(kept.rows[0]?.n).toBe('1');
+    // Message thread: channel=message is never ingest-shaped — the function leaves it.
+    const thread = await withTenant(app, ORG_B, (client) =>
+      startConversation(client, { channel: 'message' }),
+    );
+    await withTenant(app, ORG_B, (client) =>
+      client.query(`select app.delete_orphan_conversation($1)`, [thread.id]),
+    );
+    const threadKept = await withTenant(app, ORG_B, (client) =>
+      client.query<{ n: string }>(`select count(*)::text as n from conversations where id = $1`, [
+        thread.id,
+      ]),
+    );
+    expect(threadKept.rows[0]?.n).toBe('1');
+    // Decided interaction: a call conversation with an outcome verdict — left alone.
+    const decided = await withTenant(app, ORG_B, (client) =>
+      ingestCall(client, { providerCallSid: 'CA-orphan-decided-1' }),
+    );
+    await withTenant(app, ORG_B, (client) =>
+      recordOutcome(client, decided.call.conversationId, {
+        resultCode: 'handled',
+        handledAutomatically: false,
+      }),
+    );
+    await admin.query(`delete from calls where id = $1`, [decided.call.id]);
+    await withTenant(app, ORG_B, (client) =>
+      client.query(`select app.delete_orphan_conversation($1)`, [decided.call.conversationId]),
+    );
+    const verdictKept = await withTenant(app, ORG_B, (client) =>
+      client.query<{ n: string }>(`select count(*)::text as n from conversations where id = $1`, [
+        decided.call.conversationId,
+      ]),
+    );
+    expect(verdictKept.rows[0]?.n).toBe('1');
   });
 });

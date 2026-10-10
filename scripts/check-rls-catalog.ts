@@ -159,7 +159,7 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.revoke_sessions_on_membership_change': '7327cf1abdbb5e1b9a08452780f82c44',
   'app.unassign_member_tasks': 'a3b165fb4ab8fd567dd0916b74c5135c',
   'app.resolve_route': 'c3601d8e5093f32bfc1da1a2220f31ed',
-  'app.delete_orphan_conversation': 'f53e8d5ad0cf56b95be2e83192d26a2b',
+  'app.delete_orphan_conversation': '5f3521c945e93b5d4b2eaae66d9cd3fd',
 };
 
 /** Reviewed QG-09 contract. Documentation registration alone cannot change privileges. */
