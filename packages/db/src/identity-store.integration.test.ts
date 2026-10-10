@@ -264,6 +264,10 @@ describe('moin_identity — the api-only session role', () => {
     await expect(identity.query('create table probe (x int)')).rejects.toMatchObject({
       code: '42501',
     });
+    // CREATE on the database is CREATE SCHEMA, after which the role owns what it makes (0034).
+    await expect(identity.query('create schema probe_schema')).rejects.toMatchObject({
+      code: '42501',
+    });
     // TEMPORARY is a PUBLIC default on every database; it is moved off PUBLIC at provisioning.
     await expect(identity.query('create temporary table probe (x int)')).rejects.toMatchObject({
       code: '42501',
@@ -291,6 +295,7 @@ describe('who may execute the session functions', () => {
       'moin_dispatcher',
       'moin_support_ro',
       'moin_reporting',
+      'moin_readonly',
     ];
     const result = await admin.query<{ role: string; fn: string; allowed: boolean }>(
       `select r.rolname::text as role, p.proname::text as fn,
