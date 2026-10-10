@@ -123,6 +123,16 @@ $$;
 -- Name-level, so a future overload is caught by the catalog check's per-signature rules and by the
 -- identity-store matrix test, not silently absorbed here. reject_session_rewrite is the trigger
 -- that fixes a session's lifetime and is not executable by either role.
+--
+-- The second pair of checks is deliberately NOT filtered to SECURITY DEFINER: an explicit EXECUTE
+-- grant on a non-definer function would pass a definer-only assertion but fail the catalog check's
+-- direct-grant comparison. moin_identity may execute nothing outside the seven names, whatever the
+-- function's security attribute; moin_app may execute nothing with those names at all.
+-- The extra-name pair below mirrors the catalog check's two-list verdict (section 8): the
+-- definer-executable set and the explicit-grant set (aclexplode on proacl, PUBLIC built-ins
+-- excluded — those execute with the caller's own privileges and give the role nothing) must each
+-- collapse to exactly the seven session names. An explicit EXECUTE on a non-definer function would
+-- pass a definer-only assertion but fail the catalog's grant comparison.
 DO $$
 DECLARE
   got text[];
@@ -130,6 +140,7 @@ DECLARE
     'app.begin_session', 'app.begin_sign_in', 'app.consume_sign_in',
     'app.resolve_request_context', 'app.resolve_session', 'app.revoke_session', 'app.rotate_session'
   ];
+  granted text[];
   leak text[];
 BEGIN
   SELECT COALESCE(array_agg(DISTINCT n.nspname || '.' || p.proname ORDER BY n.nspname || '.' || p.proname), '{}')
@@ -138,6 +149,15 @@ BEGIN
     WHERE p.prosecdef AND has_function_privilege('moin_identity', p.oid, 'EXECUTE');
   IF got <> want THEN
     RAISE EXCEPTION 'moin_identity executes %, want exactly %.', got, want;
+  END IF;
+  SELECT COALESCE(array_agg(DISTINCT n.nspname || '.' || p.proname ORDER BY n.nspname || '.' || p.proname), '{}')
+    INTO granted
+    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace,
+         aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a
+    WHERE a.grantee = 'moin_identity'::regrole
+      AND n.nspname NOT IN ('pg_catalog', 'information_schema');
+  IF granted <> want THEN
+    RAISE EXCEPTION 'functions granted to moin_identity: %; want exactly %.', granted, want;
   END IF;
   SELECT COALESCE(array_agg(DISTINCT n.nspname || '.' || p.proname ORDER BY n.nspname || '.' || p.proname), '{}')
     INTO leak
