@@ -78,30 +78,50 @@ and **whether it is defensible at all is an open EXT-02 question**.
 
 ### Contacts
 
-| Field                                  | Category | Personal?                                                   | Retention                                 | Method      | Subprocessor |
-| -------------------------------------- | -------- | ----------------------------------------------------------- | ----------------------------------------- | ----------- | ------------ |
-| `contacts.display_name`                | Contact  | **yes**                                                     | while the business relationship continues | anonymise   | —            |
-| `contacts.notes`                       | Contact  | **yes, free text**                                          | same                                      | hard delete | —            |
-| `contact_methods.value` (phone, email) | Contact  | **yes**                                                     | same                                      | hard delete | —            |
-| `contact_methods.contact_id`           | Contact  | yes (references)                                            | same                                      | hard delete | —            |
-| `contact_methods.kind`                 | Contact  | yes in combination (what channel reaches the person)        | same                                      | hard delete | —            |
-| `contact_methods.verification`         | Contact  | no alone (workflow state about the value, not the person)   | same                                      | hard delete | —            |
-| `contact_methods.verified_via`         | Contact  | no alone (how confirmation happened, not who was confirmed) | same                                      | hard delete | —            |
-| `contact_methods.is_tenant_owned`      | Contact  | no (about the business's own number, not a caller)          | same                                      | hard delete | —            |
-| `contact_methods.normalised`           | Contact  | yes (derived)                                               | same                                      | hard delete | —            |
-| `contacts.created_at`, `last_seen_at`  | Contact  | no alone                                                    | same                                      | anonymise   | —            |
-| `interaction_links.interaction_ref`    | Contact  | yes in combination (which interaction identified whom)      | same                                      | hard delete | —            |
-| `interaction_links.contact_id`         | Contact  | yes (references)                                            | same                                      | hard delete | —            |
-| `interaction_links.method_id`          | Contact  | yes (references)                                            | same                                      | hard delete | —            |
-| `interaction_links.rule`               | Contact  | no alone (which channel matched, not who)                   | same                                      | hard delete | —            |
-| `interaction_links.label_de`           | Contact  | no alone (fixed label catalogue, no free text)              | same                                      | hard delete | —            |
-| `duplicate_candidates.contact_a_id`    | Contact  | yes (references)                                            | 24 months after the merge                 | hard delete | —            |
-| `duplicate_candidates.contact_b_id`    | Contact  | yes (references)                                            | 24 months after the merge                 | hard delete | —            |
-| `duplicate_candidates.kind`            | Contact  | yes in combination (what channel is shared)                 | 24 months after the merge                 | hard delete | —            |
-| `duplicate_candidates.value`           | Contact  | **yes** (the shared verified value itself)                  | 24 months after the merge                 | hard delete | —            |
-| `duplicate_candidates.status`          | Contact  | no alone (review workflow state)                            | 24 months after the merge                 | hard delete | —            |
-| `duplicate_candidates.review_task_id`  | Contact  | yes (references)                                            | 24 months after the merge                 | hard delete | —            |
-| `contact_merges.*`                     | Contact  | yes (references)                                            | 24 months after the merge                 | hard delete | —            |
+| Field                                        | Category | Personal?                                                     | Retention                                 | Method      | Subprocessor |
+| -------------------------------------------- | -------- | ------------------------------------------------------------- | ----------------------------------------- | ----------- | ------------ |
+| `contacts.display_name`                      | Contact  | **yes**                                                       | while the business relationship continues | anonymise   | —            |
+| `contacts.notes`                             | Contact  | **yes, free text**                                            | same                                      | hard delete | —            |
+| `contact_methods.value` (phone, email)       | Contact  | **yes**                                                       | same                                      | hard delete | —            |
+| `contact_methods.contact_id`                 | Contact  | yes (references)                                              | same                                      | hard delete | —            |
+| `contact_methods.kind`                       | Contact  | yes in combination (what channel reaches the person)          | same                                      | hard delete | —            |
+| `contact_methods.verification`               | Contact  | no alone (workflow state about the value, not the person)     | same                                      | hard delete | —            |
+| `contact_methods.verified_via`               | Contact  | no alone (how confirmation happened, not who was confirmed)   | same                                      | hard delete | —            |
+| `contact_methods.is_tenant_owned`            | Contact  | no (about the business's own number, not a caller)            | same                                      | hard delete | —            |
+| `contact_methods.normalised`                 | Contact  | yes (derived)                                                 | same                                      | hard delete | —            |
+| `contacts.created_at`, `last_seen_at`        | Contact  | no alone                                                      | same                                      | anonymise   | —            |
+| `interaction_links.interaction_ref`          | Contact  | yes in combination (which interaction identified whom)        | same                                      | hard delete | —            |
+| `interaction_links.contact_id`               | Contact  | yes (references)                                              | same                                      | hard delete | —            |
+| `interaction_links.method_id`                | Contact  | yes (references)                                              | same                                      | hard delete | —            |
+| `interaction_links.rule`                     | Contact  | no alone (which channel matched, not who)                     | same                                      | hard delete | —            |
+| `interaction_links.label_de`                 | Contact  | no alone (fixed label catalogue, no free text)                | same                                      | hard delete | —            |
+| `duplicate_candidates.contact_a_id`          | Contact  | yes (references)                                              | 24 months after the merge                 | hard delete | —            |
+| `duplicate_candidates.contact_b_id`          | Contact  | yes (references)                                              | 24 months after the merge                 | hard delete | —            |
+| `duplicate_candidates.kind`                  | Contact  | yes in combination (what channel is shared)                   | 24 months after the merge                 | hard delete | —            |
+| `duplicate_candidates.value`                 | Contact  | **yes** (the shared verified value itself)                    | 24 months after the merge                 | hard delete | —            |
+| `duplicate_candidates.status`                | Contact  | no alone (review workflow state)                              | 24 months after the merge                 | hard delete | —            |
+| `duplicate_candidates.review_task_id`        | Contact  | yes (references)                                              | 24 months after the merge                 | hard delete | —            |
+| `conversations.channel`                      | Contact  | no alone (which channel, not who)                             | same                                      | hard delete | —            |
+| `conversations.contact_id`                   | Contact  | yes (references)                                              | same                                      | hard delete | —            |
+| `conversations.status`                       | Contact  | no alone (workflow state)                                     | same                                      | hard delete | —            |
+| `calls.conversation_id`                      | Contact  | yes (references)                                              | same                                      | hard delete | —            |
+| `calls.provider_call_sid`                    | Contact  | yes in combination (which provider call reached whom)         | same                                      | hard delete | —            |
+| `calls.contact_id`                           | Contact  | yes (references)                                              | same                                      | hard delete | —            |
+| `calls.status`                               | Contact  | no alone (workflow state)                                     | same                                      | hard delete | —            |
+| `calls.from_number`                          | Contact  | **yes** (caller number)                                       | same                                      | hard delete | —            |
+| `calls.to_number`                            | Contact  | **yes** (dialled number)                                      | same                                      | hard delete | —            |
+| `call_events.call_id`                        | Contact  | yes (references)                                              | same                                      | hard delete | —            |
+| `call_events.kind`                           | Contact  | no alone (event catalogue, no free text)                      | same                                      | hard delete | —            |
+| `call_events.detail`                         | Contact  | no alone (opaque int marker)                                  | same                                      | hard delete | —            |
+| `messages.conversation_id`                   | Contact  | yes (references)                                              | same                                      | hard delete | —            |
+| `messages.thread_ref`                        | Contact  | yes in combination (which thread belongs to whom)             | same                                      | hard delete | —            |
+| `interaction_outcomes.conversation_id`       | Contact  | yes (references)                                              | same                                      | hard delete | —            |
+| `interaction_outcomes.result_code`           | Contact  | no alone (closed result catalogue)                            | same                                      | hard delete | —            |
+| `interaction_outcomes.template_intent`       | Contact  | no alone (template name, NULL until P10)                      | same                                      | hard delete | —            |
+| `interaction_outcomes.facts_schema_version`  | Contact  | no alone (schema version tag)                                 | same                                      | hard delete | —            |
+| `interaction_outcomes.facts`                 | Contact  | **yes, free JSONB** (validated payload about the interaction) | same                                      | hard delete | —            |
+| `interaction_outcomes.handled_automatically` | Contact  | no alone (boolean flag)                                       | same                                      | hard delete | —            |
+| `contact_merges.*`                           | Contact  | yes (references)                                              | 24 months after the merge                 | hard delete | —            |
 
 Anonymise rather than delete for the contact root: deleting it would orphan the tasks and leads that
 reference it, and the _shape_ of history — how many enquiries, over what period — is the business's

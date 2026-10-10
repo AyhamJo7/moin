@@ -213,3 +213,4 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P07-001 | P07.01.01 | 2026-10-10 | `f1b7d69d18325` | kernel-value-objects-plus-25-tests | [EV-P07-001-value-objects-kernel.md](P07/EV-P07-001-value-objects-kernel.md) |
 | EV-P07-002 | P07.02.01 | 2026-10-10 | `668d52a5aa6d` | contacts-plus-methods-tables-services-tests | [EV-P07-002-contacts-methods.md](P07/EV-P07-002-contacts-methods.md) |
 | EV-P07-003 | P07.03.01 | 2026-10-10 | `62d8a097cdc6` | resolution-deterministic-rules-plus-8-tests | [EV-P07-003-resolution-deterministic.md](P07/EV-P07-003-resolution-deterministic.md) |
+| EV-P07-004 | P07.05.01 | 2026-10-10 | `19106e308144` | conversations-calls-events-outcomes-plus-6-tests | [EV-P07-004-conversations-outcomes.md](P07/EV-P07-004-conversations-outcomes.md) |

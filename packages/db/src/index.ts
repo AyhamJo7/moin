@@ -65,3 +65,21 @@ export type {
 } from './contacts.ts';
 export { resolveCaller, resolveEmail, resolveExternalId } from './resolution.ts';
 export type { ResolutionRule, ResolutionVerdict } from './resolution.ts';
+export {
+  advanceCallStatus,
+  getOutcome,
+  ingestCall,
+  recordCallEvent,
+  recordOutcome,
+  startConversation,
+} from './conversations.ts';
+export type {
+  Call,
+  CallEventKind,
+  CallStatus,
+  Conversation,
+  ConversationChannel,
+  ConversationStatus,
+  OutcomeInput,
+  OutcomeResult,
+} from './conversations.ts';
