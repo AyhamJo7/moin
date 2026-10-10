@@ -265,7 +265,33 @@ describe('conversations', () => {
     ).rejects.toMatchObject({ code: '42501' });
   });
 
-  evidenceTest('deleting a contact removes its conversations and calls', async () => {
+  evidenceTest('racing terminal against forward lands the terminal', async () => {
+    const { call } = await withTenant(app, ORG_A, (client) =>
+      ingestCall(client, { providerCallSid: 'CA-race-terminal-1' }),
+    );
+    await withTenant(app, ORG_A, (client) => advanceCallStatus(client, call.id, 'ringing'));
+    const [forward, terminal] = await Promise.all([
+      withTenant(app, ORG_A, (client) => advanceCallStatus(client, call.id, 'in_progress')),
+      withTenant(app, ORG_A, (client) => advanceCallStatus(client, call.id, 'completed')),
+    ]);
+    // Whichever order the updates landed, the terminal wins: completed is reachable from ringing
+    // and from in_progress, and in_progress never overwrites completed (guarded UPDATE).
+    const kept = await withTenant(app, ORG_A, (client) =>
+      client.query<{ status: string }>(`select status from calls where id = $1`, [call.id]),
+    );
+    expect(kept.rows[0]?.status).toBe('completed');
+    expect([forward.moved, terminal.moved].filter(Boolean).length).toBeGreaterThanOrEqual(1);
+    const events = await withTenant(app, ORG_A, (client) =>
+      client.query<{ n: string }>(
+        `select count(*)::text as n from call_events where call_id = $1 and kind = 'status_change'`,
+        [call.id],
+      ),
+    );
+    // ingest + ringing + both racers' events = 4.
+    expect(events.rows[0]?.n).toBe('4');
+  });
+
+  evidenceTest('deleting a contact with history is refused; erasure clears first', async () => {
     const contact = await withTenant(app, ORG_B, async (client) => {
       const { createContact } = await import('./contacts.ts');
       return createContact(client, { displayName: 'Transient' });
@@ -274,12 +300,22 @@ describe('conversations', () => {
       startConversation(client, { channel: 'call', contactId: contact.id }),
     );
     expect(conversation.contactId).toBe(contact.id);
+    // Composite RESTRICT: history blocks the delete (23503), so nothing is silently re-homed.
+    await expect(
+      admin.query(`delete from contacts where id = $1`, [contact.id]),
+    ).rejects.toMatchObject({ code: '23503' });
+    // Erasure path: clear the link first, then the delete succeeds and history survives.
+    await withTenant(app, ORG_B, (client) =>
+      client.query(`update conversations set contact_id = null where id = $1`, [conversation.id]),
+    );
     await admin.query(`delete from contacts where id = $1`, [contact.id]);
     const left = await withTenant(app, ORG_B, (client) =>
-      client.query<{ n: string }>(`select count(*)::text as n from conversations where id = $1`, [
-        conversation.id,
-      ]),
+      client.query<{ n: string; contact: string | null }>(
+        `select count(*)::text as n, max(contact_id::text) as contact
+         from conversations where id = $1`,
+        [conversation.id],
+      ),
     );
-    expect(left.rows[0]?.n).toBe('0');
+    expect(left.rows[0]).toMatchObject({ n: '1', contact: null });
   });
 });

@@ -10,10 +10,10 @@
 -- (thread rows only, no bodies yet); `interaction_outcomes` is the finaliser's verdict (P07.05.03,
 -- INV-06: every interaction ends with an outcome or an open task, enforced in P07.11).
 --
--- All tenant rows: organisation_id, composite uniques/FKs, RLS + FORCE, moin_app DML. The call
--- links to the resolved contact where known (SET NULL: deleting a contact must not delete call
--- history) and to its interaction_link verdict. Outcomes link to the conversation strictly
--- (CASCADE): an outcome without its interaction is meaningless.
+-- All tenant rows: organisation_id, composite uniques/FKs, RLS + FORCE, moin_app DML. Contact
+-- legs are composite RESTRICT: a contact with history cannot be deleted outright — erasure
+-- (P16) clears contact_id first, then deletes, so history is never silently re-homed or erased.
+-- Outcomes link to the conversation strictly (CASCADE).
 --
 -- Status monotonicity lives in the service (compare-and-hold), not in a trigger: out-of-order
 -- provider callbacks are kept as events but must not move the call backwards (P07.05.02).
@@ -29,7 +29,9 @@ CREATE TABLE conversations (
   created_at      timestamptz NOT NULL DEFAULT now(),
   updated_at      timestamptz NOT NULL DEFAULT now(),
   UNIQUE (organisation_id, id),
-  FOREIGN KEY (organisation_id, contact_id) REFERENCES contacts (organisation_id, id) ON DELETE CASCADE
+  -- Composite RESTRICT: a contact with history cannot be deleted outright. Erasure (P16)
+  -- clears contact_id first, then deletes.
+  FOREIGN KEY (organisation_id, contact_id) REFERENCES contacts (organisation_id, id) ON DELETE RESTRICT
 );
 
 CREATE TABLE calls (
@@ -56,7 +58,7 @@ CREATE TABLE calls (
   UNIQUE (organisation_id, id),
   UNIQUE (organisation_id, provider_call_sid),
   FOREIGN KEY (organisation_id, conversation_id) REFERENCES conversations (organisation_id, id) ON DELETE CASCADE,
-  FOREIGN KEY (organisation_id, contact_id) REFERENCES contacts (organisation_id, id) ON DELETE CASCADE
+  FOREIGN KEY (organisation_id, contact_id) REFERENCES contacts (organisation_id, id) ON DELETE RESTRICT
 );
 
 CREATE INDEX calls_conversation_idx ON calls (organisation_id, conversation_id);

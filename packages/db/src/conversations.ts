@@ -189,28 +189,17 @@ export async function ingestCall(
 /**
  * Monotonic status advance: forward rungs from a non-terminal rung apply, and any terminal from
  * a non-terminal rung applies; terminal-to-terminal never moves (completed→failed is a second
- * verdict, not a transition). Every attempt is kept as a `status_change` event; a rejected move
- * leaves the rung untouched. The UPDATE is guarded on the read rung, so concurrent advancers
- * serialise: the loser re-reads, records its event, and reports moved:false.
+ * verdict, not a transition). Every attempt is kept as a `status_change` event. The UPDATE is
+ * guarded on the read rung, so concurrent advancers serialise: the loser re-reads and retries
+ * once against the kept rung (a terminal racing a forward move still lands), else records its
+ * event and reports moved:false. At most two attempts, same transaction.
  */
 export async function advanceCallStatus(
   client: TenantClient,
   callId: string,
   next: CallStatus,
 ): Promise<{ call: Call; moved: boolean }> {
-  const current = await client.query<CallRow>(
-    `select id, conversation_id, provider_call_sid, contact_id, status, version::text
-     from calls where id = $1`,
-    [callId],
-  );
-  const row = current.rows[0];
-  if (row === undefined) throw new VersionConflictError(`call ${callId} not found`);
-  const rung = row.status as CallStatus;
-  const moves =
-    rung !== next &&
-    !TERMINAL.has(rung) &&
-    (TERMINAL.has(next) || CALL_LADDER.indexOf(next) > CALL_LADDER.indexOf(rung));
-  if (!moves) {
+  async function recordEvent(rung: CallStatus, result: 'succeeded' | 'rejected'): Promise<void> {
     await client.query(
       `insert into call_events (organisation_id, id, call_id, kind, detail)
        values (app.current_org(), $1, $2, 'status_change', $3)`,
@@ -222,47 +211,71 @@ export async function advanceCallStatus(
       targetKind: 'call',
       targetId: callId,
       argsSanitized: { status: CALL_LADDER.indexOf(rung) },
-      result: 'rejected',
+      result,
     });
+  }
+
+  async function tryMove(rung: CallStatus): Promise<CallRow | null> {
+    const moved = await client.query<CallRow>(
+      `update calls set status = $2, updated_at = clock_timestamp(), version = version + 1
+       where id = $1 and status = $3
+       returning id, conversation_id, provider_call_sid, contact_id, status, version::text`,
+      [callId, next, rung],
+    );
+    return moved.rows[0] ?? null;
+  }
+
+  function movesFrom(rung: CallStatus): boolean {
+    return (
+      rung !== next &&
+      !TERMINAL.has(rung) &&
+      (TERMINAL.has(next) || CALL_LADDER.indexOf(next) > CALL_LADDER.indexOf(rung))
+    );
+  }
+
+  const current = await client.query<CallRow>(
+    `select id, conversation_id, provider_call_sid, contact_id, status, version::text
+     from calls where id = $1`,
+    [callId],
+  );
+  const row = current.rows[0];
+  if (row === undefined) throw new VersionConflictError(`call ${callId} not found`);
+  const rung = row.status as CallStatus;
+  if (!movesFrom(rung)) {
+    await recordEvent(rung, 'rejected');
     return { call: toCall(row), moved: false };
   }
-  const moved = await client.query<CallRow>(
-    `update calls set status = $2, updated_at = clock_timestamp(), version = version + 1
-     where id = $1 and status = $3
-     returning id, conversation_id, provider_call_sid, contact_id, status, version::text`,
-    [callId, next, rung],
-  );
-  const nextRow = moved.rows[0];
-  if (nextRow === undefined) {
-    // Lost the race: re-read the winner's rung, record the event, report no move.
-    const reread = await client.query<CallRow>(
-      `select id, conversation_id, provider_call_sid, contact_id, status, version::text
-       from calls where id = $1`,
-      [callId],
-    );
-    const kept = reread.rows[0];
-    if (kept === undefined) throw new Error('call row vanished');
-    await client.query(
-      `insert into call_events (organisation_id, id, call_id, kind, detail)
-       values (app.current_org(), $1, $2, 'status_change', $3)`,
-      [randomUUID(), callId, CALL_LADDER.indexOf(next)],
-    );
-    return { call: toCall(kept), moved: false };
+  const won = await tryMove(rung);
+  if (won !== null) {
+    await recordEvent(next, 'succeeded');
+    return { call: toCall(won), moved: true };
   }
-  await client.query(
-    `insert into call_events (organisation_id, id, call_id, kind, detail)
-     values (app.current_org(), $1, $2, 'status_change', $3)`,
-    [randomUUID(), callId, CALL_LADDER.indexOf(next)],
+  // Lost the race: re-read the kept rung and retry once — a terminal racing a forward move
+  // still applies from the kept non-terminal rung.
+  const reread = await client.query<CallRow>(
+    `select id, conversation_id, provider_call_sid, contact_id, status, version::text
+     from calls where id = $1`,
+    [callId],
   );
-  await appendAuditEvent(client, {
-    source: 'api',
-    operation: 'call.status',
-    targetKind: 'call',
-    targetId: callId,
-    argsSanitized: { status: CALL_LADDER.indexOf(next) },
-    result: 'succeeded',
-  });
-  return { call: toCall(nextRow), moved: true };
+  const kept = reread.rows[0];
+  if (kept === undefined) throw new Error('call row vanished');
+  const keptRung = kept.status as CallStatus;
+  if (movesFrom(keptRung)) {
+    const retried = await tryMove(keptRung);
+    if (retried !== null) {
+      await recordEvent(next, 'succeeded');
+      return { call: toCall(retried), moved: true };
+    }
+  }
+  await recordEvent(keptRung, 'rejected');
+  const final = await client.query<CallRow>(
+    `select id, conversation_id, provider_call_sid, contact_id, status, version::text
+     from calls where id = $1`,
+    [callId],
+  );
+  const last = final.rows[0];
+  if (last === undefined) throw new Error('call row vanished');
+  return { call: toCall(last), moved: false };
 }
 
 export async function recordCallEvent(
