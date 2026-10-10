@@ -571,6 +571,153 @@ describe('session revocation without status change (P06.09.02 first response)', 
       ).statusCode,
     ).toBe(404);
   });
+
+  evidenceTest(
+    'a forged organisation parameter fails closed at the database layer (H1/M1)',
+    async () => {
+      // Defence in depth: the controller passes the guarded session's tenant, but the DEFINER
+      // itself refuses a parameter that disagrees with the transaction's tenant GUC — so a
+      // caller that reaches the function directly with a forged org gets 'missing', never a
+      // revocation. KILLED without the 0032 GUC check (forged org proceeds to the gate).
+      const { org } = await ownerPair();
+      const staff = await person();
+      await member(staff.id, org, 'staff');
+      await signInPair(staff);
+      const forgedOrg = randomUUID();
+      const settled = await admin.query<{ outcome: string; revoked: number }>(
+        'select * from app.revoke_member_sessions($1::uuid, $2::text, $3::text[], $4::uuid, $5::text, null, null)',
+        [forgedOrg, 'owner', '{}', staff.id, 'password_reset'],
+      );
+      expect(settled.rows[0]?.outcome).toBe('missing');
+      expect(settled.rows[0]?.revoked).toBe(0);
+      // Nothing revoked, nothing audited: the staff session still lives.
+      const live = await admin.query<{ n: string }>(
+        'select count(*)::text as n from sessions where user_id = $1 and revoked_at is null',
+        [staff.id],
+      );
+      expect(live.rows[0]?.n).toBe('1');
+      const audits = await admin.query<{ n: string }>(
+        "select count(*)::text as n from audit_events where target_id = $1 and operation = 'account.revoke_sessions'",
+        [staff.id],
+      );
+      expect(audits.rows[0]?.n).toBe('0');
+    },
+  );
+
+  evidenceTest('revoke-sessions audit carries correlation and session count (L1)', async () => {
+    // Sibling recovery writers forward app.correlation_id and the revoked count; the
+    // revoke path passed NULLs before 0032. KILLED without the forwarding (row reads
+    // NULL / empty args).
+    const { pair, org } = await ownerPair();
+    const staff = await person();
+    await member(staff.id, org, 'staff');
+    await signInPair(staff);
+    contexts().clearCache();
+    const correlation = randomUUID();
+    expect(
+      (
+        await postAs(
+          pair,
+          '/api/recovery/revoke-sessions',
+          { userId: staff.id, reason: 'password_reset' },
+          correlation,
+        )
+      ).statusCode,
+    ).toBe(200);
+    const rows = await admin.query<{ correlation_id: string; args: unknown }>(
+      "select correlation_id::text as correlation_id, args_sanitized as args from audit_events where target_id = $1 and operation = 'account.revoke_sessions'",
+      [staff.id],
+    );
+    expect(rows.rows).toHaveLength(1);
+    expect(rows.rows[0]?.correlation_id).toBe(correlation);
+    expect(rows.rows[0]?.args).toStrictEqual({ session_count: 1 });
+  });
+});
+
+describe('disabled-account callback and races (M2)', () => {
+  evidenceTest('callback for a disabled account mints no session', async () => {
+    const { pair, org } = await ownerPair();
+    const staff = await person();
+    await member(staff.id, org, 'staff');
+    await signInPair(staff);
+    contexts().clearCache();
+    expect(
+      (await postAs(pair, '/api/recovery/disable-user', { userId: staff.id, reason: 'mfa_reset' }))
+        .statusCode,
+    ).toBe(200);
+    const started = await app.inject({ method: 'GET', url: '/api/auth/login' });
+    expect(started.statusCode).toBe(302);
+    const binding = /^__Host-moin_signin=([A-Za-z0-9_-]{43});/.exec(
+      String(started.headers['set-cookie']),
+    )?.[1];
+    if (binding === undefined) throw new Error('no binding');
+    const { code, state } = provider.authorize(String(started.headers.location), {
+      subject: staff.subject,
+      email: staff.email,
+    });
+    const callback = await app.inject({
+      method: 'GET',
+      url: `/api/auth/callback?${new URLSearchParams({ state, code, iss: provider.issuer }).toString()}`,
+      headers: { cookie: `__Host-moin_signin=${binding}` },
+    });
+    expect(callback.statusCode).not.toBe(302);
+    const sessions = await admin.query<{ n: string }>(
+      'select count(*)::text as n from sessions where user_id = $1 and revoked_at is null',
+      [staff.id],
+    );
+    expect(sessions.rows[0]?.n).toBe('0');
+  });
+
+  evidenceTest('sign-in racing disable loses: disable wins, session revoked', async () => {
+    const { pair, org } = await ownerPair();
+    const staff = await person();
+    await member(staff.id, org, 'staff');
+    const staffPair = await signInPair(staff);
+    contexts().clearCache();
+    expect(
+      (await postAs(pair, '/api/recovery/disable-user', { userId: staff.id, reason: 'mfa_reset' }))
+        .statusCode,
+    ).toBe(200);
+    contexts().clearCache();
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: '/probe',
+          headers: { cookie: staffPair.header },
+        })
+      ).statusCode,
+    ).toBe(401);
+    const audits = await admin.query<{ n: string }>(
+      "select count(*)::text as n from audit_events where target_id = $1 and operation = 'account.disable'",
+      [staff.id],
+    );
+    expect(audits.rows[0]?.n).toBe('1');
+  });
+
+  evidenceTest('disabling the last owner fails closed (owner invariant)', async () => {
+    const solo = randomUUID();
+    await admin.query('insert into organisations (id, slug, name) values ($1, $2, $3)', [
+      solo,
+      `s-${solo.slice(0, 8)}`,
+      'Solo Org',
+    ]);
+    const owner = await person();
+    await member(owner.id, solo, 'owner');
+    const keeper = await person();
+    await member(keeper.id, solo, 'owner');
+    const keeperPair = await signInPair(keeper);
+    contexts().clearCache();
+    await admin.query('delete from memberships where user_id = $1', [owner.id]);
+    expect(
+      (
+        await postAs(keeperPair, '/api/recovery/disable-user', {
+          userId: keeper.id,
+          reason: 'mfa_reset',
+        })
+      ).statusCode,
+    ).toBe(409);
+  });
 });
 
 describe('password-reset revocation hook (P06.09.01, our side)', () => {
