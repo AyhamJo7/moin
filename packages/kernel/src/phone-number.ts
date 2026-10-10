@@ -5,9 +5,10 @@
  * national `030 …` input and its `+49 30 …` spelling land on the same value. Identity resolution
  * (P07.03) matches on this string and nothing else.
  *
- * Two deliberate carve-outs. Reserved and test ranges (RFC 5737 documentation space, 555 fiction
- * numbers, premium/entertainment prefixes) are refused: a test fixture must never become a tenant's
- * callback number. Type detection answers only the question the product asks — mobile vs landline
+ * Two deliberate carve-outs. Fiction and service ranges (555 fiction numbers, 115/116 service
+ * lines) plus the BNetzA drama-number block (069 90009 000–999) are refused: a test fixture must
+ * never become a tenant's callback number. 0800 freephone and 0900 premium are callable German
+ * ranges and stay accepted. Type detection answers only the question the product asks — mobile vs landline
  * for callback routing — and returns `unknown` where libphonenumber cannot tell.
  */
 
@@ -19,8 +20,10 @@ import {
 
 const DEFAULT_REGION = 'DE';
 
-/** Documentation, fiction and premium ranges that must never become a callback number. */
-const RESERVED_PREFIXES = ['+49800', '+49900', '+49555', '+49115', '+49116', '+49699'];
+/** Fiction, service and abuse-prone ranges that must never become a callback number. */
+const RESERVED_PREFIXES = ['+49555', '+49115', '+49116'];
+/** BNetzA drama-number block: 069 90009 000–999 only, not the whole 069 prefix. */
+const DRAMA_BLOCK = /^\+496990009\d{3}$/;
 
 export type PhoneKind = 'mobile' | 'landline' | 'unknown';
 
@@ -46,11 +49,16 @@ function parse(raw: string): ParsedPhoneNumber {
   try {
     parsed = parsePhoneNumberWithError(trimmed, DEFAULT_REGION);
   } catch {
-    throw new RangeError(`not a parseable phone number: ${trimmed.slice(0, 32)}`);
+    // Generic message: the input is PII (INV-12) and must not be echoed into logs.
+    throw new RangeError('not a parseable phone number');
   }
-  if (!parsed.isValid()) throw new RangeError(`not a valid phone number: ${trimmed.slice(0, 32)}`);
+  if (!parsed.isValid()) throw new RangeError('not a valid phone number');
   const e164 = parsed.number;
-  if (!isValidPhoneNumber(e164) || RESERVED_PREFIXES.some((prefix) => e164.startsWith(prefix))) {
+  if (
+    !isValidPhoneNumber(e164) ||
+    DRAMA_BLOCK.test(e164) ||
+    RESERVED_PREFIXES.some((prefix) => e164.startsWith(prefix))
+  ) {
     throw new RangeError('reserved or test range: not a callable number');
   }
   return parsed;

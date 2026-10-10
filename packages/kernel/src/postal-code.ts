@@ -1,10 +1,10 @@
 /**
  * German postal codes (P07.01.02).
  *
- * Five digits. `01000`–`01999` never existed (leading-zero range unassigned) and `00000` is not a
- * code, so both are refused alongside any non-digit input. Existence of a specific code against the
- * delivery table is a P07.02 lookup concern, not a value-object one — this type answers "shaped
- * like a PLZ", the directory answers "deliverable".
+ * Five digits. Only `00000` and the `00xxx` range are refused (`01067` Dresden is a valid code —
+ * the `01xxx` range is assigned). Existence of a specific code against the delivery table is a
+ * P07.02 lookup concern, not a value-object one — this type answers "shaped like a PLZ", the
+ * directory answers "deliverable".
  */
 
 const SHAPE = /^\d{5}$/;

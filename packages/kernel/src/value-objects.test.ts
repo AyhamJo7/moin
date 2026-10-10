@@ -24,29 +24,75 @@ describe('phoneNumber', () => {
     expect(phoneNumber('+4930901820').national()).toContain('030');
   });
 
+  it('accepts callable neighbours of refused ranges', () => {
+    // 0800 freephone is callable; only the 069 90009 000–999 drama block is refused, not 069.
+    expect(phoneNumber('+49 800 1234567').e164).toBe('+498001234567');
+    expect(phoneNumber('+49 69 123456').e164).toBe('+4969123456');
+  });
+
   it('refuses garbage, empties and reserved ranges', () => {
-    for (const raw of ['', 'abc', '123', '+49 900 123456', '+49 555 1234', '+1 555 0100']) {
+    for (const raw of [
+      '',
+      'abc',
+      '123',
+      '+49 555 1234',
+      '+1 555 0100',
+      '+49 69 90009001',
+      '+49 115',
+    ]) {
       expect(() => phoneNumber(raw), raw).toThrow(RangeError);
     }
   });
 
-  it('property: E.164 output always round-trips', () => {
+  it('never echoes the input in an error (INV-12)', () => {
+    const secret = '+49 30 12345678901234567890';
+    try {
+      phoneNumber(secret);
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(RangeError);
+      expect((error as Error).message).not.toContain('1234567890');
+    }
+  });
+
+  it('property: generated DE numbers round-trip through E.164', () => {
     fc.assert(
       fc.property(
-        fc.constantFrom('+4930901820', '+4915123456789', '+498912345678', '+494012345678'),
-        (e164) => {
-          expect(phoneNumber(e164).e164).toBe(e164);
+        fc
+          .tuple(
+            // Area codes and mobile prefixes that libphonenumber accepts as valid.
+            fc.constantFrom('030', '040', '089', '069', '0201', '030', '0151', '0170', '0160'),
+            fc.integer({ min: 100000, max: 99999999 }),
+          )
+          .map(
+            ([prefix, subscriber]) =>
+              `+49 ${prefix.slice(prefix.startsWith('0') ? 1 : 0)} ${subscriber}`,
+          )
+          .filter((candidate) => {
+            try {
+              phoneNumber(candidate);
+              return true;
+            } catch {
+              return false;
+            }
+          }),
+        (e164input) => {
+          const once = phoneNumber(e164input);
+          expect(phoneNumber(once.e164).e164).toBe(once.e164);
+          expect(phoneNumber(once.national()).e164).toBe(once.e164);
         },
       ),
     );
   });
 
-  it('property: national spelling parses to the same E.164', () => {
+  it('property: reserved ranges are always refused', () => {
     fc.assert(
       fc.property(
-        fc.constantFrom(['030 901820', '+49 30 901820'], ['0151 23456789', '+49 151 23456789']),
-        ([national, international]) => {
-          expect(phoneNumber(national).e164).toBe(phoneNumber(international).e164);
+        fc
+          .constantFrom('+49555', '+49115', '+49116')
+          .chain((prefix) => fc.integer({ min: 100000, max: 9999999 }).map((n) => `${prefix}${n}`)),
+        (reserved) => {
+          expect(() => phoneNumber(reserved)).toThrow(RangeError);
         },
       ),
     );
@@ -89,8 +135,9 @@ describe('emailAddress', () => {
 });
 
 describe('postalCode', () => {
-  it('accepts five digits', () => {
+  it('accepts five digits, including the 01xxx range', () => {
     expect(postalCode('20354').value).toBe('20354');
+    expect(postalCode('01067').value).toBe('01067');
   });
 
   it('refuses short, long, non-digit and unassigned ranges', () => {
@@ -143,6 +190,12 @@ describe('personName', () => {
 describe('money', () => {
   it('adds cents without float error', () => {
     expect(money(10).add(money(20)).cents).toBe(30);
+    expect(moneyFromEuros(19.99).cents).toBe(1999);
+  });
+
+  it('rounds decimal euros, not binary floats', () => {
+    // 1.005 * 100 is 100.49999… in binary: Math.round would give 100, the decimal spelling 101.
+    expect(moneyFromEuros(1.005).cents).toBe(101);
     expect(moneyFromEuros(19.99).cents).toBe(1999);
   });
 

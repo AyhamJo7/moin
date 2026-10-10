@@ -39,5 +39,14 @@ export function money(cents: number): Money {
 }
 
 export function moneyFromEuros(euros: number): Money {
-  return money(Math.round(euros * 100));
+  // Decimal-string conversion: binary floats cannot represent most cent values (1.005 is stored
+  // as 1.0049999…, so euros * 100 rounds the wrong way). Split the decimal spelling instead —
+  // half cents round up, which is the documented rounding for this boundary.
+  if (!Number.isFinite(euros)) throw new RangeError('amount must be a finite number of euros');
+  const text = String(Math.abs(euros));
+  const [whole = '0', frac = ''] = text.split('.');
+  const cents = Number(whole) * 100 + Number((frac + '00').slice(0, 2));
+  const halfUp = (frac + '000')[2] !== undefined && Number((frac + '000')[2]) >= 5;
+  const total = cents + (halfUp ? 1 : 0);
+  return money(euros < 0 ? -total : total);
 }
