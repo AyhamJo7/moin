@@ -220,8 +220,8 @@ export function checkFactSchemaShape(schema: unknown): asserts schema is Record<
         if (FORBIDDEN_KEYS.has(key)) throw new RangeError(`forbidden key in ${name}: ${key}`);
       }
       const type = prop['type'];
-      if (type !== undefined && !(typeof type === 'string' && SCALAR_TYPES.has(type))) {
-        throw new RangeError(`property ${name} must be a scalar type or untyped`);
+      if (!(typeof type === 'string' && SCALAR_TYPES.has(type))) {
+        throw new RangeError(`property ${name} must declare a scalar type`);
       }
       if (prop['properties'] !== undefined || prop['items'] !== undefined) {
         throw new RangeError(`property ${name} must not nest (no properties/items)`);
@@ -239,8 +239,8 @@ export function checkFactSchemaShape(schema: unknown): asserts schema is Record<
       if (!names.has(r)) throw new RangeError(`required ${r} is not a declared property`);
     }
   }
-  if (schema['additionalProperties'] !== undefined && schema['additionalProperties'] !== false) {
-    throw new RangeError('additionalProperties must be false when present');
+  if (schema['additionalProperties'] !== false) {
+    throw new RangeError('additionalProperties must be exactly false');
   }
 }
 
@@ -330,7 +330,7 @@ function checkPayload(schema: Record<string, unknown>, payload: unknown): string
     }
   }
   for (const name of Object.keys(payload)) {
-    if (!(name in properties)) errors.push(`undeclared field ${name}`);
+    if (!Object.hasOwn(properties, name)) errors.push(`undeclared field ${name}`);
   }
   const required = schema['required'];
   if (Array.isArray(required)) {

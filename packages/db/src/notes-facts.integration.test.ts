@@ -7,7 +7,6 @@ import { listAuditEvents } from './audit.ts';
 import { createContact } from './contacts.ts';
 import { createTask } from './tasks.ts';
 import {
-  checkFactSchemaShape,
   createNote,
   deleteNote,
   listNotes,
@@ -142,6 +141,12 @@ describe('facts schemas', () => {
       validateFacts(client, 'reservation', 'v9', { name: 'M' }),
     );
     expect(unknown).toMatchObject({ valid: false });
+    // Prototype chain is not a declaration: `constructor` counts as undeclared even though
+    // `'constructor' in {}` is true — the check uses own-properties only.
+    const polluted = await withTenant(app, ORG_A, (client) =>
+      validateFacts(client, 'reservation', 'v1', { name: 'M', constructor: 'x' }),
+    );
+    expect(polluted.errors).toContain('undeclared field constructor');
   });
 
   evidenceTest('registry refuses refs, nesting and open shapes', async () => {
@@ -151,6 +156,14 @@ describe('facts schemas', () => {
       { type: 'object', properties: { a: { type: 'string' } }, additionalProperties: true },
       { type: 'array', items: {} },
       { properties: { a: { type: 'string' } } },
+      // Untyped property: without a declared scalar, nested objects/arrays would validate.
+      {
+        type: 'object',
+        properties: { a: {} },
+        additionalProperties: false,
+      },
+      // Open shape: additionalProperties must be exactly false, not absent.
+      { type: 'object', properties: { a: { type: 'string' } } },
     ]) {
       await expect(
         withTenant(app, ORG_A, (client) =>
@@ -162,15 +175,16 @@ describe('facts schemas', () => {
         ),
       ).rejects.toBeInstanceOf(RangeError);
     }
-    const shapeCheck = ((): boolean => {
-      try {
-        checkFactSchemaShape({ type: 'object' });
-        return true;
-      } catch {
-        return false;
-      }
-    })();
-    expect(shapeCheck).toBe(true);
+    // Bare object root without properties still needs the closed marker.
+    await expect(
+      withTenant(app, ORG_A, (client) =>
+        registerFactSchema(client, {
+          template: 'bad',
+          version: `v${Math.random().toString(36).slice(2, 8)}`,
+          schema: { type: 'object' },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(RangeError);
   });
 
   it('labels are validated and versions are per-template', async () => {
@@ -179,13 +193,17 @@ describe('facts schemas', () => {
         registerFactSchema(client, {
           template: 'lbl',
           version: 'v1',
-          schema: { type: 'object' },
+          schema: { type: 'object', additionalProperties: false },
           labelsDe: { name: '' },
         }),
       ),
     ).rejects.toBeInstanceOf(RangeError);
     await withTenant(app, ORG_B, (client) =>
-      registerFactSchema(client, { template: 'lbl', version: 'v1', schema: { type: 'object' } }),
+      registerFactSchema(client, {
+        template: 'lbl',
+        version: 'v1',
+        schema: { type: 'object', additionalProperties: false },
+      }),
     );
     const again = await withTenant(app, ORG_B, (client) =>
       validateFacts(client, 'lbl', 'v1', { anything: 1 }),
