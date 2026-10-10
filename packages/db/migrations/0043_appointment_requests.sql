@@ -48,7 +48,7 @@ CREATE TABLE appointment_requests (
     (status = 'confirmed_by_staff' AND confirmed_by IS NOT NULL AND informed_via IS NOT NULL)
     OR (status <> 'confirmed_by_staff' AND confirmed_by IS NULL AND informed_via IS NULL)
   ),
-  CHECK (lower("window") IS NULL OR lower("window") < upper("window"))
+  CHECK ("window" IS NULL OR (NOT isempty("window") AND lower("window") IS NOT NULL AND upper("window") IS NOT NULL AND lower("window") < upper("window")))
 );
 
 CREATE INDEX appointment_requests_contact_idx

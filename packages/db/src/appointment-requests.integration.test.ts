@@ -143,6 +143,25 @@ describe('appointment requests', () => {
         }),
       ),
     ).rejects.toBeInstanceOf(RangeError);
+    // The DB CHECK mirrors the service for direct SQL writers: empty and unbounded ranges
+    // are rejected (23514), not just service-validated ones.
+    await expect(
+      withTenant(app, ORG_A, (client) =>
+        client.query(
+          `insert into appointment_requests (organisation_id, id, kind, "window")
+           values (app.current_org(), gen_random_uuid(), 'appointment', 'empty')`,
+        ),
+      ),
+    ).rejects.toMatchObject({ code: '23514' });
+    await expect(
+      withTenant(app, ORG_A, (client) =>
+        client.query(
+          `insert into appointment_requests (organisation_id, id, kind, "window")
+           values (app.current_org(), gen_random_uuid(), 'appointment',
+             tstzrange('2026-11-01T18:00Z', null))`,
+        ),
+      ),
+    ).rejects.toMatchObject({ code: '23514' });
     await expect(
       withTenant(app, ORG_A, (client) =>
         createRequest(client, { kind: 'appointment', partySize: 0 }),
