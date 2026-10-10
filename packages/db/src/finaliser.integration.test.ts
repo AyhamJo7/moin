@@ -8,6 +8,7 @@ import { listAuditEvents } from './audit.ts';
 import {
   advanceCallStatus,
   ingestCall,
+  recordCallEvent,
   recordOutcome,
   startConversation,
 } from './conversations.ts';
@@ -110,8 +111,9 @@ describe('finaliser', () => {
         ingestCall(client, { providerCallSid: 'CA-killed-1', fromNumber: '+4930123456' }),
       );
       expect(ingested.created).toBe(true);
-      // Age both legs past the cutoff (the process died: no call advance, no conversation
-      // touch — the GREATEST clock reads old on both sides).
+      // Age all three legs past the cutoff (the process died: no event, no call
+      // advance, no conversation touch — the GREATEST clock reads old everywhere).
+      // ingestCall always writes a fresh status_change event, so it must be aged too.
       await admin.query(
         `update conversations set updated_at = clock_timestamp() - make_interval(mins => 11)
        where id = $1`,
@@ -121,6 +123,11 @@ describe('finaliser', () => {
         `update calls set updated_at = clock_timestamp() - make_interval(mins => 11)
        where conversation_id = $1`,
         [ingested.call.conversationId],
+      );
+      await admin.query(
+        `update call_events set created_at = clock_timestamp() - make_interval(mins => 11)
+       where call_id = $1`,
+        [ingested.call.id],
       );
       const first = await reconcileOrphans(app, { olderThanMinutes: 10 });
       expect(first.orphans.map((o) => o.conversationId)).toContain(ingested.call.conversationId);
@@ -192,24 +199,31 @@ describe('finaliser', () => {
     expect(orphanSeverity(new Set(['bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb']), convo)).toBe('SEV2');
   });
 
-  evidenceTest('closed fallback is repaired with a fresh open task', async () => {
+  evidenceTest('closed fallback is reopened to the same row, twice in a row', async () => {
     const convo = await withTenant(app, ORG_A, (client) =>
       startConversation(client, { channel: 'call' }),
     );
     const first = await withTenant(app, ORG_A, (client) => finaliseInteraction(client, convo.id));
     expect(first.verdict).toBe('fallback-created');
-    // Close the fallback through the strict chain (open → … → done).
-    await withTenant(app, ORG_A, (client) => completeTask(client, first.taskId ?? '', 1));
-    const repaired = await withTenant(app, ORG_A, (client) =>
-      finaliseInteraction(client, convo.id),
-    );
-    expect(repaired.verdict).toBe('fallback-created');
-    expect(repaired.taskId).not.toBeNull();
-    expect(repaired.taskId).not.toBe(first.taskId);
+    for (let round = 0; round < 2; round += 1) {
+      // Close the fallback through the strict chain (open → … → done), then finalise:
+      // the same row reopens, no new row, no 23505 — unbounded repairs, zero row growth.
+      const open = await withTenant(app, ORG_A, (client) => listOpenTasks(client));
+      const current = open.find((t) => t.conversationId === convo.id);
+      await withTenant(app, ORG_A, (client) =>
+        completeTask(client, current?.id ?? '', current?.version ?? 0),
+      );
+      const repaired = await withTenant(app, ORG_A, (client) =>
+        finaliseInteraction(client, convo.id),
+      );
+      expect(repaired.verdict).toBe('fallback-created');
+      expect(repaired.taskId).toBe(first.taskId);
+    }
     const tasks = await withTenant(app, ORG_A, (client) => listOpenTasks(client));
-    const open = tasks.filter((t) => t.conversationId === convo.id);
-    expect(open).toHaveLength(1);
-    expect(open[0]?.id).toBe(repaired.taskId);
+    const linked = tasks.filter((t) => t.conversationId === convo.id);
+    expect(linked).toHaveLength(1);
+    expect(linked[0]?.id).toBe(first.taskId);
+    expect(linked[0]?.status).toBe('open');
   });
 
   evidenceTest('live call activity keeps the conversation out of the orphan claim', async () => {
@@ -231,6 +245,33 @@ describe('finaliser', () => {
     );
     await withTenant(app, ORG_A, (client) =>
       advanceCallStatus(client, ingested.call.id, 'in_progress'),
+    );
+    const report = await reconcileOrphans(app, { olderThanMinutes: 10 });
+    expect(report.orphans.map((o) => o.conversationId)).not.toContain(ingested.call.conversationId);
+  });
+
+  evidenceTest('a fresh call event keeps the conversation out of the orphan claim', async () => {
+    const ingested = await withTenant(app, ORG_A, (client) =>
+      ingestCall(client, { providerCallSid: 'CA-event-1', fromNumber: '+4930123456' }),
+    );
+    // All three legs aged, then a bare event lands (no call advance, no conversation touch).
+    await admin.query(
+      `update conversations set updated_at = clock_timestamp() - make_interval(mins => 11)
+       where id = $1`,
+      [ingested.call.conversationId],
+    );
+    await admin.query(
+      `update calls set updated_at = clock_timestamp() - make_interval(mins => 11)
+       where conversation_id = $1`,
+      [ingested.call.conversationId],
+    );
+    await withTenant(app, ORG_A, (client) =>
+      recordCallEvent(client, ingested.call.id, 'checkpoint', 7),
+    );
+    await admin.query(
+      `update call_events set created_at = clock_timestamp()
+       where call_id = $1`,
+      [ingested.call.id],
     );
     const report = await reconcileOrphans(app, { olderThanMinutes: 10 });
     expect(report.orphans.map((o) => o.conversationId)).not.toContain(ingested.call.conversationId);
@@ -263,5 +304,12 @@ describe('finaliser', () => {
     const tasks = await withTenant(app, ORG_A, (client) => listOpenTasks(client));
     expect(tasks.filter((t) => t.conversationId === one.id)).toHaveLength(1);
     expect(tasks.filter((t) => t.conversationId === two.id)).toHaveLength(1);
+    // Every reported orphan has a persisted open task: the report never names work the
+    // transaction rolled back.
+    for (const orphan of report.orphans) {
+      const linked = tasks.filter((t) => t.conversationId === orphan.conversationId);
+      expect(linked).toHaveLength(1);
+      expect(linked[0]?.status).not.toBe('done');
+    }
   });
 });
