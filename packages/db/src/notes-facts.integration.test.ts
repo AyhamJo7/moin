@@ -164,6 +164,32 @@ describe('facts schemas', () => {
       },
       // Open shape: additionalProperties must be exactly false, not absent.
       { type: 'object', properties: { a: { type: 'string' } } },
+      // Unenforceable keywords: accepted by JSON Schema but never checked by validateFacts.
+      {
+        type: 'object',
+        properties: { a: { type: 'string', enum: ['ok'] } },
+        additionalProperties: false,
+      },
+      {
+        type: 'object',
+        properties: { a: { type: 'integer', minimum: 1 } },
+        additionalProperties: false,
+      },
+      {
+        type: 'object',
+        properties: { a: { type: 'string', pattern: '^a' } },
+        additionalProperties: false,
+      },
+      {
+        type: 'object',
+        properties: { a: { type: 'string', format: 'email' } },
+        additionalProperties: false,
+      },
+      {
+        type: 'object',
+        properties: { a: { type: 'string', const: 'x' } },
+        additionalProperties: false,
+      },
     ]) {
       await expect(
         withTenant(app, ORG_A, (client) =>

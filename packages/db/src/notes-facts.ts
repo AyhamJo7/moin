@@ -177,26 +177,18 @@ interface FactSchemaRow extends Record<string, unknown> {
 
 const SCALAR_TYPES = new Set(['string', 'number', 'integer', 'boolean']);
 
-const FORBIDDEN_KEYS = new Set([
-  '$ref',
-  '$defs',
-  'definitions',
-  '$dynamicRef',
-  '$recursiveRef',
-  'allOf',
-  'anyOf',
-  'oneOf',
-  'not',
-  'if',
-  'then',
-  'else',
-  'dependentSchemas',
-  'dependentRequired',
-  'patternProperties',
-  'propertyNames',
-  'unevaluatedProperties',
-  'unevaluatedItems',
+/** Root keywords the hand-rolled validator enforces. Anything else is refused at registration. */
+const ROOT_KEYS = new Set([
+  'type',
+  'properties',
+  'required',
+  'additionalProperties',
+  'title',
+  'description',
 ]);
+
+/** Property keywords the validator enforces. Anything else is refused at registration. */
+const PROP_KEYS = new Set(['type', 'title', 'description']);
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -206,25 +198,25 @@ function isObject(value: unknown): value is Record<string, unknown> {
 export function checkFactSchemaShape(schema: unknown): asserts schema is Record<string, unknown> {
   if (!isObject(schema)) throw new RangeError('facts schema must be an object');
   if (schema['type'] !== 'object') throw new RangeError('facts schema root must be type object');
+  // Allowlist: the registered schema is exactly the enforceable subset (flat scalar closed
+  // objects). Anything else — enum/const/pattern/min-max/format/default/examples and friends —
+  // would promise constraints validateFacts never checks, so it is refused at registration.
+  for (const key of Object.keys(schema)) {
+    if (!ROOT_KEYS.has(key)) throw new RangeError(`unsupported schema keyword: ${key}`);
+  }
   const properties = schema['properties'];
   if (properties !== undefined && !isObject(properties)) {
     throw new RangeError('properties must be an object');
-  }
-  for (const key of Object.keys(schema)) {
-    if (FORBIDDEN_KEYS.has(key)) throw new RangeError(`forbidden schema key: ${key}`);
   }
   if (properties !== undefined) {
     for (const [name, prop] of Object.entries(properties)) {
       if (!isObject(prop)) throw new RangeError(`property ${name} must be an object`);
       for (const key of Object.keys(prop)) {
-        if (FORBIDDEN_KEYS.has(key)) throw new RangeError(`forbidden key in ${name}: ${key}`);
+        if (!PROP_KEYS.has(key)) throw new RangeError(`unsupported keyword in ${name}: ${key}`);
       }
       const type = prop['type'];
       if (!(typeof type === 'string' && SCALAR_TYPES.has(type))) {
         throw new RangeError(`property ${name} must declare a scalar type`);
-      }
-      if (prop['properties'] !== undefined || prop['items'] !== undefined) {
-        throw new RangeError(`property ${name} must not nest (no properties/items)`);
       }
     }
   }
