@@ -55,14 +55,32 @@ describe('tasks', () => {
       setTaskStatus(client, task.id, 'in_progress', task.version),
     );
     expect(started.version).toBe(task.version + 1);
+    const waiting = await withTenant(app, ORG_A, (client) =>
+      setTaskStatus(client, started.id, 'waiting', started.version),
+    );
     const done = await withTenant(app, ORG_A, (client) =>
-      setTaskStatus(client, started.id, 'done', started.version),
+      setTaskStatus(client, waiting.id, 'done', waiting.version),
     );
     expect(done.status).toBe('done');
     const reopened = await withTenant(app, ORG_A, (client) =>
       reopenTask(client, done.id, done.version),
     );
     expect(reopened.status).toBe('open');
+  });
+
+  evidenceTest('stale version completion is a 409, not a silent walk', async () => {
+    const task = await withTenant(app, ORG_A, (client) => createTask(client, { title: 'Stale' }));
+    const moved = await withTenant(app, ORG_A, (client) =>
+      setTaskStatus(client, task.id, 'in_progress', task.version),
+    );
+    expect(moved.version).toBe(task.version + 1);
+    await expect(
+      withTenant(app, ORG_A, (client) => completeTask(client, task.id, task.version)),
+    ).rejects.toBeInstanceOf(VersionConflictError);
+    const done = await withTenant(app, ORG_A, (client) =>
+      completeTask(client, task.id, moved.version),
+    );
+    expect(done.status).toBe('done');
   });
 
   evidenceTest('illegal transitions are rejected for every rung', async () => {
@@ -72,11 +90,16 @@ describe('tasks', () => {
       next: 'open' | 'in_progress' | 'waiting' | 'done' | 'cancelled';
     }[] = [
       { setup: [], next: 'done' },
+      { setup: [], next: 'waiting' },
       { setup: ['in_progress'], next: 'open' },
-      { setup: ['waiting'], next: 'open' },
-      { setup: ['in_progress', 'done'], next: 'in_progress' },
-      { setup: ['in_progress', 'done'], next: 'cancelled' },
+      { setup: ['in_progress'], next: 'done' },
+      { setup: ['in_progress', 'waiting'], next: 'open' },
+      { setup: ['in_progress', 'waiting'], next: 'in_progress' },
+      { setup: ['in_progress', 'waiting', 'done'], next: 'in_progress' },
+      { setup: ['in_progress', 'waiting', 'done'], next: 'cancelled' },
+      { setup: ['in_progress', 'waiting', 'done'], next: 'waiting' },
       { setup: ['cancelled'], next: 'open' },
+      { setup: ['cancelled'], next: 'done' },
     ];
     for (const { setup, next } of illegal) {
       const task = await withTenant(app, ORG_A, (client) =>
@@ -103,7 +126,9 @@ describe('tasks', () => {
       withTenant(app, ORG_A, (client) =>
         setTaskStatus(client, task.id, 'in_progress', task.version),
       ),
-      withTenant(app, ORG_A, (client) => setTaskStatus(client, task.id, 'waiting', task.version)),
+      withTenant(app, ORG_A, (client) =>
+        setTaskStatus(client, task.id, 'in_progress', task.version),
+      ),
     ]);
     const won = [one, two].filter((r) => r.status === 'fulfilled');
     const lost = [one, two].filter((r) => r.status === 'rejected');
@@ -160,6 +185,15 @@ describe('tasks', () => {
       completeTask(client, task.id, snoozed.version),
     );
     expect(done.status).toBe('done');
+    // Snooze wrote its own audit row with an opaque marker, no instant.
+    const snoozeEvents = await withTenant(app, ORG_A, async (client) => {
+      const { listAuditEvents } = await import('./audit.ts');
+      return listAuditEvents(client, { targetId: task.id });
+    });
+    expect(snoozeEvents.map((e) => e.operation)).toContain('task.snooze');
+    for (const event of snoozeEvents.filter((e) => e.operation === 'task.snooze')) {
+      expect(JSON.stringify(event.args_sanitized)).not.toContain('2026-12-01');
+    }
   });
 
   evidenceTest('cross-tenant task rows are invisible', async () => {
@@ -172,12 +206,19 @@ describe('tasks', () => {
     const task = await withTenant(app, ORG_A, (client) =>
       createTask(client, { title: 'Geheimtitel', type: 'callback' }),
     );
+    const moved = await withTenant(app, ORG_A, (client) =>
+      setTaskStatus(client, task.id, 'in_progress', task.version),
+    );
     await withTenant(app, ORG_A, (client) =>
-      setTaskStatus(client, task.id, 'waiting', task.version),
+      setTaskStatus(client, moved.id, 'waiting', moved.version),
     );
     await withTenant(app, ORG_A, async (client) => {
       const events = await listAuditEvents(client, { targetId: task.id });
-      expect(events.map((e) => e.operation).sort()).toStrictEqual(['task.create', 'task.status']);
+      expect(events.map((e) => e.operation).sort()).toStrictEqual([
+        'task.create',
+        'task.status',
+        'task.status',
+      ]);
       for (const event of events) {
         expect(JSON.stringify(event.args_sanitized)).not.toContain('Geheimtitel');
       }

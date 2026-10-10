@@ -1,8 +1,8 @@
 /**
  * Tasks (P07.06.02): the universal next action (ADR-0015).
  *
- * The state machine is open → in_progress → waiting → done, with cancelled reachable from any
- * live rung and reopen returning done → open. Transitions are compare-and-hold on
+ * The state machine is the strict PLAN chain open → in_progress → waiting → done, with
+ * cancelled reachable from any live rung and reopen returning done → open. Transitions are compare-and-hold on
  * (status, version): an illegal move or a stale version is a VersionConflictError (409 at the
  * HTTP layer), never a silent rewrite. System-created tasks (duplicate review, reconciler
  * fallbacks) carry an idempotency key: creation retries return the existing row.
@@ -40,11 +40,11 @@ const TYPE_MARKER: Record<TaskType, number> = {
   general: 4,
 };
 
-/** Legal moves. `reopen` is done → open only; cancelled is terminal. */
+/** Legal moves (PLAN P07.06.01 strict chain). `reopen` is done → open only; cancelled is terminal. */
 const TRANSITIONS: Readonly<Record<TaskStatus, readonly TaskStatus[]>> = {
-  open: ['in_progress', 'waiting', 'cancelled'],
-  in_progress: ['waiting', 'done', 'cancelled'],
-  waiting: ['in_progress', 'done', 'cancelled'],
+  open: ['in_progress', 'cancelled'],
+  in_progress: ['waiting', 'cancelled'],
+  waiting: ['done', 'cancelled'],
   done: ['open'],
   cancelled: [],
 };
@@ -244,18 +244,27 @@ export async function reopenTask(
   return setTaskStatus(client, taskId, 'open', version);
 }
 
-/** Complete and cancel are named transitions so callers read intent, not rung names. */
+/** Complete walks the strict chain carrying versions forward (open needs three guarded moves). */
 export async function completeTask(
   client: TenantClient,
   taskId: string,
   version: number,
 ): Promise<Task> {
   const current = await loadTask(client, taskId);
-  const from = current.status as TaskStatus;
-  const next: TaskStatus = from === 'open' ? 'in_progress' : from;
-  if (next !== from) await setTaskStatus(client, taskId, next, version);
-  const moved = await loadTask(client, taskId);
-  return setTaskStatus(client, taskId, 'done', Number(moved.version));
+  if (Number(current.version) !== version) {
+    throw new VersionConflictError(`task ${taskId} version mismatch`);
+  }
+  let task = toTask(current);
+  for (const rung of ['in_progress', 'waiting', 'done'] as const) {
+    if (task.status === 'done' || task.status === 'cancelled') break;
+    if (TRANSITIONS[task.status].includes(rung)) {
+      task = await setTaskStatus(client, task.id, rung, task.version);
+    }
+  }
+  if (task.status !== 'done') {
+    throw new VersionConflictError(`cannot complete from ${task.status}`);
+  }
+  return task;
 }
 
 export async function assignTask(
@@ -306,6 +315,14 @@ export async function snoozeTask(
   );
   const row = moved.rows[0];
   if (row === undefined) throw new VersionConflictError(`task ${taskId} version mismatch`);
+  await appendAuditEvent(client, {
+    source: 'api',
+    operation: 'task.snooze',
+    targetKind: 'task',
+    targetId: taskId,
+    argsSanitized: { snoozed: 1 },
+    result: 'succeeded',
+  });
   return toTask(row);
 }
 

@@ -27,7 +27,7 @@ ALTER TABLE tasks
   ADD COLUMN snoozed_until timestamptz;
 
 ALTER TABLE tasks ADD FOREIGN KEY (organisation_id, conversation_id)
-  REFERENCES conversations (organisation_id, id) ON DELETE SET NULL;
+  REFERENCES conversations (organisation_id, id) ON DELETE SET NULL (conversation_id);
 
 -- One system task per interaction and type: rows that carry all three collide, human rows
 -- (NULL conversation or NULL type) never do.
@@ -54,5 +54,6 @@ COMMENT ON COLUMN tasks.snoozed_until IS 'UTC instant the snooze lifts. Parking,
 INSERT INTO audit_argument_allowlist(operation, argument_key, value_kind, reason) VALUES
   ('task.create', 'task_type', 'count', 'task type as opaque marker (0..4 in CHECK order, 9 when NULL); no title'),
   ('task.status', 'to_status', 'count', 'new status rung as opaque marker (0..4 in CHECK order); no payload'),
-  ('task.assign', 'assigned', 'count', '1 when a user id was set, 0 when cleared to unassigned; no user id')
+  ('task.assign', 'assigned', 'count', '1 when a user id was set, 0 when cleared to unassigned; no user id'),
+  ('task.snooze', 'snoozed', 'count', 'always 1 (a snooze parked the task); the instant itself is task data, not audit data')
 ON CONFLICT (operation, argument_key) DO NOTHING;
