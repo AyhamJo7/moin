@@ -545,12 +545,17 @@ describe('session revocation without status change (P06.09.02 first response)', 
       expect(rows.rows).toHaveLength(1);
       expect(rows.rows[0]?.correlation_id).toBe(correlation);
       // session_count is allowlisted and opaque: a count, no identity (P06.10.07). The disable
-      // revoked the one session minted above.
+      // revoked the one session minted above. was_password_reset=false (mfa_reset reason),
+      // was_active_before=true (staff was active).
       const args = await admin.query<{ args: unknown }>(
         "select args_sanitized as args from audit_events where target_id = $1 and operation = 'account.disable'",
         [staff.id],
       );
-      expect(args.rows[0]?.args).toStrictEqual({ session_count: 1 });
+      expect(args.rows[0]?.args).toStrictEqual({
+        session_count: 1,
+        was_password_reset: false,
+        was_active_before: true,
+      });
     },
   );
 
