@@ -25,21 +25,15 @@ describe('phoneNumber', () => {
   });
 
   it('accepts callable neighbours of refused ranges', () => {
-    // 0800 freephone is callable; only the 069 90009 000–999 drama block is refused, not 069.
+    // 0800 freephone is callable; only the 069 90009 000–999 drama block is refused, not 069;
+    // 05551 Northeim is a callable area code, not a fiction range.
     expect(phoneNumber('+49 800 1234567').e164).toBe('+498001234567');
     expect(phoneNumber('+49 69 123456').e164).toBe('+4969123456');
+    expect(phoneNumber('+49 5551 123456').e164).toBe('+495551123456');
   });
 
   it('refuses garbage, empties and reserved ranges', () => {
-    for (const raw of [
-      '',
-      'abc',
-      '123',
-      '+49 555 1234',
-      '+1 555 0100',
-      '+49 69 90009001',
-      '+49 115',
-    ]) {
+    for (const raw of ['', 'abc', '123', '+1 555 0100', '+49 69 90009001', '+49 115']) {
       expect(() => phoneNumber(raw), raw).toThrow(RangeError);
     }
   });
@@ -89,7 +83,7 @@ describe('phoneNumber', () => {
     fc.assert(
       fc.property(
         fc
-          .constantFrom('+49555', '+49115', '+49116')
+          .constantFrom('+49115', '+49116')
           .chain((prefix) => fc.integer({ min: 100000, max: 9999999 }).map((n) => `${prefix}${n}`)),
         (reserved) => {
           expect(() => phoneNumber(reserved)).toThrow(RangeError);
@@ -197,6 +191,8 @@ describe('money', () => {
     // 1.005 * 100 is 100.49999… in binary: Math.round would give 100, the decimal spelling 101.
     expect(moneyFromEuros(1.005).cents).toBe(101);
     expect(moneyFromEuros(19.99).cents).toBe(1999);
+    // Exponent spelling has no decimal point to split: far below half a cent, rounds to zero.
+    expect(moneyFromEuros(1e-7).cents).toBe(0);
   });
 
   it('formats German EUR', () => {

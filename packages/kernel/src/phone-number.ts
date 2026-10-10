@@ -5,10 +5,9 @@
  * national `030 …` input and its `+49 30 …` spelling land on the same value. Identity resolution
  * (P07.03) matches on this string and nothing else.
  *
- * Two deliberate carve-outs. Fiction and service ranges (555 fiction numbers, 115/116 service
- * lines) plus the BNetzA drama-number block (069 90009 000–999) are refused: a test fixture must
- * never become a tenant's callback number. 0800 freephone and 0900 premium are callable German
- * ranges and stay accepted. Type detection answers only the question the product asks — mobile vs landline
+ * One deliberate carve-out. Service lines (115/116) plus the BNetzA drama-number block
+ * (069 90009 000–999) are refused: a test fixture must never become a tenant's callback number.
+ * 0800 freephone, 0900 premium and 05551 Northeim are callable German ranges and stay accepted. Type detection answers only the question the product asks — mobile vs landline
  * for callback routing — and returns `unknown` where libphonenumber cannot tell.
  */
 
@@ -20,8 +19,8 @@ import {
 
 const DEFAULT_REGION = 'DE';
 
-/** Fiction, service and abuse-prone ranges that must never become a callback number. */
-const RESERVED_PREFIXES = ['+49555', '+49115', '+49116'];
+/** Service lines that must never become a callback number. */
+const RESERVED_PREFIXES = ['+49115', '+49116'];
 /** BNetzA drama-number block: 069 90009 000–999 only, not the whole 069 prefix. */
 const DRAMA_BLOCK = /^\+496990009\d{3}$/;
 

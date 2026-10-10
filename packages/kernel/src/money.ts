@@ -44,6 +44,9 @@ export function moneyFromEuros(euros: number): Money {
   // half cents round up, which is the documented rounding for this boundary.
   if (!Number.isFinite(euros)) throw new RangeError('amount must be a finite number of euros');
   const text = String(Math.abs(euros));
+  // Exponent spelling (1e-7) has no decimal point to split: the value is far below half a cent,
+  // so plain float rounding is exact here.
+  if (/[eE]/.test(text)) return money(Math.round(euros * 100));
   const [whole = '0', frac = ''] = text.split('.');
   const cents = Number(whole) * 100 + Number((frac + '00').slice(0, 2));
   const halfUp = (frac + '000')[2] !== undefined && Number((frac + '000')[2]) >= 5;
