@@ -119,3 +119,24 @@ export {
   validateFacts,
 } from './notes-facts.ts';
 export type { FactSchema, Note, NoteParent } from './notes-facts.ts';
+export {
+  decideApproval,
+  finishRun,
+  invokeTool,
+  purgeCandidates,
+  recordAction,
+  reportInvocation,
+  requestApproval,
+  startRun,
+} from './governance.ts';
+export type {
+  ActionKind,
+  AiAction,
+  ApprovalStatus,
+  HumanApproval,
+  InvocationState,
+  ProposalKind,
+  RunStatus,
+  ToolInvocation,
+  WorkflowRun,
+} from './governance.ts';

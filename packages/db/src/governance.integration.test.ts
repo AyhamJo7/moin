@@ -1,0 +1,314 @@
+/**
+ * Governance records (P07.10.03): every tool has an actor; TTL candidates are correct.
+ */
+import { createTestDatabase, evidenceTest, type TestDatabase } from '@moin/testing';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { listAuditEvents } from './audit.ts';
+import {
+  decideApproval,
+  finishRun,
+  invokeTool,
+  purgeCandidates,
+  recordAction,
+  reportInvocation,
+  requestApproval,
+  startRun,
+  VersionConflictError,
+} from './governance.ts';
+import { createPool, type Pool } from './pool.ts';
+import { withTenant } from './tenant.ts';
+
+const ORG_A = '11111111-1111-4111-8111-111111111111';
+const ORG_B = '22222222-2222-4222-8222-222222222222';
+const STAFF = '33333333-3333-4333-8333-333333333333';
+
+let database: TestDatabase;
+let app: Pool;
+let admin: Pool;
+
+beforeAll(async () => {
+  database = await createTestDatabase('governance');
+  app = database.pool();
+  admin = createPool({ connectionString: database.migrationUrl, max: 1 });
+  await admin.query(
+    `insert into organisations (id, slug, name) values ($1, 'alpha', 'Alpha GmbH'), ($2, 'beta', 'Beta GmbH')`,
+    [ORG_A, ORG_B],
+  );
+});
+
+afterAll(async () => {
+  await admin.end();
+  await database.drop();
+});
+
+describe('governance', () => {
+  evidenceTest('run lifecycle: running to terminal, terminal never moves', async () => {
+    const run = await withTenant(app, ORG_A, (client) => startRun(client, {}));
+    expect(run.status).toBe('running');
+    const done = await withTenant(app, ORG_A, (client) =>
+      finishRun(client, run.id, 'succeeded', run.version),
+    );
+    expect(done.status).toBe('succeeded');
+    await expect(
+      withTenant(app, ORG_A, (client) => finishRun(client, run.id, 'failed', done.version)),
+    ).rejects.toBeInstanceOf(VersionConflictError);
+  });
+
+  evidenceTest('every executed tool has an AI action or a user actor', async () => {
+    const run = await withTenant(app, ORG_A, (client) => startRun(client, {}));
+    const action = await withTenant(app, ORG_A, (client) =>
+      recordAction(client, { kind: 'tool_call', workflowRunId: run.id }),
+    );
+    // AI-attributed invocation starts unknown.
+    const invoked = await withTenant(app, ORG_A, (client) =>
+      invokeTool(client, { toolName: 'calendar.check', aiActionId: action.id }),
+    );
+    expect(invoked.state).toBe('unknown');
+    // Neither actor → unattributable; both → ambiguous. Both refused before SQL.
+    await expect(
+      withTenant(app, ORG_A, (client) => invokeTool(client, { toolName: 'x' })),
+    ).rejects.toBeInstanceOf(RangeError);
+    await expect(
+      withTenant(app, ORG_A, (client) =>
+        invokeTool(client, { toolName: 'x', aiActionId: action.id, actorUserId: STAFF }),
+      ),
+    ).rejects.toBeInstanceOf(RangeError);
+    // User-attributed invocation works without an AI action.
+    const userInvoked = await withTenant(app, ORG_A, (client) =>
+      invokeTool(client, { toolName: 'manual.note', actorUserId: STAFF }),
+    );
+    expect(userInvoked.actorUserId).toBe(STAFF);
+    // DB CHECK mirrors the service: hand-written neither/both rows rejected (23514).
+    await expect(
+      withTenant(app, ORG_A, (client) =>
+        client.query(
+          `insert into tool_invocations (organisation_id, id, tool_name)
+           values (app.current_org(), gen_random_uuid(), 'hand')`,
+        ),
+      ),
+    ).rejects.toMatchObject({ code: '23514' });
+    // Report exactly once: second report 409s.
+    const reported = await withTenant(app, ORG_A, (client) =>
+      reportInvocation(client, invoked.id, 'succeeded'),
+    );
+    expect(reported.state).toBe('succeeded');
+    await expect(
+      withTenant(app, ORG_A, (client) => reportInvocation(client, invoked.id, 'failed')),
+    ).rejects.toBeInstanceOf(VersionConflictError);
+  });
+
+  evidenceTest('approvals gate: pending decides once with a named decider', async () => {
+    const approval = await withTenant(app, ORG_A, (client) =>
+      requestApproval(client, { proposalKind: 'book' }),
+    );
+    expect(approval.status).toBe('pending');
+    const decided = await withTenant(app, ORG_A, (client) =>
+      decideApproval(client, approval.id, {
+        decision: 'approved',
+        decidedBy: STAFF,
+        version: 1,
+      }),
+    );
+    expect(decided).toMatchObject({ status: 'approved', decidedBy: STAFF });
+    await expect(
+      withTenant(app, ORG_A, (client) =>
+        decideApproval(client, approval.id, { decision: 'rejected', decidedBy: STAFF, version: 2 }),
+      ),
+    ).rejects.toBeInstanceOf(VersionConflictError);
+    // DB CHECK mirrors: hand-written decided-without-decider rejected (23514).
+    await expect(
+      withTenant(app, ORG_A, (client) =>
+        client.query(
+          `insert into human_approvals (organisation_id, id, proposal_kind, status)
+           values (app.current_org(), gen_random_uuid(), 'book', 'approved')`,
+        ),
+      ),
+    ).rejects.toMatchObject({ code: '23514' });
+  });
+
+  evidenceTest('TTL purge candidates: expired only, capped, per table', async () => {
+    const past = new Date('2020-01-01T00:00:00Z');
+    const future = new Date('2099-01-01T00:00:00Z');
+    const expired = await withTenant(app, ORG_A, (client) => startRun(client, { expiresAt: past }));
+    await withTenant(app, ORG_A, (client) => startRun(client, { expiresAt: past }));
+    await withTenant(app, ORG_A, (client) => startRun(client, { expiresAt: past }));
+    await withTenant(app, ORG_A, (client) => startRun(client, { expiresAt: future }));
+    await withTenant(app, ORG_A, (client) => startRun(client, {}));
+    const candidates = await withTenant(app, ORG_A, (client) =>
+      purgeCandidates(client, 'workflow_runs'),
+    );
+    expect(candidates).toContain(expired.id);
+    expect(candidates).toHaveLength(3);
+    const capped = await withTenant(app, ORG_A, (client) =>
+      purgeCandidates(client, 'workflow_runs', 2),
+    );
+    expect(capped).toHaveLength(2);
+    expect(
+      await withTenant(app, ORG_A, (client) => purgeCandidates(client, 'ai_actions')),
+    ).toStrictEqual([]);
+    expect(
+      await withTenant(app, ORG_A, (client) => purgeCandidates(client, 'tool_invocations', 1)),
+    ).toStrictEqual([]);
+    // Expired approvals are candidates too (per-table sweep reads each shape).
+    const approval = await withTenant(app, ORG_A, (client) =>
+      requestApproval(client, { proposalKind: 'book', expiresAt: past }),
+    );
+    const approvals = await withTenant(app, ORG_A, (client) =>
+      purgeCandidates(client, 'human_approvals'),
+    );
+    expect(approvals).toContain(approval.id);
+  });
+
+  evidenceTest('purge skips actions still referenced by live invocations', async () => {
+    const past = new Date('2020-01-01T00:00:00Z');
+    const action = await withTenant(app, ORG_A, (client) =>
+      recordAction(client, { kind: 'tool_call', expiresAt: past }),
+    );
+    await withTenant(app, ORG_A, (client) =>
+      invokeTool(client, { toolName: 'referenced.tool', aiActionId: action.id }),
+    );
+    // Direct purgeCandidates still lists the expired action (sweep order is the sweeper's job:
+    // invocations first, then actions — the RESTRICT FK refuses the wrong order, and moin_app
+    // holds no DELETE on governance tables at all, so the privileged path proves the FK).
+    const candidates = await withTenant(app, ORG_A, (client) =>
+      purgeCandidates(client, 'ai_actions'),
+    );
+    expect(candidates).toContain(action.id);
+    await expect(
+      admin.query(`delete from ai_actions where id = $1`, [action.id]),
+    ).rejects.toMatchObject({ code: '23503' });
+  });
+
+  evidenceTest('cross-tenant governance rows are invisible', async () => {
+    await withTenant(app, ORG_A, (client) => startRun(client, {}));
+    const foreign = await withTenant(app, ORG_B, (client) =>
+      client.query<{ n: string }>(`select count(*)::text as n from workflow_runs`),
+    );
+    expect(foreign.rows[0]?.n).toBe('0');
+  });
+
+  evidenceTest('mutations audit with opaque markers, never content', async () => {
+    const run = await withTenant(app, ORG_A, (client) => startRun(client, {}));
+    const action = await withTenant(app, ORG_A, (client) =>
+      recordAction(client, { kind: 'reply', workflowRunId: run.id }),
+    );
+    const invoked = await withTenant(app, ORG_A, (client) =>
+      invokeTool(client, { toolName: 'Geheimtool', aiActionId: action.id }),
+    );
+    await withTenant(app, ORG_A, (client) => reportInvocation(client, invoked.id, 'failed'));
+    await withTenant(app, ORG_A, (client) => finishRun(client, run.id, 'failed', run.version));
+    const approval = await withTenant(app, ORG_A, (client) =>
+      requestApproval(client, { proposalKind: 'book' }),
+    );
+    await withTenant(app, ORG_A, (client) => listAuditEvents(client, {}));
+    await withTenant(app, ORG_A, async (client) => {
+      const events = await listAuditEvents(client, {});
+      const ops = events.map((e) => e.operation);
+      expect(ops).toEqual(
+        expect.arrayContaining([
+          'run.start',
+          'run.finish',
+          'action.record',
+          'tool.invoke',
+          'tool.report',
+          'approval.request',
+        ]),
+      );
+      for (const event of events) {
+        expect(JSON.stringify(event.args_sanitized)).not.toContain('Geheimtool');
+      }
+    });
+    expect(approval.status).toBe('pending');
+  });
+
+  it('generates a run correlation and rejects malformed tool names', async () => {
+    await expect(
+      withTenant(app, ORG_A, (client) =>
+        invokeTool(client, { toolName: '  ', actorUserId: STAFF }),
+      ),
+    ).rejects.toBeInstanceOf(RangeError);
+    // Run correlation is generated, never caller-supplied: every run carries a fresh uuid.
+    const one = await withTenant(app, ORG_A, (client) => startRun(client, {}));
+    const two = await withTenant(app, ORG_A, (client) => startRun(client, {}));
+    expect(one.correlationId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    );
+    expect(two.correlationId).not.toBe(one.correlationId);
+  });
+
+  evidenceTest('children inherit the run correlation via withTenant threading', async () => {
+    const run = await withTenant(app, ORG_A, (client) => startRun(client, {}));
+    // A bare inner withTenant reuses the outer caller correlation — so children of a run must
+    // run in a withTenant block threaded with the run's correlation.
+    const action = await withTenant(
+      app,
+      ORG_A,
+      (client) => recordAction(client, { kind: 'tool_call', workflowRunId: run.id }),
+      { correlationId: run.correlationId },
+    );
+    expect(action.correlationId).toBe(run.correlationId);
+    const invoked = await withTenant(
+      app,
+      ORG_A,
+      (client) => invokeTool(client, { toolName: 'calendar.check', aiActionId: action.id }),
+      { correlationId: run.correlationId },
+    );
+    expect(invoked.correlationId).toBe(run.correlationId);
+    const approval = await withTenant(
+      app,
+      ORG_A,
+      (client) => requestApproval(client, { proposalKind: 'book' }),
+      { correlationId: run.correlationId },
+    );
+    expect(approval.correlationId).toBe(run.correlationId);
+    // The audit rows of the threaded children carry the run correlation too.
+    await withTenant(app, ORG_A, async (client) => {
+      for (const operation of ['action.record', 'tool.invoke', 'approval.request'] as const) {
+        const events = await listAuditEvents(client, {
+          correlationId: run.correlationId,
+        });
+        expect(events.map((e) => e.operation)).toContain(operation);
+      }
+    });
+    // Explicit input still wins over ambient (and malformed input is a RangeError, not a 22P02).
+    const other = '44444444-4444-4444-8444-444444444444';
+    const explicit = await withTenant(
+      app,
+      ORG_A,
+      (client) => recordAction(client, { kind: 'reply', correlationId: other }),
+      { correlationId: run.correlationId },
+    );
+    expect(explicit.correlationId).toBe(other);
+    await expect(
+      withTenant(app, ORG_A, (client) =>
+        recordAction(client, { kind: 'reply', correlationId: 'not-a-uuid' }),
+      ),
+    ).rejects.toBeInstanceOf(RangeError);
+    // Malformed ambient correlation degrades to NULL, never a 22P02 abort of the business txn.
+    const degraded = await withTenant(
+      app,
+      ORG_A,
+      (client) => recordAction(client, { kind: 'reply' }),
+      { correlationId: 'not-a-uuid' },
+    );
+    expect(degraded.correlationId).toBeNull();
+  });
+
+  evidenceTest('run start and finish audits carry the stored run correlation', async () => {
+    const run = await withTenant(app, ORG_A, (client) => startRun(client, {}));
+    const done = await withTenant(app, ORG_A, (client) =>
+      finishRun(client, run.id, 'succeeded', run.version),
+    );
+    await withTenant(app, ORG_A, async (client) => {
+      const starts = await listAuditEvents(client, {
+        correlationId: run.correlationId,
+      });
+      expect(starts.map((e) => e.operation)).toContain('run.start');
+      expect(starts.find((e) => e.operation === 'run.start')?.target_id).toBe(run.id);
+      const finishes = await listAuditEvents(client, {
+        correlationId: done.correlationId,
+      });
+      expect(finishes.map((e) => e.operation)).toContain('run.finish');
+    });
+  });
+});

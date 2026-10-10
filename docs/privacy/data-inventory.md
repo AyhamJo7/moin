@@ -173,11 +173,22 @@ approval step (INV-08) is where that is caught, and the approval UI says so.
 
 ### AI records
 
-| Field                                         | Category     | Personal?           | Retention | Method      | Subprocessor |
-| --------------------------------------------- | ------------ | ------------------- | --------- | ----------- | ------------ |
-| `ai_actions.proposed_output`                  | AI technical | **yes** (redacted)  | 30 d      | hard delete | —            |
-| `ai_actions.prompt_version`, `policy_version` | AI technical | no                  | 30 d      | hard delete | —            |
-| `tool_invocations.arguments`                  | AI technical | **yes** (sanitised) | 30 d      | hard delete | —            |
+| Field                                                             | Category     | Personal?                                                     | Retention | Method      | Subprocessor |
+| ----------------------------------------------------------------- | ------------ | ------------------------------------------------------------- | --------- | ----------- | ------------ |
+| `ai_actions.proposed_output`                                      | AI technical | **yes** (redacted)                                            | 30 d      | hard delete | —            |
+| `ai_actions.prompt_version`, `policy_version`                     | AI technical | no                                                            | 30 d      | hard delete | —            |
+| `tool_invocations.arguments`                                      | AI technical | **yes** (sanitised)                                           | 30 d      | hard delete | —            |
+| `workflow_runs.conversation_id`                                   | Governance   | yes (references)                                              | 30 d      | hard delete | —            |
+| `workflow_runs.status`                                            | Governance   | no — fixed run state (what stage, not whom)                   | 30 d      | hard delete | —            |
+| `ai_actions.workflow_run_id`, `ai_actions.conversation_id`        | Governance   | yes (references)                                              | 30 d      | hard delete | —            |
+| `ai_actions.kind`, `ai_actions.status`                            | Governance   | no — closed catalogues (what step/outcome, never prompt text) | 30 d      | hard delete | —            |
+| `tool_invocations.ai_action_id`, `tool_invocations.actor_user_id` | Governance   | pseudonymous (which action/person invoked)                    | 30 d      | hard delete | —            |
+| `tool_invocations.tool_name`                                      | Governance   | no — tool catalogue name (what ran, never args)               | 30 d      | hard delete | —            |
+| `tool_invocations.state`                                          | Governance   | no — fixed outcome state                                      | 30 d      | hard delete | —            |
+| `human_approvals.ai_action_id`                                    | Governance   | yes (references)                                              | 30 d      | hard delete | —            |
+| `human_approvals.proposal_kind`                                   | Governance   | no — closed catalogue (what was proposed, never payload)      | 30 d      | hard delete | —            |
+| `human_approvals.status`                                          | Governance   | no — fixed decision state                                     | 30 d      | hard delete | —            |
+| `human_approvals.decided_by`, `human_approvals.decided_at`        | Governance   | pseudonymous (who decided, when)                              | 30 d      | hard delete | —            |
 
 ### Identity, audit and security
 

@@ -218,3 +218,4 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P07-006 | P07.07.01 | 2026-10-10 | `c6bf04cae311` | leads-machine-plus-7-tests | [EV-P07-006-leads-state-machine.md](P07/EV-P07-006-leads-state-machine.md) |
 | EV-P07-007 | P07.08.01 | 2026-10-10 | `c3793761154d` | requests-machine-plus-7-tests | [EV-P07-007-appointment-requests.md](P07/EV-P07-007-appointment-requests.md) |
 | EV-P07-008 | P07.09.01 | 2026-10-10 | `1051d9c19033` | notes-plus-facts-registry-6-tests | [EV-P07-008-notes-facts-registry.md](P07/EV-P07-008-notes-facts-registry.md) |
+| EV-P07-009 | P07.10.01 | 2026-10-10 | `a887e9e16a86` | governance-records-plus-10-tests | [EV-P07-009-governance-records.md](P07/EV-P07-009-governance-records.md) |
