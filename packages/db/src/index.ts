@@ -63,3 +63,5 @@ export type {
   MethodVerification,
   VerifiedVia,
 } from './contacts.ts';
+export { resolveCaller, resolveEmail, resolveExternalId } from './resolution.ts';
+export type { ResolutionRule, ResolutionVerdict } from './resolution.ts';

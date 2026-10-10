@@ -90,6 +90,17 @@ and **whether it is defensible at all is an open EXT-02 question**.
 | `contact_methods.is_tenant_owned`      | Contact  | no (about the business's own number, not a caller)          | same                                      | hard delete | —            |
 | `contact_methods.normalised`           | Contact  | yes (derived)                                               | same                                      | hard delete | —            |
 | `contacts.created_at`, `last_seen_at`  | Contact  | no alone                                                    | same                                      | anonymise   | —            |
+| `interaction_links.interaction_ref`    | Contact  | yes in combination (which interaction identified whom)      | same                                      | hard delete | —            |
+| `interaction_links.contact_id`         | Contact  | yes (references)                                            | same                                      | hard delete | —            |
+| `interaction_links.method_id`          | Contact  | yes (references)                                            | same                                      | hard delete | —            |
+| `interaction_links.rule`               | Contact  | no alone (which channel matched, not who)                   | same                                      | hard delete | —            |
+| `interaction_links.label_de`           | Contact  | no alone (fixed label catalogue, no free text)              | same                                      | hard delete | —            |
+| `duplicate_candidates.contact_a_id`    | Contact  | yes (references)                                            | 24 months after the merge                 | hard delete | —            |
+| `duplicate_candidates.contact_b_id`    | Contact  | yes (references)                                            | 24 months after the merge                 | hard delete | —            |
+| `duplicate_candidates.kind`            | Contact  | yes in combination (what channel is shared)                 | 24 months after the merge                 | hard delete | —            |
+| `duplicate_candidates.value`           | Contact  | **yes** (the shared verified value itself)                  | 24 months after the merge                 | hard delete | —            |
+| `duplicate_candidates.status`          | Contact  | no alone (review workflow state)                            | 24 months after the merge                 | hard delete | —            |
+| `duplicate_candidates.review_task_id`  | Contact  | yes (references)                                            | 24 months after the merge                 | hard delete | —            |
 | `contact_merges.*`                     | Contact  | yes (references)                                            | 24 months after the merge                 | hard delete | —            |
 
 Anonymise rather than delete for the contact root: deleting it would orphan the tasks and leads that
