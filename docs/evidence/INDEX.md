@@ -215,3 +215,4 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P07-003 | P07.03.01 | 2026-10-10 | `62d8a097cdc6` | resolution-deterministic-rules-plus-8-tests | [EV-P07-003-resolution-deterministic.md](P07/EV-P07-003-resolution-deterministic.md) |
 | EV-P07-004 | P07.05.01 | 2026-10-10 | `19106e308144` | conversations-calls-events-outcomes-plus-6-tests | [EV-P07-004-conversations-outcomes.md](P07/EV-P07-004-conversations-outcomes.md) |
 | EV-P07-005 | P07.06.01 | 2026-10-10 | `5df675816573` | tasks-full-shape-plus-8-tests | [EV-P07-005-tasks-state-machine.md](P07/EV-P07-005-tasks-state-machine.md) |
+| EV-P07-006 | P07.07.01 | 2026-10-10 | `c6bf04cae311` | leads-machine-plus-7-tests | [EV-P07-006-leads-state-machine.md](P07/EV-P07-006-leads-state-machine.md) |

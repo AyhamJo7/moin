@@ -93,3 +93,5 @@ export {
   snoozeTask,
 } from './tasks.ts';
 export type { NewTask, Task, TaskPriority, TaskStatus, TaskType } from './tasks.ts';
+export { createLead, getLead, listLeads, setLeadStatus } from './leads.ts';
+export type { Lead, LeadStatus, LostReason } from './leads.ts';
