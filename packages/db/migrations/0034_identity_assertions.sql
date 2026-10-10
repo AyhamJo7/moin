@@ -45,14 +45,27 @@ $$;
 -- 2. Usable membership: none, except the tolerated creator ADMIN-only grant.
 -- ---------------------------------------------------------------------------------------------
 --
--- Same tolerance as the 0012 assertion: PostgreSQL 16+ records an ADMIN-only grant (no INHERIT, no
--- SET) to the CREATEROLE role that created it — the RDS master user. ADMIN still lets its holder
--- grant the role onward, so the holder must be that kind of role and nothing else.
+-- Same shape as the 0012 assertion: moin_identity itself holds NO membership at all (a member
+-- of a role inherits what that role may do, and the tolerated creator pattern below runs in the
+-- other direction — who may use moin_identity, not what it may reach). The one membership
+-- tolerated is the one PostgreSQL 16+ records by itself when a CREATEROLE non-superuser — the RDS
+-- master user — creates a role: ADMIN only, with neither INHERIT nor SET, held by that kind of
+-- role and nothing else (not one of ours, not reachable from any runtime role: ADMIN still lets
+-- its holder grant the role onward, itself included).
 DO $$
 BEGIN
+  -- moin_identity is a member of nothing.
   IF EXISTS (
-    SELECT 1 FROM pg_auth_members m JOIN pg_roles h ON h.oid = m.roleid
+    SELECT 1 FROM pg_auth_members m
     WHERE m.member = (SELECT oid FROM pg_roles WHERE rolname = 'moin_identity')
+  ) THEN
+    RAISE EXCEPTION
+      'moin_identity must be a member of no role: membership would extend what it may do.';
+  END IF;
+  -- No role may use it, except the tolerated creator ADMIN-only grant.
+  IF EXISTS (
+    SELECT 1 FROM pg_auth_members m JOIN pg_roles h ON h.oid = m.member
+    WHERE m.roleid = (SELECT oid FROM pg_roles WHERE rolname = 'moin_identity')
       AND NOT (
         m.admin_option AND NOT m.inherit_option AND NOT m.set_option
         AND h.rolcreaterole AND h.rolname NOT LIKE 'moin\_%'
@@ -64,16 +77,8 @@ BEGIN
         )
       )
   ) THEN
-    RAISE EXCEPTION 'moin_identity must be a member of no role (tolerated: creator ADMIN-only grant).';
-  END IF;
-  IF EXISTS (
-    SELECT 1 FROM pg_auth_members m
-    WHERE m.roleid = (SELECT oid FROM pg_roles WHERE rolname = 'moin_identity')
-      AND NOT (
-        m.admin_option AND NOT m.inherit_option AND NOT m.set_option
-      )
-  ) THEN
-    RAISE EXCEPTION 'no role may use moin_identity (tolerated: creator ADMIN-only grant).';
+    RAISE EXCEPTION
+      'moin_identity must have no members, except an ADMIN-only grant (no INHERIT, no SET) to the CREATEROLE role that created it, which no moin runtime role can reach.';
   END IF;
 END
 $$;
@@ -90,6 +95,8 @@ BEGIN
        + (SELECT count(*) FROM pg_proc WHERE proowner = 'moin_identity'::regrole)
        + (SELECT count(*) FROM pg_namespace WHERE nspowner = 'moin_identity'::regrole)
        + (SELECT count(*) FROM pg_type WHERE typowner = 'moin_identity'::regrole)
+       + (SELECT count(*) FROM pg_database WHERE datdba = 'moin_identity'::regrole)
+       + (SELECT count(*) FROM pg_largeobject_metadata WHERE lomowner = 'moin_identity'::regrole)
     INTO owned;
   IF owned > 0 THEN
     RAISE EXCEPTION 'moin_identity owns % object(s) and must own nothing.', owned;
