@@ -5,7 +5,7 @@
 | Evidence ID | EV-P07-010 |
 | Item | P07.11.01 |
 | Date (UTC) | 2026-10-10 22:22 UTC, round-1 fix 2026-10-11 ~00:35 UTC, round-2 fix 2026-10-11 ~00:50 UTC, round-3 fix 2026-10-11 ~01:05 UTC, round-4 fix 2026-10-11 ~01:15 UTC |
-| Commit | round-4 fix head (this push) |
+| Commit | `eb2896ca16fbfff9181e3dac226f7c71d8a8262b` |
 | Environment | local |
 | Command / procedure | `.claude/bin/gates.py full` 14/14 PASS (evidence `20261010T231121Z-full.json`, on this head); finaliser integration suite 14/14 green standalone; mutation-check KILLED on finaliser suite (initial commit) |
 | Result | PASS |
