@@ -12,7 +12,12 @@ import {
   recordOutcome,
   startConversation,
 } from './conversations.ts';
-import { finaliseInteraction, orphanSeverity, reconcileOrphans } from './finaliser.ts';
+import {
+  finaliseInteraction,
+  orphanConversations,
+  orphanSeverity,
+  reconcileOrphans,
+} from './finaliser.ts';
 import { createPool, type Pool } from './pool.ts';
 import { completeTask, listOpenTasks, setTaskStatus } from './tasks.ts';
 import { withTenant } from './tenant.ts';
@@ -266,6 +271,36 @@ describe('finaliser', () => {
     },
   );
 
+  evidenceTest(
+    'concurrent repairs of a cancelled fallback converge on one replacement',
+    async () => {
+      const convo = await withTenant(app, ORG_A, (client) =>
+        startConversation(client, { channel: 'call' }),
+      );
+      const first = await withTenant(app, ORG_A, (client) => finaliseInteraction(client, convo.id));
+      expect(first.verdict).toBe('fallback-created');
+      const open = await withTenant(app, ORG_A, (client) => listOpenTasks(client));
+      const current = open.find((t) => t.conversationId === convo.id);
+      await withTenant(app, ORG_A, (client) =>
+        setTaskStatus(client, current?.id ?? '', 'cancelled', current?.version ?? 0),
+      );
+      // Both racers pass the open-task check, then serialise on the deterministic row lock:
+      // the loser re-checks, sees the winner's replacement, and reports task-existed.
+      const [one, two] = await Promise.all([
+        withTenant(app, ORG_A, (client) => finaliseInteraction(client, convo.id)),
+        withTenant(app, ORG_A, (client) => finaliseInteraction(client, convo.id)),
+      ]);
+      const created = [one, two].filter((r) => r.verdict === 'fallback-created');
+      const existed = [one, two].filter((r) => r.verdict === 'task-existed');
+      expect(created).toHaveLength(1);
+      expect(existed).toHaveLength(1);
+      const tasks = await withTenant(app, ORG_A, (client) => listOpenTasks(client));
+      const linked = tasks.filter((t) => t.conversationId === convo.id);
+      expect(linked).toHaveLength(1);
+      expect(linked[0]?.id).toBe(created[0]?.taskId);
+    },
+  );
+
   evidenceTest('live call activity keeps the conversation out of the orphan claim', async () => {
     const ingested = await withTenant(app, ORG_A, (client) =>
       ingestCall(client, { providerCallSid: 'CA-live-1', fromNumber: '+4930123456' }),
@@ -296,7 +331,8 @@ describe('finaliser', () => {
     );
     // Age everything first — including the ingest's own status_change event — so the
     // conversation genuinely reads as orphaned; then a fresh event lands and must rescue it.
-    // (Without the ageing, the test passes even if the claim ignores the event leg.)
+    // Both reads go through the exported per-tenant claim directly: no sweep runs here,
+    // so no task is created either side and task-exists cannot mask the event leg.
     await admin.query(
       `update conversations set updated_at = clock_timestamp() - make_interval(mins => 11)
        where id = $1`,
@@ -312,14 +348,16 @@ describe('finaliser', () => {
        where call_id = $1`,
       [ingested.call.id],
     );
-    // Sanity: aged on all three legs, the conversation IS claimed before the fresh event.
-    const before = await reconcileOrphans(app, { olderThanMinutes: 10 });
-    expect(before.orphans.map((o) => o.conversationId)).toContain(ingested.call.conversationId);
+    const claimedBefore = await withTenant(app, ORG_A, (client) => orphanConversations(client, 10));
+    expect(claimedBefore).toContain(ingested.call.conversationId);
     await withTenant(app, ORG_A, (client) =>
       recordCallEvent(client, ingested.call.id, 'checkpoint', 7),
     );
-    const report = await reconcileOrphans(app, { olderThanMinutes: 10 });
-    expect(report.orphans.map((o) => o.conversationId)).not.toContain(ingested.call.conversationId);
+    const claimedAfter = await withTenant(app, ORG_A, (client) => orphanConversations(client, 10));
+    expect(claimedAfter).not.toContain(ingested.call.conversationId);
+    // And no task was created by either read: the rescue is the event leg, not task-exists.
+    const tasks = await withTenant(app, ORG_A, (client) => listOpenTasks(client));
+    expect(tasks.filter((t) => t.conversationId === ingested.call.conversationId)).toHaveLength(0);
   });
 
   evidenceTest('throwing onOrphan neither rolls back work nor breaks the report', async () => {

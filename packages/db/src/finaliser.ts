@@ -80,6 +80,11 @@ async function openTaskExists(client: TenantClient, conversationId: string): Pro
  * NULL sits outside the one-system-task-per-interaction-and-type partial unique, which
  * requires type NOT NULL): unbounded cancel-repairs with the system-type slot untouched.
  * Anything else contradicts the machine and throws rather than covering silently.
+ *
+ * Concurrency: the whole repair runs under a row lock on the deterministic fallback row.
+ * Two racers that both pass the open-task check serialise on the lock; the loser re-checks
+ * for an open task after acquiring it and skips when the winner already covered the
+ * interaction — so concurrent repairs never mint duplicate replacements.
  */
 export async function finaliseInteraction(
   client: TenantClient,
@@ -117,6 +122,21 @@ export async function finaliseInteraction(
     idempotencyKey: fallbackKey(conversationId),
   });
   if (!OPEN_TASK_STATUSES.has(task.status)) {
+    // Serialise concurrent repairs on the deterministic row: the loser blocks on the lock,
+    // then re-checks for an open task — the winner's replacement already covers the
+    // interaction, so the loser reports task-existed instead of minting a duplicate.
+    await client.query(`select id from tasks where id = $1 for update`, [task.id]);
+    if (await openTaskExists(client, conversationId)) {
+      await appendAuditEvent(client, {
+        source: 'api',
+        operation: 'interaction.finalise',
+        targetKind: 'conversation',
+        targetId: conversationId,
+        argsSanitized: { verdict: VERDICT_MARKER['task-existed'] },
+        result: 'succeeded',
+      });
+      return { conversationId, verdict: 'task-existed', taskId: null };
+    }
     // The deterministic row is closed: done reopens in place; cancelled mints a
     // general-type replacement outside the partial unique. Both keep covering the
     // interaction no matter how many times it closes.
@@ -213,8 +233,10 @@ export interface ReconcileOrphansOptions {
 /**
  * Find this tenant's orphaned interactions: open past the cutoff with no outcome and no
  * open task. Runs inside `withTenant`, under the policy — the per-tenant half of the sweep.
+ * Exported for tests: the fresh-event test asserts on this read directly, so the
+ * before-step creates no task and the after-step cannot pass via task-exists.
  */
-async function claimTenantOrphans(
+export async function orphanConversations(
   client: TenantClient,
   olderThanMinutes: number,
 ): Promise<string[]> {
@@ -306,7 +328,7 @@ export async function reconcileOrphans(
           async (client): Promise<{ orphans: OrphanFinalised[]; finalised: number }[]> => {
             const local: OrphanFinalised[] = [];
             let created = 0;
-            for (const conversationId of await claimTenantOrphans(client, olderThan)) {
+            for (const conversationId of await orphanConversations(client, olderThan)) {
               const done = await finaliseInteraction(client, conversationId);
               if (done.verdict === 'fallback-created') created += 1;
               local.push({ organisationId, conversationId, verdict: done.verdict });

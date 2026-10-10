@@ -65,7 +65,12 @@ export type {
 } from './contacts.ts';
 export { resolveCaller, resolveEmail, resolveExternalId } from './resolution.ts';
 export type { ResolutionRule, ResolutionVerdict } from './resolution.ts';
-export { finaliseInteraction, orphanSeverity, reconcileOrphans } from './finaliser.ts';
+export {
+  finaliseInteraction,
+  orphanConversations,
+  orphanSeverity,
+  reconcileOrphans,
+} from './finaliser.ts';
 export type {
   FinaliseVerdict,
   OrphanFinalised,
