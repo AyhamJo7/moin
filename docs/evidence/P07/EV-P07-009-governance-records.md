@@ -5,7 +5,7 @@
 | Evidence ID | EV-P07-009 |
 | Item | P07.10.01 |
 | Date (UTC) | 2026-10-10 23:16 UTC, round-2 fix 2026-10-10 ~23:45 UTC |
-| Commit | round-2 fix head (this push) |
+| Commit | `2cb49217beb929f5e9661f08b5f618cf56ba0e06` |
 | Environment | local |
 | Command / procedure | `.claude/bin/gates.py full` 14/14 PASS (evidence `20261010T213558Z-full.json`); governance integration suite 9/9 green standalone; mutation-check KILLED on governance integration suite (round 1) |
 | Result | PASS |
