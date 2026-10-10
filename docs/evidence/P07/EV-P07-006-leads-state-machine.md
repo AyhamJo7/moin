@@ -9,7 +9,7 @@
 | Environment | local |
 | Command / procedure | `.claude/bin/gates.py full` 14/14 PASS (evidence `20261010T153917Z-full.json`); mutation-check KILLED on leads integration suite |
 | Result | PASS |
-| CI run / artifact | PR #85 at `d066003`: 16/16 checks SUCCESS (verified via `gh pr view 85 --json statusCheckRollup`); this round-4 fix head CI pending at push time |
-| Reviewer | codex BLOCK rounds 1–4 (fixed in `52b1543`/`db8cc59`/`d066003`/`61290c2`); BLOCK round 5 on `61290c2` with seam directive (delegating FOR UPDATE gate — implemented in this round exactly as directed: pause-before-lock, concurrent contacted move, resume; guard-removal FAILS with a healed task id vs null, proving branch coverage; 10/10 green) |
+| CI run / artifact | PR #85 at `5afae06`: 16/16 checks SUCCESS (verified via `gh pr view 85 --json statusCheckRollup`) |
+| Reviewer | codex BLOCK rounds 1–5 (fixed in `52b1543`/`db8cc59`/`d066003`/`61290c2`/`5afae06`); OK-with-note on `5afae06` (code OK, stale CI row — lifted in this round: CI refreshed to current head) |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).
