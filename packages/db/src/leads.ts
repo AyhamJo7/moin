@@ -2,11 +2,15 @@
  * Leads (P07.07): qualified interest with the BR-008 machine and the needs-action invariant.
  *
  * Machine: new → needs_action → contacted → waiting → done, lost from any live rung,
- * lost_reason mandatory exactly when lost (DB CHECK). Entering needs_action ensures an open
- * task exists (idempotent by key `lead-<id>-needs-action`; concurrent entrants serialise on
- * the key's unique index and share the winner's row). The task link + history row write in the
- * same transaction as the status move — a lead in needs_action without an open task is
- * unrepresentable, not merely unlikely.
+ * lost_reason mandatory exactly when lost (DB CHECK). The invariant "a lead in needs_action
+ * always has an open task" is repair-on-read, not write-once: the linked task can be closed
+ * afterwards through tasks.ts (a separate aggregate this module must not import — the cycle
+ * would put task writes under lead locks), and a privileged delete can remove the row outright.
+ * So every read of a needs_action lead re-asserts the invariant: `getLead` heals a dead link
+ * (fresh task, new history row, same lead version — healing is not a lead mutation) and returns
+ * the repaired lead, while raw `listLeads` rows are explicitly unchecked. A lead read through
+ * `getLead` in needs_action is therefore never silently taskless; anything else is a stale
+ * snapshot, and the tests pin exactly that contract.
  *
  * All writes run inside `withTenant`; every mutation audits with opaque markers only (INV-12).
  */
@@ -111,8 +115,12 @@ export async function createLead(
 }
 
 /** Ensure the needs_action task exists; concurrent callers share the winner's row. */
-async function ensureNeedsActionTask(client: TenantClient, leadId: string): Promise<string> {
-  const key = `lead-${leadId}-needs-action`;
+async function ensureNeedsActionTask(
+  client: TenantClient,
+  leadId: string,
+  keySuffix = 'needs-action',
+): Promise<string> {
+  const key = `lead-${leadId}-${keySuffix}`;
   const existing = await client.query<{ task_id: string | null }>(
     `select task_id::text from leads where id = $1`,
     [leadId],
@@ -196,6 +204,35 @@ export async function setLeadStatus(
     });
   }
   return { ...toLead(nextRow), taskId };
+}
+
+export async function getLead(client: TenantClient, leadId: string): Promise<Lead> {
+  const current = await client.query<LeadRow>(
+    `select id, title, contact_id, conversation_id, status, lost_reason, task_id, version::text from leads where id = $1`,
+    [leadId],
+  );
+  const row = current.rows[0];
+  if (row === undefined) throw new VersionConflictError(`lead ${leadId} not found`);
+  const lead = toLead(row);
+  if (lead.status !== 'needs_action') return lead;
+  const open = await client.query<{ id: string }>(
+    `select t.id::text from tasks t join leads l on l.task_id = t.id
+     where l.id = $1 and t.status in ('open', 'in_progress', 'waiting')`,
+    [leadId],
+  );
+  if (open.rows[0]?.id !== undefined) return lead;
+  // Dead link (task done/cancelled/deleted): heal with a fresh task. Same lead version —
+  // healing repairs the linkage, it is not a lead mutation — plus history + audit rows.
+  const taskId = await ensureNeedsActionTask(client, leadId, `needs-action-${randomUUID()}`);
+  await appendAuditEvent(client, {
+    source: 'api',
+    operation: 'lead.task_link',
+    targetKind: 'lead',
+    targetId: leadId,
+    argsSanitized: { linked: 1 },
+    result: 'succeeded',
+  });
+  return { ...lead, taskId };
 }
 
 export async function listLeads(

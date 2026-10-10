@@ -4,7 +4,7 @@
 import { createTestDatabase, evidenceTest, type TestDatabase } from '@moin/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { listAuditEvents } from './audit.ts';
-import { createLead, listLeads, setLeadStatus, VersionConflictError } from './leads.ts';
+import { createLead, getLead, listLeads, setLeadStatus, VersionConflictError } from './leads.ts';
 import { createPool, type Pool } from './pool.ts';
 import { withTenant } from './tenant.ts';
 
@@ -147,5 +147,63 @@ describe('leads', () => {
     expect(lost.map((l) => l.id)).toContain(lead.id);
     const fresh = await withTenant(app, ORG_B, (client) => listLeads(client, { status: 'new' }));
     expect(fresh.map((l) => l.id)).not.toContain(lead.id);
+  });
+
+  evidenceTest('getLead heals a dead link: completed task and deleted task', async () => {
+    // Close the linked task through the legal tasks.ts walk (open→in_progress→waiting→done).
+    const lead = await withTenant(app, ORG_A, (client) => createLead(client, { title: 'Heal' }));
+    const moved = await withTenant(app, ORG_A, (client) =>
+      setLeadStatus(client, lead.id, 'needs_action', lead.version),
+    );
+    const firstTask = moved.taskId;
+    if (firstTask === null) throw new Error('no task linked');
+    const { setTaskStatus, completeTask } = await import('./tasks.ts');
+    const step1 = await withTenant(app, ORG_A, async (client) => {
+      const t = await client.query<{ id: string; version: string }>(
+        `select id::text, version::text from tasks where id = $1`,
+        [firstTask],
+      );
+      return t.rows[0];
+    });
+    await withTenant(app, ORG_A, (client) =>
+      setTaskStatus(client, firstTask, 'in_progress', Number(step1?.version ?? '1')),
+    );
+    const step2 = await withTenant(app, ORG_A, async (client) => {
+      const t = await client.query<{ id: string; version: string }>(
+        `select id::text, version::text from tasks where id = $1`,
+        [firstTask],
+      );
+      return t.rows[0];
+    });
+    await withTenant(app, ORG_A, (client) =>
+      setTaskStatus(client, firstTask, 'waiting', Number(step2?.version ?? '1')),
+    );
+    const step3 = await withTenant(app, ORG_A, async (client) => {
+      const t = await client.query<{ id: string; version: string }>(
+        `select id::text, version::text from tasks where id = $1`,
+        [firstTask],
+      );
+      return t.rows[0];
+    });
+    await withTenant(app, ORG_A, (client) =>
+      completeTask(client, firstTask, Number(step3?.version ?? '1')),
+    );
+    // getLead repairs: fresh open task, different id, history now has 2 rows.
+    const healed = await withTenant(app, ORG_A, (client) => getLead(client, lead.id));
+    expect(healed.status).toBe('needs_action');
+    expect(healed.taskId).not.toBeNull();
+    expect(healed.taskId).not.toBe(firstTask);
+    const history = await withTenant(app, ORG_A, (client) =>
+      client.query<{ n: string }>(`select count(*)::text as n from lead_tasks where lead_id = $1`, [
+        lead.id,
+      ]),
+    );
+    expect(history.rows[0]?.n).toBe('2');
+    // Delete the fresh task privileged; getLead heals again.
+    await admin.query(`delete from tasks where id = $1`, [healed.taskId]);
+    const healed2 = await withTenant(app, ORG_A, (client) => getLead(client, lead.id));
+    expect(healed2.taskId).not.toBeNull();
+    expect(healed2.taskId).not.toBe(healed.taskId);
+    expect(healed2.version).toBe(healed.version);
   });
 });
