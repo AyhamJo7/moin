@@ -220,4 +220,4 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P07-008 | P07.09.01 | 2026-10-10 | `1051d9c19033` | notes-plus-facts-registry-6-tests | [EV-P07-008-notes-facts-registry.md](P07/EV-P07-008-notes-facts-registry.md) |
 | EV-P07-009 | P07.10.01 | 2026-10-10 | `a887e9e16a86` | governance-records-plus-10-tests | [EV-P07-009-governance-records.md](P07/EV-P07-009-governance-records.md) |
 | EV-P07-010 | P07.11.01 | 2026-10-11 | `eb2896ca16fb` | finaliser plus reconciler plus 14 tests | [EV-P07-010-finaliser-reconciler.md](P07/EV-P07-010-finaliser-reconciler.md) |
-| EV-P07-011 | P07.13.01 | 2026-10-10 | `7dc0a4bbdd62` | version-conflict problem type plus 5-test parallel suite | [EV-P07-011-concurrency-optimistic-locking.md](P07/EV-P07-011-concurrency-optimistic-locking.md) |
+| EV-P07-011 | P07.13.01 | 2026-10-11 | `0f679f63fa9d` | version-conflict problem type plus 5-test parallel suite | [EV-P07-011-concurrency-optimistic-locking.md](P07/EV-P07-011-concurrency-optimistic-locking.md) |
