@@ -83,3 +83,13 @@ export type {
   OutcomeInput,
   OutcomeResult,
 } from './conversations.ts';
+export {
+  assignTask,
+  completeTask,
+  createTask,
+  listOpenTasks,
+  reopenTask,
+  setTaskStatus,
+  snoozeTask,
+} from './tasks.ts';
+export type { NewTask, Task, TaskPriority, TaskStatus, TaskType } from './tasks.ts';
