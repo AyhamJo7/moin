@@ -233,6 +233,9 @@ export async function getLead(client: TenantClient, leadId: string): Promise<Lea
   );
   const held = locked.rows[0];
   if (held === undefined) throw new VersionConflictError(`lead ${leadId} not found`);
+  // A concurrent setLeadStatus may have moved the lead out of needs_action while we waited on
+  // the lock: healing then would attach a task to a contacted/done/lost lead. Return as-is.
+  if ((held.status as LeadStatus) !== 'needs_action') return toLead(held);
   const recheck = await client.query<{ id: string }>(
     `select t.id::text from tasks t join leads l on l.task_id = t.id
      where l.id = $1 and t.status in ('open', 'in_progress', 'waiting')`,
