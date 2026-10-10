@@ -634,6 +634,92 @@ describe('session revocation without status change (P06.09.02 first response)', 
   });
 });
 
+describe('disabled-account callback and races (M2)', () => {
+  evidenceTest('callback for a disabled account mints no session', async () => {
+    const { pair, org } = await ownerPair();
+    const staff = await person();
+    await member(staff.id, org, 'staff');
+    await signInPair(staff);
+    contexts().clearCache();
+    expect(
+      (await postAs(pair, '/api/recovery/disable-user', { userId: staff.id, reason: 'mfa_reset' }))
+        .statusCode,
+    ).toBe(200);
+    const started = await app.inject({ method: 'GET', url: '/api/auth/login' });
+    expect(started.statusCode).toBe(302);
+    const binding = /^__Host-moin_signin=([A-Za-z0-9_-]{43});/.exec(
+      String(started.headers['set-cookie']),
+    )?.[1];
+    if (binding === undefined) throw new Error('no binding');
+    const { code, state } = provider.authorize(String(started.headers.location), {
+      subject: staff.subject,
+      email: staff.email,
+    });
+    const callback = await app.inject({
+      method: 'GET',
+      url: `/api/auth/callback?${new URLSearchParams({ state, code, iss: provider.issuer }).toString()}`,
+      headers: { cookie: `__Host-moin_signin=${binding}` },
+    });
+    expect(callback.statusCode).not.toBe(302);
+    const sessions = await admin.query<{ n: string }>(
+      'select count(*)::text as n from sessions where user_id = $1 and revoked_at is null',
+      [staff.id],
+    );
+    expect(sessions.rows[0]?.n).toBe('0');
+  });
+
+  evidenceTest('sign-in racing disable loses: disable wins, session revoked', async () => {
+    const { pair, org } = await ownerPair();
+    const staff = await person();
+    await member(staff.id, org, 'staff');
+    const staffPair = await signInPair(staff);
+    contexts().clearCache();
+    expect(
+      (await postAs(pair, '/api/recovery/disable-user', { userId: staff.id, reason: 'mfa_reset' }))
+        .statusCode,
+    ).toBe(200);
+    contexts().clearCache();
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: '/probe',
+          headers: { cookie: staffPair.header },
+        })
+      ).statusCode,
+    ).toBe(401);
+    const audits = await admin.query<{ n: string }>(
+      "select count(*)::text as n from audit_events where target_id = $1 and operation = 'account.disable'",
+      [staff.id],
+    );
+    expect(audits.rows[0]?.n).toBe('1');
+  });
+
+  evidenceTest('disabling the last owner fails closed (owner invariant)', async () => {
+    const solo = randomUUID();
+    await admin.query('insert into organisations (id, slug, name) values ($1, $2, $3)', [
+      solo,
+      `s-${solo.slice(0, 8)}`,
+      'Solo Org',
+    ]);
+    const owner = await person();
+    await member(owner.id, solo, 'owner');
+    const keeper = await person();
+    await member(keeper.id, solo, 'owner');
+    const keeperPair = await signInPair(keeper);
+    contexts().clearCache();
+    await admin.query('delete from memberships where user_id = $1', [owner.id]);
+    expect(
+      (
+        await postAs(keeperPair, '/api/recovery/disable-user', {
+          userId: keeper.id,
+          reason: 'mfa_reset',
+        })
+      ).statusCode,
+    ).toBe(409);
+  });
+});
+
 describe('password-reset revocation hook (P06.09.01, our side)', () => {
   evidenceTest('after an established reset, every session ends with password_reset', async () => {
     // The provider's email flow is the provider's (Cognito when P05 provisions it); this proves
