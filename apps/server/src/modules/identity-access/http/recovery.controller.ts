@@ -117,7 +117,8 @@ export class RecoveryController {
       reason: parsed.data.reason,
     });
     if (outcome === 'done') return { disabled: true, containment: 'partial' as const };
-    // Missing, denied on a non-owner, and owner-existence share one 404 (P06.07.03).
+    // Missing, denied on a non-owner, and owner-existence share one 404 (P06.07.03,
+    // intentional-indistinguishability: the shape reveals nothing about which case hit).
     return fail(reply, 404, '/problems/not-found', 'Not found');
   }
 
@@ -222,7 +223,8 @@ export class RecoveryController {
       return settled?.outcome === 'denied' ? 'denied' : 'missing';
     });
     if (outcome === 'done') return { revoked: true, containment: 'partial' as const };
-    // Missing, denied on a non-owner, and owner-existence share one 404 (P06.07.03).
+    // Missing, denied on a non-owner, and owner-existence share one 404 (P06.07.03,
+    // intentional-indistinguishability: the shape reveals nothing about which case hit).
     return fail(reply, 404, '/problems/not-found', 'Not found');
   }
 }
