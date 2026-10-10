@@ -2762,8 +2762,8 @@ Kernel value objects · contacts module · conversations module (calls, messages
   - [ ] P07.12.02 Search API with cursor pagination; RLS-scoped
   - [ ] P07.12.03 Tests: German umlaut/ß matching, partial numbers, no cross-tenant hits
 - [ ] **P07.13 Concurrency and optimistic locking** `[G:PILOT]`
-  - [ ] P07.13.01 `version` columns and a 409 problem type with the current representation
-  - [ ] P07.13.02 Concurrency test suite (parallel workers on real PG): task edits, lead transitions, finaliser vs reconciler
+  - [ ] P07.13.01 `version` columns and a 409 problem type with the current representation — EV-P07-011
+  - [ ] P07.13.02 Concurrency test suite (parallel workers on real PG): task edits, lead transitions, finaliser vs reconciler — EV-P07-011
 - [ ] **P07.14 Time, locale and holidays** `[G:PILOT]`
   - [ ] P07.14.01 Clock abstraction; tenant time zone; DST-safe arithmetic
   - [ ] P07.14.02 Public holidays dataset per Bundesland (Hamburg first), yearly update job; Betriebsferien entries per location
