@@ -9,7 +9,7 @@
 | Environment | local |
 | Command / procedure | `.claude/bin/gates.py full` 14/14 PASS (evidence `20261010T203950Z-full.json`); mutation-check KILLED on notes-facts integration suite |
 | Result | PASS |
-| CI run / artifact | PR #87 at `89f4533`: 16/16 checks SUCCESS (verified); this round-2 fix head CI pending at push time |
-| Reviewer | codex BLOCK round 1 on `278e810` (3 findings, fixed in `89f4533`); BLOCK round 2 on `89f4533` (unenforceable keywords accepted but never checked — fixed in this round: ROOT_KEYS/PROP_KEYS allowlists, registered schemas exactly the enforceable subset; enum/minimum/pattern/format/const tests) |
+| CI run / artifact | PR #87 at `d4970b4`: 16/16 checks SUCCESS (verified via `gh pr view 87 --json statusCheckRollup`) |
+| Reviewer | codex BLOCK rounds 1–2 (fixed in `89f4533`/`d4970b4`); OK on `d4970b4` (code OK, stale CI row — lifted in this round: CI refreshed to current head) |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).
