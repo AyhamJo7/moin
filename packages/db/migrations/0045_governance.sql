@@ -23,9 +23,10 @@
 -- the tests pin.
 --
 -- Tenant rows: organisation_id, composite uniques/FKs, RLS + FORCE, moin_app DML (no DELETE:
--- governance history is append-only like interactions; erasure runs privileged). Correlation
--- ids link actions to interactions and audit rows (P07.10.02): `correlation_id` mirrors the
--- tenant correlation, `conversation_id`/`lead_id`/`task_id` point at the business objects.
+-- governance history is append-only like interactions; erasure runs privileged). Relationships
+-- that exist: `correlation_id` on every table (joins to audit rows), `conversation_id` on runs
+-- and actions, `workflow_run_id` on actions, `ai_action_id` on invocations and approvals.
+-- Lead/task linkage arrives with the P07.11 finaliser needs; no lead_id/task_id columns here.
 
 CREATE TABLE workflow_runs (
   organisation_id uuid        NOT NULL REFERENCES organisations (id) ON DELETE CASCADE,
@@ -94,7 +95,11 @@ CREATE TABLE tool_invocations (
   created_at      timestamptz NOT NULL DEFAULT now(),
   updated_at      timestamptz NOT NULL DEFAULT now(),
   UNIQUE (organisation_id, id),
-  FOREIGN KEY (organisation_id, ai_action_id) REFERENCES ai_actions (organisation_id, id) ON DELETE SET NULL (ai_action_id),
+  -- RESTRICT, not SET NULL: purging an action still referenced by a live invocation would
+  -- null the only actor and violate the exactly-one-actor CHECK. Sweep order is leaf-first:
+  -- invocations, then actions, then runs; approvals reference actions loosely (SET NULL below)
+  -- because an approval names its decider, not its action, as the attribution.
+  FOREIGN KEY (organisation_id, ai_action_id) REFERENCES ai_actions (organisation_id, id) ON DELETE RESTRICT,
   CHECK (
     (ai_action_id IS NOT NULL AND actor_user_id IS NULL)
     OR (ai_action_id IS NULL AND actor_user_id IS NOT NULL)
@@ -157,8 +162,10 @@ GRANT SELECT, INSERT, UPDATE ON workflow_runs, ai_actions, tool_invocations, hum
 -- Reviewed audit argument keys (P06.10.03, P06.10.07, INV-12). Markers only, never content.
 INSERT INTO audit_argument_allowlist(operation, argument_key, value_kind, reason) VALUES
   ('run.start', 'has_conversation', 'count', '1 when linked to a conversation, 0 when standalone; no ids'),
+  ('run.finish', 'to_status', 'count', 'terminal rung as opaque marker (1=succeeded,2=failed,3=cancelled); no payload'),
   ('action.record', 'kind', 'count', 'action kind as opaque marker (0..5 in CHECK order); no prompt text'),
   ('tool.invoke', 'by_ai', 'count', '1 when called by an AI action, 0 when by a staff user; no tool args'),
   ('tool.report', 'state', 'count', 'reported state as opaque marker (1=succeeded,2=failed,3=rejected); no output'),
+  ('approval.request', 'proposal', 'count', 'proposal kind as opaque marker (0..5 in CHECK order); no payload'),
   ('approval.decide', 'decision', 'count', 'decision as opaque marker (1=approved,2=rejected,3=expired); no payload')
 ON CONFLICT (operation, argument_key) DO NOTHING;

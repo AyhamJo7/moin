@@ -130,19 +130,53 @@ describe('governance', () => {
     const past = new Date('2020-01-01T00:00:00Z');
     const future = new Date('2099-01-01T00:00:00Z');
     const expired = await withTenant(app, ORG_A, (client) => startRun(client, { expiresAt: past }));
+    await withTenant(app, ORG_A, (client) => startRun(client, { expiresAt: past }));
+    await withTenant(app, ORG_A, (client) => startRun(client, { expiresAt: past }));
     await withTenant(app, ORG_A, (client) => startRun(client, { expiresAt: future }));
     await withTenant(app, ORG_A, (client) => startRun(client, {}));
     const candidates = await withTenant(app, ORG_A, (client) =>
       purgeCandidates(client, 'workflow_runs'),
     );
     expect(candidates).toContain(expired.id);
-    expect(candidates).toHaveLength(1);
+    expect(candidates).toHaveLength(3);
+    const capped = await withTenant(app, ORG_A, (client) =>
+      purgeCandidates(client, 'workflow_runs', 2),
+    );
+    expect(capped).toHaveLength(2);
     expect(
       await withTenant(app, ORG_A, (client) => purgeCandidates(client, 'ai_actions')),
     ).toStrictEqual([]);
     expect(
       await withTenant(app, ORG_A, (client) => purgeCandidates(client, 'tool_invocations', 1)),
     ).toStrictEqual([]);
+    // Expired approvals are candidates too (per-table sweep reads each shape).
+    const approval = await withTenant(app, ORG_A, (client) =>
+      requestApproval(client, { proposalKind: 'book', expiresAt: past }),
+    );
+    const approvals = await withTenant(app, ORG_A, (client) =>
+      purgeCandidates(client, 'human_approvals'),
+    );
+    expect(approvals).toContain(approval.id);
+  });
+
+  evidenceTest('purge skips actions still referenced by live invocations', async () => {
+    const past = new Date('2020-01-01T00:00:00Z');
+    const action = await withTenant(app, ORG_A, (client) =>
+      recordAction(client, { kind: 'tool_call', expiresAt: past }),
+    );
+    await withTenant(app, ORG_A, (client) =>
+      invokeTool(client, { toolName: 'referenced.tool', aiActionId: action.id }),
+    );
+    // Direct purgeCandidates still lists the expired action (sweep order is the sweeper's job:
+    // invocations first, then actions — the RESTRICT FK refuses the wrong order, and moin_app
+    // holds no DELETE on governance tables at all, so the privileged path proves the FK).
+    const candidates = await withTenant(app, ORG_A, (client) =>
+      purgeCandidates(client, 'ai_actions'),
+    );
+    expect(candidates).toContain(action.id);
+    await expect(
+      admin.query(`delete from ai_actions where id = $1`, [action.id]),
+    ).rejects.toMatchObject({ code: '23503' });
   });
 
   evidenceTest('cross-tenant governance rows are invisible', async () => {
@@ -162,26 +196,43 @@ describe('governance', () => {
       invokeTool(client, { toolName: 'Geheimtool', aiActionId: action.id }),
     );
     await withTenant(app, ORG_A, (client) => reportInvocation(client, invoked.id, 'failed'));
+    await withTenant(app, ORG_A, (client) => finishRun(client, run.id, 'failed', run.version));
+    const approval = await withTenant(app, ORG_A, (client) =>
+      requestApproval(client, { proposalKind: 'book' }),
+    );
+    await withTenant(app, ORG_A, (client) => listAuditEvents(client, {}));
     await withTenant(app, ORG_A, async (client) => {
       const events = await listAuditEvents(client, {});
       const ops = events.map((e) => e.operation);
       expect(ops).toEqual(
-        expect.arrayContaining(['run.start', 'action.record', 'tool.invoke', 'tool.report']),
+        expect.arrayContaining([
+          'run.start',
+          'run.finish',
+          'action.record',
+          'tool.invoke',
+          'tool.report',
+          'approval.request',
+        ]),
       );
       for (const event of events) {
         expect(JSON.stringify(event.args_sanitized)).not.toContain('Geheimtool');
       }
     });
+    expect(approval.status).toBe('pending');
   });
 
-  it('rejects malformed tool names and correlations', async () => {
+  it('generates a run correlation and rejects malformed tool names', async () => {
     await expect(
       withTenant(app, ORG_A, (client) =>
         invokeTool(client, { toolName: '  ', actorUserId: STAFF }),
       ),
     ).rejects.toBeInstanceOf(RangeError);
-    await expect(
-      withTenant(app, ORG_A, (client) => startRun(client, { correlationId: 'nope' })),
-    ).rejects.toBeInstanceOf(RangeError);
+    // Run correlation is generated, never caller-supplied: every run carries a fresh uuid.
+    const one = await withTenant(app, ORG_A, (client) => startRun(client, {}));
+    const two = await withTenant(app, ORG_A, (client) => startRun(client, {}));
+    expect(one.correlationId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    );
+    expect(two.correlationId).not.toBe(one.correlationId);
   });
 });

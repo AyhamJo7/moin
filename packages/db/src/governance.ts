@@ -45,12 +45,22 @@ const DECISION_MARKER: Record<Exclude<ApprovalStatus, 'pending'>, number> = {
   expired: 3,
 };
 
+const PROPOSAL_MARKER: Record<ProposalKind, number> = {
+  send_message: 0,
+  book: 1,
+  cancel: 2,
+  refund: 3,
+  share_data: 4,
+  other: 5,
+};
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface WorkflowRun {
   readonly id: string;
   readonly status: RunStatus;
   readonly conversationId: string | null;
+  readonly correlationId: string;
   readonly version: number;
 }
 
@@ -77,29 +87,24 @@ export async function startRun(
   client: TenantClient,
   input: {
     conversationId?: string | undefined;
-    correlationId?: string | undefined;
     expiresAt?: Date | undefined;
   },
 ): Promise<WorkflowRun> {
-  if (input.correlationId !== undefined && !UUID_RE.test(input.correlationId)) {
-    throw new RangeError('correlation must be a uuid');
-  }
+  // The run correlation is generated, never caller-supplied: it becomes the identity of the
+  // run's audit trail, and a caller-chosen value could collide two runs' trails.
+  const correlationId = randomUUID();
   const id = randomUUID();
   const result = await client.query<{
     id: string;
     status: string;
     conversation_id: string | null;
+    correlation_id: string;
     version: string;
   }>(
     `insert into workflow_runs (organisation_id, id, conversation_id, correlation_id, expires_at)
      values (app.current_org(), $1, $2, $3, $4)
-     returning id::text, status, conversation_id::text, version::text`,
-    [
-      id,
-      input.conversationId ?? null,
-      input.correlationId ?? null,
-      input.expiresAt?.toISOString() ?? null,
-    ],
+     returning id::text, status, conversation_id::text, correlation_id::text, version::text`,
+    [id, input.conversationId ?? null, correlationId, input.expiresAt?.toISOString() ?? null],
   );
   const row = result.rows[0];
   if (row === undefined) throw new Error('run insert returned no row');
@@ -115,6 +120,7 @@ export async function startRun(
     id: row.id,
     status: row.status as RunStatus,
     conversationId: row.conversation_id,
+    correlationId: row.correlation_id,
     version: Number(row.version),
   };
 }
@@ -145,19 +151,29 @@ export async function finishRun(
     id: string;
     status: string;
     conversation_id: string | null;
+    correlation_id: string;
     version: string;
   }>(
     `update workflow_runs set status = $2, updated_at = clock_timestamp(), version = version + 1
      where id = $1 and version = $3
-     returning id::text, status, conversation_id::text, version::text`,
+     returning id::text, status, conversation_id::text, correlation_id::text, version::text`,
     [runId, status, version],
   );
   const next = moved.rows[0];
   if (next === undefined) throw new VersionConflictError(`run ${runId} version mismatch`);
+  await appendAuditEvent(client, {
+    source: 'api',
+    operation: 'run.finish',
+    targetKind: 'workflow_run',
+    targetId: runId,
+    argsSanitized: { to_status: status === 'succeeded' ? 1 : status === 'failed' ? 2 : 3 },
+    result: 'succeeded',
+  });
   return {
     id: next.id,
     status: next.status as RunStatus,
     conversationId: next.conversation_id,
+    correlationId: next.correlation_id,
     version: Number(next.version),
   };
 }
@@ -295,6 +311,14 @@ export async function requestApproval(
     [id, input.proposalKind, input.aiActionId ?? null, input.expiresAt?.toISOString() ?? null],
   );
   if (result.rows[0] === undefined) throw new Error('approval insert returned no row');
+  await appendAuditEvent(client, {
+    source: 'api',
+    operation: 'approval.request',
+    targetKind: 'human_approval',
+    targetId: id,
+    argsSanitized: { proposal: PROPOSAL_MARKER[input.proposalKind] },
+    result: 'succeeded',
+  });
   return { id, status: 'pending', decidedBy: null };
 }
 
