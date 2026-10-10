@@ -233,4 +233,27 @@ describe('tasks', () => {
       withTenant(app, ORG_A, (client) => createTask(client, { title: 'x'.repeat(73) })),
     ).rejects.toBeInstanceOf(RangeError);
   });
+
+  evidenceTest('delete-conversation-nulls-task-link', async () => {
+    // The column-list SET NULL (conversation_id) keeps the tenant and clears only the link:
+    // deleting a conversation must not delete the task, and must not fail on the NOT NULL org.
+    // moin_app holds no DELETE on conversations (P07.05 round-3), so the delete runs privileged.
+    const { startConversation } = await import('./conversations.ts');
+    const conversation = await withTenant(app, ORG_A, (client) =>
+      startConversation(client, { channel: 'call' }),
+    );
+    const task = await withTenant(app, ORG_A, (client) =>
+      createTask(client, { title: 'Linked', conversationId: conversation.id }),
+    );
+    expect(task.conversationId).toBe(conversation.id);
+    await admin.query(`delete from conversations where id = $1`, [conversation.id]);
+    const left = await withTenant(app, ORG_A, (client) =>
+      client.query<{ n: string; link: string | null; org: string }>(
+        `select count(*)::text as n, max(conversation_id::text) as link,
+           max(organisation_id::text) as org from tasks where id = $1`,
+        [task.id],
+      ),
+    );
+    expect(left.rows[0]).toMatchObject({ n: '1', link: null, org: ORG_A });
+  });
 });
