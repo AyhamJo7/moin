@@ -209,6 +209,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@moin/kernel':
+        specifier: workspace:*
+        version: link:../kernel
       pg:
         specifier: 8.23.0
         version: 8.23.0
