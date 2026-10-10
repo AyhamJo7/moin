@@ -200,13 +200,6 @@ describe('identity resolution', () => {
     const verdict = await withTenant(app, ORG_A, (client) =>
       resolveCaller(client, 'call-legacy-dup', '+49 30 777002'),
     );
-    // Restore the index with the legacy rows removed first: the duplicate was test scaffolding,
-    // not data the suite leaves behind.
-    await admin.query(`delete from contact_methods where contact_id = $1`, [contactB.id]);
-    await admin.query(
-      `create unique index contact_methods_verified_unique_idx
-       on contact_methods (organisation_id, kind, value) where verification = 'verified'`,
-    );
     expect(verdict.contactId).toBeNull();
     expect(verdict.candidateId).not.toBeNull();
     const rows = await withTenant(app, ORG_A, (client) =>
@@ -217,6 +210,65 @@ describe('identity resolution', () => {
     );
     expect(rows.rows[0]).toMatchObject({ status: 'open' });
     expect(rows.rows[0]?.review_task_id).toBeDefined();
+    // Repeat resolution returns the SAME candidate and creates no second task. The legacy
+    // scaffolding is still in place here (index restored after the assertions).
+    const tasksBefore = await withTenant(app, ORG_A, (client) =>
+      client.query<{ n: string }>(`select count(*)::text as n from tasks`),
+    );
+    const repeat = await withTenant(app, ORG_A, (client) =>
+      resolveCaller(client, 'call-legacy-dup-2', '+49 30 777002'),
+    );
+    expect(repeat.candidateId).toBe(verdict.candidateId);
+    const tasksAfter = await withTenant(app, ORG_A, (client) =>
+      client.query<{ n: string }>(`select count(*)::text as n from tasks`),
+    );
+    expect(tasksAfter.rows[0]?.n).toBe(tasksBefore.rows[0]?.n);
+    // Restore the index with the legacy rows removed: the duplicate was test scaffolding,
+    // not data the suite leaves behind.
+    await admin.query(`delete from contact_methods where contact_id = $1`, [contactB.id]);
+    await admin.query(
+      `create unique index contact_methods_verified_unique_idx
+       on contact_methods (organisation_id, kind, value) where verification = 'verified'`,
+    );
+  });
+
+  evidenceTest('deleting a contact removes its verdicts with it', async () => {
+    const { contactId } = await verifiedContact(ORG_A, 'Ephemeral', 'phone', '+49 30 555010');
+    await withTenant(app, ORG_A, (client) =>
+      resolveCaller(client, 'call-ephemeral', '+49 30 555010'),
+    );
+    await admin.query(`delete from contacts where id = $1`, [contactId]);
+    const links = await withTenant(app, ORG_A, (client) =>
+      client.query<{ n: string }>(
+        `select count(*)::text as n from interaction_links where interaction_ref = 'call-ephemeral'`,
+      ),
+    );
+    expect(links.rows[0]?.n).toBe('0');
+  });
+
+  evidenceTest('a verdict cannot pair a contact with another contact method', async () => {
+    const one = await withTenant(app, ORG_A, (client) =>
+      createContact(client, { displayName: 'Pair One' }),
+    );
+    const two = await withTenant(app, ORG_A, (client) =>
+      createContact(client, { displayName: 'Pair Two' }),
+    );
+    const methods = await withTenant(app, ORG_A, async (client) => {
+      const { addContactMethod } = await import('./contacts.ts');
+      const m = await addContactMethod(client, two.id, { kind: 'email', value: 'pair@x.test' });
+      return m;
+    });
+    // Hand-pairing one's contact with two's method is rejected (23503) by the composite FK.
+    await expect(
+      withTenant(app, ORG_A, (client) =>
+        client.query(
+          `insert into interaction_links
+             (organisation_id, id, interaction_ref, contact_id, method_id, rule, label_de)
+           values (app.current_org(), gen_random_uuid(), 'pair-fraud', $1, $2, 'email', 'x')`,
+          [one.id, methods.id],
+        ),
+      ),
+    ).rejects.toMatchObject({ code: '23503' });
   });
 
   evidenceTest('CLIR and unknown resolve to none and record the look', async () => {

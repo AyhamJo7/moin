@@ -36,8 +36,8 @@ CREATE TABLE interaction_links (
   created_at      timestamptz NOT NULL DEFAULT now(),
   UNIQUE (organisation_id, id),
   UNIQUE (organisation_id, interaction_ref),
-  FOREIGN KEY (organisation_id, contact_id) REFERENCES contacts (organisation_id, id) ON DELETE SET NULL,
-  FOREIGN KEY (organisation_id, method_id) REFERENCES contact_methods (organisation_id, id) ON DELETE SET NULL,
+  FOREIGN KEY (organisation_id, contact_id) REFERENCES contacts (organisation_id, id) ON DELETE CASCADE,
+  FOREIGN KEY (organisation_id, method_id) REFERENCES contact_methods (organisation_id, id) ON DELETE CASCADE,
   CHECK (
     (rule = 'none' AND contact_id IS NULL AND method_id IS NULL)
     OR (rule <> 'none' AND contact_id IS NOT NULL AND method_id IS NOT NULL)

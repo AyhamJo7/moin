@@ -147,6 +147,33 @@ async function recordCandidate(
     [hits[0]?.method_id ?? null],
   );
   const value = valueRow.rows[0]?.value ?? '';
+  // Idempotent on the open candidate: a repeat resolution of the same ambiguous value returns the
+  // existing candidate and creates no second task. The task is written only when the candidate is
+  // new, in the same transaction — no orphan tasks, no phantom ids.
+  const existing = await client.query<{ id: string }>(
+    `select id::text from duplicate_candidates
+     where kind = $1 and value = $2 and status = 'open'`,
+    [kind, value],
+  );
+  const found = existing.rows[0]?.id;
+  if (found !== undefined) {
+    await client.query(
+      `insert into interaction_links
+         (organisation_id, id, interaction_ref, contact_id, method_id, rule, label_de)
+       values (app.current_org(), $1, $2, null, null, 'none', $3)
+       on conflict (organisation_id, interaction_ref) do update
+         set contact_id = null, method_id = null, rule = 'none', label_de = excluded.label_de`,
+      [randomUUID(), interactionRef, RULE_LABEL_DE.none],
+    );
+    return {
+      interactionRef,
+      rule: 'none',
+      labelDe: RULE_LABEL_DE.none,
+      contactId: null,
+      methodId: null,
+      candidateId: found,
+    };
+  }
   const candidateId = randomUUID();
   const taskId = randomUUID();
   await client.query(
@@ -157,8 +184,7 @@ async function recordCandidate(
   await client.query(
     `insert into duplicate_candidates
        (organisation_id, id, contact_a_id, contact_b_id, kind, value, status, review_task_id)
-     values (app.current_org(), $1, $2, $3, $4, $5, 'open', $6)
-     on conflict (organisation_id, kind, value, status) do nothing`,
+     values (app.current_org(), $1, $2, $3, $4, $5, 'open', $6)`,
     [candidateId, first, second, kind, value, taskId],
   );
   await client.query(
