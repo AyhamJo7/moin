@@ -129,10 +129,14 @@ $$;
 -- direct-grant comparison. moin_identity may execute nothing outside the seven names, whatever the
 -- function's security attribute; moin_app may execute nothing with those names at all.
 -- The extra-name pair below mirrors the catalog check's two-list verdict (section 8): the
--- definer-executable set and the explicit-grant set (aclexplode on proacl, PUBLIC built-ins
--- excluded — those execute with the caller's own privileges and give the role nothing) must each
--- collapse to exactly the seven session names. An explicit EXECUTE on a non-definer function would
--- pass a definer-only assertion but fail the catalog's grant comparison.
+-- definer-executable set and the explicit-grant set (aclexplode on proacl) must each collapse to
+-- exactly the seven session names. An explicit EXECUTE on a non-definer function would pass a
+-- definer-only assertion but fail the catalog's grant comparison. The grant set carries NO schema
+-- exclusion: PUBLIC built-ins need no explicit grant (they execute with the caller's own
+-- privileges and give the role nothing), so any explicit grantee row for moin_identity outside
+-- the seven — pg_catalog included, e.g. lo_create — is a finding. lo_* reachability through
+-- PUBLIC defaults is pinned separately by the can_create_large_objects half of §1's creates-nothing
+-- boundary (provisioning revokes lo_* from PUBLIC).
 DO $$
 DECLARE
   got text[];
@@ -141,6 +145,7 @@ DECLARE
     'app.resolve_request_context', 'app.resolve_session', 'app.revoke_session', 'app.rotate_session'
   ];
   granted text[];
+  sys_grants text[];
   leak text[];
 BEGIN
   SELECT COALESCE(array_agg(DISTINCT n.nspname || '.' || p.proname ORDER BY n.nspname || '.' || p.proname), '{}')
@@ -158,6 +163,18 @@ BEGIN
       AND n.nspname NOT IN ('pg_catalog', 'information_schema');
   IF granted <> want THEN
     RAISE EXCEPTION 'functions granted to moin_identity: %; want exactly %.', granted, want;
+  END IF;
+  -- No explicit grant row anywhere else, system schemas included: the seven live in app, so any
+  -- pg_catalog/information_schema grantee row (e.g. lo_create after a provisioning regression) is
+  -- an explicit creates-nothing violation, even though PUBLIC built-ins need no grant to execute.
+  SELECT COALESCE(array_agg(DISTINCT n.nspname || '.' || p.proname ORDER BY n.nspname || '.' || p.proname), '{}')
+    INTO sys_grants
+    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace,
+         aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a
+    WHERE a.grantee = 'moin_identity'::regrole
+      AND n.nspname IN ('pg_catalog', 'information_schema');
+  IF sys_grants <> '{}' THEN
+    RAISE EXCEPTION 'moin_identity holds explicit grants on system functions (creates-nothing): %.', sys_grants;
   END IF;
   SELECT COALESCE(array_agg(DISTINCT n.nspname || '.' || p.proname ORDER BY n.nspname || '.' || p.proname), '{}')
     INTO leak
