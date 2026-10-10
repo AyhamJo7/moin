@@ -14,7 +14,7 @@ import {
 } from './conversations.ts';
 import { finaliseInteraction, orphanSeverity, reconcileOrphans } from './finaliser.ts';
 import { createPool, type Pool } from './pool.ts';
-import { completeTask, listOpenTasks } from './tasks.ts';
+import { completeTask, listOpenTasks, setTaskStatus } from './tasks.ts';
 import { withTenant } from './tenant.ts';
 
 const ORG_A = '11111111-1111-4111-8111-111111111111';
@@ -133,9 +133,14 @@ describe('finaliser', () => {
       expect(first.orphans.map((o) => o.conversationId)).toContain(ingested.call.conversationId);
       expect(first.orphaned).toBeGreaterThanOrEqual(1);
       const tasks = await withTenant(app, ORG_A, (client) => listOpenTasks(client));
-      expect(tasks.filter((t) => t.conversationId === ingested.call.conversationId)).toHaveLength(
-        1,
+      const created = tasks.filter((t) => t.conversationId === ingested.call.conversationId);
+      expect(created).toHaveLength(1);
+      // The counter names persisted work: finalised equals fallback-created orphans, and
+      // every counted orphan has its task on disk.
+      expect(first.finalised).toBe(
+        first.orphans.filter((o) => o.verdict === 'fallback-created').length,
       );
+      expect(first.finalised).toBeGreaterThanOrEqual(1);
       // Double run: the fallback task now counts as the open task — nothing left to claim.
       const second = await reconcileOrphans(app, { olderThanMinutes: 10 });
       expect(second.finalised).toBe(0);
@@ -226,6 +231,41 @@ describe('finaliser', () => {
     expect(linked[0]?.status).toBe('open');
   });
 
+  evidenceTest(
+    'cancelled fallback is replaced with a general-type task, twice without 23505',
+    async () => {
+      const convo = await withTenant(app, ORG_A, (client) =>
+        startConversation(client, { channel: 'call' }),
+      );
+      const first = await withTenant(app, ORG_A, (client) => finaliseInteraction(client, convo.id));
+      expect(first.verdict).toBe('fallback-created');
+      const repairedIds: string[] = [];
+      for (let round = 0; round < 2; round += 1) {
+        // Cancel whatever open task currently covers the conversation, then finalise: the
+        // deterministic callback row is now cancelled (terminal), so the repair mints a
+        // general-type replacement — NULL type sits outside the partial unique, so repeat
+        // cancels never collide.
+        const open = await withTenant(app, ORG_A, (client) => listOpenTasks(client));
+        const current = open.find((t) => t.conversationId === convo.id);
+        await withTenant(app, ORG_A, (client) =>
+          setTaskStatus(client, current?.id ?? '', 'cancelled', current?.version ?? 0),
+        );
+        const repaired = await withTenant(app, ORG_A, (client) =>
+          finaliseInteraction(client, convo.id),
+        );
+        expect(repaired.verdict).toBe('fallback-created');
+        expect(repaired.taskId).not.toBeNull();
+        repairedIds.push(repaired.taskId ?? '');
+      }
+      expect(new Set(repairedIds).size).toBe(2);
+      const tasks = await withTenant(app, ORG_A, (client) => listOpenTasks(client));
+      const linked = tasks.filter((t) => t.conversationId === convo.id);
+      expect(linked).toHaveLength(1);
+      expect(linked[0]?.type).toBeNull();
+      expect(linked[0]?.status).toBe('open');
+    },
+  );
+
   evidenceTest('live call activity keeps the conversation out of the orphan claim', async () => {
     const ingested = await withTenant(app, ORG_A, (client) =>
       ingestCall(client, { providerCallSid: 'CA-live-1', fromNumber: '+4930123456' }),
@@ -254,7 +294,9 @@ describe('finaliser', () => {
     const ingested = await withTenant(app, ORG_A, (client) =>
       ingestCall(client, { providerCallSid: 'CA-event-1', fromNumber: '+4930123456' }),
     );
-    // All three legs aged, then a bare event lands (no call advance, no conversation touch).
+    // Age everything first — including the ingest's own status_change event — so the
+    // conversation genuinely reads as orphaned; then a fresh event lands and must rescue it.
+    // (Without the ageing, the test passes even if the claim ignores the event leg.)
     await admin.query(
       `update conversations set updated_at = clock_timestamp() - make_interval(mins => 11)
        where id = $1`,
@@ -265,13 +307,16 @@ describe('finaliser', () => {
        where conversation_id = $1`,
       [ingested.call.conversationId],
     );
-    await withTenant(app, ORG_A, (client) =>
-      recordCallEvent(client, ingested.call.id, 'checkpoint', 7),
-    );
     await admin.query(
-      `update call_events set created_at = clock_timestamp()
+      `update call_events set created_at = clock_timestamp() - make_interval(mins => 11)
        where call_id = $1`,
       [ingested.call.id],
+    );
+    // Sanity: aged on all three legs, the conversation IS claimed before the fresh event.
+    const before = await reconcileOrphans(app, { olderThanMinutes: 10 });
+    expect(before.orphans.map((o) => o.conversationId)).toContain(ingested.call.conversationId);
+    await withTenant(app, ORG_A, (client) =>
+      recordCallEvent(client, ingested.call.id, 'checkpoint', 7),
     );
     const report = await reconcileOrphans(app, { olderThanMinutes: 10 });
     expect(report.orphans.map((o) => o.conversationId)).not.toContain(ingested.call.conversationId);

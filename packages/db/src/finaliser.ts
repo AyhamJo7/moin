@@ -19,6 +19,7 @@
  * audit-chain verifier's `onBreak`). Metric name the wiring must emit: `interactions.orphaned`.
  */
 
+import { randomUUID } from 'node:crypto';
 import { appendAuditEvent } from './audit.ts';
 import { getOutcome } from './conversations.ts';
 import { createTask, reopenTask } from './tasks.ts';
@@ -39,6 +40,9 @@ const VERDICT_MARKER: Record<FinaliseVerdict, number> = {
 };
 
 const FALLBACK_TITLE = 'Rückruf – Anruf ohne Ergebnis';
+
+/** Title for the repair task when the deterministic fallback row is cancelled (terminal). */
+const REPAIR_TITLE = 'Erneuter Rückruf – vorherige Aufgabe geschlossen';
 
 /** Task rungs that cover an interaction (mirrors the open-task claim predicate). */
 const OPEN_TASK_STATUSES: ReadonlySet<string> = new Set(['open', 'in_progress', 'waiting']);
@@ -69,12 +73,13 @@ async function openTaskExists(client: TenantClient, conversationId: string): Pro
  *
  * Closed-fallback repair: the idempotent create can return an already-closed fallback (the
  * task was closed after a previous finalise, so no open task exists now). Returning it
- * would report fallback-created while the interaction is still uncovered, so a closed
- * return reopens the same row (done → open): one row, no unique pressure, idempotent —
- * already-open short-circuits above, so repair only ever sees a closed row. A cancelled
- * fallback cannot reopen (terminal); that path mints nothing and reports task-existed is
- * wrong — it throws, surfacing a state the machine says should not exist, rather than
- * silently leaving the interaction uncovered.
+ * would report fallback-created while the interaction is still uncovered. Done reopens the
+ * same row (done → open): one row, no unique pressure, unbounded repairs with zero row
+ * growth — already-open short-circuits above, so repair only ever sees a closed row.
+ * Cancelled is terminal and cannot reopen, so it mints a general-type replacement (type
+ * NULL sits outside the one-system-task-per-interaction-and-type partial unique, which
+ * requires type NOT NULL): unbounded cancel-repairs with the system-type slot untouched.
+ * Anything else contradicts the machine and throws rather than covering silently.
  */
 export async function finaliseInteraction(
   client: TenantClient,
@@ -112,24 +117,39 @@ export async function finaliseInteraction(
     idempotencyKey: fallbackKey(conversationId),
   });
   if (!OPEN_TASK_STATUSES.has(task.status)) {
-    // The deterministic row is closed: reopen the same row (done → open). One row, no
-    // unique pressure, unbounded repairs with zero row growth — the next finalise reopens
-    // again if it closed again. Cancelled is terminal and cannot reopen: that state
-    // contradicts the machine (fallback tasks are never cancelled by the finaliser), so
-    // it throws rather than silently leaving the interaction uncovered.
-    if (!REOPENABLE_STATUSES.has(task.status)) {
-      throw new Error('fallback task is cancelled and cannot be reopened');
+    // The deterministic row is closed: done reopens in place; cancelled mints a
+    // general-type replacement outside the partial unique. Both keep covering the
+    // interaction no matter how many times it closes.
+    if (REOPENABLE_STATUSES.has(task.status)) {
+      const reopened = await reopenTask(client, task.id, task.version);
+      await appendAuditEvent(client, {
+        source: 'api',
+        operation: 'interaction.finalise',
+        targetKind: 'conversation',
+        targetId: conversationId,
+        argsSanitized: { verdict: VERDICT_MARKER['fallback-created'] },
+        result: 'succeeded',
+      });
+      return { conversationId, verdict: 'fallback-created', taskId: reopened.id };
     }
-    const reopened = await reopenTask(client, task.id, task.version);
-    await appendAuditEvent(client, {
-      source: 'api',
-      operation: 'interaction.finalise',
-      targetKind: 'conversation',
-      targetId: conversationId,
-      argsSanitized: { verdict: VERDICT_MARKER['fallback-created'] },
-      result: 'succeeded',
-    });
-    return { conversationId, verdict: 'fallback-created', taskId: reopened.id };
+    if (task.status === 'cancelled') {
+      const replacement = await createTask(client, {
+        title: REPAIR_TITLE,
+        priority: 'high',
+        conversationId,
+        idempotencyKey: `${fallbackKey(conversationId)}:repair:${randomUUID()}`,
+      });
+      await appendAuditEvent(client, {
+        source: 'api',
+        operation: 'interaction.finalise',
+        targetKind: 'conversation',
+        targetId: conversationId,
+        argsSanitized: { verdict: VERDICT_MARKER['fallback-created'] },
+        result: 'succeeded',
+      });
+      return { conversationId, verdict: 'fallback-created', taskId: replacement.id };
+    }
+    throw new Error(`fallback task in unexpected status ${task.status}`);
   }
   await appendAuditEvent(client, {
     source: 'api',
@@ -276,23 +296,33 @@ export async function reconcileOrphans(
     for (const organisationId of page.tenants) {
       // Local to the tenant attempt: returned post-commit, merged below. A tenant whose
       // transaction rolls back contributes nothing — its orphans were never finalised.
-      let committed: OrphanFinalised[];
+      // The finalised counter increments on merge, not in-txn: same rule as the orphans
+      // and callbacks — nothing in the report names work a rollback undid.
+      let committed: { orphans: OrphanFinalised[]; finalised: number }[];
       try {
-        committed = await withTenant(pool, organisationId, async (client) => {
-          const local: OrphanFinalised[] = [];
-          for (const conversationId of await claimTenantOrphans(client, olderThan)) {
-            const done = await finaliseInteraction(client, conversationId);
-            if (done.verdict === 'fallback-created') finalised += 1;
-            local.push({ organisationId, conversationId, verdict: done.verdict });
-          }
-          return local;
-        });
+        committed = await withTenant(
+          pool,
+          organisationId,
+          async (client): Promise<{ orphans: OrphanFinalised[]; finalised: number }[]> => {
+            const local: OrphanFinalised[] = [];
+            let created = 0;
+            for (const conversationId of await claimTenantOrphans(client, olderThan)) {
+              const done = await finaliseInteraction(client, conversationId);
+              if (done.verdict === 'fallback-created') created += 1;
+              local.push({ organisationId, conversationId, verdict: done.verdict });
+            }
+            return [{ orphans: local, finalised: created }];
+          },
+        );
       } catch {
         failed += 1;
         continue;
       }
-      orphans.push(...committed);
-      pendingDelivery.push(...committed);
+      for (const batch of committed) {
+        finalised += batch.finalised;
+        orphans.push(...batch.orphans);
+        pendingDelivery.push(...batch.orphans);
+      }
     }
     if (page.tenants.length < pageSize) break;
   }
