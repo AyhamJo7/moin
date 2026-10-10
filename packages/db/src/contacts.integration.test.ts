@@ -17,6 +17,7 @@ import {
   listContacts,
   removeContactMethod,
   updateContact,
+  verifyContactMethod,
 } from './contacts.ts';
 import { createPool, type Pool } from './pool.ts';
 import { withTenant } from './tenant.ts';
@@ -49,8 +50,8 @@ describe('contacts', () => {
       createContact(client, {
         displayName: 'Jürgen Müller',
         methods: [
-          { kind: 'phone', value: '030 901820', verification: 'verified' },
-          { kind: 'email', value: 'Hans@Example.COM', verification: 'verified' },
+          { kind: 'phone', value: '030 901820' },
+          { kind: 'email', value: 'Hans@Example.COM' },
         ],
       }),
     );
@@ -59,43 +60,84 @@ describe('contacts', () => {
       listContactMethods(client, contact.id),
     );
     expect(methods.map((m) => m.value).sort()).toStrictEqual(['+4930901820', 'Hans@example.com']);
+    expect(methods.map((m) => m.verification)).toStrictEqual(['unverified', 'unverified']);
   });
 
-  evidenceTest('verified values are unique per tenant, unverified are not', async () => {
+  evidenceTest('verification is a service transition; verified values collide', async () => {
     const first = await withTenant(app, ORG_A, (client) =>
       createContact(client, {
         displayName: 'First',
-        methods: [{ kind: 'phone', value: '+49 30 111111', verification: 'verified' }],
+        methods: [{ kind: 'phone', value: '+49 30 111111' }],
       }),
     );
-    // Same verified number on a second contact collides (23505).
+    const firstMethods = await withTenant(app, ORG_A, (client) =>
+      listContactMethods(client, first.id),
+    );
+    const firstMethod = firstMethods[0];
+    if (firstMethod === undefined) throw new Error('no method created');
+    const verified = await withTenant(app, ORG_A, (client) =>
+      verifyContactMethod(client, first.id, firstMethod.id),
+    );
+    expect(verified.verification).toBe('verified');
+    // Re-verifying is a conflict, not a no-op: the transition already happened.
     await expect(
-      withTenant(app, ORG_A, (client) =>
-        createContact(client, {
-          displayName: 'Second',
-          methods: [{ kind: 'phone', value: '+49 30 111111', verification: 'verified' }],
-        }),
-      ),
-    ).rejects.toMatchObject({ code: '23505' });
-    // Unverified duplicates are entry-before-proof: allowed.
+      withTenant(app, ORG_A, (client) => verifyContactMethod(client, first.id, firstMethod.id)),
+    ).rejects.toBeInstanceOf(VersionConflictError);
+    // Same number verified on a second contact collides (23505).
     const second = await withTenant(app, ORG_A, (client) =>
       createContact(client, {
         displayName: 'Second',
         methods: [{ kind: 'phone', value: '+49 30 111111' }],
       }),
     );
-    expect(second.displayName).toBe('Second');
+    const secondMethods = await withTenant(app, ORG_A, (client) =>
+      listContactMethods(client, second.id),
+    );
+    const secondMethod = secondMethods[0];
+    if (secondMethod === undefined) throw new Error('no method created');
+    await expect(
+      withTenant(app, ORG_A, (client) => verifyContactMethod(client, second.id, secondMethod.id)),
+    ).rejects.toMatchObject({ code: '23505' });
     expect(first.id).not.toBe(second.id);
   });
 
-  evidenceTest('update bumps version; stale version is a 409 signal', async () => {
+  evidenceTest('two unverified same-value methods coexist on different contacts', async () => {
+    const one = await withTenant(app, ORG_A, (client) =>
+      createContact(client, {
+        displayName: 'Unverified One',
+        methods: [{ kind: 'phone', value: '+49 30 444444' }],
+      }),
+    );
+    const two = await withTenant(app, ORG_A, (client) =>
+      createContact(client, {
+        displayName: 'Unverified Two',
+        methods: [{ kind: 'phone', value: '+49 30 444444' }],
+      }),
+    );
+    expect(one.id).not.toBe(two.id);
+  });
+
+  evidenceTest('update validates names, bumps version, clears notes on null', async () => {
     const contact = await withTenant(app, ORG_A, (client) =>
-      createContact(client, { displayName: 'Edit Me' }),
+      createContact(client, { displayName: 'Edit Me', notes: 'keep' }),
     );
+    // PersonName normalisation applies on update too.
     const updated = await withTenant(app, ORG_A, (client) =>
-      updateContact(client, contact.id, { displayName: 'Edited', version: contact.version }),
+      updateContact(client, contact.id, { displayName: '  Edited  ', version: contact.version }),
     );
+    expect(updated.displayName).toBe('Edited');
     expect(updated.version).toBe(contact.version + 1);
+    expect(updated.notes).toBe('keep');
+    // notes: null clears; an invalid name throws RangeError, not a 409.
+    const cleared = await withTenant(app, ORG_A, (client) =>
+      updateContact(client, contact.id, { notes: null, version: updated.version }),
+    );
+    expect(cleared.notes).toBeNull();
+    await expect(
+      withTenant(app, ORG_A, (client) =>
+        updateContact(client, contact.id, { displayName: 'Bad123', version: cleared.version }),
+      ),
+    ).rejects.toBeInstanceOf(RangeError);
     await expect(
       withTenant(app, ORG_A, (client) =>
         updateContact(client, contact.id, { displayName: 'Stale', version: contact.version }),
@@ -149,7 +191,7 @@ describe('contacts', () => {
     await withTenant(app, ORG_B, (client) =>
       createContact(client, {
         displayName: 'Suchname Meier',
-        methods: [{ kind: 'phone', value: '+49 40 222222', verification: 'verified' }],
+        methods: [{ kind: 'phone', value: '+49 40 222222' }],
       }),
     );
     const byName = await withTenant(app, ORG_B, (client) =>
@@ -170,7 +212,7 @@ describe('contacts', () => {
       }),
     );
     await withTenant(app, ORG_B, async (client) => {
-      await updateContact(client, contact.id, { displayName: 'Audited 2', version: 1 });
+      await updateContact(client, contact.id, { displayName: 'Audited Two', version: 1 });
       const events = await listAuditEvents(client, { targetId: contact.id });
       expect(events.map((e) => e.operation).sort()).toStrictEqual([
         'contact.create',

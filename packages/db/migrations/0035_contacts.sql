@@ -54,10 +54,10 @@ CREATE TABLE contact_methods (
   created_at      timestamptz NOT NULL DEFAULT now(),
   updated_at      timestamptz NOT NULL DEFAULT now(),
   UNIQUE (organisation_id, id),
-  FOREIGN KEY (organisation_id, contact_id) REFERENCES contacts (organisation_id, id) ON DELETE CASCADE,
-  -- One verified value, one contact: the same verified phone/email cannot identify two people.
-  -- Unverified duplicates are allowed (partial index), because entry precedes proof.
-  UNIQUE (organisation_id, kind, value, verification)
+  FOREIGN KEY (organisation_id, contact_id) REFERENCES contacts (organisation_id, id) ON DELETE CASCADE
+  -- One verified value, one contact (partial index below): the same verified phone/email cannot
+  -- identify two people. Unverified duplicates are allowed — no table-level UNIQUE on
+  -- (kind, value, verification) — because entry precedes proof.
 );
 
 -- Partial unique: only verified rows collide. Unverified/suspicious/withheld rows never conflict.
@@ -89,5 +89,6 @@ INSERT INTO audit_argument_allowlist(operation, argument_key, value_kind, reason
   ('contact.create', 'method_count', 'count', 'how many methods the new contact carries; opaque count, no PII'),
   ('contact.update', 'version', 'count', 'the new optimistic-locking version; opaque counter, no PII'),
   ('contact.method_add', 'method_kind', 'count', 'method kind as opaque marker (phone/email/external_id mapped to 0/1/2 at the writer); no value'),
-  ('contact.method_remove', 'method_kind', 'count', 'method kind as opaque marker; no value')
+  ('contact.method_remove', 'method_kind', 'count', 'method kind as opaque marker; no value'),
+  ('contact.method_verify', 'method_kind', 'count', 'method kind as opaque marker; no value')
 ON CONFLICT (operation, argument_key) DO NOTHING;

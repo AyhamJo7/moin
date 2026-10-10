@@ -9,7 +9,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { emailAddress, phoneNumber } from '@moin/kernel';
+import { emailAddress, personName, phoneNumber } from '@moin/kernel';
 import { appendAuditEvent } from './audit.ts';
 import type { TenantClient } from './tenant.ts';
 
@@ -100,7 +100,6 @@ export async function createContact(
       | readonly {
           kind: ContactMethodKind;
           value: string;
-          verification?: MethodVerification | undefined;
           isTenantOwned?: boolean | undefined;
         }[]
       | undefined;
@@ -111,7 +110,7 @@ export async function createContact(
     `insert into contacts (organisation_id, id, display_name, notes)
      values (app.current_org(), $1, $2, $3)
      returning id, display_name, notes, version::text`,
-    [id, input.displayName, input.notes ?? null],
+    [id, personName(input.displayName).value, input.notes ?? null],
   );
   const row = contact.rows[0];
   if (row === undefined) throw new Error('contact insert returned no row');
@@ -120,13 +119,12 @@ export async function createContact(
     await client.query(
       `insert into contact_methods
          (organisation_id, id, contact_id, kind, value, verification, is_tenant_owned)
-       values (app.current_org(), $1, $2, $3, $4, $5, $6)`,
+       values (app.current_org(), $1, $2, $3, $4, 'unverified', $5)`,
       [
         randomUUID(),
         id,
         method.kind,
         normaliseMethodValue(method.kind, method.value),
-        method.verification ?? 'unverified',
         method.isTenantOwned ?? false,
       ],
     );
@@ -150,10 +148,17 @@ export async function updateContact(
 ): Promise<Contact> {
   const result = await client.query<ContactRow>(
     `update contacts set display_name = coalesce($2, display_name),
-       notes = coalesce($3, notes), updated_at = clock_timestamp(), version = version + 1
+       notes = case when $5::boolean then null when $3::text is null then notes else $3 end,
+       updated_at = clock_timestamp(), version = version + 1
      where id = $1 and version = $4
      returning id, display_name, notes, version::text`,
-    [contactId, input.displayName ?? null, input.notes ?? null, input.version],
+    [
+      contactId,
+      input.displayName === undefined ? null : personName(input.displayName).value,
+      input.notes ?? null,
+      input.version,
+      input.notes === null,
+    ],
   );
   const row = result.rows[0];
   if (row === undefined) throw new VersionConflictError(`contact ${contactId} version mismatch`);
@@ -174,7 +179,6 @@ export async function addContactMethod(
   input: {
     kind: ContactMethodKind;
     value: string;
-    verification?: MethodVerification | undefined;
     isTenantOwned?: boolean | undefined;
   },
 ): Promise<ContactMethod> {
@@ -182,14 +186,13 @@ export async function addContactMethod(
   const result = await client.query<MethodRow>(
     `insert into contact_methods
        (organisation_id, id, contact_id, kind, value, verification, is_tenant_owned)
-     values (app.current_org(), $1, $2, $3, $4, $5, $6)
+     values (app.current_org(), $1, $2, $3, $4, 'unverified', $5)
      returning id, contact_id, kind, value, verification, is_tenant_owned, version::text`,
     [
       id,
       contactId,
       input.kind,
       normaliseMethodValue(input.kind, input.value),
-      input.verification ?? 'unverified',
       input.isTenantOwned ?? false,
     ],
   );
@@ -201,6 +204,35 @@ export async function addContactMethod(
     targetKind: 'contact',
     targetId: contactId,
     argsSanitized: { method_kind: METHOD_KIND_MARKER[input.kind] },
+    result: 'succeeded',
+  });
+  return toMethod(row);
+}
+
+export async function verifyContactMethod(
+  client: TenantClient,
+  contactId: string,
+  methodId: string,
+): Promise<ContactMethod> {
+  // Verification is a state transition the service owns, not a flag the caller sets: only an
+  // unverified method can become verified, and the unique index then enforces one owner.
+  const result = await client.query<MethodRow>(
+    `update contact_methods set verification = 'verified',
+       updated_at = clock_timestamp(), version = version + 1
+     where id = $1 and contact_id = $2 and verification = 'unverified'
+     returning id, contact_id, kind, value, verification, is_tenant_owned, version::text`,
+    [methodId, contactId],
+  );
+  const row = result.rows[0];
+  if (row === undefined) {
+    throw new VersionConflictError(`method ${methodId} is not unverified`);
+  }
+  await appendAuditEvent(client, {
+    source: 'api',
+    operation: 'contact.method_verify',
+    targetKind: 'contact',
+    targetId: contactId,
+    argsSanitized: { method_kind: METHOD_KIND_MARKER[row.kind as ContactMethodKind] },
     result: 'succeeded',
   });
   return toMethod(row);
