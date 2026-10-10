@@ -115,30 +115,36 @@ describe('concurrency', () => {
     expect(read.taskId).not.toBeNull();
   });
 
-  evidenceTest('finaliser vs reconciler: sequential sweep converges on one task', async () => {
-    const convo = await withTenant(app, ORG_A, (client) =>
-      startConversation(client, { channel: 'call' }),
-    );
-    // Age all three legs so the reconciler genuinely claims this conversation.
-    await admin.query(
-      `update conversations set updated_at = clock_timestamp() - make_interval(mins => 11)
+  evidenceTest(
+    'finaliser vs reconciler at N-way parallelism: one task, losers task-existed',
+    async () => {
+      const convo = await withTenant(app, ORG_A, (client) =>
+        startConversation(client, { channel: 'call' }),
+      );
+      // Age all three legs so the reconciler genuinely claims this conversation.
+      await admin.query(
+        `update conversations set updated_at = clock_timestamp() - make_interval(mins => 11)
        where id = $1`,
-      [convo.id],
-    );
-    // Direct finalise first (P07.11 proves concurrent direct finalisers converge); the
-    // sweep then finds the winner's task and reports an empty claim — every order
-    // converges on exactly one linked open task. (Racing the sweep itself is
-    // intentionally not asserted: the direct-create path is check-then-act without a
-    // lock, so two same-tick creators can both pass the open check — a P07.11 gap
-    // this suite documents but does not own.)
-    const done = await withTenant(app, ORG_A, (client) => finaliseInteraction(client, convo.id));
-    expect(done.verdict).toBe('fallback-created');
-    const sweep = await reconcileOrphans(app, { olderThanMinutes: 10 });
-    expect(sweep.orphans.map((o) => o.conversationId)).not.toContain(convo.id);
-    expect(sweep.orphaned).toBe(0);
-    const tasks = await withTenant(app, ORG_A, (client) => listOpenTasks(client));
-    expect(tasks.filter((t) => t.conversationId === convo.id)).toHaveLength(1);
-  });
+        [convo.id],
+      );
+      // The advisory lock serialises same-conversation finalises: exactly one creator,
+      // the rest report task-existed — whether they raced directly or through the sweep.
+      const racers = await Promise.allSettled([
+        withTenant(app, ORG_A, (client) => finaliseInteraction(client, convo.id)),
+        withTenant(app, ORG_A, (client) => finaliseInteraction(client, convo.id)),
+        reconcileOrphans(app, { olderThanMinutes: 10 }),
+      ]);
+      const created = racers.filter(
+        (r) =>
+          r.status === 'fulfilled' &&
+          'verdict' in r.value &&
+          r.value.verdict === 'fallback-created',
+      );
+      expect(created).toHaveLength(1);
+      const tasks = await withTenant(app, ORG_A, (client) => listOpenTasks(client));
+      expect(tasks.filter((t) => t.conversationId === convo.id)).toHaveLength(1);
+    },
+  );
 
   evidenceTest('shared problem type: shape, status, and narrowing', () => {
     const problem = versionConflictProblem({
