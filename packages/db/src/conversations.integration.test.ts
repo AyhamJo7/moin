@@ -352,4 +352,39 @@ describe('conversations', () => {
     );
     expect(eventsAfter.rows[0]?.n).toBe(eventsBefore.rows[0]?.n);
   });
+
+  evidenceTest('orphan cleanup removes only call-less conversations', async () => {
+    // moin_app can INSERT conversations but not DELETE them; the guard function removes
+    // orphans only. Orphan: inserted directly, no call references it.
+    const orphanId = await withTenant(app, ORG_B, (client) =>
+      client
+        .query<{ id: string }>(
+          `insert into conversations (organisation_id, id, channel)
+           values (app.current_org(), gen_random_uuid(), 'call') returning id::text`,
+        )
+        .then((r) => r.rows[0]?.id ?? ''),
+    );
+    await withTenant(app, ORG_B, (client) =>
+      client.query(`select app.delete_orphan_conversation($1)`, [orphanId]),
+    );
+    const gone = await withTenant(app, ORG_B, (client) =>
+      client.query<{ n: string }>(`select count(*)::text as n from conversations where id = $1`, [
+        orphanId,
+      ]),
+    );
+    expect(gone.rows[0]?.n).toBe('0');
+    // Live: the ingested conversation has a call — the function deletes nothing.
+    const live = await withTenant(app, ORG_B, (client) =>
+      ingestCall(client, { providerCallSid: 'CA-orphan-live-1' }),
+    );
+    await withTenant(app, ORG_B, (client) =>
+      client.query(`select app.delete_orphan_conversation($1)`, [live.call.conversationId]),
+    );
+    const kept = await withTenant(app, ORG_B, (client) =>
+      client.query<{ n: string }>(`select count(*)::text as n from conversations where id = $1`, [
+        live.call.conversationId,
+      ]),
+    );
+    expect(kept.rows[0]?.n).toBe('1');
+  });
 });

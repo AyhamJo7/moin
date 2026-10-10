@@ -180,7 +180,9 @@ export async function ingestCall(
   const row = created.rows[0];
   if (row === undefined) {
     // Belt-and-braces: unreachable under the advisory lock unless the lock was bypassed
-    // (e.g. a hand-written INSERT). Return the winner rather than fail.
+    // (e.g. a hand-written INSERT). Clean the orphan through the guard function (moin_app
+    // holds no DELETE on conversations since round-3) and return the winner.
+    await client.query(`select app.delete_orphan_conversation($1)`, [conversationId]);
     const winner = await client.query<CallRow>(
       `select id, conversation_id, provider_call_sid, contact_id, status, version::text
        from calls where provider_call_sid = $1`,
