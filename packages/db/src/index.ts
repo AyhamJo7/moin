@@ -45,3 +45,21 @@ export type {
   RotationReason,
   ResetReason,
 } from './identity-store.ts';
+export {
+  VersionConflictError,
+  addContactMethod,
+  createContact,
+  listContactMethods,
+  listContacts,
+  normaliseMethodValue,
+  removeContactMethod,
+  updateContact,
+  verifyContactMethod,
+} from './contacts.ts';
+export type {
+  Contact,
+  ContactMethod,
+  ContactMethodKind,
+  MethodVerification,
+  VerifiedVia,
+} from './contacts.ts';
