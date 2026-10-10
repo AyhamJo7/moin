@@ -221,9 +221,29 @@ export async function getLead(client: TenantClient, leadId: string): Promise<Lea
     [leadId],
   );
   if (open.rows[0]?.id !== undefined) return lead;
-  // Dead link (task done/cancelled/deleted): heal with a fresh task. Same lead version —
-  // healing repairs the linkage, it is not a lead mutation — plus history + audit rows.
-  const taskId = await ensureNeedsActionTask(client, leadId, `needs-action-${randomUUID()}`);
+  // Dead link (task done/cancelled/deleted): lock the lead row, re-check under the lock
+  // (a concurrent healer may have repaired while we waited), then heal. The loser's re-check
+  // sees the winner's fresh open link and returns it with no new task — callers converge.
+  // The heal key derives from the dead link deterministically, so even a lock bypass shares
+  // the row via the idempotency unique index rather than duplicating.
+  const locked = await client.query<LeadRow>(
+    `select id, title, contact_id, conversation_id, status, lost_reason, task_id, version::text
+     from leads where id = $1 for update`,
+    [leadId],
+  );
+  const held = locked.rows[0];
+  if (held === undefined) throw new VersionConflictError(`lead ${leadId} not found`);
+  const recheck = await client.query<{ id: string }>(
+    `select t.id::text from tasks t join leads l on l.task_id = t.id
+     where l.id = $1 and t.status in ('open', 'in_progress', 'waiting')`,
+    [leadId],
+  );
+  const winner = recheck.rows[0]?.id;
+  if (winner !== undefined) return { ...toLead(held), taskId: winner };
+  // Dead-link marker: the old task id when the row still points at a closed task, else the
+  // constant 'gone' for a deleted/never-linked row. Deterministic per dead link.
+  const deadMarker = held.task_id ?? 'gone';
+  const taskId = await ensureNeedsActionTask(client, leadId, `needs-action-repair-${deadMarker}`);
   await appendAuditEvent(client, {
     source: 'api',
     operation: 'lead.task_link',
@@ -232,7 +252,7 @@ export async function getLead(client: TenantClient, leadId: string): Promise<Lea
     argsSanitized: { linked: 1 },
     result: 'succeeded',
   });
-  return { ...lead, taskId };
+  return { ...toLead(held), taskId };
 }
 
 export async function listLeads(

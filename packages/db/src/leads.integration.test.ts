@@ -206,4 +206,38 @@ describe('leads', () => {
     expect(healed2.taskId).not.toBe(healed.taskId);
     expect(healed2.version).toBe(healed.version);
   });
+
+  evidenceTest('concurrent heals converge on one fresh task', async () => {
+    const lead = await withTenant(app, ORG_A, (client) =>
+      createLead(client, { title: 'HealRace' }),
+    );
+    const moved = await withTenant(app, ORG_A, (client) =>
+      setLeadStatus(client, lead.id, 'needs_action', lead.version),
+    );
+    const deadTask = moved.taskId;
+    if (deadTask === null) throw new Error('no task linked');
+    // Kill the link privileged so both healers see a dead link.
+    await admin.query(`delete from tasks where id = $1`, [deadTask]);
+    const tasksBefore = await withTenant(app, ORG_A, (client) =>
+      client.query<{ n: string }>(`select count(*)::text as n from tasks`),
+    );
+    const [one, two] = await Promise.all([
+      withTenant(app, ORG_A, (client) => getLead(client, lead.id)),
+      withTenant(app, ORG_A, (client) => getLead(client, lead.id)),
+    ]);
+    expect(one.taskId).not.toBeNull();
+    expect(two.taskId).toBe(one.taskId);
+    const tasksAfter = await withTenant(app, ORG_A, (client) =>
+      client.query<{ n: string }>(`select count(*)::text as n from tasks`),
+    );
+    // Exactly one fresh task: the loser re-checked under the row lock and took the winner.
+    expect(Number(tasksAfter.rows[0]?.n) - Number(tasksBefore.rows[0]?.n)).toBe(1);
+    const history = await withTenant(app, ORG_A, (client) =>
+      client.query<{ n: string }>(`select count(*)::text as n from lead_tasks where lead_id = $1`, [
+        lead.id,
+      ]),
+    );
+    // History: entry task + exactly one heal row (the loser wrote no history).
+    expect(history.rows[0]?.n).toBe('1');
+  });
 });
