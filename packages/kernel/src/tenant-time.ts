@@ -49,19 +49,43 @@ const BERLIN_OFFSETS: readonly { readonly from: string; readonly minutes: number
 /**
  * Offset of Europe/Berlin east of UTC in minutes at the given instant, from a table of the
  * EU-mandated transitions (last Sunday of March/October, 01:00 UTC). The table covers
- * 2024–2030; outside it the standard-time offset (+60) applies, and extending the table is
- * a data change, not a logic change. Intl remains the renderer — this table exists so tests
- * can assert the offset without depending on the host's tzdata version.
+ * 2024–2030 as a fast path and a tzdata-independent cross-check; outside it the generic
+ * Intl round-trip path applies (same as every other zone), so post-2030 summers keep
+ * their +120. Intl remains the renderer — this table exists so tests can assert the
+ * offset without depending on the host's tzdata version.
  */
 export function berlinOffsetMinutesAt(at: Date): number {
   const time = at.getTime();
   if (!Number.isFinite(time)) throw new RangeError('instant is invalid');
+  if (
+    time < Date.parse(BERLIN_OFFSETS[0]?.from ?? '') ||
+    time >= Date.parse('2030-11-01T00:00:00Z')
+  ) {
+    return genericOffsetMinutesAt(at);
+  }
   let offset = 60;
   for (const row of BERLIN_OFFSETS) {
     if (time >= Date.parse(row.from)) offset = row.minutes;
     else break;
   }
   return offset;
+}
+
+/** Zone offset by round-tripping an instant through Intl (works for every zone, any year). */
+function genericOffsetMinutesAt(at: Date, timeZone: string = DEFAULT_TIME_ZONE): number {
+  const fields = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(at);
+  const get = (type: string): number => Number(fields.find((p) => p.type === type)?.value ?? 'NaN');
+  const asUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'));
+  return Math.round((asUtc - at.getTime()) / 60_000);
 }
 
 /**
@@ -77,6 +101,8 @@ export function zonedFields(
   readonly day: number;
   readonly hour: number;
   readonly minute: number;
+  readonly second: number;
+  readonly millisecond: number;
   readonly weekday: number;
 } {
   checkTimeZone(timeZone);
@@ -87,6 +113,7 @@ export function zonedFields(
     day: 'numeric',
     hour: 'numeric',
     minute: 'numeric',
+    second: 'numeric',
     weekday: 'short',
     hourCycle: 'h23',
   }).formatToParts(at);
@@ -109,6 +136,8 @@ export function zonedFields(
     day: get('day'),
     hour: get('hour'),
     minute: get('minute'),
+    second: get('second'),
+    millisecond: at.getTime() % 1000,
     weekday: get('weekday'),
   };
 }
@@ -123,9 +152,10 @@ export function zonedDateString(at: Date, timeZone = DEFAULT_TIME_ZONE): string 
 /**
  * Add whole calendar days in the tenant zone: resolve to the zone's wall clock, add the day
  * count to the DATE (not 24h × n to the instant — that drifts across a transition), then
- * resolve back preserving the wall-clock time of day. Returns the instant of the same local
- * time n days later; the UTC duration may be 23/24/25 hours per day crossed, which is
- * correct — the appointment stays at 09:00 local, not 08:00 or 10:00.
+ * resolve back preserving the wall-clock time of day to the second and millisecond.
+ * Returns the instant of the same local time n days later; the UTC duration may be
+ * 23/24/25 hours per day crossed, which is correct — the appointment stays at 09:00 local,
+ * not 08:00 or 10:00.
  */
 export function addCalendarDays(at: Date, days: number, timeZone = DEFAULT_TIME_ZONE): Date {
   if (!Number.isInteger(days) || Math.abs(days) > 3660) {
@@ -149,24 +179,22 @@ export function addCalendarDays(at: Date, days: number, timeZone = DEFAULT_TIME_
   // on that date (midday is never inside a transition).
   const noonTarget = new Date(Date.UTC(y ?? 0, (m ?? 1) - 1, d ?? 1, 12, 0, 0)).toISOString();
   const offset = offsetMinutesAt(noonTarget, timeZone);
-  return new Date(Date.UTC(y ?? 0, (m ?? 1) - 1, d ?? 1, f.hour, f.minute, 0) - offset * 60_000);
+  const ms = ((at.getTime() % 1000) + 1000) % 1000;
+  return new Date(
+    Date.UTC(y ?? 0, (m ?? 1) - 1, d ?? 1, f.hour, f.minute, f.second, ms) - offset * 60_000,
+  );
 }
 
 function offsetMinutesAt(noonIso: string, timeZone: string): number {
-  if (timeZone === 'Europe/Berlin') return berlinOffsetMinutesAt(new Date(noonIso));
-  // Generic zones: derive from Intl by round-tripping noon UTC through the zone.
-  const noon = new Date(noonIso);
-  const fields = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    hourCycle: 'h23',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  }).formatToParts(noon);
-  const get = (type: string): number => Number(fields.find((p) => p.type === type)?.value ?? 'NaN');
-  const asUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'));
-  return Math.round((asUtc - noon.getTime()) / 60_000);
+  if (timeZone === 'Europe/Berlin') {
+    const noon = new Date(noonIso);
+    const first = BERLIN_OFFSETS[0]?.from ?? '';
+    if (
+      noon.getTime() >= Date.parse(first) &&
+      noon.getTime() < Date.parse('2030-11-01T00:00:00Z')
+    ) {
+      return berlinOffsetMinutesAt(noon);
+    }
+  }
+  return genericOffsetMinutesAt(new Date(noonIso), timeZone);
 }

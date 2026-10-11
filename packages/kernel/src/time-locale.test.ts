@@ -59,6 +59,27 @@ describe('tenant time', () => {
     expect(sunday.getTime() - saturday.getTime()).toBe(25 * 3_600_000);
   });
 
+  it('post-table summers keep daylight saving via the Intl path (2035)', () => {
+    // Beyond the 2024–2030 pinned table the generic Intl round-trip applies: July 2035
+    // is CEST (+120), and a 30-day calendar add keeps 09:00 local.
+    expect(berlinOffsetMinutesAt(new Date('2035-07-01T10:00:00Z'))).toBe(120);
+    expect(berlinOffsetMinutesAt(new Date('2035-01-15T10:00:00Z'))).toBe(60);
+    const start = new Date('2035-07-01T07:00:00Z');
+    expect(zonedFields(start).hour).toBe(9);
+    const later = addCalendarDays(start, 30);
+    expect(zonedDateString(later)).toBe('2035-07-31');
+    expect(zonedFields(later).hour).toBe(9);
+  });
+
+  it('seconds and milliseconds survive a calendar-day add', () => {
+    const at = new Date('2026-05-04T08:15:42.123Z');
+    const next = addCalendarDays(at, 1);
+    const fields = zonedFields(next);
+    expect(fields.second).toBe(42);
+    expect(next.getTime() % 1000).toBe(123);
+    expect(zonedDateString(next)).toBe('2026-05-05');
+  });
+
   it('rejects bad zones, bad instants and absurd day counts', () => {
     expect(() => zonedFields(new Date('2026-01-01T00:00:00Z'), 'Mars/Olympus')).toThrow(RangeError);
     expect(() => zonedFields(new Date('2026-01-01T00:00:00Z'), '../etc')).toThrow(RangeError);
