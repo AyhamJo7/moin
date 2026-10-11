@@ -186,3 +186,15 @@ export type {
   KnowledgeState,
   KnowledgeVersion,
 } from './knowledge.ts';
+export { getProfile, renderAnswer, upsertProfile } from './profile.ts';
+export type {
+  AddressFacts,
+  BodyFacts,
+  BusinessNameFacts,
+  BusinessProfile,
+  PriceRangesFacts,
+  ProfileCategory,
+  ProfileFacts,
+  ServiceAreaFacts,
+  ServicesFacts,
+} from './profile.ts';
