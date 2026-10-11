@@ -37,6 +37,19 @@ beforeAll(async () => {
     `insert into organisations (id, slug, name) values ($1, 'alpha', 'Alpha GmbH'), ($2, 'beta', 'Beta GmbH')`,
     [ORG_A, ORG_B],
   );
+  // P09.05 role gate: the DEFINER resolves membership role — STAFF approves here, so
+  // STAFF is an admin member (role coverage lives in approval.integration.test.ts).
+  const sub = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  await admin.query('insert into users (id, cognito_sub, email, status) values ($1, $2, $3, $4)', [
+    STAFF,
+    sub,
+    'staff@example.test',
+    'active',
+  ]);
+  await admin.query(
+    'insert into memberships (organisation_id, id, user_id, role, status) values ($1, gen_random_uuid(), $2, $3, $4)',
+    [ORG_A, STAFF, 'admin', 'active'],
+  );
 });
 
 afterAll(async () => {
