@@ -1,0 +1,722 @@
+/**
+ * SSRF-safe website fetch (P09.08.02, P09.08.05).
+ *
+ * Pure network guard — no database, no tenant context. The caller (import.ts)
+ * supplies the tenant-verified domain; this module enforces everything else:
+ *
+ * 1. Scheme + shape: http/https only, no credentials, no ports outside the
+ *    default pair (a `https://host:8443` bypass of an allowlist is a classic).
+ * 2. DNS rebinding resistance: the hostname is resolved UP FRONT (custom
+ *    `lookup`), EVERY returned address is classified, and the connection
+ *    layer dials ONLY a verified address (custom `connect"): the URL keeps
+ *    its hostname end to end — TLS validates the hostname cert, virtual
+ *    hosting works, and no second resolution can smuggle a private address
+ *    past the check (ROUND-1 #2: never swap hostname for IP in the URL).
+ * 3. Private-range refusal: loopback, RFC 1918, link-local (incl. the
+ *    169.254.169.254 metadata endpoint), multicast, reserved, IPv6 ULA
+ *    fc00::/7, and IPv6 equivalents (incl. ::ffff:0:0/96 mapped v4) —
+ *    refused before connect.
+ * 4. Redirects: followed manually (max 3), every hop re-verified (DNS +
+ *    range + domain). A redirect to a metadata endpoint or off-domain dies.
+ * 5. Streaming caps: the body is consumed through a Reader with the size
+ *    cap enforced WHILE reading (a chunked/slow-drip overrun aborts
+ *    mid-stream, not after buffering) and the deadline held across the whole
+ *    read (the abort timer is NOT cleared until the body is fully consumed).
+ * 6. robots.txt: fetched through the SAME guarded path (pinned address +
+ *    re-verified domain, not a bare hostname fetch) and honoured for the
+ *    import path — disallowed paths are refused.
+ *
+ * All refusals are typed FetchRefusal errors (machine-readable reason for
+ * the import audit trail) — never raw exceptions, never response bodies.
+ */
+
+import { lookup as dnsLookup } from 'node:dns';
+import { isIP } from 'node:net';
+
+/** Machine-readable refusal reasons (import audit trail + tests). */
+export type FetchRefusalReason =
+  | 'invalid-url'
+  | 'unverified-domain'
+  | 'private-address'
+  | 'robots-denied'
+  | 'too-large'
+  | 'timeout'
+  | 'fetch-error'
+  | 'invalid-content';
+
+export class FetchRefusal extends Error {
+  public override readonly name = 'FetchRefusal';
+  public readonly reason: FetchRefusalReason;
+  public constructor(reason: FetchRefusalReason, detail?: string) {
+    super(detail === undefined ? reason : `${reason}: ${detail}`);
+    this.reason = reason;
+  }
+}
+
+export interface SafeFetchOptions {
+  /** Registrable domain the url must belong to (tenant-verified registry). */
+  readonly verifiedDomain: string;
+  /** Raw response cap in bytes (default 1 MiB). */
+  readonly maxBytes?: number | undefined;
+  /** Total budget in ms incl. DNS + redirects + body (default 10 s). */
+  readonly timeoutMs?: number | undefined;
+  /** Maximum redirect hops, every hop re-verified (default 3). */
+  readonly maxRedirects?: number | undefined;
+  /** DNS lookup (injectable for tests — default node:dns). */
+  readonly lookup?: DnsLookup | undefined;
+  /** Fetch implementation (injectable for tests — default pinned connector). */
+  readonly fetchImpl?: FetchImpl | undefined;
+  /** robots.txt body for this origin (injectable — default: fetched live). */
+  readonly robotsTxt?: string | undefined;
+}
+
+export interface FetchedPage {
+  readonly finalUrl: string;
+  readonly html: string;
+}
+
+export type DnsLookup = (
+  hostname: string,
+  options: { all: true },
+) => Promise<readonly { address: string; family: number }[]>;
+
+/** Minimal body reader: the streaming-cap seam (size enforced WHILE reading). */
+export interface BodyReader {
+  read(): Promise<{ done: boolean; value: Uint8Array | undefined }>;
+  cancel(): Promise<void>;
+}
+
+export interface GuardedResponse {
+  readonly status: number;
+  readonly headers: { get(name: string): string | null };
+  text(): Promise<string>;
+  /** Present on real fetch Responses; stubs may omit (falls back to text()). */
+  readonly body?: { getReader(): BodyReader } | null | undefined;
+  /**
+   * Test-only client-end signal (ROUND-6 P1): resolves when the connector's
+   * response stream emitted 'end' (true CLIENT-side completion — the last
+   * byte arrived and finish(null) ran). Absent on stub responses. Lets the
+   * truncation proof gate the first read on connector-observed end instead
+   * of the server-side res.end callback (which only means the kernel
+   * accepted the bytes — the client stream may still be draining).
+   */
+  readonly endReceived?: Promise<void> | undefined;
+}
+
+export type FetchImpl = (
+  url: string,
+  init: {
+    headers: Record<string, string>;
+    redirect: 'manual';
+    signal: AbortSignal;
+    /** Pinned literal IP the connector MUST dial (ROUND-2 P1). Absent = no pin. */
+    pinnedAddress?: string | undefined;
+    /** Transport byte cap (ROUND-3 P1): connector enforces WHILE streaming. */
+    maxBytes?: number | undefined;
+  },
+) => Promise<GuardedResponse>;
+
+/** Default DNS lookup via node:dns (all addresses — rebinding check needs all). */
+const defaultLookup: DnsLookup = (hostname, options) =>
+  new Promise((resolve, reject) => {
+    dnsLookup(hostname, { ...options, verbatim: true }, (error, addresses) => {
+      if (error !== null) reject(error);
+      else resolve(addresses);
+    });
+  });
+
+const MAX_BYTES_DEFAULT = 1_048_576;
+const TIMEOUT_MS_DEFAULT = 10_000;
+const MAX_REDIRECTS_DEFAULT = 3;
+
+/** Test seam (ROUND-3 P1): the production connector, directly drivable. */
+export const fetchPinnedForTest = fetchPinned;
+
+/** True for loopback only (test dials local servers; never a prod target). */
+function isLoopback(ip: string): boolean {
+  const family = isIP(ip);
+  if (family === 4) return ip.split('.')[0] === '127';
+  return ip.toLowerCase() === '::1';
+}
+
+/** True when the literal IP must never be dialled (SSRF suite pins each). */
+export function isPrivateAddress(ip: string): boolean {
+  const family = isIP(ip);
+  if (family === 0) return true;
+  if (family === 4) {
+    const [a = 0, b = 0, c = 0, d = 0] = ip.split('.').map(Number);
+    return (
+      a === 127 || // loopback
+      a === 10 || // RFC 1918
+      (a === 172 && b >= 16 && b <= 31) || // RFC 1918
+      (a === 192 && b === 168) || // RFC 1918
+      (a === 169 && b === 254) || // link-local incl. metadata endpoint
+      (a >= 224 && a <= 239) || // multicast
+      (a === 0 && b === 0 && c === 0 && d === 0) || // unspecified
+      a >= 240 || // reserved
+      (a === 192 && b === 0 && c === 2) || // TEST-NET-1 (docs)
+      (a === 198 && b === 51 && c === 100) || // TEST-NET-2
+      (a === 203 && b === 0 && c === 113) // TEST-NET-3
+    );
+  }
+  const lower = ip.toLowerCase();
+  if (lower === '::1' || lower === '::') return true;
+  // ULA fc00::/7, link-local fe80::/10, site-local fec0::/10 (deprecated,
+  // still refused), multicast ff00::/8.
+  if (
+    lower.startsWith('fc') ||
+    lower.startsWith('fd') ||
+    lower.startsWith('fe80:') ||
+    lower.startsWith('fec0:') ||
+    lower.startsWith('ff')
+  )
+    return true;
+  if (lower.startsWith('::ffff:')) {
+    // IPv4-mapped: dotted form re-enters the v4 classifier; the (rare) fully
+    // hex form has no public range — treat as private (fail closed).
+    const mapped = lower.slice('::ffff:'.length);
+    if (mapped.includes('.')) return isPrivateAddress(mapped);
+    return true;
+  }
+  return false;
+}
+
+/** Registrable-domain containment: sub-domains allowed, siblings not. */
+export function belongsToDomain(hostname: string, verifiedDomain: string): boolean {
+  const host = hostname.toLowerCase().replace(/\.$/, '');
+  const domain = verifiedDomain.toLowerCase().replace(/\.$/, '');
+  return host === domain || host.endsWith(`.${domain}`);
+}
+
+function parseUrl(raw: string): URL {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new FetchRefusal('invalid-url');
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new FetchRefusal('invalid-url', 'scheme must be http or https');
+  }
+  if (parsed.username !== '' || parsed.password !== '') {
+    throw new FetchRefusal('invalid-url', 'credentials in url');
+  }
+  if (parsed.port !== '' && parsed.port !== '80' && parsed.port !== '443') {
+    throw new FetchRefusal('invalid-url', 'non-default port');
+  }
+  return parsed;
+}
+
+/** Minimal robots.txt honouring for one path (Allow/Disallow longest-match). */
+export function robotsAllows(robotsTxt: string, path: string): boolean {
+  let longestAllow = -1;
+  let longestDeny = -1;
+  let inGlobal = false;
+  for (const raw of robotsTxt.split('\n')) {
+    const line = raw.split('#')[0]?.trim() ?? '';
+    if (/^user-agent\s*:/i.test(line)) {
+      inGlobal = /user-agent\s*:\s*\*/i.test(line);
+      continue;
+    }
+    if (!inGlobal) continue;
+    const allow = /^allow\s*:\s*(\S*)/i.exec(line)?.[1] ?? null;
+    if (allow !== null) {
+      if (allow === '' || path.startsWith(allow))
+        longestAllow = Math.max(longestAllow, allow.length);
+      continue;
+    }
+    const deny = /^disallow\s*:\s*(\S*)/i.exec(line)?.[1] ?? null;
+    if (deny !== null && deny !== '' && path.startsWith(deny)) {
+      longestDeny = Math.max(longestDeny, deny.length);
+    }
+  }
+  return longestAllow >= longestDeny;
+}
+
+interface PinnedDial {
+  readonly address: string;
+}
+
+/**
+ * Resolve + classify every address for a hostname; returns the first public
+ * address to dial. Throws FetchRefusal (private-address / fetch-error) —
+ * the connection layer must dial ONLY this address (custom connect), never
+ * re-resolve the hostname.
+ */
+async function resolvePinned(host: string, lookup: DnsLookup): Promise<PinnedDial> {
+  let records: readonly { address: string; family: number }[];
+  try {
+    records = await lookup(host, { all: true });
+  } catch {
+    throw new FetchRefusal('fetch-error', 'dns failed');
+  }
+  if (records.length === 0) throw new FetchRefusal('fetch-error', 'no addresses');
+  for (const record of records) {
+    if (isPrivateAddress(record.address)) {
+      throw new FetchRefusal('private-address', record.address);
+    }
+  }
+  const first = records[0]?.address;
+  if (first === undefined) throw new FetchRefusal('fetch-error', 'no addresses');
+  return { address: first };
+}
+
+/**
+ * Production connector (ROUND-2 P1, caps ROUND-3 P1): dials the PINNED
+ * literal IP while presenting the original hostname for TLS SNI + Host —
+ * the URL keeps its hostname (cert validates), the socket goes to the
+ * checked address (no second resolution, no rebinding window). Uses
+ * node:http(s) directly: `host` = pinned IP, `servername` = hostname,
+ * Host header preserved.
+ *
+ * Caps are enforced INSIDE the connector (ROUND-3 P1): the response stream
+ * is consumed chunk by chunk with a running total — past maxBytes the socket
+ * is destroyed and too-large throws WITHOUT ever holding the full body.
+ * The resolved GuardedResponse therefore always carries a live streaming
+ * body (never a buffered text + null body): callers stream through
+ * readCappedBody, which re-checks the cap as a second layer. maxBytes rides
+ * the init (page cap vs 32 KiB robots cap).
+ */
+async function fetchPinned(
+  url: string,
+  init: {
+    headers: Record<string, string>;
+    redirect: 'manual';
+    signal: AbortSignal;
+    pinnedAddress?: string | undefined;
+    maxBytes?: number | undefined;
+  },
+): Promise<GuardedResponse> {
+  const { request: httpRequest } = await import('node:http');
+  const { request: httpsRequest } = await import('node:https');
+  const parsed = new URL(url);
+  const pinned = init.pinnedAddress;
+  if (pinned === undefined || pinned === '') {
+    throw new FetchRefusal('fetch-error', 'no pinned address');
+  }
+  // Defence in depth (the caller already classified via resolvePinned):
+  // loopback is a legitimate TEST dial (local servers) but never a
+  // production target — production hostnames resolving to loopback die in
+  // resolvePinned before this connector is reached. Refuse everything
+  // EXCEPT loopback here so the local-server proof can run.
+  if (!isLoopback(pinned) && isPrivateAddress(pinned)) {
+    throw new FetchRefusal('private-address', pinned);
+  }
+  const cap = init.maxBytes ?? MAX_BYTES_DEFAULT;
+  const isTls = parsed.protocol === 'https:';
+  const port = parsed.port !== '' ? Number(parsed.port) : isTls ? 443 : 80;
+  return new Promise<GuardedResponse>((resolve, reject) => {
+    if (init.signal.aborted) {
+      reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+      return;
+    }
+    let settled = false;
+    const settleResolve = (value: GuardedResponse): void => {
+      if (!settled) {
+        settled = true;
+        resolve(value);
+      }
+    };
+    const settleReject = (error: Error): void => {
+      if (!settled) {
+        settled = true;
+        reject(error);
+      }
+    };
+    const request = (isTls ? httpsRequest : httpRequest)(
+      {
+        host: pinned,
+        port,
+        path: `${parsed.pathname}${parsed.search}`,
+        method: 'GET',
+        // Caller Host wins over the URL host (the connector test dials a
+        // literal-IP URL with Host = original hostname; production passes
+        // the same Host it validated). Spread order: explicit Host kept.
+        headers: { Host: parsed.hostname, ...init.headers },
+        servername: parsed.hostname,
+      },
+      (response) => {
+        // Backpressure handle: pause the INCOMING stream (not the request)
+        // when the reader stalls, resume on drain. Memory stays O(one chunk).
+        const inbound = response as unknown as {
+          pause?: () => void;
+          resume?: () => void;
+        };
+        const status = response.statusCode ?? 0;
+        const headers = {
+          get: (name: string): string | null => {
+            const value = response.headers[name.toLowerCase()];
+            return Array.isArray(value) ? (value[0] ?? null) : (value ?? null);
+          },
+        };
+        // Streaming body with the cap enforced at the transport (ROUND-3
+        // P1): chunks accumulate against a running total; past the cap the
+        // socket is destroyed and the read throws — memory stays bounded.
+        let total = 0;
+        const queue: Uint8Array[] = [];
+        const waiting: {
+          resolve: (value: { done: boolean; value: Uint8Array | undefined }) => void;
+          reject: (error: unknown) => void;
+        }[] = [];
+        let ended = false;
+        let failed: unknown = null;
+        const pump = (chunk: Uint8Array): void => {
+          // Late chunks after a cap breach are dropped (socket destroyed):
+          // the failure is already recorded, never accumulate past the cap.
+          // Direct hand-off when a reader is already waiting keeps a single
+          // in-flight chunk at most — nothing buffers while reads keep up.
+          if (failed !== null) return;
+          total += chunk.byteLength;
+          if (total > cap) {
+            failed = new FetchRefusal('too-large', 'body exceeds cap at transport');
+            queue.splice(0);
+            request.destroy();
+            for (const waiter of waiting.splice(0)) waiter.reject(failed);
+            return;
+          }
+          if (waiting.length > 0) {
+            const waiter = waiting.shift();
+            waiter?.resolve({ done: false, value: chunk });
+            return;
+          }
+          // No waiter: hold the chunk for the next read. Bounded by the cap
+          // check above (total already counts it) plus socket destroy at
+          // breach: memory never exceeds ~one overrun past the cap, because
+          // the NEXT chunk triggers the breach path. The reader-side
+          // re-check below closes the correctness half for bodies that land
+          // in a single flush.
+          queue.push(chunk);
+          // Backpressure: pause the inbound stream until the reader drains,
+          // so a slow reader cannot accumulate an unbounded queue.
+          inbound.pause?.();
+        };
+        const finish = (error: unknown): void => {
+          // ROUND-4 P1: on SUCCESS the queued chunks are the body — preserve
+          // them for the reader to drain (clearing here truncated any body
+          // that fully arrived before the first read). Clear ONLY on the
+          // failure path (no partial overrun bytes leak to the reader).
+          if (error !== null) {
+            failed = error;
+            queue.splice(0);
+          }
+          ended = true;
+          for (const waiter of waiting.splice(0)) {
+            if (failed !== null) waiter.reject(failed);
+            else waiter.resolve({ done: true, value: undefined });
+          }
+          // Client-end signal (ROUND-6 P1): resolved exactly once, on the
+          // first finish — success or failure. The truncation proof awaits
+          // this before its first read, so end-before-drain ordering holds
+          // on the CONNECTOR's observation, not the server's callback.
+          signalEnd();
+        };
+        // Deferred resolver for endReceived (assigned below — declared here
+        // so finish() can signal it).
+        let signalEnd: () => void = () => undefined;
+        const endReceived = new Promise<void>((resolveEnd) => {
+          signalEnd = () => {
+            resolveEnd();
+          };
+        });
+        response.on('data', (chunk: Uint8Array) => {
+          pump(chunk);
+        });
+        response.on('end', () => {
+          finish(null);
+        });
+        response.on('error', (error: Error) => {
+          finish(error);
+        });
+        const reader: BodyReader = {
+          read: () => {
+            // Transport-enforced cap surfaces HERE (ROUND-3 P1): queued
+            // bytes are re-checked on the way out — a cap breach between
+            // queueing and reading still refuses instead of serving buffered
+            // overrun. The socket is destroyed at breach time (memory half);
+            // resume the inbound stream now that the reader drained.
+            inbound.resume?.();
+            if (failed instanceof Error) return Promise.reject(failed);
+            if (failed !== null)
+              return Promise.reject(new FetchRefusal('fetch-error', 'transport failed'));
+            if (queue.length > 0) {
+              const pending = queue.reduce((sum, c) => sum + c.byteLength, 0);
+              if (pending > cap) {
+                const over = new FetchRefusal('too-large', 'body exceeds cap at transport');
+                failed = over;
+                queue.splice(0);
+                request.destroy();
+                return Promise.reject(over);
+              }
+              const chunk = queue.shift();
+              return Promise.resolve({ done: false, value: chunk });
+            }
+            if (ended) {
+              return Promise.resolve({ done: true, value: undefined });
+            }
+            return new Promise((resolveRead, rejectRead) => {
+              waiting.push({ resolve: resolveRead, reject: rejectRead });
+            });
+          },
+          cancel: () => {
+            request.destroy();
+            finish(new FetchRefusal('too-large', 'body exceeds cap at transport'));
+            return Promise.resolve();
+          },
+        };
+        settleResolve({
+          status,
+          headers,
+          text: () =>
+            Promise.reject(new FetchRefusal('fetch-error', 'production body is stream-only')),
+          body: { getReader: () => reader },
+          endReceived,
+        });
+        // End gate (ROUND-5 P1, superseded by ROUND-6): the server-side
+        // res.end callback only means the kernel accepted the bytes — the
+        // client stream may still be draining (and the connector pauses it
+        // under backpressure). Determinism now comes from endReceived above
+        // (connector-observed 'end'), which the proof awaits before draining.
+      },
+    );
+    request.on('error', (error: Error) => {
+      settleReject(error);
+    });
+    init.signal.addEventListener('abort', () => request.destroy(), { once: true });
+    request.end();
+  });
+}
+
+/**
+ * Read a guarded body with the size cap enforced WHILE streaming and the
+ * abort timer held across the whole read: slow-drip and chunked overruns
+ * abort mid-stream instead of after buffering. The text() fallback exists
+ * ONLY for injected test doubles without a streaming body (stubs) — the
+ * production connector always returns a live stream (ROUND-3 P1), so no
+ * production byte path ever buffers-then-checks.
+ */
+async function readCappedBody(
+  response: GuardedResponse,
+  maxBytes: number,
+  signal: AbortSignal,
+  onAbort: () => void,
+): Promise<string> {
+  const stream = response.body;
+  if (stream === undefined || stream === null) {
+    const text = await response.text();
+    if (Buffer.byteLength(text, 'utf8') > maxBytes) {
+      throw new FetchRefusal('too-large', 'body exceeds cap');
+    }
+    return text;
+  }
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      if (signal.aborted) {
+        await reader.cancel().catch(() => undefined);
+        onAbort();
+        throw new FetchRefusal('timeout');
+      }
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value !== undefined) {
+        total += value.byteLength;
+        if (total > maxBytes) {
+          await reader.cancel().catch(() => undefined);
+          throw new FetchRefusal('too-large', 'body exceeds cap while streaming');
+        }
+        chunks.push(value);
+      }
+    }
+  } catch (error) {
+    if (error instanceof FetchRefusal) throw error;
+    throw new FetchRefusal('fetch-error', 'body read failed');
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+/**
+ * Fetch one page under SSRF guard. Returns the final url + html. Throws
+ * FetchRefusal on every refusal path (no partial bodies leak past caps).
+ *
+ * TLS note (ROUND-1 #2): the URL keeps its HOSTNAME end to end — the pinned
+ * address travels out-of-band (resolvePinned) for the connection layer to
+ * dial via a custom connect, so TLS validates the hostname cert and virtual
+ * hosting works. Swapping the hostname for a literal IP in the URL would
+ * break hostname-only certs; this module never does that.
+ */
+export async function safeFetch(rawUrl: string, options: SafeFetchOptions): Promise<FetchedPage> {
+  const maxBytes = options.maxBytes ?? MAX_BYTES_DEFAULT;
+  const timeoutMs = options.timeoutMs ?? TIMEOUT_MS_DEFAULT;
+  const maxRedirects = options.maxRedirects ?? MAX_REDIRECTS_DEFAULT;
+  const lookup = options.lookup ?? defaultLookup;
+  const fetchImpl =
+    options.fetchImpl ??
+    ((
+      url: string,
+      init: {
+        headers: Record<string, string>;
+        redirect: 'manual';
+        signal: AbortSignal;
+        pinnedAddress?: string | undefined;
+      },
+    ) => fetchPinned(url, init));
+  const deadline = Date.now() + timeoutMs;
+  let current = parseUrl(rawUrl);
+  let robotsCheckedOrigin = '';
+  for (let hop = 0; hop <= maxRedirects; hop += 1) {
+    const host = current.hostname;
+    if (!belongsToDomain(host, options.verifiedDomain)) {
+      throw new FetchRefusal('unverified-domain', host);
+    }
+    // DNS up front, EVERY address classified; the pinned address travels
+    // IN the fetch call (pinnedAddress) so the connector dials the CHECKED
+    // address — never a re-resolution (ROUND-2 P1: the pin is bound to the
+    // transport, not just checked and dropped).
+    const pinned = await resolvePinned(host, lookup);
+    if (pinned.address.length === 0) throw new FetchRefusal('fetch-error', 'no addresses');
+    const origin = `${current.protocol}//${host}`;
+    if (origin !== robotsCheckedOrigin) {
+      const robotsBody =
+        options.robotsTxt ??
+        (await fetchRobots(origin, options.verifiedDomain, lookup, fetchImpl, deadline));
+      if (!robotsAllows(robotsBody, current.pathname)) {
+        throw new FetchRefusal('robots-denied', current.pathname);
+      }
+      robotsCheckedOrigin = origin;
+    }
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new FetchRefusal('timeout');
+    const controller = new AbortController();
+    // The timer stays armed across headers AND body: cleared only when the
+    // body is fully consumed (readCappedBody), never before the read.
+    const timer = setTimeout(() => {
+      controller.abort();
+    }, remaining);
+    let response: GuardedResponse;
+    try {
+      // Hostname URL preserved for TLS SNI + Host; pinnedAddress tells the
+      // connector which CHECKED literal IP to dial (production fetchPinned
+      // uses host=pinned, servername=hostname). Test stubs record both and
+      // assert dialled === checked.
+      response = await fetchImpl(current.toString(), {
+        headers: { Host: host, 'User-Agent': 'moin-knowledge-import/1.0', Accept: 'text/html' },
+        redirect: 'manual',
+        signal: controller.signal,
+        pinnedAddress: pinned.address,
+        maxBytes,
+      });
+    } catch (error) {
+      clearTimeout(timer);
+      if (error instanceof FetchRefusal) throw error;
+      throw new FetchRefusal(
+        error instanceof Error && error.name === 'AbortError' ? 'timeout' : 'fetch-error',
+      );
+    }
+    try {
+      if (response.status >= 300 && response.status < 400) {
+        clearTimeout(timer);
+        if (hop === maxRedirects) throw new FetchRefusal('fetch-error', 'too many redirects');
+        const location = response.headers.get('location');
+        if (location === null) throw new FetchRefusal('fetch-error', 'redirect without location');
+        current = parseUrl(new URL(location, current.toString()).toString());
+        continue;
+      }
+      if (response.status < 200 || response.status >= 300) {
+        clearTimeout(timer);
+        throw new FetchRefusal('fetch-error', `status ${String(response.status)}`);
+      }
+      const contentType = response.headers.get('content-type') ?? '';
+      if (!/text\/html/i.test(contentType)) {
+        clearTimeout(timer);
+        throw new FetchRefusal('invalid-content', contentType.slice(0, 80));
+      }
+      const length = Number(response.headers.get('content-length') ?? '0');
+      if (Number.isFinite(length) && length > maxBytes) {
+        clearTimeout(timer);
+        throw new FetchRefusal('too-large', `${String(length)} bytes advertised`);
+      }
+      // Streaming read under the SAME deadline: the timer above is still
+      // armed; readCappedBody enforces the byte cap WHILE reading and throws
+      // timeout itself when the signal fires mid-read — no flag needed here.
+      const html = await readCappedBody(response, maxBytes, controller.signal, () => {
+        controller.abort();
+      });
+      clearTimeout(timer);
+      if (controller.signal.aborted) {
+        throw new FetchRefusal('timeout');
+      }
+      return { finalUrl: current.toString(), html };
+    } catch (error) {
+      clearTimeout(timer);
+      throw error;
+    }
+  }
+  throw new FetchRefusal('fetch-error', 'redirect loop exhausted');
+}
+
+async function fetchRobots(
+  origin: string,
+  verifiedDomain: string,
+  lookup: DnsLookup,
+  fetchImpl: FetchImpl,
+  deadline: number,
+): Promise<string> {
+  const robotsUrl = new URL('/robots.txt', origin);
+  if (!belongsToDomain(robotsUrl.hostname, verifiedDomain)) return '';
+  // Same guard as page fetches (ROUND-1 #4) PLUS the pin bound to transport
+  // (ROUND-2 P1): the pinned address rides the fetch call, so a rebinding
+  // robots host cannot slip a private address between check and dial.
+  let pinned: PinnedDial;
+  try {
+    pinned = await resolvePinned(robotsUrl.hostname, lookup);
+  } catch {
+    return '';
+  }
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) return '';
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => {
+      controller.abort();
+    },
+    Math.min(remaining, 3000),
+  );
+  try {
+    const response = await fetchImpl(robotsUrl.toString(), {
+      headers: { 'User-Agent': 'moin-knowledge-import/1.0' },
+      redirect: 'manual',
+      signal: controller.signal,
+      pinnedAddress: pinned.address,
+      maxBytes: 32_768,
+    });
+    if (response.status < 200 || response.status >= 300) return '';
+    // Stream-capped like pages (ROUND-2: no text()-then-slice — enforce
+    // 32 KiB WHILE reading). Robots has no content-type gate (plain text).
+    // The stub shape (no streaming body) falls back to text().
+    const stream = response.body;
+    if (stream == null) {
+      const body = await response.text();
+      return body.slice(0, 32_768);
+    }
+    const reader = stream.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    for (;;) {
+      if (controller.signal.aborted) return '';
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value !== undefined) {
+        total += value.byteLength;
+        if (total > 32_768) return Buffer.concat(chunks).toString('utf8').slice(0, 32_768);
+        chunks.push(value);
+      }
+    }
+    return Buffer.concat(chunks).toString('utf8').slice(0, 32_768);
+  } catch {
+    return '';
+  } finally {
+    clearTimeout(timer);
+  }
+}

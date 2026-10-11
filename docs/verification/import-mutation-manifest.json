@@ -1,0 +1,14 @@
+[
+  {
+    "id": "M1-private-address-check-removed",
+    "invariant": "SSRF guard: no private address is ever dialled (P09.08.02, P09.08.05)",
+    "expected": "A hostname resolving to a private address (rebinding second address, literal private IP, rebinding robots host) would be fetched instead of refused.",
+    "file": "packages/db/src/import-fetch.ts",
+    "find": "  for (const record of records) {\n    if (isPrivateAddress(record.address)) {\n      throw new FetchRefusal('private-address', record.address);\n    }\n  }",
+    "replace": "  for (const record of records) {\n    void record;\n  }",
+    "killingTest": {
+      "file": "packages/db/src/import.integration.test.ts",
+      "fullName": "import-ssrf > dns-rebinding second address refused"
+    }
+  }
+]

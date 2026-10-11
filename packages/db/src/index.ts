@@ -238,3 +238,33 @@ export {
   resolveConflict,
 } from './conflicts.ts';
 export type { ConflictDetector, ConflictSubjectKind, ConflictSweepResult } from './conflicts.ts';
+export {
+  FetchRefusal,
+  belongsToDomain,
+  fetchPinnedForTest,
+  isPrivateAddress,
+  robotsAllows,
+  safeFetch,
+} from './import-fetch.ts';
+export type {
+  DnsLookup,
+  FetchImpl,
+  FetchRefusalReason,
+  FetchedPage,
+  SafeFetchOptions,
+} from './import-fetch.ts';
+export {
+  ImportRefusal,
+  flagsInjection,
+  htmlToText,
+  importWebsite,
+  redactUrlForStorage,
+  registrableDomain,
+  structureSuggestions,
+} from './import.ts';
+export type {
+  ImportRefusalReason,
+  ImportSuggestion,
+  ImportWebsiteInput,
+  WebsiteImportResult,
+} from './import.ts';
