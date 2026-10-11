@@ -65,8 +65,8 @@ interface DueRow extends Record<string, unknown> {
 
 /**
  * Whether the live version of an item may serve, and whether the answer is
- * stale. Expired → never (null). Suspended or overdue-restricted → never
- * (null, escalation path). Overdue otherwise → serves with stale=true.
+ * stale. Expired → never (null). Suspended, conflicted, or overdue-restricted
+ * → never (null, escalation path). Overdue otherwise → serves with stale=true.
  * Fresh → serves with stale=false. `now` is injectable for tests.
  *
  * Sensitivity mapping: knowledge `restricted` is the overdue-stops class
@@ -84,11 +84,12 @@ export async function servedState(
     overdue: boolean;
     sensitivity: string;
     suspended: boolean;
+    conflicted: boolean;
   }>(
     `select v.id as version_id,
             coalesce(v.valid_until < $2::date, false) as expired,
             coalesce(a.decided_at + v.reverify_after <= $3::timestamptz, false) as overdue,
-            v.sensitivity, i.suspended
+            v.sensitivity, i.suspended, (i.conflict_state <> 'clear') as conflicted
      from knowledge_items i
      join knowledge_versions v
        on v.organisation_id = i.organisation_id and v.id = i.live_version_id
@@ -102,6 +103,7 @@ export async function servedState(
   if (row === undefined) return null;
   if (row.expired) return null;
   if (row.suspended) return null;
+  if (row.conflicted) return null;
   if (!row.overdue) return { versionId: row.version_id, stale: false };
   if (row.sensitivity === 'restricted') return null;
   return { versionId: row.version_id, stale: true };
