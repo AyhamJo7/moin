@@ -148,9 +148,13 @@ describe('import-ssrf', () => {
 
   evidenceTest('unverified domain refused before fetch', async () => {
     let fetched = false;
-    const counting: FetchImpl = async () => {
+    const counting: FetchImpl = () => {
       fetched = true;
-      return stubFetch(PAGE)('', { headers: {}, redirect: 'manual', signal: undefined as never });
+      return stubFetch(PAGE)('', {
+        headers: {},
+        redirect: 'manual',
+        signal: undefined as never,
+      });
     };
     await expect(
       withTenant(app, ORG_A, (client) =>
@@ -261,7 +265,8 @@ describe('import-ssrf', () => {
 
   evidenceTest('hostname url preserved for TLS (no IP swap)', async () => {
     // ROUND-1 #2: the fetch URL keeps its hostname end to end — TLS
-    // validates the hostname cert. The pinned address travels out-of-band.
+    // validates the hostname cert. The pinned address travels IN the call
+    // (pinnedAddress) for the connector to dial.
     let seenUrl = '';
     const spy: FetchImpl = (url, init) => {
       seenUrl = url;
@@ -275,6 +280,33 @@ describe('import-ssrf', () => {
       }),
     );
     expect(new URL(seenUrl).hostname).toBe('beispiel-restaurant.de');
+  });
+
+  evidenceTest('dialled address equals the checked address (pin bound)', async () => {
+    // ROUND-2 P1: the pin is BOUND to the transport — the connector receives
+    // the CHECKED literal IP (pinnedAddress) alongside the hostname URL.
+    // A rebinding lookup (public first, private second) refuses before any
+    // dial; a clean lookup dials exactly the checked first address, and the
+    // second (never-checked-here) address is never dialled.
+    const dialled: { url: string; pinned: string | undefined }[] = [];
+    const recordingPin: FetchImpl = (url, init) => {
+      dialled.push({ url, pinned: init.pinnedAddress });
+      return stubFetch(PAGE)(url, init);
+    };
+    await withTenant(app, ORG_A, (client) =>
+      importWebsite(client, {
+        url: 'https://beispiel-restaurant.de/karte',
+        category: 'Speisekarte',
+        fetchOptions: { lookup: PUBLIC_DNS, fetchImpl: recordingPin },
+      }),
+    );
+    // robots (pinned 93.184.216.34) + page (pinned 93.184.216.34): every
+    // dial carries the checked address, never undefined, never a private IP.
+    expect(dialled.length).toBeGreaterThanOrEqual(1);
+    for (const entry of dialled) {
+      expect(entry.pinned).toBe('93.184.216.34');
+      expect(new URL(entry.url).hostname).toBe('beispiel-restaurant.de');
+    }
   });
 
   evidenceTest('robots fetch pinned to verified address (rebinding-proof)', async () => {

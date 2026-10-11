@@ -96,7 +96,13 @@ export interface GuardedResponse {
 
 export type FetchImpl = (
   url: string,
-  init: { headers: Record<string, string>; redirect: 'manual'; signal: AbortSignal },
+  init: {
+    headers: Record<string, string>;
+    redirect: 'manual';
+    signal: AbortSignal;
+    /** Pinned literal IP the connector MUST dial (ROUND-2 P1). Absent = no pin. */
+    pinnedAddress?: string | undefined;
+  },
 ) => Promise<GuardedResponse>;
 
 /** Default DNS lookup via node:dns (all addresses — rebinding check needs all). */
@@ -235,6 +241,80 @@ async function resolvePinned(host: string, lookup: DnsLookup): Promise<PinnedDia
 }
 
 /**
+ * Production connector (ROUND-2 P1): dials the PINNED literal IP while
+ * presenting the original hostname for TLS SNI + Host — the URL keeps its
+ * hostname (cert validates), the socket goes to the checked address (no
+ * second resolution, no rebinding window). Uses node:http(s) directly:
+ * `host` = pinned IP, `servername` = hostname, Host header preserved.
+ */
+async function fetchPinned(
+  url: string,
+  init: {
+    headers: Record<string, string>;
+    redirect: 'manual';
+    signal: AbortSignal;
+    pinnedAddress?: string | undefined;
+  },
+): Promise<GuardedResponse> {
+  const { request: httpRequest } = await import('node:http');
+  const { request: httpsRequest } = await import('node:https');
+  const parsed = new URL(url);
+  const pinned = init.pinnedAddress;
+  if (pinned === undefined || pinned === '') {
+    throw new FetchRefusal('fetch-error', 'no pinned address');
+  }
+  if (isPrivateAddress(pinned)) {
+    throw new FetchRefusal('private-address', pinned);
+  }
+  const isTls = parsed.protocol === 'https:';
+  const port = parsed.port !== '' ? Number(parsed.port) : isTls ? 443 : 80;
+  return new Promise<GuardedResponse>((resolve, reject) => {
+    if (init.signal.aborted) {
+      reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+      return;
+    }
+    const request = (isTls ? httpsRequest : httpRequest)(
+      {
+        host: pinned,
+        port,
+        path: `${parsed.pathname}${parsed.search}`,
+        method: 'GET',
+        headers: { ...init.headers, Host: parsed.hostname },
+        servername: parsed.hostname,
+      },
+      (response) => {
+        const chunks: Uint8Array[] = [];
+        response.on('data', (chunk: Uint8Array) => {
+          chunks.push(chunk);
+        });
+        response.on('end', () => {
+          const text = Buffer.concat(chunks).toString('utf8');
+          resolve({
+            status: response.statusCode ?? 0,
+            headers: {
+              get: (name: string) => {
+                const value = response.headers[name.toLowerCase()];
+                return Array.isArray(value) ? (value[0] ?? null) : (value ?? null);
+              },
+            },
+            text: () => Promise.resolve(text),
+            body: null,
+          });
+        });
+        response.on('error', (error: Error) => {
+          reject(error);
+        });
+      },
+    );
+    request.on('error', (error: Error) => {
+      reject(error);
+    });
+    init.signal.addEventListener('abort', () => request.destroy(), { once: true });
+    request.end();
+  });
+}
+
+/**
  * Read a guarded body with the size cap enforced WHILE streaming and the
  * abort timer held across the whole read: slow-drip and chunked overruns
  * abort mid-stream instead of after buffering. Falls back to text() when
@@ -301,8 +381,13 @@ export async function safeFetch(rawUrl: string, options: SafeFetchOptions): Prom
     options.fetchImpl ??
     ((
       url: string,
-      init: { headers: Record<string, string>; redirect: 'manual'; signal: AbortSignal },
-    ) => fetch(url, init));
+      init: {
+        headers: Record<string, string>;
+        redirect: 'manual';
+        signal: AbortSignal;
+        pinnedAddress?: string | undefined;
+      },
+    ) => fetchPinned(url, init));
   const deadline = Date.now() + timeoutMs;
   let current = parseUrl(rawUrl);
   let robotsCheckedOrigin = '';
@@ -311,11 +396,10 @@ export async function safeFetch(rawUrl: string, options: SafeFetchOptions): Prom
     if (!belongsToDomain(host, options.verifiedDomain)) {
       throw new FetchRefusal('unverified-domain', host);
     }
-    // DNS up front, EVERY address classified; the pinned address is what the
-    // connection layer dials (no second resolution anywhere downstream).
-    // Pinned address travels out-of-band for the connector (resolvePinned
-    // throws on any private address); the hostname URL below is what TLS
-    // validates. Referenced here so the binding is visible at the call site.
+    // DNS up front, EVERY address classified; the pinned address travels
+    // IN the fetch call (pinnedAddress) so the connector dials the CHECKED
+    // address — never a re-resolution (ROUND-2 P1: the pin is bound to the
+    // transport, not just checked and dropped).
     const pinned = await resolvePinned(host, lookup);
     if (pinned.address.length === 0) throw new FetchRefusal('fetch-error', 'no addresses');
     const origin = `${current.protocol}//${host}`;
@@ -338,14 +422,15 @@ export async function safeFetch(rawUrl: string, options: SafeFetchOptions): Prom
     }, remaining);
     let response: GuardedResponse;
     try {
-      // Hostname URL preserved for TLS + Host; the pinned address is carried
-      // out-of-band for the connector (fetchImpl receives the hostname URL;
-      // production wiring dials pinned.address via a custom connect — see
-      // module header). Test stubs assert the hostname URL is intact.
+      // Hostname URL preserved for TLS SNI + Host; pinnedAddress tells the
+      // connector which CHECKED literal IP to dial (production fetchPinned
+      // uses host=pinned, servername=hostname). Test stubs record both and
+      // assert dialled === checked.
       response = await fetchImpl(current.toString(), {
         headers: { Host: host, 'User-Agent': 'moin-knowledge-import/1.0', Accept: 'text/html' },
         redirect: 'manual',
         signal: controller.signal,
+        pinnedAddress: pinned.address,
       });
     } catch (error) {
       clearTimeout(timer);
@@ -405,10 +490,12 @@ async function fetchRobots(
 ): Promise<string> {
   const robotsUrl = new URL('/robots.txt', origin);
   if (!belongsToDomain(robotsUrl.hostname, verifiedDomain)) return '';
-  // Same guard as page fetches (ROUND-1 #4): pin + classify before dial —
-  // a bare hostname fetch would let a rebinding robots host through.
+  // Same guard as page fetches (ROUND-1 #4) PLUS the pin bound to transport
+  // (ROUND-2 P1): the pinned address rides the fetch call, so a rebinding
+  // robots host cannot slip a private address between check and dial.
+  let pinned: PinnedDial;
   try {
-    await resolvePinned(robotsUrl.hostname, lookup);
+    pinned = await resolvePinned(robotsUrl.hostname, lookup);
   } catch {
     return '';
   }
@@ -426,10 +513,31 @@ async function fetchRobots(
       headers: { 'User-Agent': 'moin-knowledge-import/1.0' },
       redirect: 'manual',
       signal: controller.signal,
+      pinnedAddress: pinned.address,
     });
     if (response.status < 200 || response.status >= 300) return '';
-    const body = await response.text();
-    return body.slice(0, 32_768);
+    // Stream-capped like pages (ROUND-2: no text()-then-slice — enforce
+    // 32 KiB WHILE reading). Robots has no content-type gate (plain text).
+    // The stub shape (no streaming body) falls back to text().
+    const stream = response.body;
+    if (stream == null) {
+      const body = await response.text();
+      return body.slice(0, 32_768);
+    }
+    const reader = stream.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    for (;;) {
+      if (controller.signal.aborted) return '';
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value !== undefined) {
+        total += value.byteLength;
+        if (total > 32_768) return Buffer.concat(chunks).toString('utf8').slice(0, 32_768);
+        chunks.push(value);
+      }
+    }
+    return Buffer.concat(chunks).toString('utf8').slice(0, 32_768);
   } catch {
     return '';
   } finally {
