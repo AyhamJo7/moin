@@ -288,12 +288,15 @@ export async function editKnowledgeItem(
 }
 
 /**
- * Approve a draft version: flips the version row to approved, moves the item's live
- * pointer to it, writes the approval row — atomically under the item lock. The version
- * must belong to this item, still be draft, AND be the latest version_no (stale drafts
- * never go live — P09.05.03 re-verification approves the newest text, not an older
- * draft superseded while it waited). Concurrent approves serialise on the item lock;
- * the loser finds no matching draft and 409s.
+ * Approve a draft version: writes the approval ledger row FIRST, then flips the
+ * version row to approved, then moves the item's live pointer — atomically under the
+ * item lock. Order matters: the versions trigger requires the ledger row to exist
+ * before it allows the flip, so publishing without a named approver dies at the DB
+ * boundary even for direct SQL. The version must belong to this item, still be draft,
+ * AND be the latest version_no (stale drafts never go live — P09.05.03
+ * re-verification approves the newest text, not an older draft superseded while it
+ * waited). Concurrent approves serialise on the item lock; the loser finds no
+ * matching draft and 409s.
  */
 export async function approveKnowledgeVersion(
   client: TenantClient,
@@ -303,10 +306,28 @@ export async function approveKnowledgeVersion(
   if (!UUID_RE.test(input.approvedBy)) throw new RangeError('approver must be a user id');
   const row = await lockItem(client, input.itemId);
   if (row.state === 'retired') throw new VersionConflictError('knowledge item is retired');
-  // Guarded flip: only the LATEST draft version of THIS item flips (latest check +
+  // Pre-checks BEFORE the ledger insert (ledger-first would turn every re-approval
+  // into a 23505 instead of a 409, and leave a stray approval row behind on failure):
+  // the target must be a draft of THIS item AND the latest version_no (latest check +
   // item lock in the same txn: a concurrent newer draft lands first and this 409s).
+  const candidate = await client.query<{ state: string; latest: boolean }>(
+    `select state, (version_no = (select max(version_no) from knowledge_versions
+       where item_id = $2)) as latest
+     from knowledge_versions where id = $1 and item_id = $2`,
+    [input.versionId, input.itemId],
+  );
+  const found = candidate.rows[0];
+  if (found?.state !== 'draft' || !found.latest) {
+    throw new VersionConflictError('knowledge version is not the latest approvable draft');
+  }
+  // Ledger FIRST: the versions trigger requires this row before it allows the flip.
   // A version row's single draft→approved transition is its only write — the trigger
   // rejects every other UPDATE shape at the DB boundary.
+  await client.query(
+    `insert into knowledge_approvals (organisation_id, id, item_id, version_id, approved_by)
+     values (app.current_org(), $1, $2, $3, $4)`,
+    [randomUUID(), input.itemId, input.versionId, input.approvedBy],
+  );
   const flipped = await client.query<{ id: string }>(
     `update knowledge_versions set state = 'approved' where id = $1 and item_id = $2
        and state = 'draft'
@@ -325,11 +346,6 @@ export async function approveKnowledgeVersion(
   );
   const itemRow = moved.rows[0];
   if (itemRow === undefined) throw new Error('knowledge item update returned no row');
-  await client.query(
-    `insert into knowledge_approvals (organisation_id, id, item_id, version_id, approved_by)
-     values (app.current_org(), $1, $2, $3, $4)`,
-    [randomUUID(), input.itemId, input.versionId, input.approvedBy],
-  );
   const versionNo = await client.query<{ n: number }>(
     `select version_no as n from knowledge_versions where id = $1`,
     [input.versionId],

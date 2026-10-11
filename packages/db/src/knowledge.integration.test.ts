@@ -330,6 +330,110 @@ describe('knowledge', () => {
     },
   );
 
+  evidenceTest('DB boundary rejects state regression and cross-item pointer', async () => {
+    const first = await withTenant(app, ORG_A, (client) =>
+      createKnowledgeItem(client, {
+        title: 'Erstens',
+        body: 'Erste Karte.',
+        metadata: META,
+      }),
+    );
+    const second = await withTenant(app, ORG_A, (client) =>
+      createKnowledgeItem(client, {
+        title: 'Zweitens',
+        body: 'Zweite Karte.',
+        metadata: META,
+      }),
+    );
+    await withTenant(app, ORG_A, (client) =>
+      approveKnowledgeVersion(client, {
+        itemId: first.item.id,
+        versionId: first.version.id,
+        approvedBy: STAFF,
+      }),
+    );
+    await withTenant(app, ORG_A, (client) =>
+      approveKnowledgeVersion(client, {
+        itemId: second.item.id,
+        versionId: second.version.id,
+        approvedBy: STAFF,
+      }),
+    );
+    // approved → draft directly: forward-only, trigger rejects.
+    await expect(
+      withTenant(app, ORG_A, (client) =>
+        client.query(`update knowledge_items set state = 'draft' where id = $1`, [first.item.id]),
+      ),
+    ).rejects.toMatchObject({ code: '42501' });
+    // Live pointer to ANOTHER item's approved version: item-match rejects.
+    await expect(
+      withTenant(app, ORG_A, (client) =>
+        client.query(`update knowledge_items set live_version_id = $1 where id = $2`, [
+          second.version.id,
+          first.item.id,
+        ]),
+      ),
+    ).rejects.toMatchObject({ code: '42501' });
+    // Mismatched approval INSERT (item A + version of item B): the item-scoped FK
+    // fires before the per-version unique (the version already has its own approval),
+    // so the pair mismatch dies as 23503 — the ledger can never name a version that
+    // does not belong to the named item.
+    const fresh = await withTenant(app, ORG_A, (client) =>
+      createKnowledgeItem(client, {
+        title: 'Drittens',
+        body: 'Dritte Karte.',
+        metadata: META,
+      }),
+    );
+    const freshDraft = await withTenant(app, ORG_A, (client) =>
+      editKnowledgeItem(client, fresh.item.id, {
+        title: 'Drittens',
+        body: 'Dritte Karte neu.',
+        metadata: META,
+      }),
+    );
+    await expect(
+      withTenant(app, ORG_A, (client) =>
+        client.query(
+          `insert into knowledge_approvals (organisation_id, id, item_id, version_id, approved_by)
+           values (app.current_org(), gen_random_uuid(), $1, $2, $3)`,
+          [first.item.id, freshDraft.id, STAFF],
+        ),
+      ),
+    ).rejects.toMatchObject({ code: '23503' });
+    // Location deleted with a version leg: RESTRICT refuses with 23503 (the FK
+    // fires before any trigger — the leg survives, org kept). SET NULL would be dead
+    // text here (FK actions fire row triggers too, probe-verified), so RESTRICT is
+    // the honest action.
+    const loc = '55555555-5555-4555-8555-555555555555';
+    await withTenant(app, ORG_A, (client) =>
+      client.query(`insert into locations (organisation_id, id, name) values ($1, $2, 'Mitte')`, [
+        ORG_A,
+        loc,
+      ]),
+    );
+    const placed = await withTenant(app, ORG_A, (client) =>
+      createKnowledgeItem(client, {
+        title: 'Filiale',
+        body: 'Nur vor Ort.',
+        metadata: { ...META, locationId: loc },
+      }),
+    );
+    await expect(
+      withTenant(app, ORG_A, (client) =>
+        client.query(`delete from locations where id = $1`, [loc]),
+      ),
+    ).rejects.toMatchObject({ code: '23503' });
+    const leg = await withTenant(app, ORG_A, (client) =>
+      client.query<{ location_id: string | null; org: string }>(
+        `select location_id::text, organisation_id::text as org from knowledge_versions where id = $1`,
+        [placed.version.id],
+      ),
+    );
+    expect(leg.rows[0]?.location_id).toBe(loc);
+    expect(leg.rows[0]?.org).toBe(ORG_A);
+  });
+
   evidenceTest('audit carries markers only, never bodies; tenants isolated', async () => {
     const created = await withTenant(app, ORG_A, (client) =>
       createKnowledgeItem(client, {

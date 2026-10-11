@@ -92,8 +92,11 @@ CREATE TABLE knowledge_versions (
   UNIQUE (organisation_id, item_id, id),
   FOREIGN KEY (organisation_id, item_id) REFERENCES knowledge_items (organisation_id, id) ON DELETE CASCADE,
   -- Nullable composite leg to locations (global card when NULL): same-tenant only —
-  -- a cross-tenant location id dies as 23503.
-  FOREIGN KEY (organisation_id, location_id) REFERENCES locations (organisation_id, id) ON DELETE SET NULL,
+  -- a cross-tenant location id dies as 23503. RESTRICT on delete (not SET NULL): the
+  -- versions trigger freezes location_id (FK actions fire the row trigger too,
+  -- probe-verified), so SET NULL would be dead text — RESTRICT refuses honestly, and
+  -- locations with knowledge legs are disassociated first, never silently unlinked.
+  FOREIGN KEY (organisation_id, location_id) REFERENCES locations (organisation_id, id) ON DELETE RESTRICT,
   CHECK (valid_from IS NULL OR valid_until IS NULL OR valid_from <= valid_until)
 );
 
@@ -123,7 +126,9 @@ CREATE INDEX knowledge_approvals_item_idx ON knowledge_approvals (organisation_i
 
 CREATE FUNCTION app.knowledge_versions_lifecycle() RETURNS trigger
   LANGUAGE plpgsql SET search_path = pg_catalog
-AS $$ BEGIN
+AS $$ DECLARE
+  has_approval boolean;
+BEGIN
   -- The ONLY legal write: draft → approved, state column alone. Bodies, titles,
   -- metadata of an approved row are frozen; a draft row's content is written once at
   -- INSERT (edits create new versions, never UPDATE). Any other shape raises.
@@ -144,6 +149,25 @@ AS $$ BEGIN
     RAISE EXCEPTION 'knowledge versions allow only the draft-to-approved flip'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
+  -- location_id IS frozen like every other column: FK SET NULL actions fire the
+  -- row trigger too (probe-verified: the FK NULL-ing raises through this guard), so
+  -- deleting a location with version legs is REFUSED, not cascaded — locations with
+  -- knowledge legs must be retired/disassociated first, never silently unlinked.
+  -- (The 0041 column-list SET NULL precedent applies where no lifecycle trigger
+  -- guards the child; here the guard wins deliberately.)
+  -- The flip is the publication act: it requires the approval ledger row to EXIST
+  -- (the service inserts it first, same txn, before flipping). A direct flip without
+  -- the ledger — publishing without a named approver — raises. This is what makes the
+  -- trigger stronger than the service guard alone: the guard checks draft+latest, the
+  -- ledger check proves a human approved THIS version.
+  SELECT EXISTS (
+    SELECT 1 FROM public.knowledge_approvals a
+    WHERE a.organisation_id = NEW.organisation_id AND a.version_id = NEW.id
+  ) INTO has_approval;
+  IF NOT has_approval THEN
+    RAISE EXCEPTION 'knowledge version flip requires its approval ledger row'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
   RETURN NEW;
 END $$;
 
@@ -157,15 +181,19 @@ CREATE FUNCTION app.knowledge_items_lifecycle() RETURNS trigger
   LANGUAGE plpgsql SET search_path = pg_catalog
 AS $$ DECLARE
   v_state text;
+  v_item text;
 BEGIN
-  -- Retired is terminal: no transition out.
-  IF OLD.state = 'retired' AND NEW.state <> 'retired' THEN
-    RAISE EXCEPTION 'retired knowledge items stay retired'
+  -- Item lifecycle: draft → approved → retired, forward only. approved → draft
+  -- (quiet un-approval) and any exit from retired both raise.
+  IF (OLD.state = 'approved' AND NEW.state = 'draft')
+     OR (OLD.state = 'retired' AND NEW.state <> 'retired') THEN
+    RAISE EXCEPTION 'knowledge item states move forward only'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
   -- The live pointer may move only to an approved version of THIS item, or to NULL
-  -- exactly when retiring. Pointing at a draft (or another item's version, which the
-  -- loose reference cannot check — the service's item lock owns that) raises.
+  -- exactly when retiring. The item-match closes the cross-item pointer: a version
+  -- of another item is approved yet belongs elsewhere, and still raises. Pointing at
+  -- a draft raises.
   IF NEW.live_version_id IS DISTINCT FROM OLD.live_version_id THEN
     IF NEW.live_version_id IS NULL THEN
       IF NEW.state <> 'retired' THEN
@@ -173,9 +201,10 @@ BEGIN
           USING ERRCODE = 'insufficient_privilege';
       END IF;
     ELSE
-      SELECT v.state INTO v_state FROM public.knowledge_versions v
+      SELECT v.state, v.item_id::text INTO v_state, v_item
+        FROM public.knowledge_versions v
         WHERE v.organisation_id = NEW.organisation_id AND v.id = NEW.live_version_id;
-      IF v_state IS NULL OR v_state <> 'approved' THEN
+      IF v_state IS NULL OR v_state <> 'approved' OR v_item IS DISTINCT FROM NEW.id::text THEN
         RAISE EXCEPTION 'knowledge live pointer names an approved version of this item'
           USING ERRCODE = 'insufficient_privilege';
       END IF;
