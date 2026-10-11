@@ -217,6 +217,14 @@ seasonal.
 | `business_profile.price_min_cents`                                | Business  | no (company data)                                    | while the tenant exists    | hard delete | —                   |
 | `business_profile.price_max_cents`                                | Business  | no (company data)                                    | while the tenant exists    | hard delete | —                   |
 | `business_profile.price_currency`                                 | Business  | no (company data)                                    | while the tenant exists    | hard delete | —                   |
+| `faq_cards.canonical`                                             | Knowledge | **possibly** — owner-authored, may name staff        | while active               | hard delete | —                   |
+| `faq_cards.variants`                                              | Knowledge | **possibly** — caller phrasings, may name staff      | while active               | hard delete | —                   |
+| `faq_cards.spoken_answer`                                         | Knowledge | **possibly** — owner-authored, may name staff        | while active               | hard delete | —                   |
+| `faq_cards.written_answer`                                        | Knowledge | **possibly** — owner-authored, may name staff        | while active               | hard delete | —                   |
+| `faq_cards.sensitivity`                                           | Knowledge | no alone (fixed catalogue)                           | while active               | hard delete | —                   |
+| `faq_cards.allowed_channels`                                      | Knowledge | no alone (fixed catalogue)                           | while active               | hard delete | —                   |
+| `faq_cards.location_id`                                           | Knowledge | yes (references)                                     | while active               | hard delete | —                   |
+| `faq_cards.active`                                                | Knowledge | no alone (boolean flag)                              | while the tenant exists    | hard delete | —                   |
 | `opening_rules.location_id`                                       | Business  | yes (references)                                     | while the tenant exists    | hard delete | —                   |
 | `opening_rules.weekday`                                           | Business  | no (fixed catalogue 0..6)                            | while the tenant exists    | hard delete | —                   |
 | `opening_rules.opens_min`                                         | Business  | no (wall-clock minutes)                              | while the tenant exists    | hard delete | —                   |
