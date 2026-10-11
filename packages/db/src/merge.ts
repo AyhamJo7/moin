@@ -362,30 +362,43 @@ export async function applyMerge(
     table: 'conversations' | 'calls' | 'leads' | 'appointment_requests' | 'notes',
   ): Promise<readonly string[]> => {
     // Branch-per-table (governance.ts purgeCandidates shape): the table is a union
-    // member, never interpolated — the lint bans string-built SQL outright.
+    // member, never interpolated — the lint bans string-built SQL outright. Every
+    // reparent bumps version + updated_at: ownership is a state change, and a stale
+    // client holding the pre-merge version must 409 on its next write, not silently
+    // keep the loser as owner.
     const moved =
       table === 'conversations'
         ? await client.query<{ id: string }>(
-            `update conversations set contact_id = $1 where contact_id = $2 returning id::text`,
+            `update conversations set contact_id = $1, updated_at = clock_timestamp(),
+               version = version + 1
+             where contact_id = $2 returning id::text`,
             [input.winnerId, input.loserId],
           )
         : table === 'calls'
           ? await client.query<{ id: string }>(
-              `update calls set contact_id = $1 where contact_id = $2 returning id::text`,
+              `update calls set contact_id = $1, updated_at = clock_timestamp(),
+                 version = version + 1
+               where contact_id = $2 returning id::text`,
               [input.winnerId, input.loserId],
             )
           : table === 'leads'
             ? await client.query<{ id: string }>(
-                `update leads set contact_id = $1 where contact_id = $2 returning id::text`,
+                `update leads set contact_id = $1, updated_at = clock_timestamp(),
+                   version = version + 1
+                 where contact_id = $2 returning id::text`,
                 [input.winnerId, input.loserId],
               )
             : table === 'appointment_requests'
               ? await client.query<{ id: string }>(
-                  `update appointment_requests set contact_id = $1 where contact_id = $2 returning id::text`,
+                  `update appointment_requests set contact_id = $1, updated_at = clock_timestamp(),
+                     version = version + 1
+                   where contact_id = $2 returning id::text`,
                   [input.winnerId, input.loserId],
                 )
               : await client.query<{ id: string }>(
-                  `update notes set contact_id = $1 where contact_id = $2 returning id::text`,
+                  `update notes set contact_id = $1, updated_at = clock_timestamp(),
+                     version = version + 1
+                   where contact_id = $2 returning id::text`,
                   [input.winnerId, input.loserId],
                 );
     return moved.rows.map((r) => r.id);
@@ -534,34 +547,58 @@ export async function unmerge(client: TenantClient, mergeId: string): Promise<Un
   ): Promise<void> => {
     if (ids.length === 0) return;
     // Branch-per-table: union member, never interpolated. Contact legs re-point to the
-    // restored row; task legs re-point by conversation id (same restored id space per the
-    // ledger's recording — tasks were recorded, not moved, so their ids return as-is).
+    // restored row; every reparent bumps version + updated_at like the merge direction
+    // (a stale client holding the merged version must 409, not silently keep the
+    // winner). interaction_links and tasks carry no version column, so they move bare —
+    // links are recreated fresh on unmerge (new rows, no stale readers), and tasks are
+    // never touched by unmerge at all.
     if (table === 'contact_methods') {
-      await client.query(`update contact_methods set contact_id = $1 where id = any ($2)`, [
-        restoredId,
-        ids,
-      ]);
+      await client.query(
+        `update contact_methods set contact_id = $1, updated_at = clock_timestamp(),
+           version = version + 1
+         where id = any ($2)`,
+        [restoredId, ids],
+      );
     } else if (table === 'tasks') {
       await client.query(`update tasks set conversation_id = $1 where id = any ($2)`, [
         restoredId,
         ids,
       ]);
     } else if (table === 'conversations') {
-      await client.query(`update conversations set contact_id = $1 where id = any ($2)`, [
-        restoredId,
-        ids,
-      ]);
+      await client.query(
+        `update conversations set contact_id = $1, updated_at = clock_timestamp(),
+           version = version + 1
+         where id = any ($2)`,
+        [restoredId, ids],
+      );
     } else if (table === 'calls') {
-      await client.query(`update calls set contact_id = $1 where id = any ($2)`, [restoredId, ids]);
+      await client.query(
+        `update calls set contact_id = $1, updated_at = clock_timestamp(),
+           version = version + 1
+         where id = any ($2)`,
+        [restoredId, ids],
+      );
     } else if (table === 'leads') {
-      await client.query(`update leads set contact_id = $1 where id = any ($2)`, [restoredId, ids]);
+      await client.query(
+        `update leads set contact_id = $1, updated_at = clock_timestamp(),
+           version = version + 1
+         where id = any ($2)`,
+        [restoredId, ids],
+      );
     } else if (table === 'appointment_requests') {
-      await client.query(`update appointment_requests set contact_id = $1 where id = any ($2)`, [
-        restoredId,
-        ids,
-      ]);
+      await client.query(
+        `update appointment_requests set contact_id = $1, updated_at = clock_timestamp(),
+           version = version + 1
+         where id = any ($2)`,
+        [restoredId, ids],
+      );
     } else if (table === 'notes') {
-      await client.query(`update notes set contact_id = $1 where id = any ($2)`, [restoredId, ids]);
+      await client.query(
+        `update notes set contact_id = $1, updated_at = clock_timestamp(),
+           version = version + 1
+         where id = any ($2)`,
+        [restoredId, ids],
+      );
     } else {
       await client.query(`update interaction_links set contact_id = $1 where id = any ($2)`, [
         restoredId,

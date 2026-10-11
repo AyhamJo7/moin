@@ -131,9 +131,16 @@ describe('merge', () => {
       }),
     );
     expect(record.movedMethodIds).toContain(method.id);
-    // Loser row gone; method + conversation re-homed.
+    // Loser row gone; method + conversation re-homed — with a version bump, so a stale
+    // client holding the pre-merge version 409s instead of silently keeping the loser.
     const methods = await withTenant(app, ORG_A, (client) => listContactMethods(client, winner.id));
     expect(methods.map((m) => m.id)).toContain(method.id);
+    const moved = await withTenant(app, ORG_A, (client) =>
+      client.query<{ version: string }>(`select version::text from conversations where id = $1`, [
+        convo.id,
+      ]),
+    );
+    expect(Number(moved.rows[0]?.version)).toBe(convo.version + 1);
     const owned = await withTenant(app, ORG_A, (client) =>
       client.query<{ n: string }>(
         `select count(*)::text as n from conversations where contact_id = $1`,
@@ -317,12 +324,14 @@ describe('merge', () => {
     // not the winner (the round-2 HIGH: moved_link_ids held links+convos+calls but only
     // links were rewritten).
     const convoBack = await withTenant(app, ORG_A, (client) =>
-      client.query<{ contact_id: string }>(
-        `select contact_id::text from conversations where id = $1`,
+      client.query<{ contact_id: string; version: string }>(
+        `select contact_id::text, version::text from conversations where id = $1`,
         [movedConvo.id],
       ),
     );
     expect(convoBack.rows[0]?.contact_id).toBe(undone.restoredContactId);
+    // The move-back bumped the version a second time (merge bumped once already).
+    expect(Number(convoBack.rows[0]?.version)).toBe(movedConvo.version + 2);
     // Second unmerge refused: already undone.
     await expect(
       withTenant(app, ORG_A, (client) => unmerge(client, record.id)),

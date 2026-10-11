@@ -225,3 +225,4 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P07-013 | P07.04.01 | 2026-10-11 | `9d66c35aa656` | duplicate candidates plus human merge unmerge plus 6 tests | [EV-P07-013-merge-unmerge.md](P07/EV-P07-013-merge-unmerge.md) |
 | EV-P07-014 | P07.04.04 | 2026-10-11 | `de326e01c4cb` | ROUND-1 codex BLOCK 6 findings: triple-FK delete+recreate, task no-touch, unmerge serialisation, pair-scoped signals, candidate check, audit sum | [EV-P07-014-round1-codex-block.md](P07/EV-P07-014-round1-codex-block.md) |
 | EV-P07-015 | P07.04.04 | 2026-10-11 | `f6df63fa90b0` | ROUND-2 residuals: unmerge restores convos+calls via own columns, pair-unique arbiter, undo full sum | [EV-P07-015-round2-residuals.md](P07/EV-P07-015-round2-residuals.md) |
+| EV-P07-016 | P07.04.04 | 2026-10-11 | `31c801a0f6d6` | ROUND-3 residual: version+updated_at bump on every merge reparent | [EV-P07-016-round3-version-bump.md](P07/EV-P07-016-round3-version-bump.md) |
