@@ -257,16 +257,21 @@ export async function sweepReverify(
     } else {
       checked += 1;
     }
-    // First-writer-wins (ROUND-4 P1): a concurrent sweep may have queued this
-    // card first — ON CONFLICT DO NOTHING returns zero rows for the loser.
-    // The loser skips task + audit (no duplicates, no inflated counts).
-    // NOTE: node-pg reports rowCount null (not 0) for ON CONFLICT DO NOTHING
-    // when no row inserts — check `!== 1`, never `=== 0`.
+    // Anchor-guarded queue insert (ROUND-5 P1): an owner update committing
+    // between the select and this insert bumps updated_at AND deletes the
+    // queue row (updateFaqCard re-arms). Inserting unconditionally would
+    // re-plant a STALE row + task that suppresses the next cycle for the
+    // reviewed card. So the insert itself carries the anchor: zero rows =
+    // the update won (or a concurrent sweep won) → skip task + audit.
+    // Sweep-vs-sweep stays first-writer-wins via the same check (node-pg
+    // reports rowCount null, never 0, for ON CONFLICT DO NOTHING — check
+    // `!== 1`, never `=== 0`).
     const queued = await client.query(
       `insert into knowledge_reverify_queue (organisation_id, id, card_id, due_at)
-       values (app.current_org(), $1, $2, $3)
+       select app.current_org(), $1, $2, $3 from faq_cards
+       where id = $2 and extract(epoch from updated_at)::bigint = $4::bigint
        on conflict (organisation_id, card_id) do nothing`,
-      [randomUUID(), card.id, instant],
+      [randomUUID(), card.id, instant, card.anchor],
     );
     if (queued.rowCount !== 1) continue;
     const task = await createTask(client, {

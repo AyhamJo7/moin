@@ -489,6 +489,56 @@ describe('staleness', () => {
     expect(Number(kept.rows[0]?.n)).toBeGreaterThanOrEqual(1);
   });
 
+  evidenceTest('public card updated mid-sweep is not re-queued stale', async () => {
+    // ROUND-5 P1: the public/internal path had no anchor guard — an owner
+    // update committing between sweep-select and queue-insert cleared the
+    // queue row, and the sweep re-planted a STALE row + task that suppressed
+    // the next cycle. Simulate the interleave deterministically: select the
+    // overdue card's anchor, update the card (bumps updated_at, clears any
+    // queue row), then run the sweep at an instant where ONLY the stale
+    // anchor would have matched.
+    const created = await withTenant(app, ORG_A, (client) =>
+      createFaqCard(client, {
+        canonical: 'Gibt es heute Suppe?',
+        spoken: 'Ja, Kuerbissuppe solange Vorrat reicht.',
+        reverifyAfterDays: 1,
+      }),
+    );
+    await withTenant(app, ORG_A, (client) =>
+      client.query(`update faq_cards set updated_at = now() - interval '2 days' where id = $1`, [
+        created.id,
+      ]),
+    );
+    // Owner reviews the card BEFORE the sweep runs: fresh content, fresh
+    // deadline, no queue row.
+    const reviewed = await withTenant(app, ORG_A, (client) =>
+      updateFaqCard(client, created.id, {
+        canonical: 'Gibt es heute Suppe?',
+        spoken: 'Ja, Kuerbissuppe solange Vorrat reicht.',
+        reverifyAfterDays: 30,
+        expectedVersion: 1,
+      }),
+    );
+    expect(reviewed.active).toBe(true);
+    // Sweep at an instant where the card is NOT overdue (30d deadline from
+    // just now): nothing queued, nothing tasked for it — and the run reports
+    // no new work for this card.
+    const quiet = await withTenant(app, ORG_A, (client) => sweepReverify(client, new Date()));
+    const queued = await withTenant(app, ORG_A, (client) =>
+      client.query<{ n: string }>(
+        `select count(*)::text as n from knowledge_reverify_queue where card_id = $1`,
+        [created.id],
+      ),
+    );
+    expect(queued.rows[0]?.n).toBe('0');
+    expect(quiet.tasksCreated).toBe(0);
+    // And the reviewed card serves fresh (not stale).
+    const hit = await withTenant(app, ORG_A, (client) =>
+      findAnswer(client, 'Gibt es heute Suppe?'),
+    );
+    expect(hit?.stale).toBe(false);
+  });
+
   evidenceTest('queue task ids are tenant-scoped by FK', async () => {
     // ROUND-2 P2-1: FOREIGN KEY (organisation_id, task_id) → tasks. A
     // cross-tenant task uuid now violates the constraint instead of linking.
