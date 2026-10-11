@@ -330,6 +330,58 @@ describe('knowledge', () => {
     },
   );
 
+  evidenceTest(
+    'DB boundary rejects insert-approved, fabricated approval, direct flip',
+    async () => {
+      // INSERT-approved-version: the insert-draft trigger rejects smuggling an approved
+      // row past the publish path.
+      await expect(
+        withTenant(app, ORG_A, (client) =>
+          client.query(
+            `insert into knowledge_versions
+             (organisation_id, id, item_id, version_no, title, body, state, source, category)
+           values (app.current_org(), gen_random_uuid(), gen_random_uuid(), 1, 'Gehackt', 'Gehackt.', 'approved', 'manual', 'x')`,
+          ),
+        ),
+      ).rejects.toMatchObject({ code: '42501' });
+      const created = await withTenant(app, ORG_A, (client) =>
+        createKnowledgeItem(client, {
+          title: 'Angebot',
+          body: 'Ab 100 Euro versandkostenfrei.',
+          metadata: META,
+        }),
+      );
+      const draft = await withTenant(app, ORG_A, (client) =>
+        editKnowledgeItem(client, created.item.id, {
+          title: 'Angebot',
+          body: 'Ab 150 Euro versandkostenfrei.',
+          metadata: META,
+        }),
+      );
+      expect(draft.versionNo).toBe(2);
+      // Fabricated approval + direct flip in ONE txn: moin_app holds no INSERT on
+      // approvals and no UPDATE on versions — both die as 42501 before any trigger.
+      // (The service path works because the DEFINER fn writes as owner.)
+      await expect(
+        withTenant(app, ORG_A, async (client) => {
+          await client.query(
+            `insert into knowledge_approvals (organisation_id, id, item_id, version_id, approved_by)
+           values (app.current_org(), gen_random_uuid(), $1, $2, $3)`,
+            [created.item.id, created.version.id, STAFF],
+          );
+          await client.query(`update knowledge_versions set state = 'approved' where id = $1`, [
+            created.version.id,
+          ]);
+        }),
+      ).rejects.toMatchObject({ code: '42501' });
+      // Nothing published by the bypass attempt: still draft, still serves nothing.
+      const live = await withTenant(app, ORG_A, (client) =>
+        getLiveVersion(client, created.item.id),
+      );
+      expect(live).toBeNull();
+    },
+  );
+
   evidenceTest('DB boundary rejects state regression and cross-item pointer', async () => {
     const first = await withTenant(app, ORG_A, (client) =>
       createKnowledgeItem(client, {
@@ -374,10 +426,11 @@ describe('knowledge', () => {
         ]),
       ),
     ).rejects.toMatchObject({ code: '42501' });
-    // Mismatched approval INSERT (item A + version of item B): the item-scoped FK
-    // fires before the per-version unique (the version already has its own approval),
-    // so the pair mismatch dies as 23503 — the ledger can never name a version that
-    // does not belong to the named item.
+    // Mismatched approval INSERT (item A + version of item B): moin_app holds no
+    // INSERT on approvals at all (DEFINER-only ledger) — dies as 42501 before any FK
+    // fires. The ledger can never name a version that does not belong to the named
+    // item: only the fn writes it, and the fn takes a single (item, version) pair it
+    // validates together.
     const fresh = await withTenant(app, ORG_A, (client) =>
       createKnowledgeItem(client, {
         title: 'Drittens',
@@ -400,7 +453,7 @@ describe('knowledge', () => {
           [first.item.id, freshDraft.id, STAFF],
         ),
       ),
-    ).rejects.toMatchObject({ code: '23503' });
+    ).rejects.toMatchObject({ code: '42501' });
     // Location deleted with a version leg: RESTRICT refuses with 23503 (the FK
     // fires before any trigger — the leg survives, org kept). SET NULL would be dead
     // text here (FK actions fire row triggers too, probe-verified), so RESTRICT is

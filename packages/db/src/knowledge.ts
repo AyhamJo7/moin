@@ -288,15 +288,11 @@ export async function editKnowledgeItem(
 }
 
 /**
- * Approve a draft version: writes the approval ledger row FIRST, then flips the
- * version row to approved, then moves the item's live pointer — atomically under the
- * item lock. Order matters: the versions trigger requires the ledger row to exist
- * before it allows the flip, so publishing without a named approver dies at the DB
- * boundary even for direct SQL. The version must belong to this item, still be draft,
- * AND be the latest version_no (stale drafts never go live — P09.05.03
- * re-verification approves the newest text, not an older draft superseded while it
- * waited). Concurrent approves serialise on the item lock; the loser finds no
- * matching draft and 409s.
+ * Approve a draft version through the DEFINER door: calls
+ * `app.approve_knowledge_version` (item lock + latest-draft check + ledger + flip +
+ * pointer, atomically, as owner), then audits (markers only) in the same txn.
+ * Pre-checks run first so failures 409 (not raw DEFINER exceptions): retired items,
+ * non-draft or stale versions.
  */
 export async function approveKnowledgeVersion(
   client: TenantClient,
@@ -306,10 +302,11 @@ export async function approveKnowledgeVersion(
   if (!UUID_RE.test(input.approvedBy)) throw new RangeError('approver must be a user id');
   const row = await lockItem(client, input.itemId);
   if (row.state === 'retired') throw new VersionConflictError('knowledge item is retired');
-  // Pre-checks BEFORE the ledger insert (ledger-first would turn every re-approval
-  // into a 23505 instead of a 409, and leave a stray approval row behind on failure):
-  // the target must be a draft of THIS item AND the latest version_no (latest check +
-  // item lock in the same txn: a concurrent newer draft lands first and this 409s).
+  // Pre-checks BEFORE the DEFINER call (the fn raises invalid_parameter_value on
+  // the same conditions — the service maps everything to 409 so callers never see
+  // raw DB exceptions): the target must be a draft of THIS item AND the latest
+  // version_no (latest check + item lock in the same txn: a concurrent newer draft
+  // lands first and this 409s).
   const candidate = await client.query<{ state: string; latest: boolean }>(
     `select state, (version_no = (select max(version_no) from knowledge_versions
        where item_id = $2)) as latest
@@ -320,31 +317,18 @@ export async function approveKnowledgeVersion(
   if (found?.state !== 'draft' || !found.latest) {
     throw new VersionConflictError('knowledge version is not the latest approvable draft');
   }
-  // Ledger FIRST: the versions trigger requires this row before it allows the flip.
-  // A version row's single draft→approved transition is its only write — the trigger
-  // rejects every other UPDATE shape at the DB boundary.
-  await client.query(
-    `insert into knowledge_approvals (organisation_id, id, item_id, version_id, approved_by)
-     values (app.current_org(), $1, $2, $3, $4)`,
-    [randomUUID(), input.itemId, input.versionId, input.approvedBy],
+  // The single publish door: ledger + flip + pointer, atomically, as owner. Direct
+  // SQL cannot publish (no UPDATE on versions, no INSERT on approvals — 42501).
+  await client.query(`select app.approve_knowledge_version($1, $2, $3)`, [
+    input.itemId,
+    input.versionId,
+    input.approvedBy,
+  ]);
+  const item = await client.query<ItemRow>(
+    `select id, state, live_version_id::text, version::text from knowledge_items where id = $1`,
+    [input.itemId],
   );
-  const flipped = await client.query<{ id: string }>(
-    `update knowledge_versions set state = 'approved' where id = $1 and item_id = $2
-       and state = 'draft'
-       and version_no = (select max(version_no) from knowledge_versions where item_id = $2)
-     returning id::text`,
-    [input.versionId, input.itemId],
-  );
-  if (flipped.rows[0] === undefined) {
-    throw new VersionConflictError('knowledge version is not the latest approvable draft');
-  }
-  const moved = await client.query<ItemRow>(
-    `update knowledge_items set state = 'approved', live_version_id = $1,
-       updated_at = clock_timestamp(), version = version + 1
-     where id = $2 returning id, state, live_version_id::text, version::text`,
-    [input.versionId, input.itemId],
-  );
-  const itemRow = moved.rows[0];
+  const itemRow = item.rows[0];
   if (itemRow === undefined) throw new Error('knowledge item update returned no row');
   const versionNo = await client.query<{ n: number }>(
     `select version_no as n from knowledge_versions where id = $1`,

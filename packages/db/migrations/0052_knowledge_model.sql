@@ -120,9 +120,78 @@ CREATE TABLE knowledge_approvals (
 
 CREATE INDEX knowledge_approvals_item_idx ON knowledge_approvals (organisation_id, item_id);
 
--- Lifecycle guards at the DB boundary (the service guard is necessary but not
--- sufficient — a future caller could forget it; the trigger cannot be forgotten).
--- ENABLE ALWAYS (not default origin-only): a session GUC must not switch the guard off.
+-- ## The approve path is a single DEFINER door (finding: fabricated-approval flip)
+--
+-- Ledger-first ordering closed the service path but NOT direct SQL: moin_app could
+-- INSERT a fabricated approval row, then UPDATE the version (the EXISTS check
+-- passes — the row exists, just not from the service). Triggers cannot tell who
+-- wrote the approval row. So publishing goes through ONE door:
+-- `app.approve_knowledge_version(p_item, p_version, p_approver)` (SECURITY DEFINER,
+-- allowlisted + digest-pinned like delete_orphan_conversation):
+--   1. locks the item row (serialises concurrent approves),
+--   2. refuses retired items and non-latest/non-draft versions (409s as exceptions),
+--   3. inserts the approval row, flips the version, moves the live pointer —
+--      atomically, as the table owner (FORCE RLS still applies to the owner? No:
+--      the owner is NOBYPASSRLS-exempt? The function constrains every write to
+--      app.current_org(), so cross-tenant approval is inexpressible).
+-- moin_app holds NO direct write to the publish path: REVOKE UPDATE on
+-- knowledge_versions (the flip lives inside the fn), REVOKE INSERT on
+-- knowledge_approvals (the ledger row lives inside the fn). Direct INSERT of an
+-- approved version, direct approval INSERT, direct flip, direct pointer move that
+-- violates lifecycle — all 42501/trigger-raises. The service calls the fn, then
+-- audits (markers only) in the same txn.
+--
+-- Why not ALSO revoke UPDATE on knowledge_items: retire + the live-pointer move need
+-- direct writes (they are not publication — retire unpublishes). The items lifecycle
+-- trigger guards those shapes instead (forward-only + approved-or-NULL-on-retire).
+
+CREATE FUNCTION app.approve_knowledge_version(p_item_id uuid, p_version_id uuid, p_approved_by uuid)
+  RETURNS void
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path = pg_catalog, public, app, pg_temp
+AS $$
+DECLARE
+  v_state text;
+  v_latest boolean;
+  v_no integer;
+BEGIN
+  -- Item lock first: concurrent approves serialise here.
+  SELECT state INTO v_state FROM public.knowledge_items
+    WHERE organisation_id = app.current_org() AND id = p_item_id FOR UPDATE;
+  IF v_state IS NULL THEN
+    RAISE EXCEPTION 'knowledge item not found' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  IF v_state = 'retired' THEN
+    RAISE EXCEPTION 'knowledge item is retired' USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  -- Latest-draft check: stale drafts never go live (P09.05.03).
+  SELECT state = 'draft'
+     AND version_no = (SELECT max(version_no) FROM public.knowledge_versions
+                       WHERE organisation_id = app.current_org() AND item_id = p_item_id),
+         version_no
+    INTO v_state, v_no FROM public.knowledge_versions
+    WHERE organisation_id = app.current_org() AND id = p_version_id AND item_id = p_item_id;
+  IF v_state IS NULL THEN
+    RAISE EXCEPTION 'knowledge version is not the latest approvable draft'
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  -- Ledger, flip, pointer — atomically, as owner.
+  INSERT INTO public.knowledge_approvals (organisation_id, id, item_id, version_id, approved_by)
+    VALUES (app.current_org(), gen_random_uuid(), p_item_id, p_version_id, p_approved_by);
+  UPDATE public.knowledge_versions SET state = 'approved'
+    WHERE organisation_id = app.current_org() AND id = p_version_id;
+  UPDATE public.knowledge_items SET state = 'approved', live_version_id = p_version_id,
+      updated_at = clock_timestamp(), version = version + 1
+    WHERE organisation_id = app.current_org() AND id = p_item_id;
+END
+$$;
+
+REVOKE ALL ON FUNCTION app.approve_knowledge_version(uuid, uuid, uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app.approve_knowledge_version(uuid, uuid, uuid) TO moin_app;
+
+COMMENT ON FUNCTION app.approve_knowledge_version(uuid, uuid, uuid) IS
+  'Publishes one knowledge version (P09.01): locks the item, requires the latest draft, inserts the approval row, flips the version, moves the live pointer — atomically. Tenant-scoped by app.current_org(); the only publish path (direct writes revoked).';
 
 CREATE FUNCTION app.knowledge_versions_lifecycle() RETURNS trigger
   LANGUAGE plpgsql SET search_path = pg_catalog
@@ -176,6 +245,25 @@ REVOKE ALL ON FUNCTION app.knowledge_versions_lifecycle() FROM PUBLIC;
 CREATE TRIGGER knowledge_versions_lifecycle BEFORE UPDATE ON knowledge_versions
   FOR EACH ROW EXECUTE FUNCTION app.knowledge_versions_lifecycle();
 ALTER TABLE knowledge_versions ENABLE ALWAYS TRIGGER knowledge_versions_lifecycle;
+
+-- Versions INSERT guard: state must be draft on INSERT — smuggling an approved row
+-- past the publish path (INSERT-approved-version) raises. (The flip trigger above
+-- covers UPDATEs; this covers INSERTs.)
+CREATE FUNCTION app.knowledge_versions_insert_draft() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = pg_catalog
+AS $$ BEGIN
+  IF NEW.state <> 'draft' THEN
+    RAISE EXCEPTION 'knowledge versions are created as drafts; publishing goes through approval'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  RETURN NEW;
+END $$;
+
+REVOKE ALL ON FUNCTION app.knowledge_versions_insert_draft() FROM PUBLIC;
+
+CREATE TRIGGER knowledge_versions_insert_draft BEFORE INSERT ON knowledge_versions
+  FOR EACH ROW EXECUTE FUNCTION app.knowledge_versions_insert_draft();
+ALTER TABLE knowledge_versions ENABLE ALWAYS TRIGGER knowledge_versions_insert_draft;
 
 CREATE FUNCTION app.knowledge_items_lifecycle() RETURNS trigger
   LANGUAGE plpgsql SET search_path = pg_catalog
@@ -234,11 +322,11 @@ REVOKE ALL ON TABLE knowledge_items, knowledge_versions, knowledge_approvals
        moin_reporting;
 
 GRANT SELECT, INSERT, UPDATE ON knowledge_items TO moin_app;
--- Versions: the draft→approved flip is the single permitted write (guarded UPDATE with
--- a state='draft' WHERE clause — an approved row never matches again, so history is
--- still append-only in effect). No DELETE ever. Approvals append-only.
-GRANT SELECT, INSERT, UPDATE ON knowledge_versions TO moin_app;
-GRANT SELECT, INSERT ON knowledge_approvals TO moin_app;
+-- Versions: NO direct UPDATE (the DEFINER fn flips as owner); INSERT guarded to drafts
+-- by the insert trigger. No DELETE ever. Approvals: NO direct INSERT (the DEFINER fn
+-- writes the ledger row); SELECT only.
+GRANT SELECT, INSERT ON knowledge_versions TO moin_app;
+GRANT SELECT ON knowledge_approvals TO moin_app;
 
 -- Reviewed audit argument keys (P06.10.03, P06.10.07, INV-12). Markers only — never bodies.
 INSERT INTO audit_argument_allowlist(operation, argument_key, value_kind, reason) VALUES
