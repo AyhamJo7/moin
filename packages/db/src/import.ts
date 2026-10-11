@@ -153,6 +153,26 @@ export function registrableDomain(hostname: string): string {
   return parts.length <= 2 ? parts.join('.') : parts.slice(-2).join('.');
 }
 
+/**
+ * Redact a url for PERSISTENCE (ROUND-1 #5): strip userinfo, query and
+ * fragment — keep scheme + host + path. Credentials and tracking tokens must
+ * never land in tenant rows; the full url lives only transiently in the
+ * returned suggestion (never persisted) or not at all.
+ */
+export function redactUrlForStorage(raw: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return raw.slice(0, 200);
+  }
+  parsed.username = '';
+  parsed.password = '';
+  parsed.search = '';
+  parsed.hash = '';
+  return parsed.toString().slice(0, 2000);
+}
+
 export interface ImportWebsiteInput {
   readonly url: string;
   readonly category: string;
@@ -181,7 +201,14 @@ export async function importWebsite(
     [domain],
   );
   if (verified.rows[0] === undefined) {
-    await recordRun(client, input.url, domain, 'refused', 'unverified-domain', []);
+    await recordRun(
+      client,
+      redactUrlForStorage(input.url),
+      domain,
+      'refused',
+      'unverified-domain',
+      [],
+    );
     throw new ImportRefusal('unverified-domain');
   }
   let html: string;
@@ -196,17 +223,26 @@ export async function importWebsite(
   } catch (error) {
     const reason: ImportRefusalReason =
       error instanceof FetchRefusal ? error.reason : 'fetch-error';
-    await recordRun(client, input.url, domain, 'refused', reason, []);
+    await recordRun(client, redactUrlForStorage(input.url), domain, 'refused', reason, []);
     throw new ImportRefusal(reason);
   }
   const text = htmlToText(html);
   const suggestions = structureSuggestions(text, { category: input.category, sourceUrl: finalUrl });
   const draftItemIds: string[] = [];
   for (const suggestion of suggestions) {
+    // Provenance rides the version row (ROUND-1 #6): the review UI reads the
+    // flag + final url without a second lookup. The STORED source url is the
+    // redacted form (no credentials/query); the transient suggestion keeps
+    // the full final url for owner context (never persisted).
     const created = await createKnowledgeItem(client, {
       title: suggestion.title,
       body: suggestion.body,
-      metadata: { source: 'import', category: suggestion.category },
+      metadata: {
+        source: 'import',
+        category: suggestion.category,
+        importFlagged: suggestion.injectionFlag,
+        importSourceUrl: redactUrlForStorage(finalUrl),
+      },
     });
     draftItemIds.push(created.item.id);
   }
@@ -215,7 +251,7 @@ export async function importWebsite(
     `insert into knowledge_import_runs
        (organisation_id, id, source_url, verified_domain, status, draft_item_ids)
      values (app.current_org(), $1, $2, $3, 'succeeded', $4::uuid[])`,
-    [runId, input.url.slice(0, 2000), domain, draftItemIds],
+    [runId, redactUrlForStorage(input.url), domain, draftItemIds],
   );
   await appendAuditEvent(client, {
     source: 'api',

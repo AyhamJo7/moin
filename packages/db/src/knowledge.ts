@@ -46,6 +46,9 @@ export interface KnowledgeMetadata {
   readonly allowedChannels?: readonly string[] | undefined;
   /** Re-verification deadline in days. Defaults per category (P09.06); null = no deadline. */
   readonly reverifyAfterDays?: number | null | undefined;
+  /** Import provenance (P09.08): injection flag + final source url, set only by the import path. */
+  readonly importFlagged?: boolean | undefined;
+  readonly importSourceUrl?: string | undefined;
 }
 
 export interface KnowledgeItem {
@@ -156,6 +159,8 @@ function checkMetadata(input: KnowledgeMetadata): {
   sensitivity: KnowledgeSensitivity;
   channels: readonly string[];
   reverifyAfter: string | null;
+  importFlagged: boolean | null;
+  importSourceUrl: string | null;
 } {
   if (input.locationId !== undefined && !UUID_RE.test(input.locationId)) {
     throw new RangeError('location id must be a uuid');
@@ -183,6 +188,10 @@ function checkMetadata(input: KnowledgeMetadata): {
   // stays null (no deadline, e.g. pre-0057 rows). Stored as a Postgres interval
   // so deadline math (`decided_at + reverify_after`) stays in SQL.
   const reverifyDays = checkReverifyAfter(input.reverifyAfterDays, category);
+  // Import provenance (P09.08): validated here, stored on the version row.
+  // Only the import path sets these; manual creation leaves them null.
+  const importSourceUrl =
+    input.importSourceUrl === undefined ? null : checkImportSourceUrl(input.importSourceUrl);
   return {
     source: input.source,
     locationId: input.locationId ?? null,
@@ -192,7 +201,17 @@ function checkMetadata(input: KnowledgeMetadata): {
     sensitivity: input.sensitivity ?? 'public',
     channels,
     reverifyAfter: reverifyDays === null ? null : `${String(reverifyDays)} days`,
+    importFlagged: input.importFlagged ?? null,
+    importSourceUrl,
   };
+}
+
+function checkImportSourceUrl(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0 || trimmed.length > 2000) {
+    throw new RangeError('import source url must be 1..2000 characters');
+  }
+  return trimmed;
 }
 
 async function lockItem(client: TenantClient, itemId: string): Promise<ItemRow> {
@@ -227,8 +246,10 @@ export async function createKnowledgeItem(
   const version = await client.query<VersionRow>(
     `insert into knowledge_versions
        (organisation_id, id, item_id, version_no, title, body, source, location_id,
-        category, valid_from, valid_until, sensitivity, allowed_channels, reverify_after)
-     values (app.current_org(), $1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::interval)
+        category, valid_from, valid_until, sensitivity, allowed_channels, reverify_after,
+        import_flagged, import_source_url)
+     values (app.current_org(), $1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::interval,
+             $13, $14)
      returning id, item_id, version_no, title, body, state`,
     [
       versionId,
@@ -243,6 +264,8 @@ export async function createKnowledgeItem(
       meta.sensitivity,
       meta.channels,
       meta.reverifyAfter,
+      meta.importFlagged,
+      meta.importSourceUrl,
     ],
   );
   const versionRow = version.rows[0];
@@ -288,8 +311,10 @@ export async function editKnowledgeItem(
   const inserted = await client.query<VersionRow>(
     `insert into knowledge_versions
        (organisation_id, id, item_id, version_no, title, body, source, location_id,
-        category, valid_from, valid_until, sensitivity, allowed_channels, reverify_after)
-     values (app.current_org(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::interval)
+        category, valid_from, valid_until, sensitivity, allowed_channels, reverify_after,
+        import_flagged, import_source_url)
+     values (app.current_org(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::interval,
+             $14, $15)
      returning id, item_id, version_no, title, body, state`,
     [
       versionId,
@@ -305,6 +330,8 @@ export async function editKnowledgeItem(
       meta.sensitivity,
       meta.channels,
       meta.reverifyAfter,
+      meta.importFlagged,
+      meta.importSourceUrl,
     ],
   );
   const versionRow = inserted.rows[0];

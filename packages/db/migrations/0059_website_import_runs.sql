@@ -52,7 +52,9 @@ COMMENT ON TABLE business_domains IS 'Tenant-verified website domains (P09.08.02
 CREATE TABLE knowledge_import_runs (
   organisation_id uuid NOT NULL REFERENCES organisations (id) ON DELETE CASCADE,
   id              uuid NOT NULL PRIMARY KEY,
-  -- The url the owner asked to import (verbatim, for the audit trail).
+  -- The url the owner asked to import, REDACTED at write time (ROUND-1 #5:
+  -- scheme + host + path only; userinfo/query/fragment stripped by
+  -- redactUrlForStorage — credentials and tracking tokens never persist).
   source_url      text NOT NULL CHECK (length(btrim(source_url)) BETWEEN 1 AND 2000),
   -- The domain the url was verified against (business_domains row).
   verified_domain text NOT NULL CHECK (length(btrim(verified_domain)) BETWEEN 1 AND 253),
@@ -89,3 +91,13 @@ INSERT INTO audit_argument_allowlist(operation, argument_key, value_kind, reason
   ('knowledge.import', 'drafts', 'count', 'drafts created by the run; no urls or content'),
   ('knowledge.import_refused', 'reason', 'count', 'refusal reason marker; no urls or content')
 ON CONFLICT (operation, argument_key) DO NOTHING;
+
+-- Provenance on drafts (ROUND-1 #6): the injection flag + final source url
+-- ride the version row so the review UI reads them — no second lookup.
+-- Nullable: pre-0059 drafts predate the import path (NULL = not imported).
+ALTER TABLE knowledge_versions
+  ADD COLUMN import_flagged boolean,
+  ADD COLUMN import_source_url text CHECK (import_source_url IS NULL OR length(btrim(import_source_url)) BETWEEN 1 AND 2000);
+
+COMMENT ON COLUMN knowledge_versions.import_flagged IS 'Prompt-injection markers found in imported text (P09.08.04): review flag, never auto-approved. NULL = not an import draft.';
+COMMENT ON COLUMN knowledge_versions.import_source_url IS 'Final fetched url of the import (P09.08.02): transient provenance for review, redacted like run rows.';
