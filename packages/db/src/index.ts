@@ -228,3 +228,13 @@ export { approveFaqCard, approveKnowledge, bulkApprove, ForbiddenError } from '.
 export type { ApprovalResult, BulkApprovalResult } from './approval.ts';
 export { REVERIFY_TASK_TITLE, lockEligibleCards, servedState, sweepReverify } from './staleness.ts';
 export type { ServedVersion, SweepCandidate, SweepResult } from './staleness.ts';
+export {
+  CONFLICT_TASK_TITLE,
+  FAQ_DUPLICATE_THRESHOLD,
+  detectFaqDuplicates,
+  detectHoursOverlaps,
+  openConflict,
+  orderLegs,
+  resolveConflict,
+} from './conflicts.ts';
+export type { ConflictDetector, ConflictSubjectKind, ConflictSweepResult } from './conflicts.ts';

@@ -450,7 +450,7 @@ export async function getLiveVersion(
      left join knowledge_approvals a
        on a.organisation_id = i.organisation_id and a.version_id = v.id
      where i.id = $1 and v.id = i.live_version_id and v.state = 'approved'
-       and i.state = 'approved' and not i.suspended
+       and i.state = 'approved' and not i.suspended and i.conflict_state = 'clear'
        and coalesce(v.valid_until < $2::date, false) = false
        and not (v.sensitivity = 'restricted'
          and coalesce(a.decided_at + v.reverify_after <= $2::timestamptz, false) = true)`,
