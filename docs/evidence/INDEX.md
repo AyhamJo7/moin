@@ -221,4 +221,4 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P07-009 | P07.10.01 | 2026-10-10 | `a887e9e16a86` | governance-records-plus-10-tests | [EV-P07-009-governance-records.md](P07/EV-P07-009-governance-records.md) |
 | EV-P07-010 | P07.11.01 | 2026-10-11 | `eb2896ca16fb` | finaliser plus reconciler plus 14 tests | [EV-P07-010-finaliser-reconciler.md](P07/EV-P07-010-finaliser-reconciler.md) |
 | EV-P07-011 | P07.13.01 | 2026-10-11 | `d623966e7f89` | version-conflict problem type plus 5-test parallel suite | [EV-P07-011-concurrency-optimistic-locking.md](P07/EV-P07-011-concurrency-optimistic-locking.md) |
-| EV-P07-012 | P07.14.01 | 2026-10-11 | round-2 fix head | tenant time plus German formatting plus Hamburg holidays plus 13 tests | [EV-P07-012-time-locale-holidays.md](P07/EV-P07-012-time-locale-holidays.md) |
+| EV-P07-012 | P07.14.01 | 2026-10-11 | `92849860a033` | tenant time plus German formatting plus Hamburg holidays plus 13 tests | [EV-P07-012-time-locale-holidays.md](P07/EV-P07-012-time-locale-holidays.md) |
