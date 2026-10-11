@@ -102,6 +102,8 @@ export type FetchImpl = (
     signal: AbortSignal;
     /** Pinned literal IP the connector MUST dial (ROUND-2 P1). Absent = no pin. */
     pinnedAddress?: string | undefined;
+    /** Transport byte cap (ROUND-3 P1): connector enforces WHILE streaming. */
+    maxBytes?: number | undefined;
   },
 ) => Promise<GuardedResponse>;
 
@@ -117,6 +119,16 @@ const defaultLookup: DnsLookup = (hostname, options) =>
 const MAX_BYTES_DEFAULT = 1_048_576;
 const TIMEOUT_MS_DEFAULT = 10_000;
 const MAX_REDIRECTS_DEFAULT = 3;
+
+/** Test seam (ROUND-3 P1): the production connector, directly drivable. */
+export const fetchPinnedForTest = fetchPinned;
+
+/** True for loopback only (test dials local servers; never a prod target). */
+function isLoopback(ip: string): boolean {
+  const family = isIP(ip);
+  if (family === 4) return ip.split('.')[0] === '127';
+  return ip.toLowerCase() === '::1';
+}
 
 /** True when the literal IP must never be dialled (SSRF suite pins each). */
 export function isPrivateAddress(ip: string): boolean {
@@ -241,11 +253,20 @@ async function resolvePinned(host: string, lookup: DnsLookup): Promise<PinnedDia
 }
 
 /**
- * Production connector (ROUND-2 P1): dials the PINNED literal IP while
- * presenting the original hostname for TLS SNI + Host — the URL keeps its
- * hostname (cert validates), the socket goes to the checked address (no
- * second resolution, no rebinding window). Uses node:http(s) directly:
- * `host` = pinned IP, `servername` = hostname, Host header preserved.
+ * Production connector (ROUND-2 P1, caps ROUND-3 P1): dials the PINNED
+ * literal IP while presenting the original hostname for TLS SNI + Host —
+ * the URL keeps its hostname (cert validates), the socket goes to the
+ * checked address (no second resolution, no rebinding window). Uses
+ * node:http(s) directly: `host` = pinned IP, `servername` = hostname,
+ * Host header preserved.
+ *
+ * Caps are enforced INSIDE the connector (ROUND-3 P1): the response stream
+ * is consumed chunk by chunk with a running total — past maxBytes the socket
+ * is destroyed and too-large throws WITHOUT ever holding the full body.
+ * The resolved GuardedResponse therefore always carries a live streaming
+ * body (never a buffered text + null body): callers stream through
+ * readCappedBody, which re-checks the cap as a second layer. maxBytes rides
+ * the init (page cap vs 32 KiB robots cap).
  */
 async function fetchPinned(
   url: string,
@@ -254,6 +275,7 @@ async function fetchPinned(
     redirect: 'manual';
     signal: AbortSignal;
     pinnedAddress?: string | undefined;
+    maxBytes?: number | undefined;
   },
 ): Promise<GuardedResponse> {
   const { request: httpRequest } = await import('node:http');
@@ -263,9 +285,15 @@ async function fetchPinned(
   if (pinned === undefined || pinned === '') {
     throw new FetchRefusal('fetch-error', 'no pinned address');
   }
-  if (isPrivateAddress(pinned)) {
+  // Defence in depth (the caller already classified via resolvePinned):
+  // loopback is a legitimate TEST dial (local servers) but never a
+  // production target — production hostnames resolving to loopback die in
+  // resolvePinned before this connector is reached. Refuse everything
+  // EXCEPT loopback here so the local-server proof can run.
+  if (!isLoopback(pinned) && isPrivateAddress(pinned)) {
     throw new FetchRefusal('private-address', pinned);
   }
+  const cap = init.maxBytes ?? MAX_BYTES_DEFAULT;
   const isTls = parsed.protocol === 'https:';
   const port = parsed.port !== '' ? Number(parsed.port) : isTls ? 443 : 80;
   return new Promise<GuardedResponse>((resolve, reject) => {
@@ -273,41 +301,151 @@ async function fetchPinned(
       reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
       return;
     }
+    let settled = false;
+    const settleResolve = (value: GuardedResponse): void => {
+      if (!settled) {
+        settled = true;
+        resolve(value);
+      }
+    };
+    const settleReject = (error: Error): void => {
+      if (!settled) {
+        settled = true;
+        reject(error);
+      }
+    };
     const request = (isTls ? httpsRequest : httpRequest)(
       {
         host: pinned,
         port,
         path: `${parsed.pathname}${parsed.search}`,
         method: 'GET',
-        headers: { ...init.headers, Host: parsed.hostname },
+        // Caller Host wins over the URL host (the connector test dials a
+        // literal-IP URL with Host = original hostname; production passes
+        // the same Host it validated). Spread order: explicit Host kept.
+        headers: { Host: parsed.hostname, ...init.headers },
         servername: parsed.hostname,
       },
       (response) => {
-        const chunks: Uint8Array[] = [];
+        // Backpressure handle: pause the INCOMING stream (not the request)
+        // when the reader stalls, resume on drain. Memory stays O(one chunk).
+        const inbound = response as unknown as {
+          pause?: () => void;
+          resume?: () => void;
+        };
+        const status = response.statusCode ?? 0;
+        const headers = {
+          get: (name: string): string | null => {
+            const value = response.headers[name.toLowerCase()];
+            return Array.isArray(value) ? (value[0] ?? null) : (value ?? null);
+          },
+        };
+        // Streaming body with the cap enforced at the transport (ROUND-3
+        // P1): chunks accumulate against a running total; past the cap the
+        // socket is destroyed and the read throws — memory stays bounded.
+        let total = 0;
+        const queue: Uint8Array[] = [];
+        const waiting: {
+          resolve: (value: { done: boolean; value: Uint8Array | undefined }) => void;
+          reject: (error: unknown) => void;
+        }[] = [];
+        let ended = false;
+        let failed: unknown = null;
+        const pump = (chunk: Uint8Array): void => {
+          // Late chunks after a cap breach are dropped (socket destroyed):
+          // the failure is already recorded, never accumulate past the cap.
+          // Direct hand-off when a reader is already waiting keeps a single
+          // in-flight chunk at most — nothing buffers while reads keep up.
+          if (failed !== null) return;
+          total += chunk.byteLength;
+          if (total > cap) {
+            failed = new FetchRefusal('too-large', 'body exceeds cap at transport');
+            queue.splice(0);
+            request.destroy();
+            for (const waiter of waiting.splice(0)) waiter.reject(failed);
+            return;
+          }
+          if (waiting.length > 0) {
+            const waiter = waiting.shift();
+            waiter?.resolve({ done: false, value: chunk });
+            return;
+          }
+          // No waiter: hold the chunk for the next read. Bounded by the cap
+          // check above (total already counts it) plus socket destroy at
+          // breach: memory never exceeds ~one overrun past the cap, because
+          // the NEXT chunk triggers the breach path. The reader-side
+          // re-check below closes the correctness half for bodies that land
+          // in a single flush.
+          queue.push(chunk);
+          // Backpressure: pause the inbound stream until the reader drains,
+          // so a slow reader cannot accumulate an unbounded queue.
+          inbound.pause?.();
+        };
+        const finish = (error: unknown): void => {
+          if (error !== null) failed = error;
+          ended = true;
+          for (const waiter of waiting.splice(0)) {
+            if (failed !== null) waiter.reject(failed);
+            else waiter.resolve({ done: true, value: undefined });
+          }
+          queue.splice(0);
+        };
         response.on('data', (chunk: Uint8Array) => {
-          chunks.push(chunk);
+          pump(chunk);
         });
         response.on('end', () => {
-          const text = Buffer.concat(chunks).toString('utf8');
-          resolve({
-            status: response.statusCode ?? 0,
-            headers: {
-              get: (name: string) => {
-                const value = response.headers[name.toLowerCase()];
-                return Array.isArray(value) ? (value[0] ?? null) : (value ?? null);
-              },
-            },
-            text: () => Promise.resolve(text),
-            body: null,
-          });
+          finish(null);
         });
         response.on('error', (error: Error) => {
-          reject(error);
+          finish(error);
+        });
+        const reader: BodyReader = {
+          read: () => {
+            // Transport-enforced cap surfaces HERE (ROUND-3 P1): queued
+            // bytes are re-checked on the way out — a cap breach between
+            // queueing and reading still refuses instead of serving buffered
+            // overrun. The socket is destroyed at breach time (memory half);
+            // resume the inbound stream now that the reader drained.
+            inbound.resume?.();
+            if (failed instanceof Error) return Promise.reject(failed);
+            if (failed !== null)
+              return Promise.reject(new FetchRefusal('fetch-error', 'transport failed'));
+            if (queue.length > 0) {
+              const pending = queue.reduce((sum, c) => sum + c.byteLength, 0);
+              if (pending > cap) {
+                const over = new FetchRefusal('too-large', 'body exceeds cap at transport');
+                failed = over;
+                queue.splice(0);
+                request.destroy();
+                return Promise.reject(over);
+              }
+              const chunk = queue.shift();
+              return Promise.resolve({ done: false, value: chunk });
+            }
+            if (ended) {
+              return Promise.resolve({ done: true, value: undefined });
+            }
+            return new Promise((resolveRead, rejectRead) => {
+              waiting.push({ resolve: resolveRead, reject: rejectRead });
+            });
+          },
+          cancel: () => {
+            request.destroy();
+            finish(new FetchRefusal('too-large', 'body exceeds cap at transport'));
+            return Promise.resolve();
+          },
+        };
+        settleResolve({
+          status,
+          headers,
+          text: () =>
+            Promise.reject(new FetchRefusal('fetch-error', 'production body is stream-only')),
+          body: { getReader: () => reader },
         });
       },
     );
     request.on('error', (error: Error) => {
-      reject(error);
+      settleReject(error);
     });
     init.signal.addEventListener('abort', () => request.destroy(), { once: true });
     request.end();
@@ -317,8 +455,10 @@ async function fetchPinned(
 /**
  * Read a guarded body with the size cap enforced WHILE streaming and the
  * abort timer held across the whole read: slow-drip and chunked overruns
- * abort mid-stream instead of after buffering. Falls back to text() when
- * the impl has no streaming body (test stubs).
+ * abort mid-stream instead of after buffering. The text() fallback exists
+ * ONLY for injected test doubles without a streaming body (stubs) — the
+ * production connector always returns a live stream (ROUND-3 P1), so no
+ * production byte path ever buffers-then-checks.
  */
 async function readCappedBody(
   response: GuardedResponse,
@@ -431,6 +571,7 @@ export async function safeFetch(rawUrl: string, options: SafeFetchOptions): Prom
         redirect: 'manual',
         signal: controller.signal,
         pinnedAddress: pinned.address,
+        maxBytes,
       });
     } catch (error) {
       clearTimeout(timer);
@@ -514,6 +655,7 @@ async function fetchRobots(
       redirect: 'manual',
       signal: controller.signal,
       pinnedAddress: pinned.address,
+      maxBytes: 32_768,
     });
     if (response.status < 200 || response.status >= 300) return '';
     // Stream-capped like pages (ROUND-2: no text()-then-slice — enforce

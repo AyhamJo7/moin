@@ -199,6 +199,93 @@ describe('import-ssrf', () => {
     ).rejects.toMatchObject({ reason: 'too-large' });
   });
 
+  evidenceTest('production connector streams under cap (local server)', async () => {
+    // ROUND-3 P1: the PRODUCTION connector (fetchPinned, real node:http
+    // socket against a local server) enforces the cap INSIDE the transport:
+    // an oversize body aborts with too-large WITHOUT ever holding it, and a
+    // small body streams through intact. No stubs on this path — the socket,
+    // the Host header, and the byte counting are all real.
+    const { createServer } = await import('node:http');
+    const big = 'x'.repeat(4000);
+    const seenHosts: (string | undefined)[] = [];
+    const server = createServer((req, res) => {
+      // Record the Host the connector dialled with (asserted after close —
+      // never throw inside the handler: an in-handler throw hangs the test
+      // at the server barrier instead of failing the assertion).
+      seenHosts.push(req.headers.host);
+      res.writeHead(200, { 'content-type': 'text/html' });
+      // Chunked overrun: 4 × 1000 bytes against the tiny cap below.
+      res.write(big.slice(0, 1000));
+      res.write(big.slice(1000, 2000));
+      res.write(big.slice(2000, 3000));
+      res.write(big.slice(3000));
+      res.end();
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as { port: number }).port;
+    try {
+      const { fetchPinnedForTest } = await import('./import-fetch.ts');
+      // Oversize against a 500-byte cap: transport throws too-large. The
+      // throw surfaces on the FIRST read past the cap (streaming), so drive
+      // the reader — the connector resolves headers immediately by design.
+      const over = await fetchPinnedForTest(`http://127.0.0.1:${String(port)}/karte`, {
+        headers: { Host: 'beispiel-restaurant.de' },
+        redirect: 'manual',
+        signal: new AbortController().signal,
+        pinnedAddress: '127.0.0.1',
+        maxBytes: 500,
+      });
+      const overReader = over.body?.getReader();
+      expect(overReader).toBeDefined();
+      let overFailed: unknown = null;
+      try {
+        for (;;) {
+          const { done } = (await overReader?.read()) as {
+            done: boolean;
+            value: Uint8Array | undefined;
+          };
+          if (done) break;
+        }
+      } catch (error) {
+        overFailed = error;
+      }
+      expect(overFailed).toMatchObject({ name: 'FetchRefusal', reason: 'too-large' });
+      // Small body under a generous cap: streams through byte-identical.
+      const ok = await fetchPinnedForTest(`http://127.0.0.1:${String(port)}/karte`, {
+        headers: { Host: 'beispiel-restaurant.de' },
+        redirect: 'manual',
+        signal: new AbortController().signal,
+        pinnedAddress: '127.0.0.1',
+        maxBytes: 100_000,
+      });
+      expect(ok.status).toBe(200);
+      const reader = ok.body?.getReader();
+      expect(reader).toBeDefined();
+      const chunks: Uint8Array[] = [];
+      for (;;) {
+        const { done, value } = (await reader?.read()) as {
+          done: boolean;
+          value: Uint8Array | undefined;
+        };
+        if (done) break;
+        if (value !== undefined) chunks.push(value);
+      }
+      expect(Buffer.concat(chunks).toString('utf8')).toBe(big);
+      // The connector sent Host = original hostname on the pinned socket
+      // (both requests): virtual hosting + SNI shape preserved end to end.
+      expect(seenHosts.length).toBeGreaterThanOrEqual(2);
+      for (const host of seenHosts) {
+        expect(host?.split(':')[0]).toBe('beispiel-restaurant.de');
+      }
+    } finally {
+      await new Promise<void>((resolve) =>
+        server.close(() => {
+          resolve();
+        }),
+      );
+    }
+  });
+
   evidenceTest('streaming caps: slow drip + chunked overrun abort mid-read', async () => {
     // ROUND-1 #1: the cap is enforced WHILE streaming (Reader), with the
     // deadline held across the whole read — a slow drip of small chunks past

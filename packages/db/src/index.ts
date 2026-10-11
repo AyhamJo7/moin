@@ -241,6 +241,7 @@ export type { ConflictDetector, ConflictSubjectKind, ConflictSweepResult } from 
 export {
   FetchRefusal,
   belongsToDomain,
+  fetchPinnedForTest,
   isPrivateAddress,
   robotsAllows,
   safeFetch,
