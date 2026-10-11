@@ -14,6 +14,7 @@ export {
   TenantContextError,
   TENANT_SETTING,
   CORRELATION_SETTING,
+  ACTOR_SETTING,
 } from './tenant.ts';
 export type {
   TenantContext,

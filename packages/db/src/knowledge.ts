@@ -289,20 +289,22 @@ export async function editKnowledgeItem(
 
 /**
  * Approve a draft version through the DEFINER door: calls
- * `app.approve_knowledge_version` (item lock + latest-draft check + ledger + flip +
- * pointer, atomically, as owner), then audits (markers only) in the same txn.
- * Pre-checks run first so failures 409 (not raw DEFINER exceptions): retired items,
- * non-draft or stale versions.
+ * `app.approve_knowledge_version(item, version)` — actor from `app.current_user()`
+ * (SET by withTenant from the session, never a caller UUID), item lock +
+ * latest-draft check + role gate + hash + ledger + flip + pointer, atomically, as
+ * owner — then audits (markers only) in the same txn. Pre-checks run first so
+ * failures 409/403 (not raw DEFINER exceptions): retired items, non-draft or stale
+ * versions. No approvedBy param (P09.05 identity fix): nominating another user's
+ * UUID is inexpressible — the txn actor IS the approver.
  */
 export async function approveKnowledgeVersion(
   client: TenantClient,
-  input: { itemId: string; versionId: string; approvedBy: string },
+  input: { itemId: string; versionId: string },
 ): Promise<KnowledgeItem> {
   if (!UUID_RE.test(input.versionId)) throw new RangeError('knowledge version id must be a uuid');
-  if (!UUID_RE.test(input.approvedBy)) throw new RangeError('approver must be a user id');
   const row = await lockItem(client, input.itemId);
   if (row.state === 'retired') throw new VersionConflictError('knowledge item is retired');
-  // Pre-checks BEFORE the DEFINER call (the fn raises invalid_parameter_value on
+  // Pre-checks BEFORE the DEFINER call (the fn raises insufficient_privilege on
   // the same conditions — the service maps everything to 409 so callers never see
   // raw DB exceptions): the target must be a draft of THIS item AND the latest
   // version_no (latest check + item lock in the same txn: a concurrent newer draft
@@ -319,10 +321,9 @@ export async function approveKnowledgeVersion(
   }
   // The single publish door: ledger + flip + pointer, atomically, as owner. Direct
   // SQL cannot publish (no UPDATE on versions, no INSERT on approvals — 42501).
-  await client.query(`select app.approve_knowledge_version($1, $2, $3)`, [
+  await client.query(`select app.approve_knowledge_version($1, $2)`, [
     input.itemId,
     input.versionId,
-    input.approvedBy,
   ]);
   const item = await client.query<ItemRow>(
     `select id, state, live_version_id::text, version::text from knowledge_items where id = $1`,

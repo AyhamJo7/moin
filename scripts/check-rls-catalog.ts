@@ -160,7 +160,7 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.unassign_member_tasks': 'a3b165fb4ab8fd567dd0916b74c5135c',
   'app.resolve_route': 'c3601d8e5093f32bfc1da1a2220f31ed',
   'app.delete_orphan_conversation': '5f3521c945e93b5d4b2eaae66d9cd3fd',
-  'app.approve_knowledge_version': 'facdadccabd390e88a086dcc49f6bbaf',
+  'app.approve_knowledge_version': '11d6a8d33ff827c0414f615f4e7a95a5',
 };
 
 /** Reviewed QG-09 contract. Documentation registration alone cannot change privileges. */
@@ -336,7 +336,7 @@ const APPROVED_DEFINERS: Readonly<
     executeGrantees: ['moin_app'],
   },
   'app.approve_knowledge_version': {
-    arguments: 'uuid, uuid, uuid',
+    arguments: 'uuid, uuid',
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
     executeGrantees: ['moin_app'],

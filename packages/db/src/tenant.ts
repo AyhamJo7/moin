@@ -40,6 +40,9 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** The setting the RLS policies read. One name, one place. */
 export const TENANT_SETTING = 'app.organisation_id';
 
+/** The setting the actor id rides. One name, one place. */
+export const ACTOR_SETTING = 'app.actor_id';
+
 /** Transaction-local correlation for audit rows written inside the tenant. One name, one place. */
 export const CORRELATION_SETTING = 'app.correlation_id';
 
@@ -153,6 +156,10 @@ export async function withTenant<T>(
     await client.query('begin');
     // Transaction-local. The `true` is the whole argument of this module.
     await client.query('select set_config($1, $2, true)', [TENANT_SETTING, organisationId]);
+    // Actor alongside the tenant, same transaction-local scope: in-database writers
+    // (approval role gate) resolve WHO acts without trusting a caller-supplied UUID.
+    // Empty string when unset — NULLIF at the read site turns it into NULL.
+    await client.query('select set_config($1, $2, true)', [ACTOR_SETTING, context.actorId ?? '']);
     // Correlation alongside the tenant, same transaction-local scope: in-database audit writers
     // (invitation acceptance, account recovery) read it back for their rows. Empty string when
     // unset — NULLIF at the read site turns it into NULL, so a missing correlation can never

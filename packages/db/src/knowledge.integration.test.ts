@@ -82,12 +82,15 @@ describe('knowledge', () => {
         metadata: META,
       }),
     );
-    const approved = await withTenant(app, ORG_A, (client) =>
-      approveKnowledgeVersion(client, {
-        itemId: created.item.id,
-        versionId: created.version.id,
-        approvedBy: STAFF,
-      }),
+    const approved = await withTenant(
+      app,
+      ORG_A,
+      (client) =>
+        approveKnowledgeVersion(client, {
+          itemId: created.item.id,
+          versionId: created.version.id,
+        }),
+      { actorId: STAFF },
     );
     expect(approved.state).toBe('approved');
     expect(approved.liveVersionId).toBe(created.version.id);
@@ -109,12 +112,15 @@ describe('knowledge', () => {
     expect(stillLive?.id).toBe(created.version.id);
     expect(stillLive?.body).toBe('Montags geschlossen.');
     // Approving v2 flips the pointer atomically.
-    await withTenant(app, ORG_A, (client) =>
-      approveKnowledgeVersion(client, {
-        itemId: created.item.id,
-        versionId: draft.id,
-        approvedBy: STAFF,
-      }),
+    await withTenant(
+      app,
+      ORG_A,
+      (client) =>
+        approveKnowledgeVersion(client, {
+          itemId: created.item.id,
+          versionId: draft.id,
+        }),
+      { actorId: STAFF },
     );
     const flipped = await withTenant(app, ORG_A, (client) =>
       getLiveVersion(client, created.item.id),
@@ -133,21 +139,27 @@ describe('knowledge', () => {
           metadata: META,
         }),
       );
-      await withTenant(app, ORG_A, (client) =>
-        approveKnowledgeVersion(client, {
-          itemId: created.item.id,
-          versionId: created.version.id,
-          approvedBy: STAFF,
-        }),
-      );
-      // Same version twice: already approved, no draft to flip.
-      await expect(
-        withTenant(app, ORG_A, (client) =>
+      await withTenant(
+        app,
+        ORG_A,
+        (client) =>
           approveKnowledgeVersion(client, {
             itemId: created.item.id,
             versionId: created.version.id,
-            approvedBy: STAFF,
           }),
+        { actorId: STAFF },
+      );
+      // Same version twice: already approved, no draft to flip.
+      await expect(
+        withTenant(
+          app,
+          ORG_A,
+          (client) =>
+            approveKnowledgeVersion(client, {
+              itemId: created.item.id,
+              versionId: created.version.id,
+            }),
+          { actorId: STAFF },
         ),
       ).rejects.toBeInstanceOf(KnowledgeConflict);
       // Another item's version: wrong pair, never cross-approved.
@@ -159,12 +171,15 @@ describe('knowledge', () => {
         }),
       );
       await expect(
-        withTenant(app, ORG_A, (client) =>
-          approveKnowledgeVersion(client, {
-            itemId: created.item.id,
-            versionId: other.version.id,
-            approvedBy: STAFF,
-          }),
+        withTenant(
+          app,
+          ORG_A,
+          (client) =>
+            approveKnowledgeVersion(client, {
+              itemId: created.item.id,
+              versionId: other.version.id,
+            }),
+          { actorId: STAFF },
         ),
       ).rejects.toBeInstanceOf(KnowledgeConflict);
       // Retire, then retire again: terminal, second 409s.
@@ -197,12 +212,15 @@ describe('knowledge', () => {
         metadata: META,
       }),
     );
-    await withTenant(app, ORG_A, (client) =>
-      approveKnowledgeVersion(client, {
-        itemId: created.item.id,
-        versionId: created.version.id,
-        approvedBy: STAFF,
-      }),
+    await withTenant(
+      app,
+      ORG_A,
+      (client) =>
+        approveKnowledgeVersion(client, {
+          itemId: created.item.id,
+          versionId: created.version.id,
+        }),
+      { actorId: STAFF },
     );
     const v2 = await withTenant(app, ORG_A, (client) =>
       editKnowledgeItem(client, created.item.id, {
@@ -222,12 +240,15 @@ describe('knowledge', () => {
     expect(v3.versionNo).toBe(3);
     // v2 is stale the moment v3 exists: approving it 409s, the live v1 keeps serving.
     await expect(
-      withTenant(app, ORG_A, (client) =>
-        approveKnowledgeVersion(client, {
-          itemId: created.item.id,
-          versionId: v2.id,
-          approvedBy: STAFF,
-        }),
+      withTenant(
+        app,
+        ORG_A,
+        (client) =>
+          approveKnowledgeVersion(client, {
+            itemId: created.item.id,
+            versionId: v2.id,
+          }),
+        { actorId: STAFF },
       ),
     ).rejects.toBeInstanceOf(KnowledgeConflict);
     const stillLive = await withTenant(app, ORG_A, (client) =>
@@ -235,12 +256,15 @@ describe('knowledge', () => {
     );
     expect(stillLive?.id).toBe(created.version.id);
     // The latest draft approves cleanly.
-    await withTenant(app, ORG_A, (client) =>
-      approveKnowledgeVersion(client, {
-        itemId: created.item.id,
-        versionId: v3.id,
-        approvedBy: STAFF,
-      }),
+    await withTenant(
+      app,
+      ORG_A,
+      (client) =>
+        approveKnowledgeVersion(client, {
+          itemId: created.item.id,
+          versionId: v3.id,
+        }),
+      { actorId: STAFF },
     );
     const flipped = await withTenant(app, ORG_A, (client) =>
       getLiveVersion(client, created.item.id),
@@ -259,12 +283,15 @@ describe('knowledge', () => {
         metadata: META,
       }),
     );
-    await withTenant(app, ORG_A, (client) =>
-      approveKnowledgeVersion(client, {
-        itemId: created.item.id,
-        versionId: created.version.id,
-        approvedBy: STAFF,
-      }),
+    await withTenant(
+      app,
+      ORG_A,
+      (client) =>
+        approveKnowledgeVersion(client, {
+          itemId: created.item.id,
+          versionId: created.version.id,
+        }),
+      { actorId: STAFF },
     );
     const v2 = await withTenant(app, ORG_A, (client) =>
       editKnowledgeItem(client, created.item.id, {
@@ -281,16 +308,16 @@ describe('knowledge', () => {
       }),
     );
     // Direct DEFINER call for stale v2 (no service pre-check in this path).
-    // The fn raises invalid_parameter_value (22023), not the trigger's 42501.
+    // P09.05: 2-arg door, actor from the txn (insufficient_privilege, 42501).
     await expect(
-      withTenant(app, ORG_A, (client) =>
-        client.query(`select app.approve_knowledge_version($1, $2, $3)`, [
-          created.item.id,
-          v2.id,
-          STAFF,
-        ]),
+      withTenant(
+        app,
+        ORG_A,
+        (client) =>
+          client.query(`select app.approve_knowledge_version($1, $2)`, [created.item.id, v2.id]),
+        { actorId: STAFF },
       ),
-    ).rejects.toMatchObject({ code: '22023' });
+    ).rejects.toMatchObject({ code: '42501' });
     // v2 stays draft; live still v1.
     const state = await withTenant(app, ORG_A, (client) =>
       client.query<{ state: string }>(`select state from knowledge_versions where id = $1`, [
@@ -311,19 +338,25 @@ describe('knowledge', () => {
       }),
     );
     const outcomes = await Promise.allSettled([
-      withTenant(app, ORG_A, (client) =>
-        approveKnowledgeVersion(client, {
-          itemId: created.item.id,
-          versionId: created.version.id,
-          approvedBy: STAFF,
-        }),
+      withTenant(
+        app,
+        ORG_A,
+        (client) =>
+          approveKnowledgeVersion(client, {
+            itemId: created.item.id,
+            versionId: created.version.id,
+          }),
+        { actorId: STAFF },
       ),
-      withTenant(app, ORG_A, (client) =>
-        approveKnowledgeVersion(client, {
-          itemId: created.item.id,
-          versionId: created.version.id,
-          approvedBy: STAFF,
-        }),
+      withTenant(
+        app,
+        ORG_A,
+        (client) =>
+          approveKnowledgeVersion(client, {
+            itemId: created.item.id,
+            versionId: created.version.id,
+          }),
+        { actorId: STAFF },
       ),
     ]);
     const won = outcomes.filter((r) => r.status === 'fulfilled');
@@ -347,12 +380,15 @@ describe('knowledge', () => {
           metadata: META,
         }),
       );
-      await withTenant(app, ORG_A, (client) =>
-        approveKnowledgeVersion(client, {
-          itemId: created.item.id,
-          versionId: created.version.id,
-          approvedBy: STAFF,
-        }),
+      await withTenant(
+        app,
+        ORG_A,
+        (client) =>
+          approveKnowledgeVersion(client, {
+            itemId: created.item.id,
+            versionId: created.version.id,
+          }),
+        { actorId: STAFF },
       );
       const draft = await withTenant(app, ORG_A, (client) =>
         editKnowledgeItem(client, created.item.id, {
@@ -464,19 +500,25 @@ describe('knowledge', () => {
         metadata: META,
       }),
     );
-    await withTenant(app, ORG_A, (client) =>
-      approveKnowledgeVersion(client, {
-        itemId: first.item.id,
-        versionId: first.version.id,
-        approvedBy: STAFF,
-      }),
+    await withTenant(
+      app,
+      ORG_A,
+      (client) =>
+        approveKnowledgeVersion(client, {
+          itemId: first.item.id,
+          versionId: first.version.id,
+        }),
+      { actorId: STAFF },
     );
-    await withTenant(app, ORG_A, (client) =>
-      approveKnowledgeVersion(client, {
-        itemId: second.item.id,
-        versionId: second.version.id,
-        approvedBy: STAFF,
-      }),
+    await withTenant(
+      app,
+      ORG_A,
+      (client) =>
+        approveKnowledgeVersion(client, {
+          itemId: second.item.id,
+          versionId: second.version.id,
+        }),
+      { actorId: STAFF },
     );
     // approved → draft directly: forward-only, trigger rejects.
     await expect(
@@ -562,12 +604,15 @@ describe('knowledge', () => {
         metadata: META,
       }),
     );
-    await withTenant(app, ORG_A, (client) =>
-      approveKnowledgeVersion(client, {
-        itemId: created.item.id,
-        versionId: created.version.id,
-        approvedBy: STAFF,
-      }),
+    await withTenant(
+      app,
+      ORG_A,
+      (client) =>
+        approveKnowledgeVersion(client, {
+          itemId: created.item.id,
+          versionId: created.version.id,
+        }),
+      { actorId: STAFF },
     );
     await withTenant(app, ORG_A, async (client) => {
       const events = await listAuditEvents(client);
