@@ -179,17 +179,17 @@ export async function sweepReverify(
         result: 'succeeded',
       });
     }
-    await client.query(
+    // First-writer-wins (ROUND-4 P1, same shape as the card path): a
+    // concurrent sweep may have queued this item first. ON CONFLICT DO
+    // NOTHING inserts zero rows for the loser (node-pg reports rowCount
+    // null, never 0 — check `!== 1`). The loser skips task + audit.
+    const inserted = await client.query(
       `insert into knowledge_reverify_queue (organisation_id, id, item_id, due_at)
        values (app.current_org(), $1, $2, $3)
        on conflict (organisation_id, item_id) do nothing`,
       [randomUUID(), row.item_id, instant],
     );
-    const queued = await client.query<{ task_id: string | null }>(
-      `select task_id::text from knowledge_reverify_queue where item_id = $1`,
-      [row.item_id],
-    );
-    if (queued.rows[0]?.task_id != null) continue;
+    if (inserted.rowCount !== 1) continue;
     // Per-CYCLE key (ROUND-2 P1-1): reverify:<item>:<liveVersion>. A bare
     // per-item key would first-write-win back the DONE task from the previous
     // cycle — the queue row is deleted on approve, so the next sweep must
@@ -233,10 +233,19 @@ export async function sweepReverify(
     [day, instant],
   );
   for (const card of cards.rows) {
-    checked += 1;
     const sensitive = card.sensitivity === 'sensitive';
     if (sensitive) {
-      await client.query(`update faq_cards set active = false where id = $1`, [card.id]);
+      // Anchor-guarded (ROUND-4 P1): an owner update committing between the
+      // select and this update bumps updated_at — deactivating by id alone
+      // would kill the REVIEWED card. Zero rows = the update won: skip, the
+      // fresh content has a fresh deadline.
+      const guarded = await client.query(
+        `update faq_cards set active = false where id = $1
+         and extract(epoch from updated_at)::bigint = $2::bigint and active = true`,
+        [card.id, card.anchor],
+      );
+      if ((guarded.rowCount ?? 0) === 0) continue;
+      checked += 1;
       await appendAuditEvent(client, {
         source: 'api',
         operation: 'faq.suspend',
@@ -245,13 +254,21 @@ export async function sweepReverify(
         argsSanitized: { version: 1 },
         result: 'succeeded',
       });
+    } else {
+      checked += 1;
     }
-    await client.query(
+    // First-writer-wins (ROUND-4 P1): a concurrent sweep may have queued this
+    // card first — ON CONFLICT DO NOTHING returns zero rows for the loser.
+    // The loser skips task + audit (no duplicates, no inflated counts).
+    // NOTE: node-pg reports rowCount null (not 0) for ON CONFLICT DO NOTHING
+    // when no row inserts — check `!== 1`, never `=== 0`.
+    const queued = await client.query(
       `insert into knowledge_reverify_queue (organisation_id, id, card_id, due_at)
        values (app.current_org(), $1, $2, $3)
        on conflict (organisation_id, card_id) do nothing`,
       [randomUUID(), card.id, instant],
     );
+    if (queued.rowCount !== 1) continue;
     const task = await createTask(client, {
       title: REVERIFY_TASK_TITLE,
       type: 'review',

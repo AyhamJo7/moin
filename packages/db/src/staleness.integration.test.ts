@@ -432,8 +432,24 @@ describe('staleness', () => {
     expect(flag.rows[0]?.active).toBe(false);
     // ROUND-3 P1-2: repeat sweep converges — handled cards are excluded, so
     // the second run reports zero new work and creates no new card tasks.
+    // ROUND-4 P1: the count assertion doubles as the concurrent-sweep guard —
+    // a loser sweep that skipped on the first-writer-wins queue insert reports
+    // no task and appends no audit; sequential repeats prove the same path.
+    const auditBefore = await withTenant(app, ORG_A, async (client) => {
+      const events = await listAuditEvents(client);
+      return events.filter(
+        (e) => e.operation === 'faq.suspend' || e.operation === 'faq.reverify_task',
+      ).length;
+    });
     const second = await withTenant(app, ORG_A, (client) => sweepReverify(client, late));
-    expect(second.tasksCreated).toBe(0);
+    expect(second).toMatchObject({ checked: 0, suspended: 0, tasksCreated: 0 });
+    const auditAfter = await withTenant(app, ORG_A, async (client) => {
+      const events = await listAuditEvents(client);
+      return events.filter(
+        (e) => e.operation === 'faq.suspend' || e.operation === 'faq.reverify_task',
+      ).length;
+    });
+    expect(auditAfter).toBe(auditBefore);
     const cardTasks = await withTenant(app, ORG_A, (client) =>
       client.query<{ n: string }>(
         `select count(*)::text as n from tasks where title = 'Wissen prüfen'
