@@ -5,7 +5,7 @@
 | Evidence ID | EV-P09-007 |
 | Item | P09.05.03 |
 | Date (UTC) | 2026-10-11 19:05 UTC (ROUND-2 fix; ROUND-1 18:35 UTC; initial 16:02 UTC) |
-| Commit | `TBD (this push)` — prior pin `fff0fc7` (superseded by ROUND-2) |
+| Commit | `bc10253` (ROUND-2 fix incl. EV + ledger; prior pin `fff0fc7` superseded) |
 | Environment | local |
 | Command / procedure | `gates.py full` 14/14 PASS (artifact `20261011T170043Z-full.json`): control-plane, control-plane-lint, conventions, docs-consistency, format, lint, boundaries, typecheck, unit, integration (30.1 s), migrations, build, licences, secret-scan. One transient support-suite timing failure on the first full run (lock-wait + redirect assertions, unrelated files, green standalone + green on re-run). Test env vars exported from the example env file (no worktree secrets file; INV-15); pinned Node 24.21.0 / pnpm 10.34.5 on PATH. |
 | Result | PASS |
