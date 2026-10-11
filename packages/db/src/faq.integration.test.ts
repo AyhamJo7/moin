@@ -169,7 +169,8 @@ describe('faq', () => {
         locA,
       ]),
     );
-    // Location-specific card: matches unfiltered and at its location, not elsewhere.
+    // Location-specific card: fail-CLOSED — unfiltered calls return globally-valid
+    // cards only, so the location card needs its location named; elsewhere stays null.
     await withTenant(app, ORG_A, (client) =>
       createFaqCard(client, {
         canonical: 'Mittagsangebot?',
@@ -181,7 +182,7 @@ describe('faq', () => {
     const open = await withTenant(app, ORG_A, (client) =>
       findAnswer(client, 'Mittagstisch Hinweis'),
     );
-    expect(open).not.toBeNull();
+    expect(open).toBeNull();
     const here = await withTenant(app, ORG_A, (client) =>
       findAnswer(client, { query: 'Mittagstisch Hinweis', locationId: locA }),
     );
@@ -193,7 +194,8 @@ describe('faq', () => {
       }),
     );
     expect(away).toBeNull();
-    // Message-only card: matches on message, not on call.
+    // Message-only card: fail-CLOSED — unfiltered calls need both channels, so a
+    // message-only card matches on message, not on call, and not unfiltered.
     await withTenant(app, ORG_A, (client) =>
       createFaqCard(client, {
         canonical: 'Speisekarte per Mail?',
@@ -202,6 +204,10 @@ describe('faq', () => {
         channels: ['message'],
       }),
     );
+    const unfiltered = await withTenant(app, ORG_A, (client) =>
+      findAnswer(client, 'Karte per Mail Hinweis'),
+    );
+    expect(unfiltered).toBeNull();
     const onMessage = await withTenant(app, ORG_A, (client) =>
       findAnswer(client, { query: 'Karte per Mail Hinweis', channel: 'message' }),
     );

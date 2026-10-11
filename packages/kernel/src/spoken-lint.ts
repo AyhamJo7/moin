@@ -39,6 +39,13 @@ const READOUT_CUE_RE = /\b(null|ziffern?|nummer|telefon|rief an unter|durchwahl)
 function hasSeparator(run: string): boolean {
   return READOUT_SEPARATOR_RE.test(`0${run}0`);
 }
+
+// Cue words anchor a run only within ~25 chars: "Unsere Telefonnummer ist 030 123
+// 456, Kundenkonto 987654" must not bless 987654 via the distant Telefonnummer —
+// the cue belongs to the first run, not the second. Window measured on the raw text
+// around THIS run's span (either side: "987654, Ihre Telefonnummer" also counts).
+const CUE_WINDOW_CHARS = 25;
+
 // Capitalised words with non-German sequences (q without u, double consonants
 // outside German patterns, w/v/y clusters) — hint only, never reject.
 const FOREIGN_NAME_RE =
@@ -57,10 +64,17 @@ export function lintSpokenAnswer(text: string): SpokenLint {
   if (URL_RE.test(trimmed)) {
     errors.push('spoken answer contains a URL (callers cannot click spoken links)');
   }
-  const cue = READOUT_CUE_RE.test(trimmed);
   for (const run of trimmed.matchAll(LONG_DIGITS_RE)) {
     const digits = run[0];
-    if (!hasSeparator(digits) && !cue) {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- matchAll/g types index as optional though always set; the fallback documents the invariant.
+    const start = run.index ?? 0;
+    // Per-run cue window: ±25 chars around THIS run's span. A cue next to another
+    // run does not bless this one.
+    const window = trimmed.slice(
+      Math.max(0, start - CUE_WINDOW_CHARS),
+      start + digits.length + CUE_WINDOW_CHARS,
+    );
+    if (!hasSeparator(digits) && !READOUT_CUE_RE.test(window)) {
       errors.push(
         `digit run "${digits}" needs read-out formatting (spaces/dashes inside the run or a cue like "Nummer")`,
       );

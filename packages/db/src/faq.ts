@@ -265,9 +265,10 @@ async function matchCards(
   const trimmed = input.query.trim();
   if (trimmed.length === 0 || trimmed.length > 200)
     throw new RangeError('query must be 1..200 characters');
-  // Optional filters, validated when present: a location-specific or message-only
-  // card must not surface on the wrong location or channel. Defaults are OPEN
-  // (no constraint) — the caller constrains when the call context has one.
+  // Fail-CLOSED defaults: an unfiltered call returns globally-valid cards ONLY.
+  // No locationId → location_id IS NULL required (location-specific cards need
+  // their location named). No channel → the card must serve BOTH channels (a
+  // message-only card must not speak on a voice call the caller never named).
   const location =
     input.locationId === undefined
       ? null
@@ -288,8 +289,10 @@ async function matchCards(
      from faq_cards
      where organisation_id = app.current_org() and active = true
        and ($2::boolean = false or sensitivity <> 'sensitive')
-       and ($3::uuid is null or location_id is null or location_id = $3::uuid)
-       and ($4::text is null or $4::text = any (allowed_channels))
+       and ($3::uuid is null and location_id is null
+            or $3::uuid is not null and (location_id is null or location_id = $3::uuid))
+       and ($4::text is null and allowed_channels @> '{call,message}'
+            or $4::text is not null and $4::text = any (allowed_channels))
        and (canonical % $1 or exists (select 1 from unnest(variants) v where v % $1))
      order by score desc limit 3`,
     [trimmed, excludeSensitive, location, input.channel ?? null],

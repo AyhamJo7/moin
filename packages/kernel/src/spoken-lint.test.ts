@@ -28,4 +28,11 @@ describe('spoken lint', () => {
     expect(lintSpokenAnswer('PLZ 20500 12345678.').ok).toBe(false);
     expect(lintSpokenAnswer('PLZ 20500 123 456.').ok).toBe(true);
   });
+
+  it('ties cues per-run: a distant cue does not bless an unreadable run', () => {
+    expect(lintSpokenAnswer('Unsere Telefonnummer ist 030 123 456, Kundenkonto 987654.').ok).toBe(
+      false,
+    );
+    expect(lintSpokenAnswer('Kundenkonto Nummer 987654 lautet.').ok).toBe(true);
+  });
 });
