@@ -539,6 +539,79 @@ describe('staleness', () => {
     expect(hit?.stale).toBe(false);
   });
 
+  evidenceTest('sweep skips cards deactivated or refreshed before lock acquisition', async () => {
+    // ROUND-7 P1: the locked re-read repeats the FULL eligibility predicate
+    // (active + unexpired + still overdue + unqueued). A card deactivated or
+    // refreshed after the lock-free candidate select is absent from the
+    // locked rows → skipped, never tasked on stale state. A true mid-gap
+    // interleave is not drivable from this single-connection harness, so
+    // this pins the observable halves: a deactivated card and a refreshed
+    // card are both invisible to the sweep, while a still-overdue twin is
+    // tasked normally.
+    const deactivated = await withTenant(app, ORG_A, (client) =>
+      createFaqCard(client, {
+        canonical: 'Gibt es heute Dessert?',
+        spoken: 'Ja, Apfelstrudel mit Vanillesosse.',
+        reverifyAfterDays: 1,
+      }),
+    );
+    const refreshed = await withTenant(app, ORG_A, (client) =>
+      createFaqCard(client, {
+        canonical: 'Gibt es heute Vorspeise?',
+        spoken: 'Ja, Kuerbiscremesuppe zum Auftakt.',
+        reverifyAfterDays: 1,
+      }),
+    );
+    const twin = await withTenant(app, ORG_A, (client) =>
+      createFaqCard(client, {
+        canonical: 'Gibt es heute Hauptgang?',
+        spoken: 'Ja, Pilzragout mit Knoedeln.',
+        reverifyAfterDays: 1,
+      }),
+    );
+    await withTenant(app, ORG_A, (client) =>
+      client.query(
+        `update faq_cards set updated_at = now() - interval '2 days'
+         where id = any ($1::uuid[])`,
+        [[deactivated.id, refreshed.id, twin.id]],
+      ),
+    );
+    // One card deactivated by owner review flow, one refreshed to a fresh
+    // deadline — both before the sweep runs.
+    await withTenant(app, ORG_A, (client) =>
+      client.query(`update faq_cards set active = false where id = $1`, [deactivated.id]),
+    );
+    await withTenant(app, ORG_A, (client) =>
+      updateFaqCard(client, refreshed.id, {
+        canonical: 'Gibt es heute Vorspeise?',
+        spoken: 'Ja, Kuerbiscremesuppe zum Auftakt.',
+        reverifyAfterDays: 30,
+        expectedVersion: 1,
+      }),
+    );
+    const late = new Date(Date.now() + 2 * 86_400_000);
+    const sweep = await withTenant(app, ORG_A, (client) => sweepReverify(client, late));
+    expect(sweep.tasksCreated).toBeGreaterThanOrEqual(1);
+    // Deactivated + refreshed: no queue rows (ineligible at locked re-read).
+    for (const cardId of [deactivated.id, refreshed.id]) {
+      const queued = await withTenant(app, ORG_A, (client) =>
+        client.query<{ n: string }>(
+          `select count(*)::text as n from knowledge_reverify_queue where card_id = $1`,
+          [cardId],
+        ),
+      );
+      expect(queued.rows[0]?.n).toBe('0');
+    }
+    // The still-overdue twin: queued + tasked exactly once.
+    const twinQueued = await withTenant(app, ORG_A, (client) =>
+      client.query<{ n: string }>(
+        `select count(*)::text as n from knowledge_reverify_queue where card_id = $1 and task_id is not null`,
+        [twin.id],
+      ),
+    );
+    expect(twinQueued.rows[0]?.n).toBe('1');
+  });
+
   evidenceTest('concurrent sweeps do not duplicate card tasks or audits', async () => {
     // ROUND-6 P1: the card select holds FOR UPDATE row locks, so two sweeps
     // racing the same overdue card serialize — the loser finds the queue row

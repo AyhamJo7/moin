@@ -252,9 +252,30 @@ export async function sweepReverify(
       ? []
       : (
           await client.query<{ id: string; sensitivity: string; anchor: string }>(
-            `select id::text, sensitivity, extract(epoch from updated_at)::bigint::text as anchor
-           from faq_cards where id = any ($1::uuid[]) order by id for update`,
-            [candidates.rows.map((r) => r.id)],
+            // Eligibility re-check under lock (ROUND-7 P1): the lock-free
+            // candidate select and this acquisition bracket a gap — an owner
+            // update or deactivate committing inside it would otherwise flow
+            // through on a stale snapshot (fresh or inactive content tasked).
+            // FOR UPDATE cannot touch the nullable queue side of an outer
+            // join, so the lock targets faq_cards alone by id; the re-check
+            // repeats the FULL predicate minus the queue leg (active +
+            // unexpired + still overdue — the queue conflict is caught by the
+            // anchor-carrying INSERT...SELECT below, which skips on zero
+            // rows). Cards failing the recheck are simply absent here →
+            // skipped. Same treatment the item path gets from its
+            // version-guarded UPDATE (it re-checks liveness at write time;
+            // here the re-check rides the locked read because the card path
+            // has no write before the queue insert to guard on).
+            `select id::text, sensitivity,
+                    extract(epoch from updated_at)::bigint::text as anchor
+             from faq_cards
+             where organisation_id = app.current_org()
+               and id = any ($3::uuid[])
+               and active = true
+               and coalesce(valid_until < $1::date, false) = false
+               and coalesce(updated_at + reverify_after <= $2::timestamptz, false) = true
+             order by id for update`,
+            [day, instant, candidates.rows.map((r) => r.id)],
           )
         ).rows;
   for (const card of locked) {
