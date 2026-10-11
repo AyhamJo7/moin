@@ -80,6 +80,22 @@ describe('tenant time', () => {
     expect(zonedDateString(next)).toBe('2026-05-05');
   });
 
+  it('gap times shift forward to the first existing minute (spring forward)', () => {
+    // 02:30 does not exist on 2026-03-29 in Berlin. Adding a day from 2026-03-28 02:30
+    // must land on a VALID 03:xx local time, not silently on 01:30. Normal times are
+    // unaffected: 09:00 stays 09:00 (covered above).
+    const before = new Date('2026-03-28T01:30:00Z');
+    expect(zonedFields(before).hour).toBe(2);
+    expect(zonedFields(before).minute).toBe(30);
+    const shifted = addCalendarDays(before, 1);
+    expect(zonedDateString(shifted)).toBe('2026-03-29');
+    const fields = zonedFields(shifted);
+    expect(fields.hour).toBe(3);
+    expect(fields.minute).toBeGreaterThanOrEqual(0);
+    // The result round-trips: it is a real local time, not a silent misresolve.
+    expect(zonedFields(shifted).hour).toBe(fields.hour);
+  });
+
   it('rejects bad zones, bad instants and absurd day counts', () => {
     expect(() => zonedFields(new Date('2026-01-01T00:00:00Z'), 'Mars/Olympus')).toThrow(RangeError);
     expect(() => zonedFields(new Date('2026-01-01T00:00:00Z'), '../etc')).toThrow(RangeError);

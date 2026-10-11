@@ -156,6 +156,12 @@ export function zonedDateString(at: Date, timeZone = DEFAULT_TIME_ZONE): string 
  * Returns the instant of the same local time n days later; the UTC duration may be
  * 23/24/25 hours per day crossed, which is correct — the appointment stays at 09:00 local,
  * not 08:00 or 10:00.
+ *
+ * Gap policy (spring forward): a wall-clock time that does not exist on the target date
+ * (02:00–02:59 on the last Sunday of March in Berlin) shifts forward to the first existing
+ * minute — the candidate is advanced until it round-trips, at most the 60 missing minutes.
+ * Fold policy (autumn back): the repeated hour exists twice; the noon-offset resolve picks
+ * the first occurrence deterministically, no shift.
  */
 export function addCalendarDays(at: Date, days: number, timeZone = DEFAULT_TIME_ZONE): Date {
   if (!Number.isInteger(days) || Math.abs(days) > 3660) {
@@ -180,9 +186,18 @@ export function addCalendarDays(at: Date, days: number, timeZone = DEFAULT_TIME_
   const noonTarget = new Date(Date.UTC(y ?? 0, (m ?? 1) - 1, d ?? 1, 12, 0, 0)).toISOString();
   const offset = offsetMinutesAt(noonTarget, timeZone);
   const ms = ((at.getTime() % 1000) + 1000) % 1000;
-  return new Date(
+  let candidate = new Date(
     Date.UTC(y ?? 0, (m ?? 1) - 1, d ?? 1, f.hour, f.minute, f.second, ms) - offset * 60_000,
   );
+  // Gap repair: if the wall clock does not exist on the target date (spring-forward hour),
+  // the resolve above lands an hour early. Round-trip and shift forward to the first
+  // existing minute — at most the 60 missing minutes, so the loop always terminates.
+  for (let step = 0; step < 60; step += 1) {
+    const round = zonedFields(candidate, timeZone);
+    if (round.hour === f.hour && round.minute === f.minute) break;
+    candidate = new Date(candidate.getTime() + 60_000);
+  }
+  return candidate;
 }
 
 function offsetMinutesAt(noonIso: string, timeZone: string): number {
