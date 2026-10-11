@@ -141,25 +141,31 @@ describe('concurrency', () => {
       const sweepResult = racers[2];
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- allSettled element access types as possibly undefined; the index exists by construction.
       if (sweepResult?.status !== 'fulfilled') throw new Error('sweep racer rejected');
-      const directCreated = direct.filter(
-        (r) =>
-          r.status === 'fulfilled' &&
-          'verdict' in r.value &&
-          r.value.verdict === 'fallback-created',
-      ).length;
+      // Both direct racers must settle fulfilled: a rejected direct is a failure LOUDLY,
+      // never a silently excluded non-creator. Each fulfilled direct carries a verdict.
+      const directVerdicts = direct.map((r) => {
+        if (r.status !== 'fulfilled') {
+          throw new Error(`direct finaliser rejected: ${String(r.reason)}`);
+        }
+        if (!('verdict' in r.value)) throw new Error('direct result has no verdict');
+        return r.value.verdict;
+      });
+      const directCreated = directVerdicts.filter((v) => v === 'fallback-created').length;
       const sweepEntry = sweepResult.value.orphans.find((o) => o.conversationId === convo.id);
       if (sweepEntry === undefined) {
-        // Sweep observed the post-winner state: direct created exactly once.
+        // Sweep observed the post-winner state: one direct created, the other task-existed.
         expect(directCreated).toBe(1);
+        expect(directVerdicts.filter((v) => v === 'task-existed')).toHaveLength(1);
       } else if (sweepEntry.verdict === 'fallback-created') {
-        // Sweep won outright: no direct creator (both direct racers lost the lock race
-        // and reported task-existed).
+        // Sweep won outright: both direct racers lost the lock race and reported task-existed.
         expect(directCreated).toBe(0);
+        expect(directVerdicts).toStrictEqual(['task-existed', 'task-existed']);
       } else {
         // Sweep claimed while uncovered, then the direct winner covered it first:
-        // task-existed observation, exactly one direct creator.
+        // task-existed observation, exactly one direct creator and one direct observer.
         expect(sweepEntry.verdict).toBe('task-existed');
         expect(directCreated).toBe(1);
+        expect(directVerdicts.filter((v) => v === 'task-existed')).toHaveLength(1);
       }
       const tasks = await withTenant(app, ORG_A, (client) => listOpenTasks(client));
       expect(tasks.filter((t) => t.conversationId === convo.id)).toHaveLength(1);
