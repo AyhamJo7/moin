@@ -101,6 +101,25 @@ and **whether it is defensible at all is an open EXT-02 question**.
 | `duplicate_candidates.value`                 | Contact  | **yes** (the shared verified value itself)                    | 24 months after the merge                 | hard delete | —            |
 | `duplicate_candidates.status`                | Contact  | no alone (review workflow state)                              | 24 months after the merge                 | hard delete | —            |
 | `duplicate_candidates.review_task_id`        | Contact  | yes (references)                                              | 24 months after the merge                 | hard delete | —            |
+| `duplicate_candidates.signal_name`           | Contact  | **yes** (normalised display name)                             | 24 months after the merge                 | hard delete | —            |
+| `duplicate_candidates.signal_postal`         | Contact  | yes in combination (PLZ with name)                            | 24 months after the merge                 | hard delete | —            |
+| `duplicate_candidates.signal_local`          | Contact  | **yes** (email local part)                                    | 24 months after the merge                 | hard delete | —            |
+| `duplicate_candidates.ai_suggested`          | Contact  | no alone (boolean flag)                                       | 24 months after the merge                 | hard delete | —            |
+| `contact_merges.winner_id`                   | Contact  | yes (references)                                              | 24 months after the merge                 | hard delete | —            |
+| `contact_merges.loser_id`                    | Contact  | yes (references, row deleted)                                 | 24 months after the merge                 | hard delete | —            |
+| `contact_merges.approved_by`                 | Contact  | yes (staff user reference)                                    | 24 months after the merge                 | hard delete | —            |
+| `contact_merges.candidate_id`                | Contact  | yes (references)                                              | 24 months after the merge                 | hard delete | —            |
+| `contact_merges.moved_method_ids`            | Contact  | yes (references)                                              | 24 months after the merge                 | hard delete | —            |
+| `contact_merges.moved_link_ids`              | Contact  | yes (references)                                              | 24 months after the merge                 | hard delete | —            |
+| `contact_merges.moved_conversation_ids`      | Contact  | yes (references)                                              | 24 months after the merge                 | hard delete | —            |
+| `contact_merges.moved_call_ids`              | Contact  | yes (references)                                              | 24 months after the merge                 | hard delete | —            |
+| `contact_merges.moved_task_ids`              | Contact  | yes (references)                                              | 24 months after the merge                 | hard delete | —            |
+| `contact_merges.moved_lead_ids`              | Contact  | yes (references)                                              | 24 months after the merge                 | hard delete | —            |
+| `contact_merges.moved_request_ids`           | Contact  | yes (references)                                              | 24 months after the merge                 | hard delete | —            |
+| `contact_merges.moved_note_ids`              | Contact  | yes (references)                                              | 24 months after the merge                 | hard delete | —            |
+| `contact_merges.merged_at`                   | Contact  | no alone (merge timestamp)                                    | 24 months after the merge                 | hard delete | —            |
+| `contact_merges.unmerged_at`                 | Contact  | no alone (undo timestamp)                                     | 24 months after the merge                 | hard delete | —            |
+| `contact_merges.undone`                      | Contact  | no alone (boolean flag)                                       | 24 months after the merge                 | hard delete | —            |
 | `conversations.channel`                      | Contact  | no alone (which channel, not who)                             | same                                      | hard delete | —            |
 | `conversations.contact_id`                   | Contact  | yes (references)                                              | same                                      | hard delete | —            |
 | `conversations.status`                       | Contact  | no alone (workflow state)                                     | same                                      | hard delete | —            |
