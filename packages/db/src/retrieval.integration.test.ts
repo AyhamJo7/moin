@@ -130,10 +130,17 @@ describe('retrieval-exclusion', () => {
     expect(
       await withTenant(app, ORG_A, (client) => getLiveVersion(client, overdue.itemId)),
     ).toBeNull();
+    // The conflict peer is excluded by the conflict leg alone: it is not
+    // suspended and not overdue at serving time, so neutralising the
+    // conflict predicate (M1) is the only change that lets it back in.
+    expect(
+      await withTenant(app, ORG_A, (client) => getLiveVersion(client, other.itemId)),
+    ).toBeNull();
     const view = await withTenant(app, ORG_A, (client) => readApprovedVersions(client));
     const ids = view.map((v) => v.itemId);
     expect(ids).not.toContain(expired.itemId);
     expect(ids).not.toContain(overdue.itemId);
+    expect(ids).not.toContain(other.itemId);
   });
 
   evidenceTest('disallowed-channel cards absent from catalogue and answers', async () => {
