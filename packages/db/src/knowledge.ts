@@ -290,8 +290,10 @@ export async function editKnowledgeItem(
 /**
  * Approve a draft version: flips the version row to approved, moves the item's live
  * pointer to it, writes the approval row — atomically under the item lock. The version
- * must belong to this item and still be draft; concurrent approves serialise (loser
- * finds no draft version and 409s).
+ * must belong to this item, still be draft, AND be the latest version_no (stale drafts
+ * never go live — P09.05.03 re-verification approves the newest text, not an older
+ * draft superseded while it waited). Concurrent approves serialise on the item lock;
+ * the loser finds no matching draft and 409s.
  */
 export async function approveKnowledgeVersion(
   client: TenantClient,
@@ -301,16 +303,19 @@ export async function approveKnowledgeVersion(
   if (!UUID_RE.test(input.approvedBy)) throw new RangeError('approver must be a user id');
   const row = await lockItem(client, input.itemId);
   if (row.state === 'retired') throw new VersionConflictError('knowledge item is retired');
-  // Guarded flip: only a draft version of THIS item flips. A version row is immutable
-  // afterwards — this single draft→approved transition is its only write, enforced by
-  // the WHERE clause (an approved row never matches again).
+  // Guarded flip: only the LATEST draft version of THIS item flips (latest check +
+  // item lock in the same txn: a concurrent newer draft lands first and this 409s).
+  // A version row's single draft→approved transition is its only write — the trigger
+  // rejects every other UPDATE shape at the DB boundary.
   const flipped = await client.query<{ id: string }>(
     `update knowledge_versions set state = 'approved' where id = $1 and item_id = $2
-       and state = 'draft' returning id::text`,
+       and state = 'draft'
+       and version_no = (select max(version_no) from knowledge_versions where item_id = $2)
+     returning id::text`,
     [input.versionId, input.itemId],
   );
   if (flipped.rows[0] === undefined) {
-    throw new VersionConflictError('knowledge version is not an approvable draft');
+    throw new VersionConflictError('knowledge version is not the latest approvable draft');
   }
   const moved = await client.query<ItemRow>(
     `update knowledge_items set state = 'approved', live_version_id = $1,

@@ -176,6 +176,65 @@ describe('knowledge', () => {
     },
   );
 
+  evidenceTest('stale draft never goes live: approve v2 with v3 pending 409s', async () => {
+    const created = await withTenant(app, ORG_A, (client) =>
+      createKnowledgeItem(client, {
+        title: 'Speisekarte',
+        body: 'Schnitzel 12,90.',
+        metadata: META,
+      }),
+    );
+    await withTenant(app, ORG_A, (client) =>
+      approveKnowledgeVersion(client, {
+        itemId: created.item.id,
+        versionId: created.version.id,
+        approvedBy: STAFF,
+      }),
+    );
+    const v2 = await withTenant(app, ORG_A, (client) =>
+      editKnowledgeItem(client, created.item.id, {
+        title: 'Speisekarte',
+        body: 'Schnitzel 13,90.',
+        metadata: META,
+      }),
+    );
+    const v3 = await withTenant(app, ORG_A, (client) =>
+      editKnowledgeItem(client, created.item.id, {
+        title: 'Speisekarte',
+        body: 'Schnitzel 14,90.',
+        metadata: META,
+      }),
+    );
+    expect(v2.versionNo).toBe(2);
+    expect(v3.versionNo).toBe(3);
+    // v2 is stale the moment v3 exists: approving it 409s, the live v1 keeps serving.
+    await expect(
+      withTenant(app, ORG_A, (client) =>
+        approveKnowledgeVersion(client, {
+          itemId: created.item.id,
+          versionId: v2.id,
+          approvedBy: STAFF,
+        }),
+      ),
+    ).rejects.toBeInstanceOf(KnowledgeConflict);
+    const stillLive = await withTenant(app, ORG_A, (client) =>
+      getLiveVersion(client, created.item.id),
+    );
+    expect(stillLive?.id).toBe(created.version.id);
+    // The latest draft approves cleanly.
+    await withTenant(app, ORG_A, (client) =>
+      approveKnowledgeVersion(client, {
+        itemId: created.item.id,
+        versionId: v3.id,
+        approvedBy: STAFF,
+      }),
+    );
+    const flipped = await withTenant(app, ORG_A, (client) =>
+      getLiveVersion(client, created.item.id),
+    );
+    expect(flipped?.id).toBe(v3.id);
+  });
+
   evidenceTest('concurrent approves serialise: one flips, the other 409s', async () => {
     const created = await withTenant(app, ORG_A, (client) =>
       createKnowledgeItem(client, {
@@ -211,6 +270,66 @@ describe('knowledge', () => {
     }
   });
 
+  evidenceTest(
+    'DB boundary rejects bypass writes: approved body, unretire, draft pointer',
+    async () => {
+      const created = await withTenant(app, ORG_A, (client) =>
+        createKnowledgeItem(client, {
+          title: 'Angebot',
+          body: 'Ab 100 Euro versandkostenfrei.',
+          metadata: META,
+        }),
+      );
+      await withTenant(app, ORG_A, (client) =>
+        approveKnowledgeVersion(client, {
+          itemId: created.item.id,
+          versionId: created.version.id,
+          approvedBy: STAFF,
+        }),
+      );
+      const draft = await withTenant(app, ORG_A, (client) =>
+        editKnowledgeItem(client, created.item.id, {
+          title: 'Angebot',
+          body: 'Ab 150 Euro versandkostenfrei.',
+          metadata: META,
+        }),
+      );
+      // Direct body rewrite of the APPROVED row: trigger rejects (insufficient_privilege).
+      await expect(
+        withTenant(app, ORG_A, (client) =>
+          client.query(`update knowledge_versions set body = 'gehackt' where id = $1`, [
+            created.version.id,
+          ]),
+        ),
+      ).rejects.toMatchObject({ code: '42501' });
+      // Direct live-pointer move to a DRAFT version: items trigger rejects.
+      await expect(
+        withTenant(app, ORG_A, (client) =>
+          client.query(`update knowledge_items set live_version_id = $1 where id = $2`, [
+            draft.id,
+            created.item.id,
+          ]),
+        ),
+      ).rejects.toMatchObject({ code: '42501' });
+      // Retire, then direct unretire: terminal, trigger rejects.
+      await withTenant(app, ORG_A, (client) => retireKnowledgeItem(client, created.item.id));
+      await expect(
+        withTenant(app, ORG_A, (client) =>
+          client.query(`update knowledge_items set state = 'approved' where id = $1`, [
+            created.item.id,
+          ]),
+        ),
+      ).rejects.toMatchObject({ code: '42501' });
+      // Approved content untouched by the rejected writes.
+      const live = await withTenant(app, ORG_A, (client) =>
+        client.query<{ body: string }>(`select body from knowledge_versions where id = $1`, [
+          created.version.id,
+        ]),
+      );
+      expect(live.rows[0]?.body).toBe('Ab 100 Euro versandkostenfrei.');
+    },
+  );
+
   evidenceTest('audit carries markers only, never bodies; tenants isolated', async () => {
     const created = await withTenant(app, ORG_A, (client) =>
       createKnowledgeItem(client, {
@@ -244,6 +363,23 @@ describe('knowledge', () => {
       client.query<{ n: string }>(`select count(*)::text as n from knowledge_versions`),
     );
     expect(foreignVersions.rows[0]?.n).toBe('0');
+    // Cross-tenant location: B's location id on an A version dies as 23503 (composite FK).
+    const bloc = '44444444-4444-4444-8444-444444444444';
+    await withTenant(app, ORG_B, (client) =>
+      client.query(`insert into locations (organisation_id, id, name) values ($1, $2, 'Beta')`, [
+        ORG_B,
+        bloc,
+      ]),
+    );
+    await expect(
+      withTenant(app, ORG_A, (client) =>
+        createKnowledgeItem(client, {
+          title: 'Falsch',
+          body: 'Fremder Standort.',
+          metadata: { ...META, locationId: bloc },
+        }),
+      ),
+    ).rejects.toMatchObject({ code: '23503' });
     const served = await withTenant(app, ORG_B, (client) =>
       getLiveVersion(client, created.item.id),
     );

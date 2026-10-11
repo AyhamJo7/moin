@@ -2,15 +2,18 @@
 -- migration-check: allow create-index-blocking because every index here is on a table created
 -- earlier in this same migration, so it is new and empty.
 --
--- ## Shape: item (mutable shell) + versions (immutable history) + approvals (ledger)
+-- ## Shape: item (mutable shell) + versions (guarded history) + approvals (ledger)
 --
 -- `knowledge_items` is the mutable shell: one row per card/FAQ, carrying the CURRENT
 -- live version pointer (`live_version_id`, NULL until first approval) and the lifecycle
--- state (draft | approved | retired). `knowledge_versions` is append-only history with
--- exactly one permitted write: the draft→approved flip on approval (guarded UPDATE,
--- state='draft' in the WHERE clause — an approved row never matches again).
--- `knowledge_approvals` records who approved which version when (append-only like the
--- audit chain; erasure privileged).
+-- state (draft | approved | retired). `knowledge_versions` is history with exactly one
+-- permitted write: the draft→approved flip on approval. That single write is enforced
+-- at TWO boundaries: the service issues a guarded UPDATE (state='draft' in WHERE), and
+-- the `knowledge_versions_lifecycle` trigger below rejects every other UPDATE shape at
+-- the DB boundary (a hand-written UPDATE of an approved body, a state regression, or a
+-- field edit on a live row all raise — the service can never be bypassed by a future
+-- caller that forgets the guard). `knowledge_approvals` records who approved which
+-- version when (append-only like the audit chain; erasure privileged).
 --
 -- ## Lifecycle (BR-095: Draft → Approved → Retired)
 --
@@ -36,7 +39,7 @@
 -- Bodies NEVER reach audit rows (INV-12): audit carries title + version markers only.
 --
 -- Tenant rows: organisation_id, composite uniques/FKs, RLS + FORCE, moin_app DML
--- (versions: no UPDATE/DELETE; approvals: no UPDATE/DELETE).
+-- (versions: guarded flip only — trigger-enforced; approvals: no UPDATE/DELETE).
 
 CREATE TABLE knowledge_items (
   organisation_id uuid        NOT NULL REFERENCES organisations (id) ON DELETE CASCADE,
@@ -46,8 +49,9 @@ CREATE TABLE knowledge_items (
   state           text        NOT NULL DEFAULT 'draft'
                     CHECK (state IN ('draft', 'approved', 'retired')),
   -- Current live version (NULL until first approval, NULL after retirement).
-  -- Loose reference, no FK: versions are immutable and never deleted, but the pointer
-  -- must clear on retire while the version row lives on as history.
+  -- Loose reference, no FK: versions are never deleted, but the pointer must clear
+  -- on retire while the version row lives on as history. The items trigger below
+  -- constrains pointer moves to approved versions (or NULL on retire).
   live_version_id uuid,
   version         integer     NOT NULL DEFAULT 1,
   created_at      timestamptz NOT NULL DEFAULT now(),
@@ -82,7 +86,14 @@ CREATE TABLE knowledge_versions (
   created_at      timestamptz NOT NULL DEFAULT now(),
   UNIQUE (organisation_id, id),
   UNIQUE (organisation_id, item_id, version_no),
+  -- Item-scoped identity: a version belongs to exactly one (org, item). The approvals
+  -- FK below targets (org, item, id) so an approval can never name an item/version
+  -- pair that do not belong together — the mismatch dies as 23503, not as a 409.
+  UNIQUE (organisation_id, item_id, id),
   FOREIGN KEY (organisation_id, item_id) REFERENCES knowledge_items (organisation_id, id) ON DELETE CASCADE,
+  -- Nullable composite leg to locations (global card when NULL): same-tenant only —
+  -- a cross-tenant location id dies as 23503.
+  FOREIGN KEY (organisation_id, location_id) REFERENCES locations (organisation_id, id) ON DELETE SET NULL,
   CHECK (valid_from IS NULL OR valid_until IS NULL OR valid_from <= valid_until)
 );
 
@@ -100,14 +111,88 @@ CREATE TABLE knowledge_approvals (
   -- the service layer (the item lock serialises it into a 409).
   UNIQUE (organisation_id, version_id),
   FOREIGN KEY (organisation_id, item_id) REFERENCES knowledge_items (organisation_id, id) ON DELETE CASCADE,
-  FOREIGN KEY (organisation_id, version_id) REFERENCES knowledge_versions (organisation_id, id) ON DELETE CASCADE
+  -- Item-scoped: the version must belong to the named item (see versions unique above).
+  FOREIGN KEY (organisation_id, item_id, version_id) REFERENCES knowledge_versions (organisation_id, item_id, id) ON DELETE CASCADE
 );
 
 CREATE INDEX knowledge_approvals_item_idx ON knowledge_approvals (organisation_id, item_id);
 
+-- Lifecycle guards at the DB boundary (the service guard is necessary but not
+-- sufficient — a future caller could forget it; the trigger cannot be forgotten).
+-- ENABLE ALWAYS (not default origin-only): a session GUC must not switch the guard off.
+
+CREATE FUNCTION app.knowledge_versions_lifecycle() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = pg_catalog
+AS $$ BEGIN
+  -- The ONLY legal write: draft → approved, state column alone. Bodies, titles,
+  -- metadata of an approved row are frozen; a draft row's content is written once at
+  -- INSERT (edits create new versions, never UPDATE). Any other shape raises.
+  IF OLD.state <> 'draft' OR NEW.state <> 'approved' THEN
+    RAISE EXCEPTION 'knowledge versions allow only the draft-to-approved flip'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF NEW.id IS DISTINCT FROM OLD.id OR NEW.item_id IS DISTINCT FROM OLD.item_id
+     OR NEW.version_no IS DISTINCT FROM OLD.version_no
+     OR NEW.title IS DISTINCT FROM OLD.title OR NEW.body IS DISTINCT FROM OLD.body
+     OR NEW.source IS DISTINCT FROM OLD.source OR NEW.location_id IS DISTINCT FROM OLD.location_id
+     OR NEW.category IS DISTINCT FROM OLD.category OR NEW.valid_from IS DISTINCT FROM OLD.valid_from
+     OR NEW.valid_until IS DISTINCT FROM OLD.valid_until
+     OR NEW.sensitivity IS DISTINCT FROM OLD.sensitivity
+     OR NEW.allowed_channels IS DISTINCT FROM OLD.allowed_channels
+     OR NEW.last_verified_at IS DISTINCT FROM OLD.last_verified_at
+     OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+    RAISE EXCEPTION 'knowledge versions allow only the draft-to-approved flip'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  RETURN NEW;
+END $$;
+
+REVOKE ALL ON FUNCTION app.knowledge_versions_lifecycle() FROM PUBLIC;
+
+CREATE TRIGGER knowledge_versions_lifecycle BEFORE UPDATE ON knowledge_versions
+  FOR EACH ROW EXECUTE FUNCTION app.knowledge_versions_lifecycle();
+ALTER TABLE knowledge_versions ENABLE ALWAYS TRIGGER knowledge_versions_lifecycle;
+
+CREATE FUNCTION app.knowledge_items_lifecycle() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = pg_catalog
+AS $$ DECLARE
+  v_state text;
+BEGIN
+  -- Retired is terminal: no transition out.
+  IF OLD.state = 'retired' AND NEW.state <> 'retired' THEN
+    RAISE EXCEPTION 'retired knowledge items stay retired'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  -- The live pointer may move only to an approved version of THIS item, or to NULL
+  -- exactly when retiring. Pointing at a draft (or another item's version, which the
+  -- loose reference cannot check — the service's item lock owns that) raises.
+  IF NEW.live_version_id IS DISTINCT FROM OLD.live_version_id THEN
+    IF NEW.live_version_id IS NULL THEN
+      IF NEW.state <> 'retired' THEN
+        RAISE EXCEPTION 'knowledge live pointer clears only on retire'
+          USING ERRCODE = 'insufficient_privilege';
+      END IF;
+    ELSE
+      SELECT v.state INTO v_state FROM public.knowledge_versions v
+        WHERE v.organisation_id = NEW.organisation_id AND v.id = NEW.live_version_id;
+      IF v_state IS NULL OR v_state <> 'approved' THEN
+        RAISE EXCEPTION 'knowledge live pointer names an approved version of this item'
+          USING ERRCODE = 'insufficient_privilege';
+      END IF;
+    END IF;
+  END IF;
+  RETURN NEW;
+END $$;
+
+REVOKE ALL ON FUNCTION app.knowledge_items_lifecycle() FROM PUBLIC;
+
+CREATE TRIGGER knowledge_items_lifecycle BEFORE UPDATE ON knowledge_items
+  FOR EACH ROW EXECUTE FUNCTION app.knowledge_items_lifecycle();
+ALTER TABLE knowledge_items ENABLE ALWAYS TRIGGER knowledge_items_lifecycle;
+
 COMMENT ON TABLE knowledge_items IS 'Knowledge card shells (P09.01, BR-095). Mutable state + live-version pointer; content lives in knowledge_versions.';
 COMMENT ON COLUMN knowledge_items.live_version_id IS 'Currently served version (NULL until first approval, NULL after retirement). Moved only on approval/retire under the item lock.';
-COMMENT ON TABLE knowledge_versions IS 'Immutable knowledge history (P09.01, BR-095). Append-only: moin_app holds SELECT + INSERT, never UPDATE/DELETE (fact_schemas precedent, 0044).';
+COMMENT ON TABLE knowledge_versions IS 'Knowledge history with one guarded write (P09.01, BR-095). Draft-to-approved flip only — trigger-enforced; never DELETE.';
 COMMENT ON COLUMN knowledge_versions.body IS 'Approved card text, spoken verbatim (ADR-0014). NEVER reaches audit rows (INV-12).';
 COMMENT ON TABLE knowledge_approvals IS 'Who approved which version when (P09.01, BR-095). Append-only ledger; erasure runs privileged.';
 
