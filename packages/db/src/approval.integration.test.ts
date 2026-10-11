@@ -96,8 +96,14 @@ describe('approval', () => {
     const live = await withTenant(app, ORG_A, (client) => getLiveVersion(client, draft.itemId));
     expect(live?.id).toBe(draft.versionId);
     const row = await withTenant(app, ORG_A, (client) =>
-      client.query<{ role: string | null; hash: string | null; decided: string | null }>(
-        `select approver_role as role, version_hash as hash, decided_at::text as decided
+      client.query<{
+        role: string | null;
+        hash: string | null;
+        decided: string | null;
+        approved: string | null;
+      }>(
+        `select approver_role as role, version_hash as hash,
+                decided_at::text as decided, approved_at::text as approved
          from knowledge_approvals where item_id = $1`,
         [draft.itemId],
       ),
@@ -105,6 +111,12 @@ describe('approval', () => {
     expect(row.rows[0]?.role).toBe('owner');
     expect(row.rows[0]?.hash).toBe(expectedHash('Ruhetag', 'Montags geschlossen.', 1));
     expect(row.rows[0]?.decided).toBeTruthy();
+    // New rows: the fn stamps decided_at itself — it tracks the insert instant
+    // (within seconds of the pre-existing approved_at default).
+    expect(row.rows[0]?.approved).toBeTruthy();
+    const decidedMs = Date.parse(row.rows[0]?.decided ?? '');
+    const approvedMs = Date.parse(row.rows[0]?.approved ?? '');
+    expect(Math.abs(decidedMs - approvedMs)).toBeLessThan(60_000);
     const second = await makeDraft('Dienstags geschlossen.');
     await withTenant(
       app,
@@ -131,21 +143,25 @@ describe('approval', () => {
         { actorId: STAFF },
       ),
     ).rejects.toBeInstanceOf(ForbiddenError);
-    // The CRITICAL regression: no approvedBy parameter exists to nominate, and the
-    // DEFINER itself resolves the actor — a staff context calling the fn directly
-    // still dies in the role gate (server-side identity, not a caller UUID).
+    // The service binds actor from session context — staff cannot nominate.
+    // Below that boundary, the fn trusts its p_actor arg the way every DEFINER
+    // trusts its caller (house precedent: accept_invitation p_actor_id, 0018):
+    // moin_app is the privileged application role, and direct SQL as moin_app
+    // is privileged-role surface, not an HTTP-reachable bypass. A staff actor
+    // passed straight to the fn still dies in the role gate (42501).
     await expect(
       withTenant(
         app,
         ORG_A,
         (client) =>
-          client.query(`select app.approve_knowledge_version($1, $2)`, [
+          client.query(`select app.approve_knowledge_version($1, $2, $3::uuid)`, [
             draft.itemId,
             draft.versionId,
+            STAFF,
           ]),
         { actorId: STAFF },
       ),
-    ).rejects.toThrow(/requires owner or admin/);
+    ).rejects.toMatchObject({ code: '42501' });
     const live = await withTenant(app, ORG_A, (client) => getLiveVersion(client, draft.itemId));
     expect(live).toBeNull();
     const ledger = await withTenant(app, ORG_A, (client) =>
@@ -248,13 +264,14 @@ describe('approval', () => {
         ORG_A,
         async (client) => {
           await client.query('savepoint prove_sp');
-          // No such version: the fn raises (DB error — txn now poisoned).
+          // No such version: the fn raises 22023 (DB error — txn now poisoned).
           await expect(
-            client.query(`select app.approve_knowledge_version($1, $2)`, [
+            client.query(`select app.approve_knowledge_version($1, $2, $3::uuid)`, [
               poison.itemId,
               '00000000-0000-4000-8000-000000000000',
+              OWNER,
             ]),
-          ).rejects.toThrow();
+          ).rejects.toMatchObject({ code: '22023' });
           // Without the savepoint rollback below, this approve would die with
           // "current transaction is aborted". With it, the run continues.
           await client.query('rollback to savepoint prove_sp');

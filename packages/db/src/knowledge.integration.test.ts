@@ -308,16 +308,21 @@ describe('knowledge', () => {
       }),
     );
     // Direct DEFINER call for stale v2 (no service pre-check in this path).
-    // P09.05: 2-arg door, actor from the txn (insufficient_privilege, 42501).
+    // P09.05: 3-arg door, stale content raises 22023 invalid_parameter_value
+    // (content class — role guards alone own 42501).
     await expect(
       withTenant(
         app,
         ORG_A,
         (client) =>
-          client.query(`select app.approve_knowledge_version($1, $2)`, [created.item.id, v2.id]),
+          client.query(`select app.approve_knowledge_version($1, $2, $3::uuid)`, [
+            created.item.id,
+            v2.id,
+            STAFF,
+          ]),
         { actorId: STAFF },
       ),
-    ).rejects.toMatchObject({ code: '42501' });
+    ).rejects.toMatchObject({ code: '22023' });
     // v2 stays draft; live still v1.
     const state = await withTenant(app, ORG_A, (client) =>
       client.query<{ state: string }>(`select state from knowledge_versions where id = $1`, [

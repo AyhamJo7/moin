@@ -2,15 +2,16 @@
  * Approval workflow + audit (P09.05): role-gated, content-bound, audited approvals.
  *
  * Thin service over the DEFINER publish door (`app.approve_knowledge_version(item,
- * version)`, 0052 + 0056): the fn resolves the ACTOR from `app.current_user()` (SET
- * by withTenant from the session — never a caller UUID), checks latest-draft +
- * role, computes the version hash, and stamps ledger + flip + pointer atomically.
- * There is NO approvedBy param anywhere on this path (P09.05 identity fix):
- * nominating another user's UUID is inexpressible — the txn actor IS the approver.
+ * version, actor)`, 0052 + 0056): the SERVICE binds the actor from session context
+ * (`currentTenant().actorId`, SET by withTenant — never a caller UUID) and passes
+ * it as the fn arg; the fn checks latest-draft + role, computes the version hash,
+ * and stamps ledger + flip + pointer atomically. There is NO approvedBy param
+ * anywhere on this path (P09.05 identity fix): nominating another user's UUID is
+ * inexpressible — the txn actor IS the approver.
  * This module adds:
  * - pre-checks that map to 409 (not raw DEFINER exceptions): retired, non-draft,
  *   stale — plus the role check surfaced as 403-forbidden semantics (staff contexts
- *   get ForbiddenError; HTTP maps it, the DB path stays a single error shape),
+ *   get ForbiddenError; HTTP maps it; the DB path stays a single error shape),
  * - per-approval audit events (markers only, INV-12),
  * - bulk approval: sequential per-item SAVEPOINTs, each item individually confirmed
  *   with its own result — no silent bulk accept (P09.05.02). A bulk run returns one
@@ -41,9 +42,9 @@ export interface BulkApprovalResult {
 
 /**
  * Approve one item version: role-gated (owner|admin), latest-draft, content-bound,
- * audited. The approver is the TXN ACTOR (withTenant actorId → app.actor_id) —
- * never a parameter. Staff contexts fail with ForbiddenError (403 semantics);
- * stale/retired fail with the knowledge 409.
+ * audited. The approver is the TXN ACTOR (withTenant actorId) — never a parameter.
+ * Staff contexts fail with ForbiddenError (403 semantics); stale/retired fail
+ * with the knowledge 409.
  */
 export async function approveFaqCard(
   client: TenantClient,
