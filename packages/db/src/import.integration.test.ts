@@ -208,15 +208,15 @@ describe('import-ssrf', () => {
     // ROUND-4 P1: the server flushes the FULL body in one write then ends
     // immediately; the reader drains only AFTER end. finish(null) must
     // preserve queued chunks (clear-on-success truncated this case).
-    // ROUND-5 P1 (determinism): the end-gate is a SERVER barrier, not a
-    // connector option — res.end's callback fires when the kernel accepts
-    // the final bytes. The test awaits that callback BEFORE the first read,
-    // so end-before-drain ordering is guaranteed (no race between the
-    // connector resolving at headers and the test reading).
+    // ROUND-6 P1 (determinism): the gate is the CLIENT-side endReceived
+    // signal — the connector's own response-'end' observation. The server
+    // res.end callback only means the kernel accepted the bytes (the client
+    // stream may still be draining, and the connector pauses it). The test
+    // awaits endReceived BEFORE the first read, so post-end drain ordering
+    // holds on the connector's observation, not the server's callback.
     const { createServer } = await import('node:http');
     const big = 'x'.repeat(4000);
     const seenHosts: (string | undefined)[] = [];
-    let endAcked = 0;
     const server = createServer((req, res) => {
       // Record the Host the connector dialled with (asserted after close —
       // never throw inside the handler: an in-handler throw hangs the test
@@ -224,10 +224,7 @@ describe('import-ssrf', () => {
       seenHosts.push(req.headers.host);
       res.writeHead(200, { 'content-type': 'text/html' });
       // Single-flush full body + immediate end (ROUND-4 P1 truncation case).
-      // The end callback is the determinism gate for the small-body read.
-      res.end(big, () => {
-        endAcked += 1;
-      });
+      res.end(big);
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const port = (server.address() as { port: number }).port;
@@ -259,10 +256,11 @@ describe('import-ssrf', () => {
       }
       expect(overFailed).toMatchObject({ name: 'FetchRefusal', reason: 'too-large' });
       // Small body under a generous cap: streams through byte-identical.
-      // Determinism gate (ROUND-5 P1): poll until the server's end callback
-      // fired for BOTH requests (oversize + small) BEFORE draining — the
-      // small body's end is then guaranteed complete, so the drain exercises
-      // post-end reads (the truncation shape), not a mid-stream race.
+      // Determinism gate (ROUND-6 P1): await the CONNECTOR's endReceived
+      // (response-'end' observed client-side) BEFORE the first read — the
+      // queued body is then complete, so the drain exercises post-end reads
+      // (the truncation shape), not a mid-stream race. endReceived may be
+      // absent on stub responses; the production connector always sets it.
       const ok = await fetchPinnedForTest(`http://127.0.0.1:${String(port)}/karte`, {
         headers: { Host: 'beispiel-restaurant.de' },
         redirect: 'manual',
@@ -271,11 +269,7 @@ describe('import-ssrf', () => {
         maxBytes: 100_000,
       });
       expect(ok.status).toBe(200);
-      const deadline = Date.now() + 5000;
-      while (endAcked < 2 && Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 10));
-      }
-      expect(endAcked).toBe(2);
+      await ok.endReceived;
       const reader = ok.body?.getReader();
       expect(reader).toBeDefined();
       const chunks: Uint8Array[] = [];

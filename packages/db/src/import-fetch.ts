@@ -92,6 +92,15 @@ export interface GuardedResponse {
   text(): Promise<string>;
   /** Present on real fetch Responses; stubs may omit (falls back to text()). */
   readonly body?: { getReader(): BodyReader } | null | undefined;
+  /**
+   * Test-only client-end signal (ROUND-6 P1): resolves when the connector's
+   * response stream emitted 'end' (true CLIENT-side completion — the last
+   * byte arrived and finish(null) ran). Absent on stub responses. Lets the
+   * truncation proof gate the first read on connector-observed end instead
+   * of the server-side res.end callback (which only means the kernel
+   * accepted the bytes — the client stream may still be draining).
+   */
+  readonly endReceived?: Promise<void> | undefined;
 }
 
 export type FetchImpl = (
@@ -395,7 +404,20 @@ async function fetchPinned(
             if (failed !== null) waiter.reject(failed);
             else waiter.resolve({ done: true, value: undefined });
           }
+          // Client-end signal (ROUND-6 P1): resolved exactly once, on the
+          // first finish — success or failure. The truncation proof awaits
+          // this before its first read, so end-before-drain ordering holds
+          // on the CONNECTOR's observation, not the server's callback.
+          signalEnd();
         };
+        // Deferred resolver for endReceived (assigned below — declared here
+        // so finish() can signal it).
+        let signalEnd: () => void = () => undefined;
+        const endReceived = new Promise<void>((resolveEnd) => {
+          signalEnd = () => {
+            resolveEnd();
+          };
+        });
         response.on('data', (chunk: Uint8Array) => {
           pump(chunk);
         });
@@ -447,14 +469,13 @@ async function fetchPinned(
           text: () =>
             Promise.reject(new FetchRefusal('fetch-error', 'production body is stream-only')),
           body: { getReader: () => reader },
+          endReceived,
         });
-        // End gate (ROUND-5 P1, test-only): NOT implemented by deferring the
-        // settle above (settle-once makes deferral racy). Instead the gate
-        // lives in the TEST, which awaits the server-side end-acknowledgement
-        // (res.end callback fired) before the first read — see the connector
-        // proof. This comment marks the deliberate no-op: production streams
-        // headers-immediately, and determinism comes from the server barrier,
-        // not from connector buffering.
+        // End gate (ROUND-5 P1, superseded by ROUND-6): the server-side
+        // res.end callback only means the kernel accepted the bytes — the
+        // client stream may still be draining (and the connector pauses it
+        // under backpressure). Determinism now comes from endReceived above
+        // (connector-observed 'end'), which the proof awaits before draining.
       },
     );
     request.on('error', (error: Error) => {
