@@ -539,6 +539,55 @@ describe('staleness', () => {
     expect(hit?.stale).toBe(false);
   });
 
+  evidenceTest('concurrent sweeps do not duplicate card tasks or audits', async () => {
+    // ROUND-6 P1: the card select holds FOR UPDATE row locks, so two sweeps
+    // racing the same overdue card serialize — the loser finds the queue row
+    // (first-writer-wins) and reports no task, no audit. A true mid-statement
+    // interleave is not drivable from this single-connection harness (one
+    // withTenant transaction at a time per client checkout), so this pins the
+    // observable contract instead: exactly one task + one audit row total,
+    // zero new work on every repeat.
+    const created = await withTenant(app, ORG_A, (client) =>
+      createFaqCard(client, {
+        canonical: 'Gibt es heute Salat?',
+        spoken: 'Ja, gemischter Salat mit Brot.',
+        reverifyAfterDays: 1,
+      }),
+    );
+    await withTenant(app, ORG_A, (client) =>
+      client.query(`update faq_cards set updated_at = now() - interval '2 days' where id = $1`, [
+        created.id,
+      ]),
+    );
+    const late = new Date(Date.now() + 2 * 86_400_000);
+    const outcomes = await Promise.allSettled([
+      withTenant(app, ORG_A, (client) => sweepReverify(client, late)),
+      withTenant(app, ORG_A, (client) => sweepReverify(client, late)),
+    ]);
+    const won = outcomes.filter((r) => r.status === 'fulfilled');
+    expect(won).toHaveLength(2);
+    // Exactly one queue row with a task for this card across BOTH sweeps —
+    // the loser skipped on the queue guard instead of duplicating.
+    const cardTasks = await withTenant(app, ORG_A, (client) =>
+      client.query<{ n: string }>(
+        `select count(*)::text as n from knowledge_reverify_queue where card_id = $1 and task_id is not null`,
+        [created.id],
+      ),
+    );
+    expect(cardTasks.rows[0]?.n).toBe('1');
+    const audits = await withTenant(app, ORG_A, async (client) => {
+      const events = await listAuditEvents(client);
+      return events.filter((e) => e.operation === 'faq.reverify_task').length;
+    });
+    const before = audits;
+    await withTenant(app, ORG_A, (client) => sweepReverify(client, late));
+    const afterCount = await withTenant(app, ORG_A, async (client) => {
+      const events = await listAuditEvents(client);
+      return events.filter((e) => e.operation === 'faq.reverify_task').length;
+    });
+    expect(afterCount).toBe(before);
+  });
+
   evidenceTest('queue task ids are tenant-scoped by FK', async () => {
     // ROUND-2 P2-1: FOREIGN KEY (organisation_id, task_id) → tasks. A
     // cross-tenant task uuid now violates the constraint instead of linking.

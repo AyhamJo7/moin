@@ -221,7 +221,21 @@ export async function sweepReverify(
   // per-cycle key carries the card's updated_at epoch: an owner update bumps
   // updated_at (and deletes the queue row, re-arming the card), so the next
   // overdue cycle mints a fresh task instead of recycling the old one.
-  const cards = await client.query<{ id: string; sensitivity: string; anchor: string }>(
+  //
+  // CONCURRENCY (ROUND-6 P1): the select locks every candidate card row FOR
+  // UPDATE, in id order. FOR UPDATE cannot touch the nullable (queue) side
+  // of the outer join — so the lock targets faq_cards only, via a subselect:
+  // candidates are computed lock-free, then the card rows are re-read FOR
+  // UPDATE by id. The lock is held for the sweep transaction's duration, so
+  // a concurrent updateFaqCard (same row lock via its version-guarded UPDATE)
+  // blocks until the sweep commits or aborts — the INSERT...SELECT anchor
+  // check then reads the COMMITTED updated_at, never a stale snapshot. This
+  // serializes exactly like the sensitive path (whose guarded UPDATE takes
+  // the same lock). Lock order is single-table, id-ordered, so no deadlock
+  // cycle exists with the update path. BOTH the lock and the anchor re-check
+  // are needed: the anchor alone races under READ COMMITTED (snapshot taken
+  // at statement start can predate a concurrent commit).
+  const candidates = await client.query<{ id: string; sensitivity: string; anchor: string }>(
     `select c.id::text, c.sensitivity, extract(epoch from c.updated_at)::bigint::text as anchor
      from faq_cards c
      left join knowledge_reverify_queue q
@@ -229,10 +243,21 @@ export async function sweepReverify(
      where c.organisation_id = app.current_org() and c.active = true
        and q.card_id is null
        and coalesce(c.valid_until < $1::date, false) = false
-       and coalesce(c.updated_at + c.reverify_after <= $2::timestamptz, false) = true`,
+       and coalesce(c.updated_at + c.reverify_after <= $2::timestamptz, false) = true
+     order by c.id`,
     [day, instant],
   );
-  for (const card of cards.rows) {
+  const locked =
+    candidates.rows.length === 0
+      ? []
+      : (
+          await client.query<{ id: string; sensitivity: string; anchor: string }>(
+            `select id::text, sensitivity, extract(epoch from updated_at)::bigint::text as anchor
+           from faq_cards where id = any ($1::uuid[]) order by id for update`,
+            [candidates.rows.map((r) => r.id)],
+          )
+        ).rows;
+  for (const card of locked) {
     const sensitive = card.sensitivity === 'sensitive';
     if (sensitive) {
       // Anchor-guarded (ROUND-4 P1): an owner update committing between the
