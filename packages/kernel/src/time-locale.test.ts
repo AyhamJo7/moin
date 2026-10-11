@@ -80,10 +80,11 @@ describe('tenant time', () => {
     expect(zonedDateString(next)).toBe('2026-05-05');
   });
 
-  it('gap times shift forward to the first existing minute (spring forward)', () => {
+  it('gap times shift forward to exactly 03:00 (spring forward)', () => {
     // 02:30 does not exist on 2026-03-29 in Berlin. Adding a day from 2026-03-28 02:30
-    // must land on a VALID 03:xx local time, not silently on 01:30. Normal times are
-    // unaffected: 09:00 stays 09:00 (covered above).
+    // must land on EXACTLY 03:00 local — the first existing minute — not 03:30 (blind
+    // +60 stepping overshoots) and not silently on 01:30. Normal times are unaffected:
+    // 09:00 stays 09:00 (covered above).
     const before = new Date('2026-03-28T01:30:00Z');
     expect(zonedFields(before).hour).toBe(2);
     expect(zonedFields(before).minute).toBe(30);
@@ -91,9 +92,24 @@ describe('tenant time', () => {
     expect(zonedDateString(shifted)).toBe('2026-03-29');
     const fields = zonedFields(shifted);
     expect(fields.hour).toBe(3);
-    expect(fields.minute).toBeGreaterThanOrEqual(0);
-    // The result round-trips: it is a real local time, not a silent misresolve.
-    expect(zonedFields(shifted).hour).toBe(fields.hour);
+    expect(fields.minute).toBe(0);
+    expect(fields.second).toBe(0);
+  });
+
+  it('fold times resolve to the first occurrence (autumn back)', () => {
+    // 02:30 exists twice on 2026-10-25 in Berlin. Adding a day from 2026-10-24 02:30
+    // (+0200) must land on the FIRST 02:30 (+0200, the earlier instant), not the second
+    // (+0100, exactly 3600000 ms later).
+    const before = new Date('2026-10-24T00:30:00Z');
+    expect(zonedFields(before).hour).toBe(2);
+    const shifted = addCalendarDays(before, 1);
+    expect(zonedDateString(shifted)).toBe('2026-10-25');
+    expect(zonedFields(shifted).hour).toBe(2);
+    expect(zonedFields(shifted).minute).toBe(30);
+    const secondOccurrence = new Date(shifted.getTime() + 3_600_000);
+    expect(zonedFields(secondOccurrence).hour).toBe(2);
+    expect(zonedFields(secondOccurrence).minute).toBe(30);
+    expect(secondOccurrence.getTime() - shifted.getTime()).toBe(3_600_000);
   });
 
   it('rejects bad zones, bad instants and absurd day counts', () => {

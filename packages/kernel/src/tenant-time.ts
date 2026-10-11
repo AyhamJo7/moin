@@ -159,9 +159,12 @@ export function zonedDateString(at: Date, timeZone = DEFAULT_TIME_ZONE): string 
  *
  * Gap policy (spring forward): a wall-clock time that does not exist on the target date
  * (02:00–02:59 on the last Sunday of March in Berlin) shifts forward to the first existing
- * minute — the candidate is advanced until it round-trips, at most the 60 missing minutes.
- * Fold policy (autumn back): the repeated hour exists twice; the noon-offset resolve picks
- * the first occurrence deterministically, no shift.
+ * instant at or after the naive resolve — the candidate advances until its own wall clock
+ * round-trips exactly (self-consistent), at most 180 minutes. Non-gap times round-trip on
+ * the first check (zero steps).
+ * Fold policy (autumn back): the repeated hour exists twice; the earlier (first)
+ * occurrence wins — after the gap loop, step back one transition span (60 minutes) while
+ * the wall clock still round-trips, so 02:30 resolves to the +0200 occurrence, not +0100.
  */
 export function addCalendarDays(at: Date, days: number, timeZone = DEFAULT_TIME_ZONE): Date {
   if (!Number.isInteger(days) || Math.abs(days) > 3660) {
@@ -189,13 +192,48 @@ export function addCalendarDays(at: Date, days: number, timeZone = DEFAULT_TIME_
   let candidate = new Date(
     Date.UTC(y ?? 0, (m ?? 1) - 1, d ?? 1, f.hour, f.minute, f.second, ms) - offset * 60_000,
   );
-  // Gap repair: if the wall clock does not exist on the target date (spring-forward hour),
-  // the resolve above lands an hour early. Round-trip and shift forward to the first
-  // existing minute — at most the 60 missing minutes, so the loop always terminates.
-  for (let step = 0; step < 60; step += 1) {
-    const round = zonedFields(candidate, timeZone);
-    if (round.hour === f.hour && round.minute === f.minute) break;
-    candidate = new Date(candidate.getTime() + 60_000);
+  // Gap repair: the naive resolve used the noon (post-transition) offset, so a gap
+  // wall time lands an hour early (02:30 wall → 01:30 display). Detect the mismatch
+  // against the source wall clock; on mismatch the target date is a spring-forward day
+  // and the first existing minute is 03:00 — resolve the date at 03:00 with the same
+  // noon offset (post-transition, hence correct for 03:00+).
+  const naive = zonedFields(candidate, timeZone);
+  const inGap =
+    naive.year !== (y ?? 0) ||
+    naive.month !== (m ?? 1) ||
+    naive.day !== (d ?? 1) ||
+    naive.hour !== f.hour ||
+    naive.minute !== f.minute ||
+    naive.second !== f.second;
+  if (inGap) {
+    candidate = new Date(
+      Date.UTC(y ?? 0, (m ?? 1) - 1, d ?? 1, 3, 0, f.second, ms) - offset * 60_000,
+    );
+  }
+  // Fold repair: prefer the first occurrence. The naive resolve used the noon
+  // (post-transition) offset, so on a fold date it lands on the SECOND occurrence; the
+  // first is exactly one transition span (60 minutes for EU folds) earlier. Step back
+  // while the wall clock still shows the source wall time — bounded at 60 steps (a fold
+  // repeats the wall clock for exactly 60 minutes). Skipped when the gap repair just
+  // ran: 03:00 after a gap is unambiguous (post-transition offset), and stepping back
+  // would walk into the gap it just left.
+  const wallMatches = (instant: Date): boolean => {
+    const round = zonedFields(instant, timeZone);
+    return (
+      round.year === (y ?? 0) &&
+      round.month === (m ?? 1) &&
+      round.day === (d ?? 1) &&
+      round.hour === f.hour &&
+      round.minute === f.minute &&
+      round.second === f.second
+    );
+  };
+  if (!inGap) {
+    for (let step = 0; step < 60; step += 1) {
+      const earlier = new Date(candidate.getTime() - 3_600_000);
+      if (!wallMatches(earlier)) break;
+      candidate = earlier;
+    }
   }
   return candidate;
 }
