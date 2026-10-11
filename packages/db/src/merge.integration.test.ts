@@ -6,6 +6,7 @@ import { createTestDatabase, evidenceTest, type TestDatabase } from '@moin/testi
 import { afterAll, beforeAll, describe, expect } from 'vitest';
 import { listAuditEvents } from './audit.ts';
 import { addContactMethod, createContact, listContactMethods } from './contacts.ts';
+import { randomUUID } from 'node:crypto';
 import {
   applyMerge,
   suggestAiSimilarity,
@@ -14,6 +15,7 @@ import {
   unmerge,
   VersionConflictError as MergeConflict,
 } from './merge.ts';
+import { createTask } from './tasks.ts';
 import { createPool, type Pool } from './pool.ts';
 import { startConversation } from './conversations.ts';
 import { withTenant } from './tenant.ts';
@@ -64,6 +66,20 @@ describe('merge', () => {
     expect(local.kind).toBe('email_local');
     const ai = await withTenant(app, ORG_A, (client) => suggestAiSimilarity(client, a.id, b.id));
     expect(ai.kind).toBe('ai_similarity');
+    // Changed signal, same open pair: stored suggestion stands (re-suggesting with
+    // different data is not an update) — same row, original signal intact.
+    const changed = await withTenant(app, ORG_A, (client) =>
+      suggestNamePostal(client, a.id, b.id, { displayName: 'Anna Schmidt', postalCode: '10115' }),
+    );
+    expect(changed.id).toBe(one.id);
+    // Identical signal on a DIFFERENT pair: a distinct row (pair-scoped, not value-scoped).
+    const c = await withTenant(app, ORG_A, (client) =>
+      createContact(client, { displayName: 'Anna Schmidt' }),
+    );
+    const other = await withTenant(app, ORG_A, (client) =>
+      suggestNamePostal(client, a.id, c.id, { displayName: 'Anna Schmidt', postalCode: '20354' }),
+    );
+    expect(other.id).not.toBe(one.id);
     // Malformed signals rejected, never stored.
     await expect(
       withTenant(app, ORG_A, (client) =>
@@ -89,6 +105,16 @@ describe('merge', () => {
     );
     const convo = await withTenant(app, ORG_A, (client) =>
       startConversation(client, { channel: 'call', contactId: loser.id }),
+    );
+    // A resolver verdict on the loser: merge must carry it to the winner (same
+    // interaction_ref, winner leg), not drop it with the triple-FK delete.
+    await withTenant(app, ORG_A, (client) =>
+      client.query(
+        `insert into interaction_links
+           (organisation_id, id, interaction_ref, contact_id, method_id, rule, label_de)
+         values (app.current_org(), $1, $2, $3, $4, 'phone', 'erkannt über Rufnummer')`,
+        [randomUUID(), 'merge-probe-link', loser.id, method.id],
+      ),
     );
     const candidate = await withTenant(app, ORG_A, (client) =>
       suggestNamePostal(client, winner.id, loser.id, {
@@ -116,6 +142,19 @@ describe('merge', () => {
     );
     expect(owned.rows[0]?.n).toBe('1');
     expect(convo.id).toBeTruthy();
+    // The resolver verdict survived the triple-FK delete+recreate: winner leg, same ref.
+    const link = await withTenant(app, ORG_A, (client) =>
+      client.query<{ contact_id: string; method_id: string; rule: string; label_de: string }>(
+        `select contact_id::text, method_id::text, rule, label_de
+         from interaction_links where interaction_ref = 'merge-probe-link'`,
+      ),
+    );
+    expect(link.rows[0]).toMatchObject({
+      contact_id: winner.id,
+      method_id: method.id,
+      rule: 'phone',
+      label_de: 'erkannt über Rufnummer',
+    });
     // Candidate consumed by the merge: the inbox row is gone with the loser (RESTRICT
     // legs forbid keeping it), and the merge_id lives on in the ledger + audit row.
     const resolved = await withTenant(app, ORG_A, (client) =>
@@ -139,6 +178,50 @@ describe('merge', () => {
       expect(applied).toBeTruthy();
       expect(JSON.stringify(applied?.args_sanitized)).not.toContain('Bernd');
     });
+  });
+
+  evidenceTest('merge with a candidate for another pair is a 409, nothing moved', async () => {
+    const winner = await withTenant(app, ORG_A, (client) =>
+      createContact(client, { displayName: 'Clara Jansen' }),
+    );
+    const loser = await withTenant(app, ORG_A, (client) =>
+      createContact(client, { displayName: 'Clara Jansen' }),
+    );
+    const stranger = await withTenant(app, ORG_A, (client) =>
+      createContact(client, { displayName: 'Clara Jansen' }),
+    );
+    const foreign = await withTenant(app, ORG_A, (client) =>
+      suggestNamePostal(client, winner.id, stranger.id, {
+        displayName: 'Clara Jansen',
+        postalCode: '20354',
+      }),
+    );
+    await expect(
+      withTenant(app, ORG_A, (client) =>
+        applyMerge(client, {
+          winnerId: winner.id,
+          loserId: loser.id,
+          approvedBy: STAFF,
+          candidateId: foreign.id,
+        }),
+      ),
+    ).rejects.toBeInstanceOf(MergeConflict);
+    // Nothing moved: both rows still live, and this attempt wrote no ledger entry
+    // (other tests in this file merge their own pairs — count only this pair's ledger).
+    const live = await withTenant(app, ORG_A, (client) =>
+      client.query<{ n: string }>(
+        `select count(*)::text as n from contacts where id = $1 or id = $2`,
+        [winner.id, loser.id],
+      ),
+    );
+    expect(live.rows[0]?.n).toBe('2');
+    const ledgers = await withTenant(app, ORG_A, (client) =>
+      client.query<{ n: string }>(
+        `select count(*)::text as n from contact_merges where winner_id = $1 and loser_id = $2`,
+        [winner.id, loser.id],
+      ),
+    );
+    expect(ledgers.rows[0]?.n).toBe('0');
   });
 
   evidenceTest('concurrent merges serialise: one applies, the other 409s', async () => {
@@ -200,8 +283,11 @@ describe('merge', () => {
     const method = await withTenant(app, ORG_A, (client) =>
       addContactMethod(client, loser.id, { kind: 'email', value: 'eva@example.test' }),
     );
-    await withTenant(app, ORG_A, (client) =>
+    const movedConvo = await withTenant(app, ORG_A, (client) =>
       startConversation(client, { channel: 'call', contactId: loser.id }),
+    );
+    const task = await withTenant(app, ORG_A, (client) =>
+      createTask(client, { title: 'Rückruf Eva', conversationId: movedConvo.id }),
     );
     const record = await withTenant(app, ORG_A, (client) =>
       applyMerge(client, { winnerId: winner.id, loserId: loser.id, approvedBy: STAFF }),
@@ -218,10 +304,51 @@ describe('merge', () => {
       listContactMethods(client, winner.id),
     );
     expect(winnerMethods.map((m) => m.id)).not.toContain(method.id);
+    // The task stayed with its conversation throughout: unmerge must not re-point it
+    // at the restored CONTACT id (that would corrupt tasks.conversation_id).
+    const after = await withTenant(app, ORG_A, (client) =>
+      client.query<{ conversation_id: string }>(
+        `select conversation_id::text from tasks where id = $1`,
+        [task.id],
+      ),
+    );
+    expect(after.rows[0]?.conversation_id).toBe(movedConvo.id);
     // Second unmerge refused: already undone.
     await expect(
       withTenant(app, ORG_A, (client) => unmerge(client, record.id)),
     ).rejects.toBeInstanceOf(MergeConflict);
+  });
+
+  evidenceTest('concurrent unmerges serialise: one restores, the other 409s', async () => {
+    const winner = await withTenant(app, ORG_A, (client) =>
+      createContact(client, { displayName: 'Greta Wolf' }),
+    );
+    const loser = await withTenant(app, ORG_A, (client) =>
+      createContact(client, { displayName: 'Greta Wolf' }),
+    );
+    const record = await withTenant(app, ORG_A, (client) =>
+      applyMerge(client, { winnerId: winner.id, loserId: loser.id, approvedBy: STAFF }),
+    );
+    const outcomes = await Promise.allSettled([
+      withTenant(app, ORG_A, (client) => unmerge(client, record.id)),
+      withTenant(app, ORG_A, (client) => unmerge(client, record.id)),
+    ]);
+    const won = outcomes.filter((r) => r.status === 'fulfilled');
+    const lost = outcomes.filter((r) => r.status === 'rejected');
+    expect(won).toHaveLength(1);
+    expect(lost).toHaveLength(1);
+    if (lost[0]?.status === 'rejected') {
+      expect(lost[0].reason).toBeInstanceOf(MergeConflict);
+    } else {
+      throw new Error('expected exactly one rejected unmerge');
+    }
+    // One restoration only: exactly one restored contact beyond the winner.
+    const restored = await withTenant(app, ORG_A, (client) =>
+      client.query<{ n: string }>(
+        `select count(*)::text as n from contacts where display_name = 'Greta Wolf'`,
+      ),
+    );
+    expect(restored.rows[0]?.n).toBe('2');
   });
 
   evidenceTest('cross-tenant merges and candidates are invisible', async () => {

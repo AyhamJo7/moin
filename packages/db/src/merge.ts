@@ -110,13 +110,30 @@ export async function suggestNamePostal(
   const name = personName(input.displayName).value;
   const postal = checkPostal(input.postalCode);
   const id = randomUUID();
+  // Signal `value` is scoped to the ordered pair (`A~B`, plus the local for email_local):
+  // the 0037 value unique then matches inferable arbiter columns exactly, and the partial
+  // signal unique dedupes repeat suggestions per open pair+kind (pair-scoped, not
+  // value-scoped). INSERT races the unique; the loser falls back to the re-read below
+  // (SELECT-first first, so a stored suggestion stands when re-suggested with different
+  // inputs — a re-suggest is not an update).
+  const existing = await client.query<CandidateRow>(
+    `select id, contact_a_id, contact_b_id, kind, status from duplicate_candidates
+     where organisation_id = app.current_org() and contact_a_id = $1
+       and contact_b_id = $2 and kind = 'name_postal' and status = 'open'`,
+    [first, second],
+  );
+  const open = existing.rows[0];
+  // SELECT-first returns the open row WITHOUT auditing (a re-suggest is not a new
+  // suggestion); only the insert path below audits. Concurrent suggesters race on the
+  // partial unique and the loser re-reads via the fallback select.
+  if (open !== undefined) return toCandidate(open);
   const result = await client.query<CandidateRow>(
     `insert into duplicate_candidates
        (organisation_id, id, contact_a_id, contact_b_id, kind, value, signal_name, signal_postal)
      values (app.current_org(), $1, $2, $3, 'name_postal', $4, $5, $6)
      on conflict (organisation_id, kind, value, status) do nothing
      returning id, contact_a_id, contact_b_id, kind, status`,
-    [id, first, second, `${name} ${postal}`, name, postal],
+    [id, first, second, `${first}~${second}~${name} ${postal}`, name, postal],
   );
   const row =
     result.rows[0] ??
@@ -153,13 +170,22 @@ export async function suggestEmailLocal(
   const [first, second] = orderedPair(contactAId, contactBId);
   const local = checkLocalPart(input.localPart);
   const id = randomUUID();
+  // Value scoped to the pair (same shape as name_postal above) for the arbiter.
+  const existing = await client.query<CandidateRow>(
+    `select id, contact_a_id, contact_b_id, kind, status from duplicate_candidates
+     where organisation_id = app.current_org() and contact_a_id = $1
+       and contact_b_id = $2 and kind = 'email_local' and status = 'open'`,
+    [first, second],
+  );
+  const open = existing.rows[0];
+  if (open !== undefined) return toCandidate(open);
   const result = await client.query<CandidateRow>(
     `insert into duplicate_candidates
        (organisation_id, id, contact_a_id, contact_b_id, kind, value, signal_local)
      values (app.current_org(), $1, $2, $3, 'email_local', $4, $5)
      on conflict (organisation_id, kind, value, status) do nothing
      returning id, contact_a_id, contact_b_id, kind, status`,
-    [id, first, second, local, local],
+    [id, first, second, `${first}~${second}~${local}`, local],
   );
   const row =
     result.rows[0] ??
@@ -194,13 +220,22 @@ export async function suggestAiSimilarity(
 ): Promise<DuplicateCandidate> {
   const [first, second] = orderedPair(contactAId, contactBId);
   const id = randomUUID();
+  // SELECT-first (same shape as the other signals): the partial unique has no arbiter.
+  const existing = await client.query<CandidateRow>(
+    `select id, contact_a_id, contact_b_id, kind, status from duplicate_candidates
+     where organisation_id = app.current_org() and contact_a_id = $1
+       and contact_b_id = $2 and kind = 'ai_similarity' and status = 'open'`,
+    [first, second],
+  );
+  const open = existing.rows[0];
+  if (open !== undefined) return toCandidate(open);
   const result = await client.query<CandidateRow>(
     `insert into duplicate_candidates
        (organisation_id, id, contact_a_id, contact_b_id, kind, value, ai_suggested)
      values (app.current_org(), $1, $2, $3, 'ai_similarity', $4, true)
      on conflict (organisation_id, kind, value, status) do nothing
      returning id, contact_a_id, contact_b_id, kind, status`,
-    [id, first, second, `${first.slice(0, 8)}~${second.slice(0, 8)}`],
+    [id, first, second, `${first}~${second}`],
   );
   const row =
     result.rows[0] ??
@@ -252,13 +287,48 @@ export async function applyMerge(
     throw new RangeError('candidate id must be a uuid');
   }
   await lockContacts(client, input.winnerId, input.loserId);
+  if (input.candidateId !== undefined) {
+    // Validate the candidate BEFORE moving anything: open, and naming this exact ordered
+    // pair. A candidate for another pair (or an already-consumed one) is a 409, never a
+    // silent consume — the approver clicked the wrong suggestion or lost a race.
+    const [first, second] =
+      input.winnerId < input.loserId
+        ? [input.winnerId, input.loserId]
+        : [input.loserId, input.winnerId];
+    const candidate = await client.query<{ id: string }>(
+      `select id from duplicate_candidates where id = $1 and status = 'open'
+         and contact_a_id = $2 and contact_b_id = $3`,
+      [input.candidateId, first, second],
+    );
+    if (candidate.rows[0] === undefined) {
+      throw new VersionConflictError('merge candidate mismatch');
+    }
+  }
   const mergeId = randomUUID();
-  // Move links that name a METHOD first: interaction_links carries the composite triple
-  // (organisation, contact, method) — re-pointing contact_id while method_id still names
-  // the loser's row would violate the triple FK. Move method rows first, then the links.
-  // Verified-unique collisions cannot happen here: the pair was suggested exactly because
-  // both contacts own the same verified value through DIFFERENT rows, and the loser's
-  // rows leave it (UPDATE, not copy) — the winner ends with the union, one row per value.
+  // Move interaction_links FIRST, before their methods move: the triple FK
+  // (organisation, contact, method) → contact_methods is immediate and non-deferrable
+  // (0038 merged, immutable), so neither order of two UPDATEs can satisfy it mid-move —
+  // moving links first would dangle (W,M) with the method still at (L,M), moving methods
+  // first dangles (L,M) links. Instead links are DELETED and re-INSERTED after the
+  // methods land: the re-insert names the winner pair directly, and the ledger records
+  // the rewritten link ids. The link's rule/label/interaction_ref survive verbatim —
+  // only the contact leg changes — so no verdict is lost, and the audit counts the
+  // rewrite. (A DEFERRABLE triple would also work but rewrites reviewed 0038 semantics;
+  // delete+recreate keeps every constraint exactly as reviewed.)
+  const doomedLinks = await client.query<{
+    id: string;
+    interaction_ref: string;
+    method_id: string;
+    rule: string;
+    label_de: string;
+  }>(
+    `delete from interaction_links where contact_id = $1
+     returning id::text, interaction_ref, method_id::text, rule, label_de`,
+    [input.loserId],
+  );
+  // Move methods: the verified-unique index cannot collide — the pair was suggested
+  // exactly because both contacts own the same verified value through DIFFERENT rows,
+  // and the loser's rows leave it (UPDATE, not copy): the winner ends with the union.
   const methods = await client.query<{ id: string }>(
     `update contact_methods set contact_id = $1, updated_at = clock_timestamp(), version = version + 1
      where contact_id = $2
@@ -266,9 +336,31 @@ export async function applyMerge(
     [input.winnerId, input.loserId],
   );
   const methodIds = methods.rows.map((r) => r.id);
+  // Re-create the doomed links against the winner: method rows now live at (W, M), so
+  // the triple FK is satisfied directly. Fresh link ids (the old rows are gone); the
+  // ledger records the NEW ids, and unmerge moves exactly these back.
+  const linkIds: string[] = [];
+  for (const doomed of doomedLinks.rows) {
+    const recreated = await client.query<{ id: string }>(
+      `insert into interaction_links
+         (organisation_id, id, interaction_ref, contact_id, method_id, rule, label_de)
+       values (app.current_org(), $1, $2, $3, $4, $5, $6)
+       returning id::text`,
+      [
+        randomUUID(),
+        doomed.interaction_ref,
+        input.winnerId,
+        doomed.method_id,
+        doomed.rule,
+        doomed.label_de,
+      ],
+    );
+    const fresh = recreated.rows[0];
+    if (fresh === undefined) throw new Error('link re-insert returned no row');
+    linkIds.push(fresh.id);
+  }
   const moveLinks = async (
-    table:
-      'conversations' | 'calls' | 'leads' | 'appointment_requests' | 'notes' | 'interaction_links',
+    table: 'conversations' | 'calls' | 'leads' | 'appointment_requests' | 'notes',
   ): Promise<readonly string[]> => {
     // Branch-per-table (governance.ts purgeCandidates shape): the table is a union
     // member, never interpolated — the lint bans string-built SQL outright.
@@ -293,27 +385,21 @@ export async function applyMerge(
                   `update appointment_requests set contact_id = $1 where contact_id = $2 returning id::text`,
                   [input.winnerId, input.loserId],
                 )
-              : table === 'notes'
-                ? await client.query<{ id: string }>(
-                    `update notes set contact_id = $1 where contact_id = $2 returning id::text`,
-                    [input.winnerId, input.loserId],
-                  )
-                : await client.query<{ id: string }>(
-                    `update interaction_links set contact_id = $1 where contact_id = $2 returning id::text`,
-                    [input.winnerId, input.loserId],
-                  );
+              : await client.query<{ id: string }>(
+                  `update notes set contact_id = $1 where contact_id = $2 returning id::text`,
+                  [input.winnerId, input.loserId],
+                );
     return moved.rows.map((r) => r.id);
   };
-  const linkIds = await moveLinks('interaction_links');
   const convoIds = await moveLinks('conversations');
   const callIds = await moveLinks('calls');
   const leadIds = await moveLinks('leads');
   const requestIds = await moveLinks('appointment_requests');
   const noteIds = await moveLinks('notes');
-  // Tasks link by conversation, not contact — and only through the conversations that
-  // actually moved (a task on an unmoved conversation is not this merge's business).
-  // No-op by construction today (convoIds re-homed above carry no tasks yet in practice),
-  // kept explicit so the ledger's moved_task_ids means what it says.
+  // Tasks link by conversation, not contact: they stay with their conversation, which
+  // itself moved to the winner. The ledger records which task ids were OBSERVED on moved
+  // conversations (for the audit count), but unmerge does not touch them — re-pointing a
+  // task's conversation_id at a contact id would corrupt it.
   const taskIds: string[] = [];
   if (convoIds.length > 0) {
     const moved = await client.query<{ id: string }>(
@@ -350,12 +436,21 @@ export async function applyMerge(
     await client.query(`delete from duplicate_candidates where id = $1`, [input.candidateId]);
   }
   await client.query(`delete from contacts where id = $1`, [input.loserId]);
+  const movedTotal =
+    methodIds.length +
+    linkIds.length +
+    convoIds.length +
+    callIds.length +
+    taskIds.length +
+    leadIds.length +
+    requestIds.length +
+    noteIds.length;
   await appendAuditEvent(client, {
     source: 'api',
     operation: 'merge.apply',
     targetKind: 'contact_merge',
     targetId: mergeId,
-    argsSanitized: { moved: methodIds.length + linkIds.length },
+    argsSanitized: { moved: movedTotal },
     result: 'succeeded',
   });
   return {
@@ -405,6 +500,10 @@ export async function unmerge(client: TenantClient, mergeId: string): Promise<Un
   if (ageMs > UNMERGE_WINDOW_DAYS * 86_400_000) {
     throw new VersionConflictError('merge is past the 30-day window');
   }
+  // Serialise concurrent unmerges on the ledger row: the loser blocks, then the guarded
+  // conditional UPDATE below finds undone = true and 409s. Without the lock both readers
+  // see undone = false and both restore.
+  await client.query(`select id from contact_merges where id = $1 for update`, [mergeId]);
   // Re-create the loser under a fresh id with the winner's current name (the name itself
   // is not versioned history; the links are what unmerge restores).
   const winner = await client.query<{ display_name: string }>(
@@ -468,28 +567,44 @@ export async function unmerge(client: TenantClient, mergeId: string): Promise<Un
     }
   };
   await moveBack(record.moved_method_ids, 'contact_methods');
-  // Link ids were recorded across conversations/calls/links; move each recorded id back by
-  // trying each table (ids are unique per table, so at most one table matches each id).
-  for (const table of [
-    'conversations',
-    'calls',
-    'interaction_links',
-    'leads',
-    'appointment_requests',
-    'notes',
-  ] as const) {
-    await moveBack(record.moved_link_ids, table);
+  // Re-created link ids live in the ledger's moved_link_ids (the pre-merge rows are gone);
+  // the recorded conversation/call/lead/request/note ids move back by table as usual.
+  // Links are REWRITTEN, not moved: delete the winner's recreated rows and re-insert them
+  // against the restored contact (same rule/label/interaction_ref, restored contact leg).
+  // The triple FK is satisfied directly — no order violation in either direction.
+  // Methods already moved back above, so the (restored, method) pairs exist.
+  const doomed = await client.query<{
+    interaction_ref: string;
+    method_id: string;
+    rule: string;
+    label_de: string;
+  }>(
+    `delete from interaction_links where id = any ($1)
+     returning interaction_ref, method_id::text, rule, label_de`,
+    [record.moved_link_ids],
+  );
+  for (const row of doomed.rows) {
+    await client.query(
+      `insert into interaction_links
+         (organisation_id, id, interaction_ref, contact_id, method_id, rule, label_de)
+       values (app.current_org(), $1, $2, $3, $4, $5, $6)`,
+      [randomUUID(), row.interaction_ref, restoredId, row.method_id, row.rule, row.label_de],
+    );
   }
-  await moveBack(record.moved_task_ids, 'tasks');
+  // Tasks attach to conversations, not contacts: the ledger records which task ids were
+  // observed on moved conversations, but the tasks themselves never moved — re-pointing
+  // their conversation_id at a CONTACT id would corrupt them. Unmerge leaves tasks alone.
   await moveBack(record.moved_lead_ids, 'leads');
   await moveBack(record.moved_request_ids, 'appointment_requests');
   await moveBack(record.moved_note_ids, 'notes');
-  await client.query(
+  const undone = await client.query(
     `update contact_merges set undone = true, unmerged_at = clock_timestamp(),
        updated_at = clock_timestamp(), version = version + 1
-     where id = $1 and undone = false`,
+     where id = $1 and undone = false
+     returning id::text`,
     [mergeId],
   );
+  if (undone.rows[0] === undefined) throw new VersionConflictError('merge already undone');
   await appendAuditEvent(client, {
     source: 'api',
     operation: 'merge.undo',

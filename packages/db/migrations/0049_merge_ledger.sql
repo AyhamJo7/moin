@@ -119,6 +119,6 @@ GRANT SELECT, INSERT, UPDATE ON contact_merges TO moin_app;
 -- Reviewed audit argument keys (P06.10.03, P06.10.07, INV-12). Markers and counts only.
 INSERT INTO audit_argument_allowlist(operation, argument_key, value_kind, reason) VALUES
   ('merge.suggest', 'signal', 'count', 'candidate signal as opaque marker (0=name_postal,1=email_local,2=ai_similarity); no names or values'),
-  ('merge.apply', 'moved', 'count', 'rows moved, by table count bucket; no ids or content'),
+  ('merge.apply', 'moved', 'count', 'total rows moved+observed across methods, links, conversations, calls, tasks, leads, requests, notes; no ids or content'),
   ('merge.undo', 'restored', 'count', 'rows restored, by table count bucket; no ids or content')
 ON CONFLICT (operation, argument_key) DO NOTHING;
