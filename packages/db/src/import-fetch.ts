@@ -64,7 +64,7 @@ export interface SafeFetchOptions {
   readonly maxRedirects?: number | undefined;
   /** DNS lookup (injectable for tests — default node:dns). */
   readonly lookup?: DnsLookup | undefined;
-  /** Fetch implementation (injectable for tests — default global fetch). */
+  /** Fetch implementation (injectable for tests — default pinned connector). */
   readonly fetchImpl?: FetchImpl | undefined;
   /** robots.txt body for this origin (injectable — default: fetched live). */
   readonly robotsTxt?: string | undefined;
@@ -448,6 +448,13 @@ async function fetchPinned(
             Promise.reject(new FetchRefusal('fetch-error', 'production body is stream-only')),
           body: { getReader: () => reader },
         });
+        // End gate (ROUND-5 P1, test-only): NOT implemented by deferring the
+        // settle above (settle-once makes deferral racy). Instead the gate
+        // lives in the TEST, which awaits the server-side end-acknowledgement
+        // (res.end callback fired) before the first read — see the connector
+        // proof. This comment marks the deliberate no-op: production streams
+        // headers-immediately, and determinism comes from the server barrier,
+        // not from connector buffering.
       },
     );
     request.on('error', (error: Error) => {
