@@ -58,11 +58,46 @@ describe('search', () => {
     await withTenant(app, ORG_A, (client) =>
       addContactMethod(client, contact.id, { kind: 'phone', value: '+49 30 111111' }),
     );
-    // Trailing-digit fragment: matches the stored value after space folding.
-    const found = await withTenant(app, ORG_A, (client) =>
+    // Folding strips spaces/dashes/plus on BOTH sides: the stored '+49 30 …' matches
+    // a query with the plus and one without it.
+    const withPlus = await withTenant(app, ORG_A, (client) =>
+      searchTenant(client, { query: '+4930111111', scope: 'contacts' }),
+    );
+    expect(withPlus.hits.map((h) => h.id)).toContain(contact.id);
+    const withoutPlus = await withTenant(app, ORG_A, (client) =>
       searchTenant(client, { query: '30 111111', scope: 'contacts' }),
     );
-    expect(found.hits.map((h) => h.id)).toContain(contact.id);
+    expect(withoutPlus.hits.map((h) => h.id)).toContain(contact.id);
+  });
+
+  evidenceTest('cursor orders numerically across integer widths', async () => {
+    // Cursor regression: scores compared as TEXT misorder across integer widths
+    // ('2.1' > '10.5' lexicographically). Seed an FTS-band row (~2.1) plus a fuzzy
+    // companion, page with limit 1, and assert the second page advances numerically
+    // instead of replaying the first row.
+    await withTenant(app, ORG_A, (client) =>
+      createContact(client, { displayName: 'Zahlwort Tausendundeins' }),
+    );
+    await withTenant(app, ORG_A, (client) =>
+      createContact(client, { displayName: 'Zahlwort Tausendundzwei' }),
+    );
+    const first = await withTenant(app, ORG_A, (client) =>
+      searchTenant(client, { query: 'Zahlwort Tausendundeins', scope: 'contacts', limit: 1 }),
+    );
+    expect(first.hits).toHaveLength(1);
+    expect(first.nextCursor).not.toBeNull();
+    expect(first.hits[0]?.score).toBeGreaterThan(1.9);
+    const second = await withTenant(app, ORG_A, (client) =>
+      searchTenant(client, {
+        query: 'Zahlwort Tausendundeins',
+        scope: 'contacts',
+        limit: 1,
+        cursor: first.nextCursor ?? undefined,
+      }),
+    );
+    // Advanced past page 1: no replay of the first row (text cursors replayed here
+    // when a 1.x trgm score compared above a 2.x FTS score lexicographically).
+    expect(second.hits.map((h) => h.id)).not.toContain(first.hits[0]?.id);
   });
 
   evidenceTest('tasks and notes match German stems; audit keeps no query text', async () => {

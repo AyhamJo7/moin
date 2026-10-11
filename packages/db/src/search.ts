@@ -4,13 +4,16 @@
  * One query per scope, all through withTenant — RLS scopes every hit, so a search can
  * never return another tenant's rows (proven by the cross-tenant test, not by trust).
  * Input is validated and parameterised, never interpolated: FTS goes through
- * `plainto_tsquery('german', $n)`, trgm through `similarity()` / `%` with a bound
- * parameter. The audit row carries the query LENGTH bucket and the scope marker only —
- * the query text itself never reaches an audit row (INV-12).
+ * `plainto_tsquery('german', $n)`, trgm through `similarity()` with a bound parameter,
+ * phone digits through a folded ILIKE with a bound parameter. The audit row carries the
+ * query LENGTH bucket and the scope marker only — the query text itself never reaches
+ * an audit row (INV-12).
  *
- * Ranking: FTS `ts_rank_cd` first (exact stem hits), trgm similarity as the tiebreak
- * for name/phone scopes. Cursor pagination is `(rank, id)`-ordered with a limit cap;
- * the cursor is the last row's `(score, id)` pair, opaque to callers.
+ * Ranking: per-leg score bands (FTS +2, trgm +1, phone +0) so each contact ranks once
+ * at its best leg via MAX + GROUP BY; the outer cursor is (rounded-score, id).
+ * Scores round to 6dp numeric both in SELECT and in the predicate — float text
+ * rendering differs by width (2.1 vs 10.5 lexicographic misorder), so text comparison
+ * is wrong and raw float equality is width-fragile; numeric(rounded) is neither.
  */
 
 import { appendAuditEvent } from './audit.ts';
@@ -71,12 +74,10 @@ function parseCursor(cursor: string | undefined): Cursor | null {
 }
 
 function encodeCursor(score: number, id: string): string {
-  // Scores arrive as float8 text ('2.100000001490116') while the cursor param binds
-  // as float4-cast float ('2.1') — the two never compare equal, so the (score, id)
-  // tiebreak never fires and pages replay. The cursor therefore carries the score's
-  // full-precision TEXT form, and SQL compares score::text — text equality on the
-  // rendered value, immune to float width mismatches.
-  return Buffer.from(JSON.stringify({ score: String(score), id }), 'utf8').toString('base64url');
+  // Fixed 6dp numeric form (round(numeric, 6)): matches the SQL rounding exactly, so
+  // the cursor predicate compares equal on a page boundary. Raw float text ('2.1' vs
+  // '10.5') misorders lexicographically; raw float equality is width-fragile.
+  return Buffer.from(JSON.stringify({ score: score.toFixed(6), id }), 'utf8').toString('base64url');
 }
 
 async function searchContacts(
@@ -85,15 +86,14 @@ async function searchContacts(
   limit: number,
   cursor: Cursor | null,
 ): Promise<SearchHit[]> {
-  // FTS leg (german stemming + ß-folding) UNION trgm leg (fuzzy names: unaccent
-  // folded at query time — unaccent is STABLE so it cannot live in the index
-  // expression; the lower() trgm index prunes, similarity rechecks) UNION phone-digit
-  // leg (partial value match). UNION (not UNION ALL) dedupes only FULL-row matches —
-  // a row matching FTS and trgm with different scores appears TWICE, once per band.
-  // The outer query therefore collapses to the best score per id (MAX + GROUP BY)
-  // before the cursor predicate, so each contact ranks once and pages advance.
+  // FTS leg (german stemming + ß-folding) UNION ALL trgm leg (fuzzy names: unaccent
+  // folded at query time) UNION ALL phone-digit leg (partial value match). UNION ALL
+  // (not UNION) because legs score differently — UNION would keep both rows and the
+  // contact would rank twice. The outer query collapses to the best score per id
+  // (MAX + GROUP BY) at fixed 6dp numeric, so each contact ranks once, integer
+  // widths order numerically, and the (score, id) cursor advances disjoint pages.
   const result = await client.query<{ id: string; title: string; score: string }>(
-    `select id::text, max(title) as title, max(score)::text as score from (
+    `select id::text, max(title) as title, round(max(score)::numeric, 6)::text as score from (
        select c.id as id, c.display_name as title,
          ts_rank_cd(to_tsvector('german', c.display_name),
            plainto_tsquery('german', $1)) + 2 as score
@@ -110,13 +110,13 @@ async function searchContacts(
        where exists (
          select 1 from contact_methods m
          where m.contact_id = c.id and m.organisation_id = c.organisation_id
-           and replace(replace(replace(m.value, ' ', ''), '-', ''), '+', '') ilike '%' || replace(replace($1, ' ', ''), '-', '') || '%' escape '\\'
+           and replace(replace(replace(m.value, ' ', ''), '-', ''), '+', '') ilike '%' || replace(replace(replace($1, ' ', ''), '-', ''), '+', '') || '%' escape '\\'
        )
      ) hits
      group by id
-     having ($2::text is null or max(score)::text < $2::text
-       or (max(score)::text = $2::text and id::text > $3::text))
-     order by max(score) desc, id limit $4`,
+     having ($2::numeric is null or round(max(score)::numeric, 6) < $2::numeric
+       or (round(max(score)::numeric, 6) = $2::numeric and id::text > $3::text))
+     order by round(max(score)::numeric, 6) desc, id limit $4`,
     [query, cursor?.score ?? null, cursor?.id ?? null, limit + 1],
   );
   return result.rows.map((r) => ({
@@ -135,14 +135,14 @@ async function searchTasks(
 ): Promise<SearchHit[]> {
   const result = await client.query<{ id: string; title: string; score: string }>(
     `select t.id::text, t.title,
-       ts_rank_cd(to_tsvector('german', t.title), plainto_tsquery('german', $1)) as score
+       round(ts_rank_cd(to_tsvector('german', t.title), plainto_tsquery('german', $1))::numeric, 6)::text as score
      from tasks t
      where to_tsvector('german', t.title) @@ plainto_tsquery('german', $1)
-       and ($2::text is null or ts_rank_cd(to_tsvector('german', t.title),
-         plainto_tsquery('german', $1))::text < $2::text
-         or (ts_rank_cd(to_tsvector('german', t.title), plainto_tsquery('german', $1))::text = $2::text
+       and ($2::numeric is null or round(ts_rank_cd(to_tsvector('german', t.title),
+         plainto_tsquery('german', $1))::numeric, 6) < $2::numeric
+         or (round(ts_rank_cd(to_tsvector('german', t.title), plainto_tsquery('german', $1))::numeric, 6) = $2::numeric
            and t.id::text > $3::text))
-     order by score desc, t.id limit $4`,
+     order by round(ts_rank_cd(to_tsvector('german', t.title), plainto_tsquery('german', $1))::numeric, 6) desc, t.id limit $4`,
     [query, cursor?.score ?? null, cursor?.id ?? null, limit + 1],
   );
   return result.rows.map((r) => ({
@@ -161,15 +161,15 @@ async function searchNotes(
 ): Promise<SearchHit[]> {
   const result = await client.query<{ id: string; title: string; score: string }>(
     `select n.id::text, left(n.body, 120) as title,
-       ts_rank_cd(to_tsvector('german', n.body), plainto_tsquery('german', $1)) as score
+       round(ts_rank_cd(to_tsvector('german', n.body), plainto_tsquery('german', $1))::numeric, 6)::text as score
      from notes n
      where n.deleted_at is null
        and to_tsvector('german', n.body) @@ plainto_tsquery('german', $1)
-       and ($2::text is null or ts_rank_cd(to_tsvector('german', n.body),
-         plainto_tsquery('german', $1))::text < $2::text
-         or (ts_rank_cd(to_tsvector('german', n.body), plainto_tsquery('german', $1))::text = $2::text
+       and ($2::numeric is null or round(ts_rank_cd(to_tsvector('german', n.body),
+         plainto_tsquery('german', $1))::numeric, 6) < $2::numeric
+         or (round(ts_rank_cd(to_tsvector('german', n.body), plainto_tsquery('german', $1))::numeric, 6) = $2::numeric
            and n.id::text > $3::text))
-     order by score desc, n.id limit $4`,
+     order by round(ts_rank_cd(to_tsvector('german', n.body), plainto_tsquery('german', $1))::numeric, 6) desc, n.id limit $4`,
     [query, cursor?.score ?? null, cursor?.id ?? null, limit + 1],
   );
   return result.rows.map((r) => ({
