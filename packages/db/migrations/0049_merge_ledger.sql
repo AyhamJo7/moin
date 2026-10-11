@@ -80,8 +80,13 @@ CREATE TABLE contact_merges (
   approved_by     uuid        NOT NULL,
   candidate_id    uuid,
   -- Moved row ids (empty arrays, never NULL): methods, links, tasks, leads, requests, notes.
+  -- Conversations and calls get their own columns (not folded into links): their contact
+  -- legs move by UPDATE like the other tables, while interaction_links rows are deleted
+  -- and re-created (triple-FK), so unmerge must tell the two shapes apart.
   moved_method_ids uuid[]     NOT NULL DEFAULT '{}',
   moved_link_ids   uuid[]     NOT NULL DEFAULT '{}',
+  moved_conversation_ids uuid[] NOT NULL DEFAULT '{}',
+  moved_call_ids   uuid[]     NOT NULL DEFAULT '{}',
   moved_task_ids   uuid[]     NOT NULL DEFAULT '{}',
   moved_lead_ids   uuid[]     NOT NULL DEFAULT '{}',
   moved_request_ids uuid[]    NOT NULL DEFAULT '{}',

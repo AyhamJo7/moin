@@ -111,6 +111,8 @@ and **whether it is defensible at all is an open EXT-02 question**.
 | `contact_merges.candidate_id`                | Contact  | yes (references)                                              | 24 months after the merge                 | hard delete | —            |
 | `contact_merges.moved_method_ids`            | Contact  | yes (references)                                              | 24 months after the merge                 | hard delete | —            |
 | `contact_merges.moved_link_ids`              | Contact  | yes (references)                                              | 24 months after the merge                 | hard delete | —            |
+| `contact_merges.moved_conversation_ids`      | Contact  | yes (references)                                              | 24 months after the merge                 | hard delete | —            |
+| `contact_merges.moved_call_ids`              | Contact  | yes (references)                                              | 24 months after the merge                 | hard delete | —            |
 | `contact_merges.moved_task_ids`              | Contact  | yes (references)                                              | 24 months after the merge                 | hard delete | —            |
 | `contact_merges.moved_lead_ids`              | Contact  | yes (references)                                              | 24 months after the merge                 | hard delete | —            |
 | `contact_merges.moved_request_ids`           | Contact  | yes (references)                                              | 24 months after the merge                 | hard delete | —            |

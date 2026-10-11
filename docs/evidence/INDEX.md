@@ -224,3 +224,4 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P07-012 | P07.14.01 | 2026-10-11 | `cba84d1c8b5` | tenant time plus German formatting plus Hamburg holidays plus 14 tests | [EV-P07-012-time-locale-holidays.md](P07/EV-P07-012-time-locale-holidays.md) |
 | EV-P07-013 | P07.04.01 | 2026-10-11 | `9d66c35aa656` | duplicate candidates plus human merge unmerge plus 6 tests | [EV-P07-013-merge-unmerge.md](P07/EV-P07-013-merge-unmerge.md) |
 | EV-P07-014 | P07.04.04 | 2026-10-11 | `de326e01c4cb` | ROUND-1 codex BLOCK 6 findings: triple-FK delete+recreate, task no-touch, unmerge serialisation, pair-scoped signals, candidate check, audit sum | [EV-P07-014-round1-codex-block.md](P07/EV-P07-014-round1-codex-block.md) |
+| EV-P07-015 | P07.04.04 | 2026-10-11 | `f6df63fa90b0` | ROUND-2 residuals: unmerge restores convos+calls via own columns, pair-unique arbiter, undo full sum | [EV-P07-015-round2-residuals.md](P07/EV-P07-015-round2-residuals.md) |

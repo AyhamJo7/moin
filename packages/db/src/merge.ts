@@ -62,6 +62,90 @@ function toCandidate(row: CandidateRow): DuplicateCandidate {
   };
 }
 
+/**
+ * Insert-or-return the open row for one signal. SELECT-first is the fast path (and gives
+ * the stored-suggestion-stands semantics: a re-suggest with different inputs is not an
+ * update — it returns the open row without auditing). Under concurrency both racers can
+ * miss the SELECT; the INSERT then races the partial pair unique with the matching
+ * arbiter, so the loser gets an empty RETURNING (not a 23505) and falls back to the
+ * re-read. The audit fires only when this call actually inserted (RETURNING non-empty).
+ */
+async function insertSignal(
+  client: TenantClient,
+  first: string,
+  second: string,
+  kind: CandidateSignal,
+  value: string,
+  columns: string,
+  extraValues: readonly string[],
+): Promise<CandidateRow> {
+  const existing = await client.query<CandidateRow>(
+    `select id, contact_a_id, contact_b_id, kind, status from duplicate_candidates
+     where organisation_id = app.current_org() and contact_a_id = $1
+       and contact_b_id = $2 and kind = $3 and status = 'open'`,
+    [first, second, kind],
+  );
+  const open = existing.rows[0];
+  if (open !== undefined) return open;
+  // Branch-per-column-set (governance.ts purgeCandidates shape): the column list is a
+  // union member, never interpolated — the lint bans string-built SQL outright.
+  const inserted =
+    columns === 'name_postal'
+      ? await client.query<CandidateRow>(
+          `insert into duplicate_candidates
+             (organisation_id, id, contact_a_id, contact_b_id, kind, value, signal_name, signal_postal)
+           values (app.current_org(), $1, $2, $3, 'name_postal', $4, $5, $6)
+           on conflict (organisation_id, contact_a_id, contact_b_id, kind)
+             where status = 'open' and kind in ('name_postal', 'email_local', 'ai_similarity')
+           do nothing
+           returning id, contact_a_id, contact_b_id, kind, status`,
+          [randomUUID(), first, second, value, extraValues[0], extraValues[1]],
+        )
+      : columns === 'email_local'
+        ? await client.query<CandidateRow>(
+            `insert into duplicate_candidates
+               (organisation_id, id, contact_a_id, contact_b_id, kind, value, signal_local)
+             values (app.current_org(), $1, $2, $3, 'email_local', $4, $5)
+             on conflict (organisation_id, contact_a_id, contact_b_id, kind)
+               where status = 'open' and kind in ('name_postal', 'email_local', 'ai_similarity')
+             do nothing
+             returning id, contact_a_id, contact_b_id, kind, status`,
+            [randomUUID(), first, second, value, extraValues[0]],
+          )
+        : await client.query<CandidateRow>(
+            `insert into duplicate_candidates
+               (organisation_id, id, contact_a_id, contact_b_id, kind, value, ai_suggested)
+             values (app.current_org(), $1, $2, $3, 'ai_similarity', $4, true)
+             on conflict (organisation_id, contact_a_id, contact_b_id, kind)
+               where status = 'open' and kind in ('name_postal', 'email_local', 'ai_similarity')
+             do nothing
+             returning id, contact_a_id, contact_b_id, kind, status`,
+            [randomUUID(), first, second, value],
+          );
+  const row =
+    inserted.rows[0] ??
+    (
+      await client.query<CandidateRow>(
+        `select id, contact_a_id, contact_b_id, kind, status from duplicate_candidates
+         where organisation_id = app.current_org() and contact_a_id = $1
+           and contact_b_id = $2 and kind = $3 and status = 'open'`,
+        [first, second, kind],
+      )
+    ).rows[0];
+  if (row === undefined) throw new Error('candidate suggest returned no row');
+  if (inserted.rows[0] !== undefined) {
+    await appendAuditEvent(client, {
+      source: 'api',
+      operation: 'merge.suggest',
+      targetKind: 'duplicate_candidate',
+      targetId: row.id,
+      argsSanitized: { signal: SIGNAL_MARKER[kind] },
+      result: 'succeeded',
+    });
+  }
+  return row;
+}
+
 /** Order two contact ids for lock acquisition: same pair, same order, never a deadlock. */
 function orderedPair(a: string, b: string): [string, string] {
   if (!UUID_RE.test(a) || !UUID_RE.test(b)) throw new RangeError('contact id must be a uuid');
@@ -109,52 +193,21 @@ export async function suggestNamePostal(
   const [first, second] = orderedPair(contactAId, contactBId);
   const name = personName(input.displayName).value;
   const postal = checkPostal(input.postalCode);
-  const id = randomUUID();
-  // Signal `value` is scoped to the ordered pair (`A~B`, plus the local for email_local):
-  // the 0037 value unique then matches inferable arbiter columns exactly, and the partial
-  // signal unique dedupes repeat suggestions per open pair+kind (pair-scoped, not
-  // value-scoped). INSERT races the unique; the loser falls back to the re-read below
-  // (SELECT-first first, so a stored suggestion stands when re-suggested with different
-  // inputs — a re-suggest is not an update).
-  const existing = await client.query<CandidateRow>(
-    `select id, contact_a_id, contact_b_id, kind, status from duplicate_candidates
-     where organisation_id = app.current_org() and contact_a_id = $1
-       and contact_b_id = $2 and kind = 'name_postal' and status = 'open'`,
-    [first, second],
+  // Signal `value` is scoped to the ordered pair (`A~B~…`): the 0037 (kind, value, status)
+  // unique then collides only within the pair — a different pair with the same signal
+  // values gets a distinct value and never trips the old arbiter. The pair unique above
+  // is the dedup index (pair-scoped, not value-scoped).
+  return toCandidate(
+    await insertSignal(
+      client,
+      first,
+      second,
+      'name_postal',
+      `${first}~${second}~${name} ${postal}`,
+      'name_postal',
+      [name, postal],
+    ),
   );
-  const open = existing.rows[0];
-  // SELECT-first returns the open row WITHOUT auditing (a re-suggest is not a new
-  // suggestion); only the insert path below audits. Concurrent suggesters race on the
-  // partial unique and the loser re-reads via the fallback select.
-  if (open !== undefined) return toCandidate(open);
-  const result = await client.query<CandidateRow>(
-    `insert into duplicate_candidates
-       (organisation_id, id, contact_a_id, contact_b_id, kind, value, signal_name, signal_postal)
-     values (app.current_org(), $1, $2, $3, 'name_postal', $4, $5, $6)
-     on conflict (organisation_id, kind, value, status) do nothing
-     returning id, contact_a_id, contact_b_id, kind, status`,
-    [id, first, second, `${first}~${second}~${name} ${postal}`, name, postal],
-  );
-  const row =
-    result.rows[0] ??
-    (
-      await client.query<CandidateRow>(
-        `select id, contact_a_id, contact_b_id, kind, status from duplicate_candidates
-         where organisation_id = app.current_org() and contact_a_id = $1
-           and contact_b_id = $2 and kind = 'name_postal' and status = 'open'`,
-        [first, second],
-      )
-    ).rows[0];
-  if (row === undefined) throw new Error('candidate suggest returned no row');
-  await appendAuditEvent(client, {
-    source: 'api',
-    operation: 'merge.suggest',
-    targetKind: 'duplicate_candidate',
-    targetId: row.id,
-    argsSanitized: { signal: SIGNAL_MARKER.name_postal },
-    result: 'succeeded',
-  });
-  return toCandidate(row);
 }
 
 /**
@@ -169,44 +222,17 @@ export async function suggestEmailLocal(
 ): Promise<DuplicateCandidate> {
   const [first, second] = orderedPair(contactAId, contactBId);
   const local = checkLocalPart(input.localPart);
-  const id = randomUUID();
-  // Value scoped to the pair (same shape as name_postal above) for the arbiter.
-  const existing = await client.query<CandidateRow>(
-    `select id, contact_a_id, contact_b_id, kind, status from duplicate_candidates
-     where organisation_id = app.current_org() and contact_a_id = $1
-       and contact_b_id = $2 and kind = 'email_local' and status = 'open'`,
-    [first, second],
+  return toCandidate(
+    await insertSignal(
+      client,
+      first,
+      second,
+      'email_local',
+      `${first}~${second}~${local}`,
+      'email_local',
+      [local],
+    ),
   );
-  const open = existing.rows[0];
-  if (open !== undefined) return toCandidate(open);
-  const result = await client.query<CandidateRow>(
-    `insert into duplicate_candidates
-       (organisation_id, id, contact_a_id, contact_b_id, kind, value, signal_local)
-     values (app.current_org(), $1, $2, $3, 'email_local', $4, $5)
-     on conflict (organisation_id, kind, value, status) do nothing
-     returning id, contact_a_id, contact_b_id, kind, status`,
-    [id, first, second, `${first}~${second}~${local}`, local],
-  );
-  const row =
-    result.rows[0] ??
-    (
-      await client.query<CandidateRow>(
-        `select id, contact_a_id, contact_b_id, kind, status from duplicate_candidates
-         where organisation_id = app.current_org() and contact_a_id = $1
-           and contact_b_id = $2 and kind = 'email_local' and status = 'open'`,
-        [first, second],
-      )
-    ).rows[0];
-  if (row === undefined) throw new Error('candidate suggest returned no row');
-  await appendAuditEvent(client, {
-    source: 'api',
-    operation: 'merge.suggest',
-    targetKind: 'duplicate_candidate',
-    targetId: row.id,
-    argsSanitized: { signal: SIGNAL_MARKER.email_local },
-    result: 'succeeded',
-  });
-  return toCandidate(row);
 }
 
 /**
@@ -219,44 +245,17 @@ export async function suggestAiSimilarity(
   contactBId: string,
 ): Promise<DuplicateCandidate> {
   const [first, second] = orderedPair(contactAId, contactBId);
-  const id = randomUUID();
-  // SELECT-first (same shape as the other signals): the partial unique has no arbiter.
-  const existing = await client.query<CandidateRow>(
-    `select id, contact_a_id, contact_b_id, kind, status from duplicate_candidates
-     where organisation_id = app.current_org() and contact_a_id = $1
-       and contact_b_id = $2 and kind = 'ai_similarity' and status = 'open'`,
-    [first, second],
+  return toCandidate(
+    await insertSignal(
+      client,
+      first,
+      second,
+      'ai_similarity',
+      `${first}~${second}`,
+      'ai_similarity',
+      [],
+    ),
   );
-  const open = existing.rows[0];
-  if (open !== undefined) return toCandidate(open);
-  const result = await client.query<CandidateRow>(
-    `insert into duplicate_candidates
-       (organisation_id, id, contact_a_id, contact_b_id, kind, value, ai_suggested)
-     values (app.current_org(), $1, $2, $3, 'ai_similarity', $4, true)
-     on conflict (organisation_id, kind, value, status) do nothing
-     returning id, contact_a_id, contact_b_id, kind, status`,
-    [id, first, second, `${first}~${second}`],
-  );
-  const row =
-    result.rows[0] ??
-    (
-      await client.query<CandidateRow>(
-        `select id, contact_a_id, contact_b_id, kind, status from duplicate_candidates
-         where organisation_id = app.current_org() and contact_a_id = $1
-           and contact_b_id = $2 and kind = 'ai_similarity' and status = 'open'`,
-        [first, second],
-      )
-    ).rows[0];
-  if (row === undefined) throw new Error('candidate suggest returned no row');
-  await appendAuditEvent(client, {
-    source: 'api',
-    operation: 'merge.suggest',
-    targetKind: 'duplicate_candidate',
-    targetId: row.id,
-    argsSanitized: { signal: SIGNAL_MARKER.ai_similarity },
-    result: 'succeeded',
-  });
-  return toCandidate(row);
 }
 
 export interface MergeRecord {
@@ -411,9 +410,9 @@ export async function applyMerge(
   await client.query(
     `insert into contact_merges
        (organisation_id, id, winner_id, loser_id, approved_by, candidate_id,
-        moved_method_ids, moved_link_ids, moved_task_ids, moved_lead_ids,
-        moved_request_ids, moved_note_ids)
-     values (app.current_org(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        moved_method_ids, moved_link_ids, moved_conversation_ids, moved_call_ids,
+        moved_task_ids, moved_lead_ids, moved_request_ids, moved_note_ids)
+     values (app.current_org(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
     [
       mergeId,
       input.winnerId,
@@ -421,7 +420,9 @@ export async function applyMerge(
       input.approvedBy,
       input.candidateId ?? null,
       methodIds,
-      [...linkIds, ...convoIds, ...callIds],
+      linkIds,
+      convoIds,
+      callIds,
       taskIds,
       leadIds,
       requestIds,
@@ -480,6 +481,8 @@ export async function unmerge(client: TenantClient, mergeId: string): Promise<Un
     loser_id: string;
     moved_method_ids: string[];
     moved_link_ids: string[];
+    moved_conversation_ids: string[];
+    moved_call_ids: string[];
     moved_task_ids: string[];
     moved_lead_ids: string[];
     moved_request_ids: string[];
@@ -488,8 +491,8 @@ export async function unmerge(client: TenantClient, mergeId: string): Promise<Un
     undone: boolean;
   }>(
     `select id, winner_id::text, loser_id::text, moved_method_ids, moved_link_ids,
-       moved_task_ids, moved_lead_ids, moved_request_ids, moved_note_ids,
-       merged_at, undone
+       moved_conversation_ids, moved_call_ids, moved_task_ids, moved_lead_ids,
+       moved_request_ids, moved_note_ids, merged_at, undone
      from contact_merges where id = $1`,
     [mergeId],
   );
@@ -567,11 +570,11 @@ export async function unmerge(client: TenantClient, mergeId: string): Promise<Un
     }
   };
   await moveBack(record.moved_method_ids, 'contact_methods');
-  // Re-created link ids live in the ledger's moved_link_ids (the pre-merge rows are gone);
-  // the recorded conversation/call/lead/request/note ids move back by table as usual.
-  // Links are REWRITTEN, not moved: delete the winner's recreated rows and re-insert them
-  // against the restored contact (same rule/label/interaction_ref, restored contact leg).
-  // The triple FK is satisfied directly — no order violation in either direction.
+  // Re-created link ids live in moved_link_ids (the pre-merge rows are gone); recorded
+  // conversation/call/lead/request/note ids move back by table as usual. Links are
+  // REWRITTEN, not moved: delete the winner's recreated rows and re-insert them against
+  // the restored contact (same rule/label/interaction_ref, restored contact leg). The
+  // triple FK is satisfied directly — no order violation in either direction.
   // Methods already moved back above, so the (restored, method) pairs exist.
   const doomed = await client.query<{
     interaction_ref: string;
@@ -591,6 +594,11 @@ export async function unmerge(client: TenantClient, mergeId: string): Promise<Un
       [randomUUID(), row.interaction_ref, restoredId, row.method_id, row.rule, row.label_de],
     );
   }
+  // Conversations and calls moved by UPDATE (not rewrite): their contact legs return to
+  // the restored contact. Without this they would strand on the winner while only the
+  // links came back — the reviewer's HIGH.
+  await moveBack(record.moved_conversation_ids, 'conversations');
+  await moveBack(record.moved_call_ids, 'calls');
   // Tasks attach to conversations, not contacts: the ledger records which task ids were
   // observed on moved conversations, but the tasks themselves never moved — re-pointing
   // their conversation_id at a CONTACT id would corrupt them. Unmerge leaves tasks alone.
@@ -610,7 +618,16 @@ export async function unmerge(client: TenantClient, mergeId: string): Promise<Un
     operation: 'merge.undo',
     targetKind: 'contact_merge',
     targetId: mergeId,
-    argsSanitized: { restored: record.moved_method_ids.length + record.moved_link_ids.length },
+    argsSanitized: {
+      restored:
+        record.moved_method_ids.length +
+        record.moved_link_ids.length +
+        record.moved_conversation_ids.length +
+        record.moved_call_ids.length +
+        record.moved_lead_ids.length +
+        record.moved_request_ids.length +
+        record.moved_note_ids.length,
+    },
     result: 'succeeded',
   });
   return { mergeId, restoredContactId: restoredId };

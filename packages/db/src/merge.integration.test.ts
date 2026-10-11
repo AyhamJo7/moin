@@ -313,10 +313,50 @@ describe('merge', () => {
       ),
     );
     expect(after.rows[0]?.conversation_id).toBe(movedConvo.id);
+    // Recorded conversations/calls came back: their contact legs name the restored row,
+    // not the winner (the round-2 HIGH: moved_link_ids held links+convos+calls but only
+    // links were rewritten).
+    const convoBack = await withTenant(app, ORG_A, (client) =>
+      client.query<{ contact_id: string }>(
+        `select contact_id::text from conversations where id = $1`,
+        [movedConvo.id],
+      ),
+    );
+    expect(convoBack.rows[0]?.contact_id).toBe(undone.restoredContactId);
     // Second unmerge refused: already undone.
     await expect(
       withTenant(app, ORG_A, (client) => unmerge(client, record.id)),
     ).rejects.toBeInstanceOf(MergeConflict);
+  });
+
+  evidenceTest('concurrent different-value suggests converge on one row', async () => {
+    const a = await withTenant(app, ORG_A, (client) =>
+      createContact(client, { displayName: 'Hugo Berger' }),
+    );
+    const b = await withTenant(app, ORG_A, (client) =>
+      createContact(client, { displayName: 'Hugo Berger' }),
+    );
+    // Same pair, different signal inputs, racing: SELECT-first can miss on both sides,
+    // so the INSERTs collide — the pair-unique arbiter turns the loser into a re-read,
+    // not a 23505. Both callers get the same stored row (no throw, no duplicates).
+    const [one, two] = await Promise.all([
+      withTenant(app, ORG_A, (client) =>
+        suggestNamePostal(client, a.id, b.id, { displayName: 'Hugo Berger', postalCode: '20354' }),
+      ),
+      withTenant(app, ORG_A, (client) =>
+        suggestNamePostal(client, b.id, a.id, { displayName: 'Hugo Berger', postalCode: '10115' }),
+      ),
+    ]);
+    expect(one.id).toBe(two.id);
+    const rows = await withTenant(app, ORG_A, (client) =>
+      client.query<{ n: string }>(
+        `select count(*)::text as n from duplicate_candidates
+         where kind = 'name_postal' and status = 'open'
+           and ((contact_a_id = $1 and contact_b_id = $2) or (contact_a_id = $2 and contact_b_id = $1))`,
+        [a.id, b.id],
+      ),
+    );
+    expect(rows.rows[0]?.n).toBe('1');
   });
 
   evidenceTest('concurrent unmerges serialise: one restores, the other 409s', async () => {
