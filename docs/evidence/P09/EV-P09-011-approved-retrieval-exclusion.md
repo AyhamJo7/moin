@@ -5,7 +5,7 @@
 | Evidence ID | EV-P09-011 |
 | Item | P09.09.05 |
 | Date (UTC) | 2026-10-12 01:30 UTC |
-| Commit | `05fd6cf` (ledger pin incl. EV + implementation; code HEAD `7ab1ab3`, mutation measured at `49e15a5`) |
+| Commit | `5b19f8c` (EV + implementation; mutation measured at `49e15a5`, gates at `05fd6cf` — same tree plus ledger/EV pins) |
 | Environment | local |
 | Command / procedure | `gates.py full` 14/14 PASS (artifact `20261011T233333Z-full.json`): control-plane (22.5 s), control-plane-lint, conventions, docs-consistency, format, lint, boundaries, typecheck, unit (5.7 s), integration (23.9 s), migrations, build, licences, secret-scan. TEST_* vars exported from `.env.example` values (no worktree secrets file; INV-15); pinned Node 24.21.0 / pnpm 10.34.5 on PATH. Earlier full runs on this tree failed only on Keycloak-dependent suites missing `TEST_OIDC_ISSUER_URL` in the gate-inherited env; the suites pass standalone and the cited run has all vars present. |
 | Result | PASS |
