@@ -165,14 +165,16 @@ BEGIN
   IF v_state = 'retired' THEN
     RAISE EXCEPTION 'knowledge item is retired' USING ERRCODE = 'invalid_parameter_value';
   END IF;
-  -- Latest-draft check: stale drafts never go live (P09.05.03).
+  -- Latest-draft check: stale drafts never go live (P09.05.03). IS NOT TRUE
+  -- covers BOTH missing rows (NULL: wrong pair) and stale drafts (false: superseded)
+  -- — a bare IS NULL check would let a stale v2 through with v3 pending.
   SELECT state = 'draft'
      AND version_no = (SELECT max(version_no) FROM public.knowledge_versions
                        WHERE organisation_id = app.current_org() AND item_id = p_item_id),
          version_no
-    INTO v_state, v_no FROM public.knowledge_versions
+    INTO v_latest, v_no FROM public.knowledge_versions
     WHERE organisation_id = app.current_org() AND id = p_version_id AND item_id = p_item_id;
-  IF v_state IS NULL THEN
+  IF v_latest IS NOT TRUE THEN
     RAISE EXCEPTION 'knowledge version is not the latest approvable draft'
       USING ERRCODE = 'invalid_parameter_value';
   END IF;

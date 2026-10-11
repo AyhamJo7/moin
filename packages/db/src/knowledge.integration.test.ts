@@ -235,6 +235,60 @@ describe('knowledge', () => {
     expect(flipped?.id).toBe(v3.id);
   });
 
+  evidenceTest('direct definer call cannot publish a stale draft', async () => {
+    // ROUND-4 regression: the DEFINER assigned the boolean guard to the wrong
+    // variable, so a DIRECT fn call (bypassing the service pre-check) published a
+    // stale v2 with v3 pending. The fn itself must refuse.
+    const created = await withTenant(app, ORG_A, (client) =>
+      createKnowledgeItem(client, {
+        title: 'Direktaufruf',
+        body: 'Erste Fassung.',
+        metadata: META,
+      }),
+    );
+    await withTenant(app, ORG_A, (client) =>
+      approveKnowledgeVersion(client, {
+        itemId: created.item.id,
+        versionId: created.version.id,
+        approvedBy: STAFF,
+      }),
+    );
+    const v2 = await withTenant(app, ORG_A, (client) =>
+      editKnowledgeItem(client, created.item.id, {
+        title: 'Direktaufruf',
+        body: 'Zweite Fassung.',
+        metadata: META,
+      }),
+    );
+    await withTenant(app, ORG_A, (client) =>
+      editKnowledgeItem(client, created.item.id, {
+        title: 'Direktaufruf',
+        body: 'Dritte Fassung.',
+        metadata: META,
+      }),
+    );
+    // Direct DEFINER call for stale v2 (no service pre-check in this path).
+    // The fn raises invalid_parameter_value (22023), not the trigger's 42501.
+    await expect(
+      withTenant(app, ORG_A, (client) =>
+        client.query(`select app.approve_knowledge_version($1, $2, $3)`, [
+          created.item.id,
+          v2.id,
+          STAFF,
+        ]),
+      ),
+    ).rejects.toMatchObject({ code: '22023' });
+    // v2 stays draft; live still v1.
+    const state = await withTenant(app, ORG_A, (client) =>
+      client.query<{ state: string }>(`select state from knowledge_versions where id = $1`, [
+        v2.id,
+      ]),
+    );
+    expect(state.rows[0]?.state).toBe('draft');
+    const live = await withTenant(app, ORG_A, (client) => getLiveVersion(client, created.item.id));
+    expect(live?.id).toBe(created.version.id);
+  });
+
   evidenceTest('concurrent approves serialise: one flips, the other 409s', async () => {
     const created = await withTenant(app, ORG_A, (client) =>
       createKnowledgeItem(client, {
