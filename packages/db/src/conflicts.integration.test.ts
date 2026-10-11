@@ -289,6 +289,88 @@ describe('conflicts', () => {
     expect(back.rows[0]?.active).toBe(true);
   });
 
+  evidenceTest('resolved then redetected reopens with a fresh open task', async () => {
+    // ROUND-1 P1: resolved + redetected is a NEW CYCLE — the row reopens
+    // (status open, resolution cleared), subjects suspend again, and the
+    // owner gets a FRESH open task (not the DONE one from cycle one).
+    const x = await withTenant(app, ORG_A, (client) =>
+      createFaqCard(client, {
+        canonical: 'Gibt es sonntags Brunch?',
+        spoken: 'Ja, von zehn bis vierzehn Uhr.',
+      }),
+    );
+    const y = await withTenant(app, ORG_A, (client) =>
+      createFaqCard(client, {
+        canonical: 'Gibt es sonntags Fruehstueck?',
+        spoken: 'Ja, von neun bis dreizehn Uhr.',
+      }),
+    );
+    const first = await withTenant(app, ORG_A, (client) =>
+      openConflict(client, {
+        detector: 'faq-duplicate',
+        subjectKind: 'faq-card',
+        subjectA: x.id,
+        subjectB: y.id,
+        reason: 'cycle one',
+      }),
+    );
+    expect(first).toMatchObject({ opened: true, tasked: true });
+    const row = await withTenant(app, ORG_A, (client) =>
+      client.query<{ id: string; task_id: string }>(
+        `select id::text, task_id::text from knowledge_conflicts
+         where status = 'open' and reason = 'cycle one' limit 1`,
+      ),
+    );
+    const conflictId = row.rows[0]?.id ?? '';
+    const firstTaskId = row.rows[0]?.task_id ?? '';
+    expect(conflictId).toBeTruthy();
+    expect(firstTaskId).toBeTruthy();
+    // Owner resolves; cycle-one task completes.
+    await withTenant(app, ORG_A, (client) =>
+      resolveConflict(client, { conflictId, note: 'Reviewed, kept both.' }),
+    );
+    await withTenant(app, ORG_A, (client) =>
+      client.query(`update tasks set status = 'done' where id = $1::uuid`, [firstTaskId]),
+    );
+    // Contradiction persists → redetection reopens: row OPEN again,
+    // resolution cleared, subjects suspended, FRESH open task.
+    const second = await withTenant(app, ORG_A, (client) =>
+      openConflict(client, {
+        detector: 'faq-duplicate',
+        subjectKind: 'faq-card',
+        subjectA: x.id,
+        subjectB: y.id,
+        reason: 'cycle two',
+      }),
+    );
+    expect(second).toMatchObject({ opened: true, tasked: true });
+    const reopened = await withTenant(app, ORG_A, (client) =>
+      client.query<{ status: string; note: string | null; task_id: string }>(
+        `select status, resolution_note as note, task_id::text from knowledge_conflicts
+         where id = $1::uuid`,
+        [conflictId],
+      ),
+    );
+    expect(reopened.rows[0]?.status).toBe('open');
+    expect(reopened.rows[0]?.note).toBeNull();
+    const secondTaskId = reopened.rows[0]?.task_id ?? '';
+    expect(secondTaskId).toBeTruthy();
+    expect(secondTaskId).not.toBe(firstTaskId);
+    const taskState = await withTenant(app, ORG_A, (client) =>
+      client.query<{ status: string }>(`select status from tasks where id = $1::uuid`, [
+        secondTaskId,
+      ]),
+    );
+    expect(taskState.rows[0]?.status).toBe('open');
+    const suspended = await withTenant(app, ORG_A, (client) =>
+      client.query<{ n: string }>(
+        `select count(*)::text as n from faq_cards where id = any ($1::uuid[]) and active = false`,
+        [[x.id, y.id]],
+      ),
+    );
+    expect(suspended.rows[0]?.n).toBe('2');
+  });
+
   evidenceTest('conflict audit rows carry markers only; tenants isolated', async () => {
     await withTenant(app, ORG_A, (client) =>
       openConflict(client, {

@@ -25,7 +25,7 @@
  * bodies, canonicals, or hours.
  */
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { appendAuditEvent } from './audit.ts';
 import { createTask } from './tasks.ts';
 import type { TenantClient } from './tenant.ts';
@@ -191,6 +191,19 @@ export async function openConflict(
   );
   const conflictId = inserted.rows[0]?.id;
   if (conflictId === undefined) throw new Error('conflict upsert returned no row');
+  // Resolved + redetected = NEW CYCLE (ROUND-1 P1): the upsert above revived
+  // a resolved row's reason but left status resolved — reopen it (status open,
+  // cleared resolution, fresh detected_at) so subjects suspend and the owner
+  // gets a fresh open task. Without this the row stays resolved while the
+  // subjects suspend around it: silent dead content, no callback.
+  const revived = await client.query<{ n: string }>(
+    `update knowledge_conflicts set status = 'open', resolved_at = null,
+       resolution_note = null, detected_at = now(), task_id = null
+     where organisation_id = app.current_org() and id = $1::uuid and status = 'resolved'
+     returning 1`,
+    [conflictId],
+  );
+  const reopened = (revived.rowCount ?? 0) > 0;
   // Repeat detection must not re-task: when the row already carries a task,
   // report opened=false (nothing new happened). The task key is per-pair, so
   // createTask would first-write-win the same row back anyway — but the
@@ -200,16 +213,17 @@ export async function openConflict(
      where organisation_id = app.current_org() and id = $1::uuid`,
     [conflictId],
   );
-  if (already.rows[0]?.task_id != null) {
+  if (!reopened && already.rows[0]?.task_id != null) {
     await suspendSubjects(client, input.subjectKind, [a, b]);
     return { opened: false, tasked: false };
   }
-  // A repeat (row already open with a task) tasks nothing new: the task key is
-  // per-pair, and createTask first-write-wins the same row back.
-  const key =
-    input.subjectKind === 'opening-rule'
-      ? `conflict:hours:${a}:${b}`
-      : `conflict:${input.subjectKind}:${a}:${b}`;
+  // Per-CYCLE key (reverify precedent): the reopen clears task_id above, so
+  // the key must be novel per reopen — a bare per-pair key would first-write-
+  // win back the DONE task from the previous cycle instead of minting fresh
+  // callback work. Keys fit the 100-char task limit via sha256 pair digest
+  // (uuids are 36 chars each — two bare uuids + prefix overflow it).
+  const pair = createHash('sha256').update(`${a}:${b}`, 'utf8').digest('hex').slice(0, 16);
+  const key = `conflict:${reopened ? `r${String(Date.now())}:` : ''}${pair}`;
   const task = await createTask(client, {
     title: CONFLICT_TASK_TITLE,
     type: 'review',
