@@ -53,6 +53,15 @@ CREATE TABLE knowledge_reverify_queue (
   id              uuid NOT NULL PRIMARY KEY,
   item_id         uuid NOT NULL,
   due_at          timestamptz NOT NULL,
+  -- Bare uuid, deliberately NOT a database FK (ROUND-1 P2-2): tasks carries
+  -- UNIQUE (organisation_id, id) but its PRIMARY KEY is the bare id, so a
+  -- composite FK is inexpressible and a bare-uuid FK would admit cross-tenant
+  -- task ids. Tenant isolation holds because every write and read runs inside
+  -- withTenant under FORCE RLS — the sweep writes task_id from a task row it
+  -- just created in the SAME tenant transaction, and the cross-tenant test
+  -- below pins that no foreign row is ever visible. See also the
+  -- application-level assertion in staleness.integration.test.ts
+  -- ('queue task ids resolve inside the tenant').
   task_id         uuid,
   created_at      timestamptz NOT NULL DEFAULT now(),
   UNIQUE (organisation_id, id),
@@ -70,7 +79,7 @@ REVOKE ALL ON TABLE knowledge_reverify_queue
   FROM PUBLIC, moin_app, moin_identity, moin_provisioner, moin_dispatcher, moin_support_ro,
        moin_reporting;
 
-GRANT SELECT, INSERT, UPDATE ON knowledge_reverify_queue TO moin_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON knowledge_reverify_queue TO moin_app;
 
 COMMENT ON TABLE knowledge_reverify_queue IS 'Re-verification queue (P09.06.02): one row per item past its reverify deadline. task_id links the Wissen-pruefen task; NULL until created. Append-only per item (upsert); erasure runs privileged.';
 

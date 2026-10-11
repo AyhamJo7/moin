@@ -146,8 +146,18 @@ function checkValidUntil(validUntil: string | undefined): string | null {
   return validUntil;
 }
 
+/**
+ * Reverify deadline for a card in days (P09.06, ROUND-1 P2-1): omitted
+ * (undefined) falls back to the 90-day card default — a card that never goes
+ * stale is a card nobody re-checks. Explicit null opts OUT (no deadline).
+ * Cards have no menu category, so the single 90d fallback applies (the
+ * knowledge menu-30d default lives on versions, not cards — documented here
+ * so the asymmetry is deliberate, not an omission).
+ */
+const FAQ_FALLBACK_DAYS = 90;
+
 function checkReverifyAfterDays(value: number | null | undefined): string | null {
-  if (value === undefined) return null;
+  if (value === undefined) return `${String(FAQ_FALLBACK_DAYS)} days`;
   if (value === null) return null;
   if (!Number.isInteger(value) || value <= 0 || value > 3650) {
     throw new RangeError('reverify_after must be 1..3650 days');
@@ -331,6 +341,11 @@ async function matchCards(
      from faq_cards
      where organisation_id = app.current_org() and active = true
        and coalesce(valid_until < current_date, false) = false
+       -- Overdue sensitive cards stop serving (escalation, same rule as
+       -- knowledge restricted — ROUND-1 P1-3); overdue public/internal serve
+       -- flagged stale.
+       and not (sensitivity = 'sensitive'
+         and coalesce(updated_at + reverify_after <= now(), false) = true)
        and ($2::boolean = false or sensitivity <> 'sensitive')
        and ($3::uuid is null and location_id is null
             or $3::uuid is not null and (location_id is null or location_id = $3::uuid))
@@ -352,7 +367,8 @@ async function matchCards(
  * Approved-card lookup (the DEFAULT answer mode, ADR-0014): trigram match over
  * canonical + variants, spoken answer verbatim — sensitive cards INCLUDED (this is
  * their only mode). Null when nothing matches: the caller abstains or escalates.
- * Expired cards never match (P09.06.01); overdue cards match with stale=true.
+ * Expired cards never match (P09.06.01); overdue sensitive cards never match
+ * (escalation); overdue public/internal match with stale=true.
  */
 export async function findAnswer(
   client: TenantClient,

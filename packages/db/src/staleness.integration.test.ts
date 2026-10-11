@@ -100,9 +100,17 @@ describe('staleness', () => {
     const late = new Date(Date.now() + 2 * 86_400_000);
     const stopped = await withTenant(app, ORG_A, (client) => servedState(client, itemId, late));
     expect(stopped).toBeNull();
-    // The sweep suspends it.
+    // ROUND-1 P1-2: the SERVING path suppresses inline — no sweep has run, no
+    // suspended flag is set, yet nothing is served at the overdue instant.
+    // The sweep still owns the suspension + tasking; serving never waits.
+    const unswept = await withTenant(app, ORG_A, (client) => getLiveVersion(client, itemId, late));
+    expect(unswept).toBeNull();
+    // The sweep suspends it (checked counts THIS test's item plus any earlier
+    // overdue items the sweep has not handled yet — shared database, so count
+    // per-item: this item suspended + tasked exactly once).
     const sweep = await withTenant(app, ORG_A, (client) => sweepReverify(client, late));
-    expect(sweep).toMatchObject({ checked: 1, suspended: 1, tasksCreated: 1 });
+    expect(sweep.suspended).toBeGreaterThanOrEqual(1);
+    expect(sweep.tasksCreated).toBeGreaterThanOrEqual(1);
     const live = await withTenant(app, ORG_A, (client) => getLiveVersion(client, itemId));
     expect(live).toBeNull();
     // Re-approval (the review) lifts the suspension: serves again.
@@ -121,6 +129,54 @@ describe('staleness', () => {
     );
     const back = await withTenant(app, ORG_A, (client) => getLiveVersion(client, itemId));
     expect(back?.id).toBe(v2.id);
+  });
+
+  evidenceTest('re-approval resets the reverify lifecycle: re-queue after re-due', async () => {
+    // ROUND-1 P1-1: approving must delete the queue row, or the sweep's
+    // handled-row exclusion would never re-queue a re-approved item.
+    const { itemId } = await makeLive({ sensitivity: 'restricted', reverifyAfterDays: 1 });
+    const late = new Date(Date.now() + 2 * 86_400_000);
+    const first = await withTenant(app, ORG_A, (client) => sweepReverify(client, late));
+    expect(first.tasksCreated).toBeGreaterThanOrEqual(1);
+    const queued = await withTenant(app, ORG_A, (client) =>
+      client.query<{ n: string }>(
+        `select count(*)::text as n from knowledge_reverify_queue where item_id = $1`,
+        [itemId],
+      ),
+    );
+    expect(queued.rows[0]?.n).toBe('1');
+    // Re-approve: queue row goes away with the suspension.
+    const v2 = await withTenant(app, ORG_A, (client) =>
+      editKnowledgeItem(client, itemId, {
+        title: 'Ruhetag',
+        body: 'Dienstags offen.',
+        metadata: meta({ sensitivity: 'restricted', reverifyAfterDays: 1 }),
+      }),
+    );
+    await withTenant(
+      app,
+      ORG_A,
+      (client) => approveKnowledgeVersion(client, { itemId, versionId: v2.id }),
+      { actorId: OWNER },
+    );
+    const cleared = await withTenant(app, ORG_A, (client) =>
+      client.query<{ n: string }>(
+        `select count(*)::text as n from knowledge_reverify_queue where item_id = $1`,
+        [itemId],
+      ),
+    );
+    expect(cleared.rows[0]?.n).toBe('0');
+    // Overdue again → the sweep re-queues and re-tasks.
+    const later = new Date(Date.now() + 4 * 86_400_000);
+    const second = await withTenant(app, ORG_A, (client) => sweepReverify(client, later));
+    expect(second.tasksCreated).toBeGreaterThanOrEqual(1);
+    const requeued = await withTenant(app, ORG_A, (client) =>
+      client.query<{ n: string }>(
+        `select count(*)::text as n from knowledge_reverify_queue where item_id = $1 and task_id is not null`,
+        [itemId],
+      ),
+    );
+    expect(requeued.rows[0]?.n).toBe('1');
   });
 
   evidenceTest('overdue public item keeps serving flagged stale', async () => {
@@ -237,13 +293,106 @@ describe('staleness', () => {
       }),
     );
     // Backdate updated_at so the card is overdue without waiting a day.
+    // Scoped to this card: the shared database holds other cards.
     await withTenant(app, ORG_A, (client) =>
-      client.query(`update faq_cards set updated_at = now() - interval '2 days'`),
+      client.query(
+        `update faq_cards set updated_at = now() - interval '2 days'
+         where canonical = 'Was gibt es mittags?'`,
+      ),
     );
     const hit = await withTenant(app, ORG_A, (client) =>
       findAnswer(client, 'Was gibt es mittags?'),
     );
     expect(hit?.stale).toBe(true);
     expect(hit?.spoken).toBe('Heute Eintopf mit Brot.');
+  });
+
+  evidenceTest('overdue sensitive faq card stops serving (escalation)', async () => {
+    // ROUND-1 P1-3: same rule as knowledge restricted — overdue sensitive
+    // stops, it does not speak flagged-stale.
+    await withTenant(app, ORG_A, (client) =>
+      createFaqCard(client, {
+        canonical: 'Enthaelt der Kuchen Nuesse?',
+        spoken: 'Unser Kuchen enthaelt Haselnuesse.',
+        sensitivity: 'sensitive',
+        reverifyAfterDays: 1,
+      }),
+    );
+    const fresh = await withTenant(app, ORG_A, (client) =>
+      findAnswer(client, 'Enthaelt der Kuchen Nuesse?'),
+    );
+    expect(fresh?.spoken).toBe('Unser Kuchen enthaelt Haselnuesse.');
+    expect(fresh?.stale).toBe(false);
+    await withTenant(app, ORG_A, (client) =>
+      client.query(
+        `update faq_cards set updated_at = now() - interval '2 days'
+         where canonical = 'Enthaelt der Kuchen Nuesse?'`,
+      ),
+    );
+    const stopped = await withTenant(app, ORG_A, (client) =>
+      findAnswer(client, 'Enthaelt der Kuchen Nuesse?'),
+    );
+    expect(stopped).toBeNull();
+  });
+
+  evidenceTest('faq cards default to a 90-day deadline; null opts out', async () => {
+    // ROUND-1 P2-1: omitted reverifyAfterDays → 90d fallback (a card that
+    // never goes stale is never re-checked); explicit null → no deadline.
+    await withTenant(app, ORG_A, (client) =>
+      createFaqCard(client, {
+        canonical: 'Wo kann man parken?',
+        spoken: 'Parkhaus nebenan, erste Stunde frei.',
+      }),
+    );
+    const fallback = await withTenant(app, ORG_A, (client) =>
+      client.query<{ after: string | null }>(
+        `select reverify_after::text as after from faq_cards
+         where canonical = 'Wo kann man parken?'`,
+      ),
+    );
+    expect(fallback.rows[0]?.after).toContain('90 days');
+    await withTenant(app, ORG_A, (client) =>
+      createFaqCard(client, {
+        canonical: 'Gibt es WLAN?',
+        spoken: 'Ja, freies WLAN im Gastraum.',
+        reverifyAfterDays: null,
+      }),
+    );
+    const opted = await withTenant(app, ORG_A, (client) =>
+      client.query<{ after: string | null }>(
+        `select reverify_after as after from faq_cards where canonical = 'Gibt es WLAN?'`,
+      ),
+    );
+    expect(opted.rows[0]?.after).toBeNull();
+  });
+
+  evidenceTest('queue task ids resolve inside the tenant', async () => {
+    // ROUND-1 P2-2: task_id is a bare uuid (no composite FK possible — tasks
+    // PKs on bare id). Application-level pin: every queued task_id resolves
+    // to a task row visible in THIS tenant, and B sees none of it.
+    const { itemId } = await makeLive({ reverifyAfterDays: 1 });
+    const late = new Date(Date.now() + 2 * 86_400_000);
+    await withTenant(app, ORG_A, (client) => sweepReverify(client, late));
+    await withTenant(app, ORG_A, async (client) => {
+      const queued = await client.query<{ task_id: string }>(
+        `select task_id::text from knowledge_reverify_queue where item_id = $1`,
+        [itemId],
+      );
+      const taskId = queued.rows[0]?.task_id;
+      expect(taskId).toBeTruthy();
+      const task = await client.query<{ n: string }>(
+        `select count(*)::text as n from tasks where id = $1::uuid`,
+        [taskId],
+      );
+      expect(task.rows[0]?.n).toBe('1');
+    });
+    // Cross-tenant: the task id is meaningless in B (RLS hides it).
+    const foreign = await withTenant(app, ORG_B, async (client) => {
+      const queued = await client.query<{ task_id: string }>(
+        `select task_id::text from knowledge_reverify_queue`,
+      );
+      return queued.rows;
+    });
+    expect(foreign).toHaveLength(0);
   });
 });

@@ -373,9 +373,12 @@ export async function approveKnowledgeVersion(
   );
   const itemRow = item.rows[0];
   if (itemRow === undefined) throw new Error('knowledge item update returned no row');
-  // Re-approval lifts the suspension (P09.06.02): a suspended item that passes
-  // review serves again — the new approval is the review.
+  // Re-approval resets the reverify lifecycle (P09.06.02, ROUND-1 P1-1): the new
+  // approval is the review, so the suspension lifts AND the queue row goes —
+  // otherwise the sweep's handled-row exclusion would never re-queue the item
+  // and it could go overdue again silently.
   await client.query(`update knowledge_items set suspended = false where id = $1`, [input.itemId]);
+  await client.query(`delete from knowledge_reverify_queue where item_id = $1`, [input.itemId]);
   const versionNo = await client.query<{ n: number }>(
     `select version_no as n from knowledge_versions where id = $1`,
     [input.versionId],
@@ -430,20 +433,28 @@ export async function retireKnowledgeItem(
  * P09.06 validity: expired live versions (valid_until < today) serve nothing —
  * expiry is absolute, regardless of sensitivity or verification age. Suspended
  * items (overdue restricted, P09.06.02) serve nothing until re-approved.
+ * Overdue restricted items are suppressed INLINE (same predicate as servedState)
+ * so serving is correct even when the sweep has not run yet (ROUND-1 P1-2) —
+ * the sweep still owns suspension + tasking, this is the serving guard.
  */
 export async function getLiveVersion(
   client: TenantClient,
   itemId: string,
+  now: Date = new Date(),
 ): Promise<KnowledgeVersion | null> {
   if (!UUID_RE.test(itemId)) throw new RangeError('knowledge item id must be a uuid');
   const found = await client.query<VersionRow>(
     `select v.id, v.item_id, v.version_no, v.title, v.body, v.state
      from knowledge_versions v join knowledge_items i
        on i.organisation_id = v.organisation_id and i.id = v.item_id
+     left join knowledge_approvals a
+       on a.organisation_id = i.organisation_id and a.version_id = v.id
      where i.id = $1 and v.id = i.live_version_id and v.state = 'approved'
        and i.state = 'approved' and not i.suspended
-       and coalesce(v.valid_until < current_date, false) = false`,
-    [itemId],
+       and coalesce(v.valid_until < $2::date, false) = false
+       and not (v.sensitivity = 'restricted'
+         and coalesce(a.decided_at + v.reverify_after <= $2::timestamptz, false) = true)`,
+    [itemId, now.toISOString()],
   );
   const row = found.rows[0];
   return row === undefined ? null : toVersion(row);
