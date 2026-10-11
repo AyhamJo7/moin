@@ -180,24 +180,22 @@ export async function upsertProfile(
     });
     return toProfile(row);
   }
-  if (input.expectedVersion !== undefined && Number(open.version) !== input.expectedVersion) {
+  // Updates REQUIRE expectedVersion: no silent unconditional path. INSERT covers
+  // new categories; every UPDATE names the version it saw, else 409 — a caller that
+  // forgot to read first cannot overwrite blindly.
+  if (input.expectedVersion === undefined) {
+    throw new VersionConflictError('business profile update requires expectedVersion');
+  }
+  if (Number(open.version) !== input.expectedVersion) {
     throw new VersionConflictError('business profile version mismatch');
   }
   const updated = await client.query<ProfileRow>(
-    input.expectedVersion === undefined
-      ? // eslint-disable-next-line no-restricted-syntax -- closed-union assignments; values parameterised.
-        `update business_profile set ${assignments(built.columns, built.casts, 2)}, updated_at = clock_timestamp(),
-           version = version + 1
-         where organisation_id = app.current_org() and category = $1::text
-         returning id, category, version::text`
-      : // eslint-disable-next-line no-restricted-syntax -- closed-union assignments; values parameterised.
-        `update business_profile set ${assignments(built.columns, built.casts, 3)}, updated_at = clock_timestamp(),
-           version = version + 1
-         where organisation_id = app.current_org() and category = $1::text and version = $2::integer
-         returning id, category, version::text`,
-    input.expectedVersion === undefined
-      ? [input.category, ...built.values]
-      : [input.category, input.expectedVersion, ...built.values],
+    // eslint-disable-next-line no-restricted-syntax -- closed-union assignments; values parameterised.
+    `update business_profile set ${assignments(built.columns, built.casts, 3)}, updated_at = clock_timestamp(),
+       version = version + 1
+     where organisation_id = app.current_org() and category = $1::text and version = $2::integer
+     returning id, category, version::text`,
+    [input.category, input.expectedVersion, ...built.values],
   );
   const row = updated.rows[0];
   if (row === undefined) throw new VersionConflictError('business profile version mismatch');
@@ -330,40 +328,68 @@ export async function getProfile(
  * no retrieval, no content branching. Each category renders one fixed shape; missing
  * rows render the honest fallback (never a guess).
  */
-export function renderAnswer(category: ProfileCategory, payload: Record<string, unknown>): string {
-  const text = (key: string): string => {
+/**
+ * Deterministic German answer template per category. Pure string templates — no LLM,
+ * no retrieval, no content branching. Each category renders one fixed shape.
+ * Required-fields guard: a payload missing its required fields renders NULL (the
+ * caller abstains — silence, never a false price like ": ab 0 Euro" from a defaulted
+ * zero). Required per category: business_name→name; address→street+plz+city;
+ * body categories→body; services→non-empty list; service_area→PLZ-list XOR
+ * radius+center; price_ranges→label+min (max optional: single-sided "ab" when absent).
+ */
+export function renderAnswer(
+  category: ProfileCategory,
+  payload: Record<string, unknown>,
+): string | null {
+  const text = (key: string): string | null => {
     const value: unknown = payload[key];
-    if (typeof value === 'string' || typeof value === 'number') return String(value);
-    return '';
+    if (typeof value === 'string' && value.length > 0) return value;
+    if (typeof value === 'number') return String(value);
+    return null;
   };
   switch (category) {
     case 'business_name': {
-      return `Sie haben ${text('name')} erreicht.`;
+      const name = text('name');
+      if (name === null) return null;
+      return `Sie haben ${name} erreicht.`;
     }
     case 'address': {
-      return `Unsere Adresse lautet ${text('street')}, ${text('postal_code')} ${text('city')}.`;
+      const street = text('street');
+      const plz = text('postal_code');
+      const city = text('city');
+      if (street === null || plz === null || city === null) return null;
+      return `Unsere Adresse lautet ${street}, ${plz} ${city}.`;
     }
     case 'directions': {
-      return `Anfahrt: ${text('body')}`;
+      const body = text('body');
+      if (body === null) return null;
+      return `Anfahrt: ${body}`;
     }
     case 'parking': {
-      return `Parken: ${text('body')}`;
+      const body = text('body');
+      if (body === null) return null;
+      return `Parken: ${body}`;
     }
     case 'services': {
       const raw: unknown = payload['services'];
-      const list = Array.isArray(raw) ? raw.map((s) => String(s)).join(', ') : '';
-      return `Unsere Leistungen: ${list}.`;
+      if (!Array.isArray(raw) || raw.length === 0) return null;
+      return `Unsere Leistungen: ${raw.map((s) => String(s)).join(', ')}.`;
     }
     case 'service_area': {
       const postcodes: unknown = payload['area_postcodes'];
-      if (Array.isArray(postcodes)) {
+      if (Array.isArray(postcodes) && postcodes.length > 0) {
         return `Unser Liefergebiet umfasst die Postleitzahlen ${postcodes.map((p) => String(p)).join(', ')}.`;
       }
-      return `Wir liefern im Umkreis von ${text('area_radius_km')} Kilometern um ${text('area_center_plz')}.`;
+      const radius = text('area_radius_km');
+      const center = text('area_center_plz');
+      if (radius === null || center === null) return null;
+      return `Wir liefern im Umkreis von ${radius} Kilometern um ${center}.`;
     }
     case 'price_ranges': {
       const label = text('price_label');
-      const min = formatEuros(Number(payload['price_min_cents'] ?? 0));
+      const minRaw: unknown = payload['price_min_cents'];
+      if (label === null || minRaw === null || minRaw === undefined) return null;
+      const min = formatEuros(Number(minRaw));
       const maxRaw: unknown = payload['price_max_cents'];
       if (maxRaw === null || maxRaw === undefined) {
         return `${label}: ab ${min}.`;
@@ -371,13 +397,19 @@ export function renderAnswer(category: ProfileCategory, payload: Record<string, 
       return `${label}: ${min} bis ${formatEuros(Number(maxRaw))}.`;
     }
     case 'booking_policy': {
-      return `Zur Buchung: ${text('body')}`;
+      const body = text('body');
+      if (body === null) return null;
+      return `Zur Buchung: ${body}`;
     }
     case 'cancellation_policy': {
-      return `Zur Stornierung: ${text('body')}`;
+      const body = text('body');
+      if (body === null) return null;
+      return `Zur Stornierung: ${body}`;
     }
     case 'escalation_rules': {
-      return `In dringenden Fällen: ${text('body')}`;
+      const body = text('body');
+      if (body === null) return null;
+      return `In dringenden Fällen: ${body}`;
     }
   }
 }

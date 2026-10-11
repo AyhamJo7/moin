@@ -126,7 +126,15 @@ describe('profile', () => {
       },
     ];
     for (const { input, german } of cases) {
-      const written = await withTenant(app, ORG_A, (client) => upsertProfile(client, input));
+      // Re-runnable: a repeat category UPDATES — read its version first (updates
+      // require expectedVersion since round-1: no silent unconditional path).
+      const prior = await withTenant(app, ORG_A, (client) => getProfile(client, input.category));
+      const written = await withTenant(app, ORG_A, (client) =>
+        upsertProfile(
+          client,
+          prior === null ? input : { ...input, expectedVersion: prior.version },
+        ),
+      );
       expect(written.category).toBe(input.category);
       const stored = await withTenant(app, ORG_A, (client) => getProfile(client, input.category));
       expect(stored).not.toBeNull();
@@ -216,7 +224,7 @@ describe('profile', () => {
         }),
       ),
     ).rejects.toBeInstanceOf(ProfileConflict);
-    // Fresh write bumps.
+    // Fresh write bumps (version required — unconditional updates are refused).
     const second = await withTenant(app, ORG_A, (client) =>
       upsertProfile(client, {
         category: 'parking',
@@ -225,6 +233,15 @@ describe('profile', () => {
       }),
     );
     expect(second.version).toBe(base + 1);
+    // Update WITHOUT expectedVersion 409s (no silent unconditional path).
+    await expect(
+      withTenant(app, ORG_A, (client) =>
+        upsertProfile(client, {
+          category: 'parking',
+          facts: { body: 'Hofplatz drei.' },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(ProfileConflict);
     // Audit carries category + version markers — never names, addresses or prices.
     await withTenant(app, ORG_A, async (client) => {
       const events = await listAuditEvents(client);
@@ -239,12 +256,67 @@ describe('profile', () => {
     });
   });
 
+  evidenceTest('missing fields abstain: renderAnswer returns null, never a false price', () => {
+    expect(renderAnswer('price_ranges', {})).toBeNull();
+    expect(renderAnswer('price_ranges', { price_max_cents: 4500 })).toBeNull();
+    expect(renderAnswer('business_name', {})).toBeNull();
+    expect(renderAnswer('service_area', {})).toBeNull();
+    expect(renderAnswer('services', { services: [] })).toBeNull();
+  });
+
+  evidenceTest('DB boundary rejects 00000, shapeless service_area via direct SQL', async () => {
+    // 00000 address: kernel shape refused at service AND CHECK at DB.
+    await expect(
+      withTenant(app, ORG_A, (client) =>
+        client.query(
+          `insert into business_profile (organisation_id, id, category, street, postal_code, city)
+           values (app.current_org(), gen_random_uuid(), 'address', 'Hauptstraße 1', '00000', 'Hamburg')`,
+        ),
+      ),
+    ).rejects.toMatchObject({ code: '23514' });
+    // service_area neither shape: XOR CHECK refuses.
+    await expect(
+      withTenant(app, ORG_A, (client) =>
+        client.query(
+          `insert into business_profile (organisation_id, id, category)
+           values (app.current_org(), gen_random_uuid(), 'service_area')`,
+        ),
+      ),
+    ).rejects.toMatchObject({ code: '23514' });
+    // service_area both shapes: XOR CHECK refuses.
+    await expect(
+      withTenant(app, ORG_A, (client) =>
+        client.query(
+          `insert into business_profile
+             (organisation_id, id, category, area_postcodes, area_radius_km, area_center_plz)
+           values (app.current_org(), gen_random_uuid(), 'service_area', '{20354}', 10, '20354')`,
+        ),
+      ),
+    ).rejects.toMatchObject({ code: '23514' });
+    // 00xxx inside the PLZ array: element CHECK refuses.
+    await expect(
+      withTenant(app, ORG_A, (client) =>
+        client.query(
+          `insert into business_profile (organisation_id, id, category, area_postcodes)
+           values (app.current_org(), gen_random_uuid(), 'service_area', '{00123}')`,
+        ),
+      ),
+    ).rejects.toMatchObject({ code: '23514' });
+  });
+
   evidenceTest('tenants isolated per category', async () => {
+    const prior = await withTenant(app, ORG_A, (client) => getProfile(client, 'business_name'));
     await withTenant(app, ORG_A, (client) =>
-      upsertProfile(client, {
-        category: 'business_name',
-        facts: { name: 'Alpha Laden' },
-      }),
+      upsertProfile(
+        client,
+        prior === null
+          ? { category: 'business_name', facts: { name: 'Alpha Laden' } }
+          : {
+              category: 'business_name',
+              facts: { name: 'Alpha Laden' },
+              expectedVersion: prior.version,
+            },
+      ),
     );
     const foreign = await withTenant(app, ORG_B, (client) => getProfile(client, 'business_name'));
     expect(foreign).toBeNull();

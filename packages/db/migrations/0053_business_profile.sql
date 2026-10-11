@@ -2,6 +2,15 @@
 -- migration-check: allow create-index-blocking because every index here is on a table created
 -- earlier in this same migration, so it is new and empty.
 --
+-- Element-shape helper (CHECK constraints cannot subquery): immutable, pinned path.
+CREATE FUNCTION app.all_plz_ok(plzs text[]) RETURNS boolean
+  LANGUAGE sql IMMUTABLE SET search_path = pg_catalog
+AS $$ SELECT NOT EXISTS (SELECT 1 FROM unnest(plzs) p
+                         WHERE p !~ '^[0-9]{5}$' OR p = '00000' OR p LIKE '00%') $$;
+
+REVOKE ALL ON FUNCTION app.all_plz_ok(text[]) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app.all_plz_ok(text[]) TO moin_app, moin_migrator;
+--
 -- ## Why a NEW table, not knowledge_versions payloads
 --
 -- knowledge_versions (0052) stores free-text card bodies governed by the publish door
@@ -35,18 +44,21 @@ CREATE TABLE business_profile (
   -- business_name.
   name            text        CHECK (length(btrim(name)) BETWEEN 1 AND 200),
   phonetic_name   text        CHECK (length(btrim(phonetic_name)) BETWEEN 1 AND 200),
-  -- address.
+  -- address. PLZ shape mirrors the kernel PostalCode (5 digits, no 00000/00xxx):
+  -- the DB enforces what the service validates, so direct SQL cannot smuggle 00000.
   street          text        CHECK (length(btrim(street)) BETWEEN 1 AND 200),
-  postal_code     text        CHECK (postal_code ~ '^[0-9]{5}$'),
+  postal_code     text        CHECK (postal_code ~ '^[0-9]{5}$' AND postal_code NOT LIKE '00%' AND postal_code <> '00000'),
   city            text        CHECK (length(btrim(city)) BETWEEN 1 AND 100),
   -- directions / parking / booking / cancellation / escalation (free text, capped).
   body            text        CHECK (length(btrim(body)) BETWEEN 1 AND 2000),
   -- services: text list (1..50 entries, each 1..120 chars).
   services        text[],
-  -- service_area: PLZ list XOR radius_km + center PLZ.
-  area_postcodes  text[],
+  -- service_area: PLZ list XOR radius_km + center PLZ. Element shape mirrors the
+  -- kernel PostalCode (no 00000/00xxx anywhere, including inside arrays) via the
+  -- immutable helper above (CHECK cannot subquery — 0A000, probe-verified).
+  area_postcodes  text[]      CHECK (app.all_plz_ok(area_postcodes)),
   area_radius_km  integer     CHECK (area_radius_km BETWEEN 1 AND 200),
-  area_center_plz text        CHECK (area_center_plz ~ '^[0-9]{5}$'),
+  area_center_plz text        CHECK (area_center_plz ~ '^[0-9]{5}$' AND area_center_plz NOT LIKE '00%' AND area_center_plz <> '00000'),
   -- price_ranges: label + min/max EUR cents + currency (EUR-only until P23).
   price_label     text        CHECK (length(btrim(price_label)) BETWEEN 1 AND 120),
   price_min_cents integer     CHECK (price_min_cents >= 0),
@@ -58,6 +70,16 @@ CREATE TABLE business_profile (
   UNIQUE (organisation_id, id),
   UNIQUE (organisation_id, category),
   CHECK (price_max_cents IS NULL OR price_min_cents IS NULL OR price_max_cents >= price_min_cents),
+  -- service_area shape XOR at the DB boundary (was service-enforced only): exactly
+  -- one of (PLZ list) / (radius + center). Neither (empty row) and both (ambiguous)
+  -- both violate — direct SQL cannot store a shapeless service_area.
+  CHECK (
+    category <> 'service_area'
+    OR (
+      (area_postcodes IS NOT NULL AND cardinality(area_postcodes) > 0 AND area_radius_km IS NULL AND area_center_plz IS NULL)
+      OR (area_postcodes IS NULL AND area_radius_km IS NOT NULL AND area_center_plz IS NOT NULL)
+    )
+  ),
   CHECK (
     (category = 'business_name' AND name IS NOT NULL)
     OR (category = 'address' AND street IS NOT NULL AND postal_code IS NOT NULL AND city IS NOT NULL)
