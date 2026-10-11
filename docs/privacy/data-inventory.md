@@ -217,6 +217,17 @@ seasonal.
 | `business_profile.price_min_cents`                                | Business  | no (company data)                                    | while the tenant exists    | hard delete | —                   |
 | `business_profile.price_max_cents`                                | Business  | no (company data)                                    | while the tenant exists    | hard delete | —                   |
 | `business_profile.price_currency`                                 | Business  | no (company data)                                    | while the tenant exists    | hard delete | —                   |
+| `opening_rules.location_id`                                       | Business  | yes (references)                                     | while the tenant exists    | hard delete | —                   |
+| `opening_rules.weekday`                                           | Business  | no (fixed catalogue 0..6)                            | while the tenant exists    | hard delete | —                   |
+| `opening_rules.opens_min`                                         | Business  | no (wall-clock minutes)                              | while the tenant exists    | hard delete | —                   |
+| `opening_rules.closes_min`                                        | Business  | no (wall-clock minutes)                              | while the tenant exists    | hard delete | —                   |
+| `opening_exceptions.location_id`                                  | Business  | yes (references)                                     | while the tenant exists    | hard delete | —                   |
+| `opening_exceptions.kind`                                         | Business  | no (fixed catalogue)                                 | while the tenant exists    | hard delete | —                   |
+| `opening_exceptions.start_date`                                   | Business  | no (dates)                                           | while the tenant exists    | hard delete | —                   |
+| `opening_exceptions.end_date`                                     | Business  | no (dates)                                           | while the tenant exists    | hard delete | —                   |
+| `opening_exceptions.opens_min`                                    | Business  | no (wall-clock minutes)                              | while the tenant exists    | hard delete | —                   |
+| `opening_exceptions.closes_min`                                   | Business  | no (wall-clock minutes)                              | while the tenant exists    | hard delete | —                   |
+| `opening_exceptions.label`                                        | Business  | **possibly** — owner-authored holiday/vacation label | while the tenant exists    | hard delete | —                   |
 
 Knowledge is flagged **possibly** personal on purpose. An owner writing "bei Notfällen Herrn Meier
 anrufen, 0170…" has put a staff member's number into a field nobody classified as personal. The

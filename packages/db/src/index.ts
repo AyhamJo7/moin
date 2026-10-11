@@ -198,3 +198,20 @@ export type {
   ServiceAreaFacts,
   ServicesFacts,
 } from './profile.ts';
+export {
+  addException,
+  describeWeek,
+  hoursOnDate,
+  isOpenAt,
+  loadHours,
+  nextOpening,
+  setWeeklyRules,
+} from './hours.ts';
+export type {
+  DayHours,
+  ExceptionInput,
+  ExceptionKind,
+  HoursSnapshot,
+  OpeningInterval,
+  RuleInput,
+} from './hours.ts';
