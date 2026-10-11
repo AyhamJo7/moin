@@ -215,3 +215,11 @@ export type {
   OpeningInterval,
   RuleInput,
 } from './hours.ts';
+export {
+  createFaqCard,
+  deactivateFaqCard,
+  findAnswer,
+  groundedCandidates,
+  updateFaqCard,
+} from './faq.ts';
+export type { FaqAnswer, FaqCard, FaqInput, FaqSensitivity } from './faq.ts';

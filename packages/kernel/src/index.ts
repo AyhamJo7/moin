@@ -33,3 +33,5 @@ export {
 } from './format-de.ts';
 export { coveredYears, isPublicHoliday, publicHolidayOn } from './holidays.ts';
 export type { Bundesland, PublicHoliday } from './holidays.ts';
+export { lintSpokenAnswer } from './spoken-lint.ts';
+export type { SpokenLint } from './spoken-lint.ts';
