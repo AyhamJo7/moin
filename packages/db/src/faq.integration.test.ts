@@ -152,9 +152,64 @@ describe('faq', () => {
       }),
     );
     expect(bumped.version).toBe(card.version + 1);
-    await withTenant(app, ORG_A, (client) => deactivateFaqCard(client, card.id));
+    // Stale deactivate 409s (no silent kill of an edited card).
+    await expect(
+      withTenant(app, ORG_A, (client) => deactivateFaqCard(client, card.id, 999)),
+    ).rejects.toBeInstanceOf(FaqConflict);
+    await withTenant(app, ORG_A, (client) => deactivateFaqCard(client, card.id, bumped.version));
     const gone = await withTenant(app, ORG_A, (client) => findAnswer(client, 'Storno Hinweis'));
     expect(gone).toBeNull();
+  });
+
+  evidenceTest('location and channel filters constrain matching', async () => {
+    const locA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    await withTenant(app, ORG_A, (client) =>
+      client.query(`insert into locations (organisation_id, id, name) values ($1, $2, 'Mitte')`, [
+        '11111111-1111-4111-8111-111111111111',
+        locA,
+      ]),
+    );
+    // Location-specific card: matches unfiltered and at its location, not elsewhere.
+    await withTenant(app, ORG_A, (client) =>
+      createFaqCard(client, {
+        canonical: 'Mittagsangebot?',
+        variants: ['Mittagstisch Hinweis'],
+        spoken: 'Heute Eintopf mit Brot.',
+        locationId: locA,
+      }),
+    );
+    const open = await withTenant(app, ORG_A, (client) =>
+      findAnswer(client, 'Mittagstisch Hinweis'),
+    );
+    expect(open).not.toBeNull();
+    const here = await withTenant(app, ORG_A, (client) =>
+      findAnswer(client, { query: 'Mittagstisch Hinweis', locationId: locA }),
+    );
+    expect(here).not.toBeNull();
+    const away = await withTenant(app, ORG_A, (client) =>
+      findAnswer(client, {
+        query: 'Mittagstisch Hinweis',
+        locationId: '99999999-9999-4999-8999-999999999999',
+      }),
+    );
+    expect(away).toBeNull();
+    // Message-only card: matches on message, not on call.
+    await withTenant(app, ORG_A, (client) =>
+      createFaqCard(client, {
+        canonical: 'Speisekarte per Mail?',
+        variants: ['Karte per Mail Hinweis'],
+        spoken: 'Wir senden die Karte per Mail.',
+        channels: ['message'],
+      }),
+    );
+    const onMessage = await withTenant(app, ORG_A, (client) =>
+      findAnswer(client, { query: 'Karte per Mail Hinweis', channel: 'message' }),
+    );
+    expect(onMessage).not.toBeNull();
+    const onCall = await withTenant(app, ORG_A, (client) =>
+      findAnswer(client, { query: 'Karte per Mail Hinweis', channel: 'call' }),
+    );
+    expect(onCall).toBeNull();
   });
 
   evidenceTest('no match abstains; audit markers only; tenants isolated', async () => {

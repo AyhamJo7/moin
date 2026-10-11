@@ -26,12 +26,19 @@ export interface SpokenLint {
 
 const MAX_SPOKEN_LENGTH = 350;
 const URL_RE = /(https?:\/\/|www\.)\S+/iu;
-// Digit runs of 6+: allowed only with read-out formatting nearby (separator inside
-// the run) or an explicit read-out cue word in the text. Five-digit runs (PLZ) pass
-// bare — addresses speak their PLZ digit-by-digit without a cue.
-const LONG_DIGITS_RE = /\d{6,}/u;
+// Digit runs of 6+: EACH run needs its OWN read-out formatting — a separator INSIDE
+// that run, or an explicit cue word in the text. Per-run, not per-answer: "PLZ 20500
+// 12345678" must not pass via the innocent space in "20500 12" — the 8-digit run is
+// unreadable on its own. Five-digit runs (PLZ) pass bare — addresses speak their PLZ
+// digit-by-digit without a cue.
+const LONG_DIGITS_RE = /\d{6,}/gu;
 const READOUT_SEPARATOR_RE = /[\d][\s\-/.][\d]/u;
 const READOUT_CUE_RE = /\b(null|ziffern?|nummer|telefon|rief an unter|durchwahl)\b/iu;
+
+/** True when the digit run itself contains a spoken separator (space/dash/dot/slash). */
+function hasSeparator(run: string): boolean {
+  return READOUT_SEPARATOR_RE.test(`0${run}0`);
+}
 // Capitalised words with non-German sequences (q without u, double consonants
 // outside German patterns, w/v/y clusters) — hint only, never reject.
 const FOREIGN_NAME_RE =
@@ -50,11 +57,14 @@ export function lintSpokenAnswer(text: string): SpokenLint {
   if (URL_RE.test(trimmed)) {
     errors.push('spoken answer contains a URL (callers cannot click spoken links)');
   }
-  const digits = LONG_DIGITS_RE.exec(trimmed);
-  if (digits !== null && !READOUT_SEPARATOR_RE.test(trimmed) && !READOUT_CUE_RE.test(trimmed)) {
-    errors.push(
-      `digit run "${digits[0]}" needs read-out formatting (spaces/dashes or a cue like "Nummer")`,
-    );
+  const cue = READOUT_CUE_RE.test(trimmed);
+  for (const run of trimmed.matchAll(LONG_DIGITS_RE)) {
+    const digits = run[0];
+    if (!hasSeparator(digits) && !cue) {
+      errors.push(
+        `digit run "${digits}" needs read-out formatting (spaces/dashes inside the run or a cue like "Nummer")`,
+      );
+    }
   }
   const foreign = FOREIGN_NAME_RE.exec(trimmed);
   if (foreign !== null) {

@@ -133,6 +133,12 @@ export interface FaqInput {
   readonly locationId?: string | undefined;
 }
 
+function checkLocation(locationId: string | undefined): string | null {
+  if (locationId === undefined) return null;
+  if (!UUID_RE.test(locationId)) throw new RangeError('location id must be a uuid');
+  return locationId;
+}
+
 /** Create a card (linted; audit markers only). */
 export async function createFaqCard(client: TenantClient, input: FaqInput): Promise<FaqCard> {
   const canonical = checkCanonical(input.canonical);
@@ -141,14 +147,7 @@ export async function createFaqCard(client: TenantClient, input: FaqInput): Prom
   const written = checkWritten(input.written);
   const sensitivity = checkSensitivity(input.sensitivity ?? 'public');
   const channels = checkChannels(input.channels);
-  const location =
-    input.locationId === undefined
-      ? null
-      : UUID_RE.test(input.locationId)
-        ? input.locationId
-        : (() => {
-            throw new RangeError('location id must be a uuid');
-          })();
+  const location = checkLocation(input.locationId);
   const id = randomUUID();
   const inserted = await client.query<FaqRow>(
     `insert into faq_cards
@@ -184,13 +183,25 @@ export async function updateFaqCard(
   const written = checkWritten(input.written);
   const sensitivity = checkSensitivity(input.sensitivity ?? 'public');
   const channels = checkChannels(input.channels);
+  const location = checkLocation(input.locationId);
   const updated = await client.query<FaqRow>(
     `update faq_cards set canonical = $2::text, variants = $3::text[], spoken_answer = $4::text,
        written_answer = $5::text, sensitivity = $6::text, allowed_channels = $7::text[],
+       location_id = $8::uuid,
        updated_at = clock_timestamp(), version = version + 1
-     where organisation_id = app.current_org() and id = $1 and version = $8::integer
+     where organisation_id = app.current_org() and id = $1 and version = $9::integer
      returning id, canonical, sensitivity, spoken_answer, active, version::text`,
-    [cardId, canonical, variants, spoken, written, sensitivity, channels, input.expectedVersion],
+    [
+      cardId,
+      canonical,
+      variants,
+      spoken,
+      written,
+      sensitivity,
+      channels,
+      location,
+      input.expectedVersion,
+    ],
   );
   const row = updated.rows[0];
   if (row === undefined) throw new VersionConflictError('faq card version mismatch');
@@ -205,20 +216,30 @@ export async function updateFaqCard(
   return toCard(row);
 }
 
-/** Deactivate a card (retired cards never match). */
-export async function deactivateFaqCard(client: TenantClient, cardId: string): Promise<void> {
+/** Deactivate a card (version-locked; retired cards never match). */
+export async function deactivateFaqCard(
+  client: TenantClient,
+  cardId: string,
+  expectedVersion: number,
+): Promise<void> {
   if (!UUID_RE.test(cardId)) throw new RangeError('faq card id must be a uuid');
-  await client.query(
+  const done = await client.query(
     `update faq_cards set active = false, updated_at = clock_timestamp(), version = version + 1
-     where organisation_id = app.current_org() and id = $1`,
-    [cardId],
+     where organisation_id = app.current_org() and id = $1 and version = $2::integer
+     returning sensitivity, version::text as version`,
+    [cardId, expectedVersion],
   );
+  const row = (done.rows as { sensitivity: string; version: string }[])[0];
+  if (row === undefined) throw new VersionConflictError('faq card version mismatch');
   await appendAuditEvent(client, {
     source: 'api',
     operation: 'faq.upsert',
     targetKind: 'faq_card',
     targetId: cardId,
-    argsSanitized: { sensitivity: 9, version: 0 },
+    argsSanitized: {
+      sensitivity: SENSITIVITY_MARKER[row.sensitivity as FaqSensitivity],
+      version: Number(row.version),
+    },
     result: 'succeeded',
   });
 }
@@ -230,14 +251,34 @@ interface MatchRow extends Record<string, unknown> {
   score: number;
 }
 
+export interface FaqQuery {
+  readonly query: string;
+  readonly locationId?: string | undefined;
+  readonly channel?: string | undefined;
+}
+
 async function matchCards(
   client: TenantClient,
-  query: string,
+  input: FaqQuery,
   excludeSensitive: boolean,
 ): Promise<readonly FaqAnswer[]> {
-  const trimmed = query.trim();
+  const trimmed = input.query.trim();
   if (trimmed.length === 0 || trimmed.length > 200)
     throw new RangeError('query must be 1..200 characters');
+  // Optional filters, validated when present: a location-specific or message-only
+  // card must not surface on the wrong location or channel. Defaults are OPEN
+  // (no constraint) — the caller constrains when the call context has one.
+  const location =
+    input.locationId === undefined
+      ? null
+      : UUID_RE.test(input.locationId)
+        ? input.locationId
+        : (() => {
+            throw new RangeError('location id must be a uuid');
+          })();
+  if (input.channel !== undefined && input.channel !== 'call' && input.channel !== 'message') {
+    throw new RangeError('channel must be call or message');
+  }
   const found = await client.query<MatchRow>(
     `select id::text, spoken_answer, sensitivity,
        greatest(
@@ -247,9 +288,11 @@ async function matchCards(
      from faq_cards
      where organisation_id = app.current_org() and active = true
        and ($2::boolean = false or sensitivity <> 'sensitive')
+       and ($3::uuid is null or location_id is null or location_id = $3::uuid)
+       and ($4::text is null or $4::text = any (allowed_channels))
        and (canonical % $1 or exists (select 1 from unnest(variants) v where v % $1))
      order by score desc limit 3`,
-    [trimmed, excludeSensitive],
+    [trimmed, excludeSensitive, location, input.channel ?? null],
   );
   return found.rows.map((r) => ({
     cardId: r.id,
@@ -263,8 +306,11 @@ async function matchCards(
  * canonical + variants, spoken answer verbatim — sensitive cards INCLUDED (this is
  * their only mode). Null when nothing matches: the caller abstains or escalates.
  */
-export async function findAnswer(client: TenantClient, query: string): Promise<FaqAnswer | null> {
-  const hits = await matchCards(client, query, false);
+export async function findAnswer(
+  client: TenantClient,
+  query: string | FaqQuery,
+): Promise<FaqAnswer | null> {
+  const hits = await matchCards(client, typeof query === 'string' ? { query } : query, false);
   return hits[0] ?? null;
 }
 
@@ -275,7 +321,7 @@ export async function findAnswer(client: TenantClient, query: string): Promise<F
  */
 export async function groundedCandidates(
   client: TenantClient,
-  query: string,
+  query: string | FaqQuery,
 ): Promise<readonly FaqAnswer[]> {
-  return matchCards(client, query, true);
+  return matchCards(client, typeof query === 'string' ? { query } : query, true);
 }

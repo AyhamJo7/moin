@@ -23,4 +23,9 @@ describe('spoken lint', () => {
     expect(lintSpokenAnswer('Rufen Sie 030 123 456 an.').ok).toBe(true);
     expect(lintSpokenAnswer('Ihre Nummer 03012345 lautet.').ok).toBe(true);
   });
+
+  it('rejects per-run: an innocent space elsewhere does not bless a long run', () => {
+    expect(lintSpokenAnswer('PLZ 20500 12345678.').ok).toBe(false);
+    expect(lintSpokenAnswer('PLZ 20500 123 456.').ok).toBe(true);
+  });
 });
