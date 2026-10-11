@@ -232,3 +232,4 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P09-002 | P09.02.04 | 2026-10-11 | `c74841218bb3` | P09.02 business profile: structured facts, validation, German templates, 4 tests | [EV-P09-002-profile-structured-facts.md](P09/EV-P09-002-profile-structured-facts.md) |
 | EV-P09-003 | P09.02.04 | 2026-10-11 | `f269b3cb504b` | ROUND-1 review BLOCK 4 findings: null-abstain, DB CHECKs, version-required, privacy | [EV-P09-003-round1-review-block.md](P09/EV-P09-003-round1-review-block.md) |
 | EV-P09-004 | P09.03.04 | 2026-10-11 | `90b23e964fce` | P09.03 opening-hours engine: rules, exceptions, queries, 6 tests | [EV-P09-004-opening-hours-engine.md](P09/EV-P09-004-opening-hours-engine.md) |
+| EV-P09-005 | P09.03.04 | 2026-10-11 | `65f6b4260466` | ROUND-1 review BLOCK 2 findings: wall-clock resolve, exception spillover | [EV-P09-005-round1-review-block.md](P09/EV-P09-005-round1-review-block.md) |

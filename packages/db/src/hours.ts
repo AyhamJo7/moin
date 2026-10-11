@@ -24,7 +24,13 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { addCalendarDays, publicHolidayOn, zonedDateString, zonedFields } from '@moin/kernel';
+import {
+  addCalendarDays,
+  berlinOffsetMinutesAt,
+  publicHolidayOn,
+  zonedDateString,
+  zonedFields,
+} from '@moin/kernel';
 import { appendAuditEvent } from './audit.ts';
 import type { TenantClient } from './tenant.ts';
 
@@ -143,14 +149,40 @@ export function hoursOnDate(
   weekday: number,
   snapshot: HoursSnapshot,
   yesterdayWeekday: number,
+  yesterdayDate: string | null = null,
 ): DayHours {
+  // Yesterday's midnight-spanning legs FIRST: they cover 00:00–close today whatever
+  // today holds (even when today has its own exception — the spill-over already
+  // started last night and cannot be un-started). Weekly yesterday-legs and
+  // yesterday-exception legs both apply.
+  const spill: OpeningInterval[] = [];
+  for (const r of snapshot.rules) {
+    if (r.weekday === yesterdayWeekday) {
+      const split = splitInterval(r.opens_min, r.closes_min);
+      if (split.tomorrow !== null) spill.push(split.tomorrow);
+    }
+  }
+  if (yesterdayDate !== null) {
+    const yesterdayException = exceptionOn(yesterdayDate, snapshot.exceptions);
+    const opens = yesterdayException?.opens_min ?? null;
+    const closes = yesterdayException?.closes_min ?? null;
+    if (opens !== null && closes !== null && opens > closes) {
+      spill.push({ opensMin: 0, closesMin: closes });
+    }
+  }
   const exception = exceptionOn(date, snapshot.exceptions);
   if (exception !== null) {
     if (exception.opens_min === null || exception.closes_min === null) {
+      // Closed-all-day exception — but yesterday's spill still covers 00:00–close.
+      if (spill.length > 0) {
+        return { date, intervals: spill, closed: false, reason: exception.label ?? exception.kind };
+      }
       return { date, intervals: [], closed: true, reason: exception.label ?? exception.kind };
     }
     const split = splitInterval(exception.opens_min, exception.closes_min);
     const intervals = split.today === null ? [] : [split.today];
+    intervals.push(...spill);
+    intervals.sort((a, b) => a.opensMin - b.opensMin);
     return {
       date,
       intervals,
@@ -158,15 +190,11 @@ export function hoursOnDate(
       reason: exception.label ?? exception.kind,
     };
   }
-  const intervals: OpeningInterval[] = [];
+  const intervals: OpeningInterval[] = [...spill];
   for (const r of snapshot.rules) {
     if (r.weekday === weekday) {
       const split = splitInterval(r.opens_min, r.closes_min);
       if (split.today !== null) intervals.push(split.today);
-    }
-    if (r.weekday === yesterdayWeekday) {
-      const split = splitInterval(r.opens_min, r.closes_min);
-      if (split.tomorrow !== null) intervals.push(split.tomorrow);
     }
   }
   intervals.sort((a, b) => a.opensMin - b.opensMin);
@@ -188,8 +216,15 @@ export function isOpenAt(at: Date, snapshot: HoursSnapshot): boolean {
   const fields = zonedFields(at);
   const pad = (n: number): string => String(n).padStart(2, '0');
   const date = `${String(fields.year).padStart(4, '0')}-${pad(fields.month)}-${pad(fields.day)}`;
-  const yesterday = zonedFields(addCalendarDays(at, -1));
-  const day = hoursOnDate(date, fields.weekday, snapshot, yesterday.weekday);
+  const yesterdayInstant = addCalendarDays(at, -1);
+  const yesterday = zonedFields(yesterdayInstant);
+  const day = hoursOnDate(
+    date,
+    fields.weekday,
+    snapshot,
+    yesterday.weekday,
+    zonedDateString(yesterdayInstant),
+  );
   if (day.closed) return false;
   const now = minutesOf(fields);
   return day.intervals.some((i) => i.opensMin <= now && now < i.closesMin);
@@ -199,35 +234,88 @@ export function isOpenAt(at: Date, snapshot: HoursSnapshot): boolean {
  * First opening at or after the given instant: scans day by day (cap 366 — a
  * location closed a full year has no next opening worth naming). Returns the
  * instant of the opening minute, or null when nothing opens within the cap.
+ * Wall-clock resolved (never minute arithmetic): the opening instant is built from
+ * the target DATE at the opening wall time through the zone offset — elapsed-ms
+ * math on wall minutes breaks across DST (spring 00:30→09:00 would land 10:00).
  */
 export function nextOpening(after: Date, snapshot: HoursSnapshot): Date | null {
   const fields = zonedFields(after);
-  const pad = (n: number): string => String(n).padStart(2, '0');
   for (let d = 0; d < 366; d++) {
     const probe = addCalendarDays(after, d);
     const pf = zonedFields(probe);
+    const pad = (n: number): string => String(n).padStart(2, '0');
     const date = `${String(pf.year).padStart(4, '0')}-${pad(pf.month)}-${pad(pf.day)}`;
-    const yesterday = zonedFields(addCalendarDays(probe, -1));
-    const day = hoursOnDate(date, pf.weekday, snapshot, yesterday.weekday);
+    const yesterdayInstant = addCalendarDays(probe, -1);
+    const yesterday = zonedFields(yesterdayInstant);
+    const day = hoursOnDate(
+      date,
+      pf.weekday,
+      snapshot,
+      yesterday.weekday,
+      zonedDateString(yesterdayInstant),
+    );
     const startMin = d === 0 ? minutesOf(fields) : 0;
     for (const interval of day.intervals) {
       if (interval.closesMin > startMin) {
         const openMin = Math.max(interval.opensMin, startMin);
-        return addMinutesOnDate(probe, openMin, pf.hour * 60 + pf.minute);
+        return wallMinutesOnDate(date, openMin);
       }
     }
   }
   return null;
 }
 
-function addMinutesOnDate(base: Date, targetMin: number, baseMin: number): Date {
-  // Same wall-clock date as base, at targetMin minutes since midnight: walk from the
-  // base instant by the minute delta. Minute deltas under a day cross a DST transition
-  // at most once and only when the opening itself is inside the transition hour —
-  // the kernel gap/fold policies own that edge; the date never shifts (delta < 24h).
-  const deltaMs =
-    (targetMin - baseMin) * 60_000 - base.getSeconds() * 1000 - base.getMilliseconds();
-  return new Date(base.getTime() + deltaMs);
+/**
+ * Resolve a calendar date + wall-clock minutes to the instant in Europe/Berlin:
+ * noon-offset resolve (midday is never inside a transition) + gap shift-forward to
+ * 03:00 + fold first-occurrence — the kernel addCalendarDays policy, factored for a
+ * caller-chosen wall time instead of the source instant's. Returns null only when
+ * the wall time falls inside the spring gap AND equals the gap repair itself
+ * (unreachable: gap repair lands 03:00 exactly).
+ */
+function wallMinutesOnDate(date: string, minutes: number): Date | null {
+  const [y, m, d] = date.split('-').map(Number);
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  const noonTarget = new Date(Date.UTC(y ?? 0, (m ?? 1) - 1, d ?? 1, 12, 0, 0)).toISOString();
+  const offset = berlinOffsetMinutesAt(new Date(noonTarget));
+  let candidate = new Date(
+    Date.UTC(y ?? 0, (m ?? 1) - 1, d ?? 1, hour, minute, 0, 0) - offset * 60_000,
+  );
+  const naive = zonedFields(candidate);
+  const matches =
+    naive.year === (y ?? 0) &&
+    naive.month === (m ?? 1) &&
+    naive.day === (d ?? 1) &&
+    naive.hour === hour &&
+    naive.minute === minute;
+  if (!matches) {
+    // Spring gap: the wall time does not exist — shift to the first existing minute.
+    // A 02:xx opening on a forward day resolves to 03:00 (same date, never skipped).
+    if (hour === 2) {
+      candidate = new Date(Date.UTC(y ?? 0, (m ?? 1) - 1, d ?? 1, 3, 0, 0, 0) - offset * 60_000);
+      return candidate;
+    }
+    return null;
+  }
+  // Fold: prefer the first occurrence — step back one transition span (60 min) while
+  // the wall clock still shows the target time.
+  let stepped = candidate;
+  for (let i = 0; i < 60; i++) {
+    const earlier = new Date(stepped.getTime() - 60_000);
+    const round = zonedFields(earlier);
+    if (
+      round.year !== (y ?? 0) ||
+      round.month !== (m ?? 1) ||
+      round.day !== (d ?? 1) ||
+      round.hour !== hour ||
+      round.minute !== minute
+    ) {
+      break;
+    }
+    stepped = earlier;
+  }
+  return stepped;
 }
 
 /** Deterministic German week summary starting Monday for the week containing `at`. */
@@ -241,9 +329,16 @@ export function describeWeek(at: Date, snapshot: HoursSnapshot): string {
   for (let i = 0; i < 7; i++) {
     const day = addCalendarDays(monday, i);
     const date = zonedDateString(day);
-    const yesterday = zonedFields(addCalendarDays(day, -1));
+    const yesterdayInstant = addCalendarDays(day, -1);
+    const yesterday = zonedFields(yesterdayInstant);
     // Weekday for hoursOnDate is Sunday-first; Monday+i maps to (i+1)%7.
-    const hours = hoursOnDate(date, (i + 1) % 7, snapshot, yesterday.weekday);
+    const hours = hoursOnDate(
+      date,
+      (i + 1) % 7,
+      snapshot,
+      yesterday.weekday,
+      zonedDateString(yesterdayInstant),
+    );
     const fmt = (m: number): string =>
       `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
     const body =

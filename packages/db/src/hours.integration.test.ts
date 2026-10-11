@@ -143,6 +143,41 @@ describe('hours', () => {
     expect(isOpenAt(new Date('2026-10-26T08:00:00Z'), snapshot)).toBe(true);
   });
 
+  evidenceTest('nextOpening resolves wall-clock across DST Sundays', async () => {
+    await seedWeekdays();
+    const snapshot = await withTenant(app, ORG_A, (client) => loadHours(client, LOC_A));
+    // Spring Sunday 2026-03-29 00:30 CET (23:30Z Saturday): minute-arithmetic would add
+    // 8.5h elapsed and land 10:00 local — wall-clock resolve lands 09:00 CEST = 07:00Z.
+    const spring = nextOpening(new Date('2026-03-28T23:30:00Z'), snapshot);
+    expect(spring?.toISOString()).toBe('2026-03-30T07:00:00.000Z');
+    // Autumn Sunday 2026-10-25 00:30 CEST (22:30Z Saturday): wall-clock resolve lands
+    // Monday 09:00 CET = 08:00Z (minute math would land 08:00 local = 07:00Z).
+    const autumn = nextOpening(new Date('2026-10-24T22:30:00Z'), snapshot);
+    expect(autumn?.toISOString()).toBe('2026-10-26T08:00:00.000Z');
+  });
+
+  evidenceTest('overnight dated exceptions cover the after-midnight leg', async () => {
+    await seedWeekdays();
+    // New Year's Eve special: 22:00–02:00 on 2026-12-31 (spills into 2027-01-01).
+    await withTenant(app, ORG_A, (client) =>
+      addException(client, LOC_A, {
+        kind: 'holiday',
+        startDate: '2026-12-31',
+        endDate: '2026-12-31',
+        opensMin: 1320,
+        closesMin: 120,
+        label: 'Silvester',
+      }),
+    );
+    const snapshot = await withTenant(app, ORG_A, (client) => loadHours(client, LOC_A));
+    // 2026-12-31 23:00 Berlin (22:00Z CET) → open (today leg).
+    expect(isOpenAt(new Date('2026-12-31T22:00:00Z'), snapshot)).toBe(true);
+    // 2027-01-01 01:00 Berlin (00:00Z CET) → open via YESTERDAY's exception spill-over.
+    expect(isOpenAt(new Date('2027-01-01T00:00:00Z'), snapshot)).toBe(true);
+    // 2027-01-01 03:00 Berlin (02:00Z CET) → closed (spill leg ends 02:00).
+    expect(isOpenAt(new Date('2027-01-01T02:00:00Z'), snapshot)).toBe(false);
+  });
+
   evidenceTest('describeWeek renders deterministic German', async () => {
     await withTenant(app, ORG_A, (client) =>
       setWeeklyRules(client, LOC_A, [
