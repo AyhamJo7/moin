@@ -235,3 +235,4 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P09-005 | P09.03.04 | 2026-10-11 | `65f6b4260466` | ROUND-1 review BLOCK 2 findings: wall-clock resolve, exception spillover | [EV-P09-005-round1-review-block.md](P09/EV-P09-005-round1-review-block.md) |
 | EV-P09-006 | P09.04.04 | 2026-10-11 | `ef770b0ebb37` | P09.04 FAQ cards: spoken lint, sensitivity gating, 5+3 tests | [EV-P09-006-faq-approved-spoken.md](P09/EV-P09-006-faq-approved-spoken.md) |
 | EV-P09-007 | P09.05.03 | 2026-10-11 | `b6c82c866bbe` | P09.05 approval workflow: role gate, hash binding, bulk per-item, 5 tests | [EV-P09-007-approval-workflow-audit.md](P09/EV-P09-007-approval-workflow-audit.md) |
+| EV-P09-008 | P09.06.03 | 2026-10-11 | `614b0710ecfa` | Validity, staleness and re-verification: expiry enforced, overdue-sensitive suspension, flagged stale, idempotent sweep | [EV-P09-008-validity-staleness-reverify.md](P09/EV-P09-008-validity-staleness-reverify.md) |

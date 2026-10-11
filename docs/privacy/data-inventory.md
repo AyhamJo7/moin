@@ -193,6 +193,8 @@ seasonal.
 | `knowledge_versions.sensitivity`                                  | Knowledge | no alone (fixed catalogue)                           | while approved             | hard delete             | —                   |
 | `knowledge_versions.allowed_channels`                             | Knowledge | no alone (fixed catalogue)                           | while approved             | hard delete             | —                   |
 | `knowledge_versions.last_verified_at`                             | Knowledge | no alone (timestamp)                                 | while approved             | hard delete             | —                   |
+| `knowledge_versions.reverify_after`                               | Knowledge | no alone (interval)                                  | while approved             | hard delete             | —                   |
+| `knowledge_items.suspended`                                       | Knowledge | no alone (boolean flag)                              | while approved             | hard delete             | —                   |
 | `knowledge_versions.item_id`                                      | Knowledge | yes (references)                                     | while approved             | hard delete             | —                   |
 | `knowledge_versions.version_no`                                   | Knowledge | no alone (monotonic counter)                         | while approved             | hard delete             | —                   |
 | `knowledge_versions.state`                                        | Knowledge | no alone (lifecycle state)                           | while approved             | hard delete             | —                   |
@@ -228,6 +230,11 @@ seasonal.
 | `faq_cards.allowed_channels`                                      | Knowledge | no alone (fixed catalogue)                           | while active               | hard delete             | —                   |
 | `faq_cards.location_id`                                           | Knowledge | yes (references)                                     | while active               | hard delete             | —                   |
 | `faq_cards.active`                                                | Knowledge | no alone (boolean flag)                              | while the tenant exists    | hard delete             | —                   |
+| `faq_cards.valid_until`                                           | Knowledge | no alone (date)                                      | while active               | hard delete             | —                   |
+| `faq_cards.reverify_after`                                        | Knowledge | no alone (interval)                                  | while active               | hard delete             | —                   |
+| `knowledge_reverify_queue.item_id`                                | Knowledge | yes (references)                                     | until re-approved          | hard delete             | —                   |
+| `knowledge_reverify_queue.task_id`                                | Knowledge | yes (references)                                     | until re-approved          | hard delete             | —                   |
+| `knowledge_reverify_queue.card_id`                                | Knowledge | yes (references)                                     | until card updated         | hard delete             | —                   |
 | `opening_rules.location_id`                                       | Business  | yes (references)                                     | while the tenant exists    | hard delete             | —                   |
 | `opening_rules.weekday`                                           | Business  | no (fixed catalogue 0..6)                            | while the tenant exists    | hard delete             | —                   |
 | `opening_rules.opens_min`                                         | Business  | no (wall-clock minutes)                              | while the tenant exists    | hard delete             | —                   |

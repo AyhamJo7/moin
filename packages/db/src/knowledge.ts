@@ -44,6 +44,8 @@ export interface KnowledgeMetadata {
   readonly validUntil?: string | undefined;
   readonly sensitivity?: KnowledgeSensitivity | undefined;
   readonly allowedChannels?: readonly string[] | undefined;
+  /** Re-verification deadline in days. Defaults per category (P09.06); null = no deadline. */
+  readonly reverifyAfterDays?: number | null | undefined;
 }
 
 export interface KnowledgeItem {
@@ -122,6 +124,29 @@ function checkCategory(category: string): string {
   return trimmed;
 }
 
+/** Per-category reverify defaults in days (PLAN P09.06.01). Single home. */
+const REVERIFY_DEFAULT_DAYS: Readonly<Record<string, number>> = {
+  menu: 30,
+  hours: 90,
+  prices: 90,
+};
+
+const REVERIFY_FALLBACK_DAYS = 90;
+
+/** Days until re-verification is due for a category (PLAN P09.06.01). */
+export function reverifyDaysForCategory(category: string): number {
+  return REVERIFY_DEFAULT_DAYS[category.trim().toLowerCase()] ?? REVERIFY_FALLBACK_DAYS;
+}
+
+function checkReverifyAfter(value: number | null | undefined, category: string): number | null {
+  if (value === undefined) return reverifyDaysForCategory(category);
+  if (value === null) return null;
+  if (!Number.isInteger(value) || value <= 0 || value > 3650) {
+    throw new RangeError('reverify_after must be 1..3650 days');
+  }
+  return value;
+}
+
 function checkMetadata(input: KnowledgeMetadata): {
   source: KnowledgeSource;
   locationId: string | null;
@@ -130,6 +155,7 @@ function checkMetadata(input: KnowledgeMetadata): {
   validUntil: string | null;
   sensitivity: KnowledgeSensitivity;
   channels: readonly string[];
+  reverifyAfter: string | null;
 } {
   if (input.locationId !== undefined && !UUID_RE.test(input.locationId)) {
     throw new RangeError('location id must be a uuid');
@@ -153,6 +179,10 @@ function checkMetadata(input: KnowledgeMetadata): {
     }
   }
   if (channels.length === 0) throw new RangeError('at least one channel required');
+  // Reverify deadline (P09.06): explicit days beat the category default; null
+  // stays null (no deadline, e.g. pre-0057 rows). Stored as a Postgres interval
+  // so deadline math (`decided_at + reverify_after`) stays in SQL.
+  const reverifyDays = checkReverifyAfter(input.reverifyAfterDays, category);
   return {
     source: input.source,
     locationId: input.locationId ?? null,
@@ -161,6 +191,7 @@ function checkMetadata(input: KnowledgeMetadata): {
     validUntil,
     sensitivity: input.sensitivity ?? 'public',
     channels,
+    reverifyAfter: reverifyDays === null ? null : `${String(reverifyDays)} days`,
   };
 }
 
@@ -196,8 +227,8 @@ export async function createKnowledgeItem(
   const version = await client.query<VersionRow>(
     `insert into knowledge_versions
        (organisation_id, id, item_id, version_no, title, body, source, location_id,
-        category, valid_from, valid_until, sensitivity, allowed_channels)
-     values (app.current_org(), $1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        category, valid_from, valid_until, sensitivity, allowed_channels, reverify_after)
+     values (app.current_org(), $1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::interval)
      returning id, item_id, version_no, title, body, state`,
     [
       versionId,
@@ -211,6 +242,7 @@ export async function createKnowledgeItem(
       meta.validUntil,
       meta.sensitivity,
       meta.channels,
+      meta.reverifyAfter,
     ],
   );
   const versionRow = version.rows[0];
@@ -256,8 +288,8 @@ export async function editKnowledgeItem(
   const inserted = await client.query<VersionRow>(
     `insert into knowledge_versions
        (organisation_id, id, item_id, version_no, title, body, source, location_id,
-        category, valid_from, valid_until, sensitivity, allowed_channels)
-     values (app.current_org(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        category, valid_from, valid_until, sensitivity, allowed_channels, reverify_after)
+     values (app.current_org(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::interval)
      returning id, item_id, version_no, title, body, state`,
     [
       versionId,
@@ -272,6 +304,7 @@ export async function editKnowledgeItem(
       meta.validUntil,
       meta.sensitivity,
       meta.channels,
+      meta.reverifyAfter,
     ],
   );
   const versionRow = inserted.rows[0];
@@ -340,6 +373,12 @@ export async function approveKnowledgeVersion(
   );
   const itemRow = item.rows[0];
   if (itemRow === undefined) throw new Error('knowledge item update returned no row');
+  // Re-approval resets the reverify lifecycle (P09.06.02, ROUND-1 P1-1): the new
+  // approval is the review, so the suspension lifts AND the queue row goes —
+  // otherwise the sweep's handled-row exclusion would never re-queue the item
+  // and it could go overdue again silently.
+  await client.query(`update knowledge_items set suspended = false where id = $1`, [input.itemId]);
+  await client.query(`delete from knowledge_reverify_queue where item_id = $1`, [input.itemId]);
   const versionNo = await client.query<{ n: number }>(
     `select version_no as n from knowledge_versions where id = $1`,
     [input.versionId],
@@ -390,18 +429,32 @@ export async function retireKnowledgeItem(
  * The currently served version: the item's live pointer, or null when nothing is live
  * (draft items before first approval, retired items always). Only approved versions
  * are ever reachable through this path — drafts are invisible to serving.
+ *
+ * P09.06 validity: expired live versions (valid_until < today) serve nothing —
+ * expiry is absolute, regardless of sensitivity or verification age. Suspended
+ * items (overdue restricted, P09.06.02) serve nothing until re-approved.
+ * Overdue restricted items are suppressed INLINE (same predicate as servedState)
+ * so serving is correct even when the sweep has not run yet (ROUND-1 P1-2) —
+ * the sweep still owns suspension + tasking, this is the serving guard.
  */
 export async function getLiveVersion(
   client: TenantClient,
   itemId: string,
+  now: Date = new Date(),
 ): Promise<KnowledgeVersion | null> {
   if (!UUID_RE.test(itemId)) throw new RangeError('knowledge item id must be a uuid');
   const found = await client.query<VersionRow>(
     `select v.id, v.item_id, v.version_no, v.title, v.body, v.state
      from knowledge_versions v join knowledge_items i
        on i.organisation_id = v.organisation_id and i.id = v.item_id
-     where i.id = $1 and v.id = i.live_version_id and v.state = 'approved'`,
-    [itemId],
+     left join knowledge_approvals a
+       on a.organisation_id = i.organisation_id and a.version_id = v.id
+     where i.id = $1 and v.id = i.live_version_id and v.state = 'approved'
+       and i.state = 'approved' and not i.suspended
+       and coalesce(v.valid_until < $2::date, false) = false
+       and not (v.sensitivity = 'restricted'
+         and coalesce(a.decided_at + v.reverify_after <= $2::timestamptz, false) = true)`,
+    [itemId, now.toISOString()],
   );
   const row = found.rows[0];
   return row === undefined ? null : toVersion(row);

@@ -50,6 +50,8 @@ export interface FaqAnswer {
   readonly cardId: string;
   readonly spoken: string;
   readonly sensitivity: FaqSensitivity;
+  /** True when the card is past its reverify deadline but still served (P09.06). */
+  readonly stale: boolean;
 }
 
 interface FaqRow extends Record<string, unknown> {
@@ -131,6 +133,36 @@ export interface FaqInput {
   readonly sensitivity?: string | undefined;
   readonly channels?: readonly string[] | undefined;
   readonly locationId?: string | undefined;
+  readonly validUntil?: string | undefined;
+  /** Re-verification deadline in days (P09.06); null = no deadline. */
+  readonly reverifyAfterDays?: number | null | undefined;
+}
+
+function checkValidUntil(validUntil: string | undefined): string | null {
+  if (validUntil === undefined) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(validUntil)) {
+    throw new RangeError('valid_until must be YYYY-MM-DD');
+  }
+  return validUntil;
+}
+
+/**
+ * Reverify deadline for a card in days (P09.06, ROUND-1 P2-1): omitted
+ * (undefined) falls back to the 90-day card default — a card that never goes
+ * stale is a card nobody re-checks. Explicit null opts OUT (no deadline).
+ * Cards have no menu category, so the single 90d fallback applies (the
+ * knowledge menu-30d default lives on versions, not cards — documented here
+ * so the asymmetry is deliberate, not an omission).
+ */
+const FAQ_FALLBACK_DAYS = 90;
+
+function checkReverifyAfterDays(value: number | null | undefined): string | null {
+  if (value === undefined) return `${String(FAQ_FALLBACK_DAYS)} days`;
+  if (value === null) return null;
+  if (!Number.isInteger(value) || value <= 0 || value > 3650) {
+    throw new RangeError('reverify_after must be 1..3650 days');
+  }
+  return `${String(value)} days`;
 }
 
 function checkLocation(locationId: string | undefined): string | null {
@@ -148,14 +180,28 @@ export async function createFaqCard(client: TenantClient, input: FaqInput): Prom
   const sensitivity = checkSensitivity(input.sensitivity ?? 'public');
   const channels = checkChannels(input.channels);
   const location = checkLocation(input.locationId);
+  const validUntil = checkValidUntil(input.validUntil);
+  const reverifyAfter = checkReverifyAfterDays(input.reverifyAfterDays);
   const id = randomUUID();
   const inserted = await client.query<FaqRow>(
     `insert into faq_cards
        (organisation_id, id, canonical, variants, spoken_answer, written_answer,
-        sensitivity, allowed_channels, location_id)
-     values (app.current_org(), $1, $2, $3::text[], $4::text, $5::text, $6::text, $7::text[], $8::uuid)
+        sensitivity, allowed_channels, location_id, valid_until, reverify_after)
+     values (app.current_org(), $1, $2, $3::text[], $4::text, $5::text, $6::text, $7::text[], $8::uuid,
+             $9::date, $10::interval)
      returning id, canonical, sensitivity, spoken_answer, active, version::text`,
-    [id, canonical, variants, spoken, written, sensitivity, channels, location],
+    [
+      id,
+      canonical,
+      variants,
+      spoken,
+      written,
+      sensitivity,
+      channels,
+      location,
+      validUntil,
+      reverifyAfter,
+    ],
   );
   const row = inserted.rows[0];
   if (row === undefined) throw new Error('faq insert returned no row');
@@ -170,7 +216,12 @@ export async function createFaqCard(client: TenantClient, input: FaqInput): Prom
   return toCard(row);
 }
 
-/** Update a card (linted; expectedVersion required — no silent unconditional path). */
+/**
+ * Update a card (linted; expectedVersion required — no silent unconditional path).
+ * Any owner edit re-arms the card (active=true, the re-approval equivalent):
+ * a sweep-deactivated card serves again once its content is reviewed, and the
+ * updated_at bump restarts the reverify deadline.
+ */
 export async function updateFaqCard(
   client: TenantClient,
   cardId: string,
@@ -184,11 +235,13 @@ export async function updateFaqCard(
   const sensitivity = checkSensitivity(input.sensitivity ?? 'public');
   const channels = checkChannels(input.channels);
   const location = checkLocation(input.locationId);
+  const validUntil = checkValidUntil(input.validUntil);
+  const reverifyAfter = checkReverifyAfterDays(input.reverifyAfterDays);
   const updated = await client.query<FaqRow>(
     `update faq_cards set canonical = $2::text, variants = $3::text[], spoken_answer = $4::text,
        written_answer = $5::text, sensitivity = $6::text, allowed_channels = $7::text[],
-       location_id = $8::uuid,
-       updated_at = clock_timestamp(), version = version + 1
+       location_id = $8::uuid, valid_until = $10::date, reverify_after = $11::interval,
+       active = true, updated_at = clock_timestamp(), version = version + 1
      where organisation_id = app.current_org() and id = $1 and version = $9::integer
      returning id, canonical, sensitivity, spoken_answer, active, version::text`,
     [
@@ -201,10 +254,16 @@ export async function updateFaqCard(
       channels,
       location,
       input.expectedVersion,
+      validUntil,
+      reverifyAfter,
     ],
   );
   const row = updated.rows[0];
   if (row === undefined) throw new VersionConflictError('faq card version mismatch');
+  // Re-arm the reverify lifecycle (ROUND-3 P1-1/P1-2, mirrors approval-clears-
+  // queue): the reviewed card leaves the sweep's handled set, so the next
+  // overdue cycle re-tasks it instead of skipping it silently.
+  await client.query(`delete from knowledge_reverify_queue where card_id = $1`, [cardId]);
   await appendAuditEvent(client, {
     source: 'api',
     operation: 'faq.upsert',
@@ -249,6 +308,7 @@ interface MatchRow extends Record<string, unknown> {
   spoken_answer: string;
   sensitivity: string;
   score: number;
+  stale: boolean;
 }
 
 export interface FaqQuery {
@@ -285,9 +345,16 @@ async function matchCards(
        greatest(
          similarity(canonical, $1),
          coalesce((select max(similarity(v, $1)) from unnest(variants) v), 0)
-       ) as score
+       ) as score,
+       coalesce(updated_at + reverify_after <= now(), false) as stale
      from faq_cards
      where organisation_id = app.current_org() and active = true
+       and coalesce(valid_until < current_date, false) = false
+       -- Overdue sensitive cards stop serving (escalation, same rule as
+       -- knowledge restricted — ROUND-1 P1-3); overdue public/internal serve
+       -- flagged stale.
+       and not (sensitivity = 'sensitive'
+         and coalesce(updated_at + reverify_after <= now(), false) = true)
        and ($2::boolean = false or sensitivity <> 'sensitive')
        and ($3::uuid is null and location_id is null
             or $3::uuid is not null and (location_id is null or location_id = $3::uuid))
@@ -301,6 +368,7 @@ async function matchCards(
     cardId: r.id,
     spoken: r.spoken_answer,
     sensitivity: r.sensitivity as FaqSensitivity,
+    stale: r.stale,
   }));
 }
 
@@ -308,6 +376,8 @@ async function matchCards(
  * Approved-card lookup (the DEFAULT answer mode, ADR-0014): trigram match over
  * canonical + variants, spoken answer verbatim — sensitive cards INCLUDED (this is
  * their only mode). Null when nothing matches: the caller abstains or escalates.
+ * Expired cards never match (P09.06.01); overdue sensitive cards never match
+ * (escalation); overdue public/internal match with stale=true.
  */
 export async function findAnswer(
   client: TenantClient,
