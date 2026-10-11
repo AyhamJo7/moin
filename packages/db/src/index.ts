@@ -154,3 +154,10 @@ export type {
   ToolInvocation,
   WorkflowRun,
 } from './governance.ts';
+export { isVersionConflict, versionConflictProblem } from './version-conflict.ts';
+export type { VersionConflictProblem, VersionConflictRepresentation } from './version-conflict.ts';
+export {
+  VERSION_CONFLICT_PROBLEM_TYPE,
+  VERSION_CONFLICT_STATUS,
+  VERSION_CONFLICT_TITLE,
+} from './version-conflict.ts';

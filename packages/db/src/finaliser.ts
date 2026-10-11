@@ -81,15 +81,24 @@ async function openTaskExists(client: TenantClient, conversationId: string): Pro
  * requires type NOT NULL): unbounded cancel-repairs with the system-type slot untouched.
  * Anything else contradicts the machine and throws rather than covering silently.
  *
- * Concurrency: the whole repair runs under a row lock on the deterministic fallback row.
- * Two racers that both pass the open-task check serialise on the lock; the loser re-checks
- * for an open task after acquiring it and skips when the winner already covered the
- * interaction — so concurrent repairs never mint duplicate replacements.
+ * Concurrency: the whole interaction serialises on a transaction-scoped advisory lock
+ * keyed by conversation id (same pattern as the ingestCall SID lock in P07.05) — taken as
+ * the first statement, so the SELECT-first flow below is always correct: a retry finds the
+ * winner's row with no write at all, and a miss proceeds knowing no concurrent finalise
+ * for this conversation can interleave. hashtext is 32-bit: collisions across distinct
+ * conversations merely serialise unrelated finalises, never misroute one (every check below
+ * is still the exact conversation id). The repair path additionally holds a row lock on
+ * the deterministic fallback row for the close/reopen decision itself.
  */
 export async function finaliseInteraction(
   client: TenantClient,
   conversationId: string,
 ): Promise<{ conversationId: string; verdict: FinaliseVerdict; taskId: string | null }> {
+  // Serialise same-conversation finalises for this transaction. Without this, two
+  // same-tick creators both pass the open-task check below and both report
+  // fallback-created (the idempotency key dedupes the ROW but not the verdict, and the
+  // reconciler double-counts). Under the lock the loser re-reads and takes task-existed.
+  await client.query(`select pg_advisory_xact_lock(hashtext($1))`, [conversationId]);
   const outcome = await getOutcome(client, conversationId);
   if (outcome !== null) {
     await appendAuditEvent(client, {
