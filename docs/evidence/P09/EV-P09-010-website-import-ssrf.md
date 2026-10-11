@@ -5,7 +5,7 @@
 | Evidence ID | EV-P09-010 |
 | Item | P09.08.05 |
 | Date (UTC) | 2026-10-11 23:55 UTC (ROUND-8 record-only; ROUND-7 23:35 UTC; ROUND-6 23:20 UTC; ROUND-5 23:00 UTC; ROUND-4 22:45 UTC; ROUND-3 22:30 UTC; ROUND-2 22:00 UTC; ROUND-1 21:30 UTC; initial 20:50 UTC) |
-| Commit | `TBD (this push)` — code unchanged since `de1e726` (record-only update) |
+| Commit | `ae4460e` (ROUND-8 record-only incl. EV + ledger; code unchanged since `de1e726`) |
 | Environment | local |
 | Command / procedure | `gates.py full` 14/14 PASS (artifact `20261011T225729Z-full.json`): control-plane, control-plane-lint, conventions, docs-consistency, format, lint, boundaries, typecheck, unit, integration (24.5 s), migrations, build, licences, secret-scan. Test env vars exported from the example env file (no worktree secrets file; INV-15); pinned Node 24.21.0 / pnpm 10.34.5 on PATH. |
 | Result | PASS |
