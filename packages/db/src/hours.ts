@@ -143,6 +143,10 @@ function exceptionOn(date: string, exceptions: readonly ExceptionRow[]): Excepti
  * exception label/holiday name as reason), else weekly rules + yesterday's
  * spill-over leg for midnight-spanning intervals. Public holidays do NOT close
  * implicitly — without an explicit exception row the regular rules apply.
+ * Exceptions override weekly on the spill leg too: when yesterday has ANY exception
+ * row, its weekly midnight-spanning rules do NOT spill — only yesterday's own
+ * overnight exception hours spill. (A Friday closure must kill the weekly Friday
+ * 22:00–02:00 Saturday leg; only a Friday overnight exception re-opens it.)
  */
 export function hoursOnDate(
   date: string,
@@ -153,19 +157,22 @@ export function hoursOnDate(
 ): DayHours {
   // Yesterday's midnight-spanning legs FIRST: they cover 00:00–close today whatever
   // today holds (even when today has its own exception — the spill-over already
-  // started last night and cannot be un-started). Weekly yesterday-legs and
-  // yesterday-exception legs both apply.
+  // started last night and cannot be un-started). When yesterday carries ANY
+  // exception row, weekly spill is SUPPRESSED — only yesterday's own overnight
+  // exception hours spill (exceptions override weekly, on the spill leg too).
   const spill: OpeningInterval[] = [];
-  for (const r of snapshot.rules) {
-    if (r.weekday === yesterdayWeekday) {
-      const split = splitInterval(r.opens_min, r.closes_min);
-      if (split.tomorrow !== null) spill.push(split.tomorrow);
+  const yesterdayException =
+    yesterdayDate === null ? null : exceptionOn(yesterdayDate, snapshot.exceptions);
+  if (yesterdayException === null) {
+    for (const r of snapshot.rules) {
+      if (r.weekday === yesterdayWeekday) {
+        const split = splitInterval(r.opens_min, r.closes_min);
+        if (split.tomorrow !== null) spill.push(split.tomorrow);
+      }
     }
-  }
-  if (yesterdayDate !== null) {
-    const yesterdayException = exceptionOn(yesterdayDate, snapshot.exceptions);
-    const opens = yesterdayException?.opens_min ?? null;
-    const closes = yesterdayException?.closes_min ?? null;
+  } else {
+    const opens = yesterdayException.opens_min;
+    const closes = yesterdayException.closes_min;
     if (opens !== null && closes !== null && opens > closes) {
       spill.push({ opensMin: 0, closesMin: closes });
     }

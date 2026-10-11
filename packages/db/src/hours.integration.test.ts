@@ -144,16 +144,51 @@ describe('hours', () => {
   });
 
   evidenceTest('nextOpening resolves wall-clock across DST Sundays', async () => {
-    await seedWeekdays();
+    // Sunday hours ADDED (round-2 precision): without a Sunday leg both
+    // implementations skip to Monday and the test cannot discriminate. With Sunday
+    // 09:00–12:00, wall-clock resolve lands Sunday 09:00 local sharp.
+    await withTenant(app, ORG_A, (client) =>
+      setWeeklyRules(client, LOC_A, [
+        { weekday: 0, opensMin: 540, closesMin: 720 },
+        { weekday: 1, opensMin: 540, closesMin: 1080 },
+        { weekday: 2, opensMin: 540, closesMin: 1080 },
+        { weekday: 3, opensMin: 540, closesMin: 1080 },
+        { weekday: 4, opensMin: 540, closesMin: 1080 },
+        { weekday: 5, opensMin: 540, closesMin: 1080 },
+      ]),
+    );
     const snapshot = await withTenant(app, ORG_A, (client) => loadHours(client, LOC_A));
-    // Spring Sunday 2026-03-29 00:30 CET (23:30Z Saturday): minute-arithmetic would add
-    // 8.5h elapsed and land 10:00 local — wall-clock resolve lands 09:00 CEST = 07:00Z.
+    // Spring Sunday 2026-03-29 00:30 CET (23:30Z Saturday): minute-arithmetic adds
+    // 8.5h elapsed and lands 10:00 local — wall-clock resolve lands 09:00 CEST = 07:00Z.
     const spring = nextOpening(new Date('2026-03-28T23:30:00Z'), snapshot);
-    expect(spring?.toISOString()).toBe('2026-03-30T07:00:00.000Z');
-    // Autumn Sunday 2026-10-25 00:30 CEST (22:30Z Saturday): wall-clock resolve lands
-    // Monday 09:00 CET = 08:00Z (minute math would land 08:00 local = 07:00Z).
+    expect(spring?.toISOString()).toBe('2026-03-29T07:00:00.000Z');
+    // Autumn Sunday 2026-10-25 00:30 CEST (22:30Z Saturday): wall-clock resolve
+    // lands Sunday 09:00 local. The fold repeats 02:00–03:00, so 09:00 is
+    // unambiguous CET = 08:00Z (minute math lands 08:00 local = 07:00Z — wrong hour).
     const autumn = nextOpening(new Date('2026-10-24T22:30:00Z'), snapshot);
-    expect(autumn?.toISOString()).toBe('2026-10-26T08:00:00.000Z');
+    expect(autumn?.toISOString()).toBe('2026-10-25T08:00:00.000Z');
+  });
+
+  evidenceTest('Friday closure kills the weekly overnight Saturday leg', async () => {
+    // Weekly Friday 22:00–02:00 would spill into Saturday 00:00–02:00 — but a Friday
+    // CLOSURE exception suppresses the weekly spill (exceptions override weekly, on
+    // the spill leg too). Saturday 01:00 stays CLOSED.
+    await withTenant(app, ORG_A, (client) =>
+      setWeeklyRules(client, LOC_A, [{ weekday: 5, opensMin: 1320, closesMin: 120 }]),
+    );
+    await withTenant(app, ORG_A, (client) =>
+      addException(client, LOC_A, {
+        kind: 'closure',
+        startDate: '2026-10-09',
+        endDate: '2026-10-09',
+        label: 'Betriebsversammlung',
+      }),
+    );
+    const snapshot = await withTenant(app, ORG_A, (client) => loadHours(client, LOC_A));
+    // Saturday 2026-10-10 01:00 Berlin (Friday 23:00Z) → CLOSED (no spill).
+    expect(isOpenAt(new Date('2026-10-09T23:00:00Z'), snapshot)).toBe(false);
+    // Friday 21:00 Berlin (19:00Z) → closed too (closure covers the whole day).
+    expect(isOpenAt(new Date('2026-10-09T19:00:00Z'), snapshot)).toBe(false);
   });
 
   evidenceTest('overnight dated exceptions cover the after-midnight leg', async () => {
