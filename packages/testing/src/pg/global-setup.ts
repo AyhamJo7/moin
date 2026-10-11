@@ -49,7 +49,7 @@ export async function setup(): Promise<void> {
   // Without this the template is a bare database and every test built on it lacks pgvector.
   const template = createPool({ connectionString: templateUrl.toString(), max: 1 });
   try {
-    for (const extension of ['vector', 'pgcrypto', 'citext', 'pg_trgm']) {
+    for (const extension of ['vector', 'pgcrypto', 'citext', 'pg_trgm', 'unaccent']) {
       // eslint-disable-next-line no-restricted-syntax -- database identifier. The extension names come from a literal array in this file.
       await template.query(`create extension if not exists ${extension}`);
     }

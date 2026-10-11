@@ -8,3 +8,4 @@ CREATE EXTENSION IF NOT EXISTS vector;      -- pgvector: knowledge retrieval (P0
 CREATE EXTENSION IF NOT EXISTS pgcrypto;    -- gen_random_uuid(), digest() for the audit hash chain
 CREATE EXTENSION IF NOT EXISTS citext;      -- case-insensitive email comparison
 CREATE EXTENSION IF NOT EXISTS pg_trgm;     -- fuzzy contact matching (P07)
+CREATE EXTENSION IF NOT EXISTS unaccent;    -- umlaut-insensitive search (P07.12)

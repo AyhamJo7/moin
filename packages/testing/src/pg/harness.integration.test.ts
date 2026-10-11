@@ -84,5 +84,7 @@ describe('real-postgres harness', () => {
     expect(names).toContain('vector');
     expect(names).toContain('pgcrypto');
     expect(names).toContain('citext');
+    expect(names).toContain('pg_trgm');
+    expect(names).toContain('unaccent');
   });
 });
