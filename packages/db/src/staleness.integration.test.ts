@@ -15,7 +15,7 @@ import {
   type KnowledgeMetadata,
 } from './knowledge.ts';
 import { createPool, type Pool } from './pool.ts';
-import { servedState, sweepReverify } from './staleness.ts';
+import { lockEligibleCards, servedState, sweepReverify } from './staleness.ts';
 import { withTenant } from './tenant.ts';
 
 const ORG_A = '11111111-1111-4111-8111-111111111111';
@@ -610,6 +610,60 @@ describe('staleness', () => {
       ),
     );
     expect(twinQueued.rows[0]?.n).toBe('1');
+  });
+
+  evidenceTest('locked re-read drops cards changed after candidate select', async () => {
+    // ROUND-8 ARCH: drives the two sweep phases separately with an
+    // interleaved update BETWEEN them — the gap the full sweep cannot expose
+    // from this single-connection harness. Phase 1 (candidate ids) sees the
+    // overdue card; the owner then deactivates / refreshes it; phase 2 (the
+    // locked re-read, same predicate the sweep runs) must NOT return it.
+    // Removing any locked-query predicate (active / valid_until / overdue)
+    // fails this test — the predicates are load-bearing, not decorative.
+    const late = new Date(Date.now() + 2 * 86_400_000);
+    const day = late.toISOString().slice(0, 10);
+    const instant = late.toISOString();
+    async function makeOverdue(canonical: string): Promise<string> {
+      const card = await withTenant(app, ORG_A, (client) =>
+        createFaqCard(client, {
+          canonical,
+          spoken: 'Ja, gerne doch zum Test.',
+          reverifyAfterDays: 1,
+        }),
+      );
+      await withTenant(app, ORG_A, (client) =>
+        client.query(`update faq_cards set updated_at = now() - interval '2 days' where id = $1`, [
+          card.id,
+        ]),
+      );
+      return card.id;
+    }
+    const deactivatedId = await makeOverdue('Ist Deaktivtest eins?');
+    const refreshedId = await makeOverdue('Ist Auffrischtest zwei?');
+    const twinId = await makeOverdue('Ist Zwillingsprobe drei?');
+    const candidateIds = [deactivatedId, refreshedId, twinId];
+    // Sanity: all three are eligible BEFORE the interleave.
+    const before = await withTenant(app, ORG_A, (client) =>
+      lockEligibleCards(client, candidateIds, day, instant),
+    );
+    expect(before.map((r) => r.id).sort()).toStrictEqual([...candidateIds].sort());
+    // The interleave: deactivate one, refresh another to a fresh deadline.
+    await withTenant(app, ORG_A, (client) =>
+      client.query(`update faq_cards set active = false where id = $1`, [deactivatedId]),
+    );
+    await withTenant(app, ORG_A, (client) =>
+      updateFaqCard(client, refreshedId, {
+        canonical: 'Ist Auffrischtest zwei?',
+        spoken: 'Ja, gerne doch zum Test.',
+        reverifyAfterDays: 30,
+        expectedVersion: 1,
+      }),
+    );
+    // Phase 2 with the SAME candidate ids: only the untouched twin survives.
+    const after = await withTenant(app, ORG_A, (client) =>
+      lockEligibleCards(client, candidateIds, day, instant),
+    );
+    expect(after.map((r) => r.id)).toStrictEqual([twinId]);
   });
 
   evidenceTest('concurrent sweeps do not duplicate card tasks or audits', async () => {

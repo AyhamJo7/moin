@@ -113,6 +113,48 @@ export interface SweepResult {
   readonly tasksCreated: number;
 }
 
+/** Candidate card row: what the lock-free select hands the locked re-read. */
+export interface SweepCandidate extends Record<string, unknown> {
+  readonly id: string;
+  readonly sensitivity: string;
+  readonly anchor: string;
+}
+
+/**
+ * Locked eligibility re-read (ROUND-8 seam): given candidate ids, re-checks the
+ * FULL predicate minus the queue leg under FOR UPDATE row locks, in id order.
+ * Cards deactivated / refreshed / expired after the candidate select are
+ * absent here → skipped. Exported so the regression test can drive the two
+ * phases separately with an interleaved update between them — the production
+ * sweep calls it immediately after the candidate select (same transaction).
+ */
+export async function lockEligibleCards(
+  client: TenantClient,
+  candidateIds: readonly string[],
+  day: string,
+  instant: string,
+): Promise<readonly SweepCandidate[]> {
+  if (candidateIds.length === 0) return [];
+  const locked = await client.query<SweepCandidate>(
+    // FOR UPDATE cannot touch the nullable queue side of an outer join, so
+    // the lock targets faq_cards alone by id; the re-check repeats active +
+    // unexpired + still overdue — the queue conflict is caught by the
+    // anchor-carrying INSERT...SELECT below, which skips on zero rows.
+    // Cards failing the recheck are simply absent here → skipped.
+    `select id::text, sensitivity,
+            extract(epoch from updated_at)::bigint::text as anchor
+     from faq_cards
+     where organisation_id = app.current_org()
+       and id = any ($3::uuid[])
+       and active = true
+       and coalesce(valid_until < $1::date, false) = false
+       and coalesce(updated_at + reverify_after <= $2::timestamptz, false) = true
+     order by id for update`,
+    [day, instant, [...candidateIds]],
+  );
+  return locked.rows;
+}
+
 /**
  * Reverify sweep: for every approved, non-suspended item whose live version is
  * neither expired nor (yet) handled — suspend it when restricted-overdue,
@@ -247,37 +289,12 @@ export async function sweepReverify(
      order by c.id`,
     [day, instant],
   );
-  const locked =
-    candidates.rows.length === 0
-      ? []
-      : (
-          await client.query<{ id: string; sensitivity: string; anchor: string }>(
-            // Eligibility re-check under lock (ROUND-7 P1): the lock-free
-            // candidate select and this acquisition bracket a gap — an owner
-            // update or deactivate committing inside it would otherwise flow
-            // through on a stale snapshot (fresh or inactive content tasked).
-            // FOR UPDATE cannot touch the nullable queue side of an outer
-            // join, so the lock targets faq_cards alone by id; the re-check
-            // repeats the FULL predicate minus the queue leg (active +
-            // unexpired + still overdue — the queue conflict is caught by the
-            // anchor-carrying INSERT...SELECT below, which skips on zero
-            // rows). Cards failing the recheck are simply absent here →
-            // skipped. Same treatment the item path gets from its
-            // version-guarded UPDATE (it re-checks liveness at write time;
-            // here the re-check rides the locked read because the card path
-            // has no write before the queue insert to guard on).
-            `select id::text, sensitivity,
-                    extract(epoch from updated_at)::bigint::text as anchor
-             from faq_cards
-             where organisation_id = app.current_org()
-               and id = any ($3::uuid[])
-               and active = true
-               and coalesce(valid_until < $1::date, false) = false
-               and coalesce(updated_at + reverify_after <= $2::timestamptz, false) = true
-             order by id for update`,
-            [day, instant, candidates.rows.map((r) => r.id)],
-          )
-        ).rows;
+  const locked = await lockEligibleCards(
+    client,
+    candidates.rows.map((r) => r.id),
+    day,
+    instant,
+  );
   for (const card of locked) {
     const sensitive = card.sensitivity === 'sensitive';
     if (sensitive) {

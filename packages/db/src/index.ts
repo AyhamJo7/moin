@@ -226,5 +226,5 @@ export {
 export type { FaqAnswer, FaqCard, FaqInput, FaqSensitivity } from './faq.ts';
 export { approveFaqCard, approveKnowledge, bulkApprove, ForbiddenError } from './approval.ts';
 export type { ApprovalResult, BulkApprovalResult } from './approval.ts';
-export { REVERIFY_TASK_TITLE, servedState, sweepReverify } from './staleness.ts';
-export type { ServedVersion, SweepResult } from './staleness.ts';
+export { REVERIFY_TASK_TITLE, lockEligibleCards, servedState, sweepReverify } from './staleness.ts';
+export type { ServedVersion, SweepCandidate, SweepResult } from './staleness.ts';
