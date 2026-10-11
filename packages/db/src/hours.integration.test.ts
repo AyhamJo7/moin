@@ -170,6 +170,12 @@ describe('hours', () => {
   });
 
   evidenceTest('Friday closure kills the weekly overnight Saturday leg', async () => {
+    // Direct hoursOnDate assertion (not only via isOpenAt): Saturday's row must NOT
+    // contain the Friday-weekly spill once Friday carries ANY exception. The 4-arg
+    // shape is gone — yesterday derives internally, so this call cannot forget it.
+    await withTenant(app, ORG_A, (client) =>
+      setWeeklyRules(client, LOC_A, [{ weekday: 5, opensMin: 1320, closesMin: 120 }]),
+    );
     // Weekly Friday 22:00–02:00 would spill into Saturday 00:00–02:00 — but a Friday
     // CLOSURE exception suppresses the weekly spill (exceptions override weekly, on
     // the spill leg too). Saturday 01:00 stays CLOSED.
@@ -189,6 +195,10 @@ describe('hours', () => {
     expect(isOpenAt(new Date('2026-10-09T23:00:00Z'), snapshot)).toBe(false);
     // Friday 21:00 Berlin (19:00Z) → closed too (closure covers the whole day).
     expect(isOpenAt(new Date('2026-10-09T19:00:00Z'), snapshot)).toBe(false);
+    // Direct row shape: Saturday carries no intervals at all (not even a spill).
+    const saturday = hoursOnDate('2026-10-10', 6, snapshot, 5);
+    expect(saturday.intervals).toHaveLength(0);
+    expect(saturday.closed).toBe(true);
   });
 
   evidenceTest('overnight dated exceptions cover the after-midnight leg', async () => {

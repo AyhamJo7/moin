@@ -138,6 +138,14 @@ function exceptionOn(date: string, exceptions: readonly ExceptionRow[]): Excepti
   return null;
 }
 
+/** Calendar-date arithmetic on YYYY-MM-DD (UTC noon anchored — date-only, no DST). */
+function shiftDateString(date: string, days: number): string {
+  const [y, m, d] = date.split('-').map(Number);
+  const shifted = new Date(Date.UTC(y ?? 0, (m ?? 1) - 1, d ?? 1, 12, 0, 0) + days * 86_400_000);
+  const pad = (n: number): string => String(n).padStart(2, '0');
+  return `${String(shifted.getUTCFullYear()).padStart(4, '0')}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())}`;
+}
+
 /**
  * Hours for one calendar date: exception wins (NULL hours = closed with the
  * exception label/holiday name as reason), else weekly rules + yesterday's
@@ -153,16 +161,19 @@ export function hoursOnDate(
   weekday: number,
   snapshot: HoursSnapshot,
   yesterdayWeekday: number,
-  yesterdayDate: string | null = null,
 ): DayHours {
+  // Yesterday's date derives from the DATE itself (calendar arithmetic, never caller
+  // memory): a 4-arg caller that forgot yesterday silently got no-exception
+  // spill-over — a false opening after a closure. Internal computation makes that
+  // shape inexpressible; the signature stays 4 args.
+  const yesterdayDate = shiftDateString(date, -1);
   // Yesterday's midnight-spanning legs FIRST: they cover 00:00–close today whatever
   // today holds (even when today has its own exception — the spill-over already
   // started last night and cannot be un-started). When yesterday carries ANY
   // exception row, weekly spill is SUPPRESSED — only yesterday's own overnight
   // exception hours spill (exceptions override weekly, on the spill leg too).
   const spill: OpeningInterval[] = [];
-  const yesterdayException =
-    yesterdayDate === null ? null : exceptionOn(yesterdayDate, snapshot.exceptions);
+  const yesterdayException = exceptionOn(yesterdayDate, snapshot.exceptions);
   if (yesterdayException === null) {
     for (const r of snapshot.rules) {
       if (r.weekday === yesterdayWeekday) {
@@ -223,15 +234,8 @@ export function isOpenAt(at: Date, snapshot: HoursSnapshot): boolean {
   const fields = zonedFields(at);
   const pad = (n: number): string => String(n).padStart(2, '0');
   const date = `${String(fields.year).padStart(4, '0')}-${pad(fields.month)}-${pad(fields.day)}`;
-  const yesterdayInstant = addCalendarDays(at, -1);
-  const yesterday = zonedFields(yesterdayInstant);
-  const day = hoursOnDate(
-    date,
-    fields.weekday,
-    snapshot,
-    yesterday.weekday,
-    zonedDateString(yesterdayInstant),
-  );
+  const yesterday = zonedFields(addCalendarDays(at, -1));
+  const day = hoursOnDate(date, fields.weekday, snapshot, yesterday.weekday);
   if (day.closed) return false;
   const now = minutesOf(fields);
   return day.intervals.some((i) => i.opensMin <= now && now < i.closesMin);
@@ -252,15 +256,8 @@ export function nextOpening(after: Date, snapshot: HoursSnapshot): Date | null {
     const pf = zonedFields(probe);
     const pad = (n: number): string => String(n).padStart(2, '0');
     const date = `${String(pf.year).padStart(4, '0')}-${pad(pf.month)}-${pad(pf.day)}`;
-    const yesterdayInstant = addCalendarDays(probe, -1);
-    const yesterday = zonedFields(yesterdayInstant);
-    const day = hoursOnDate(
-      date,
-      pf.weekday,
-      snapshot,
-      yesterday.weekday,
-      zonedDateString(yesterdayInstant),
-    );
+    const yesterday = zonedFields(addCalendarDays(probe, -1));
+    const day = hoursOnDate(date, pf.weekday, snapshot, yesterday.weekday);
     const startMin = d === 0 ? minutesOf(fields) : 0;
     for (const interval of day.intervals) {
       if (interval.closesMin > startMin) {
@@ -336,16 +333,9 @@ export function describeWeek(at: Date, snapshot: HoursSnapshot): string {
   for (let i = 0; i < 7; i++) {
     const day = addCalendarDays(monday, i);
     const date = zonedDateString(day);
-    const yesterdayInstant = addCalendarDays(day, -1);
-    const yesterday = zonedFields(yesterdayInstant);
+    const yesterday = zonedFields(addCalendarDays(day, -1));
     // Weekday for hoursOnDate is Sunday-first; Monday+i maps to (i+1)%7.
-    const hours = hoursOnDate(
-      date,
-      (i + 1) % 7,
-      snapshot,
-      yesterday.weekday,
-      zonedDateString(yesterdayInstant),
-    );
+    const hours = hoursOnDate(date, (i + 1) % 7, snapshot, yesterday.weekday);
     const fmt = (m: number): string =>
       `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
     const body =
