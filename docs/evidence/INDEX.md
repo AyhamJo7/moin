@@ -231,3 +231,4 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P09-001 | P09.01.04 | 2026-10-11 | `a31c7a810c62` | P09.01 knowledge model: items, immutable versions, approvals, 5 tests | [EV-P09-001-knowledge-model-lifecycle.md](P09/EV-P09-001-knowledge-model-lifecycle.md) |
 | EV-P09-002 | P09.02.04 | 2026-10-11 | `c74841218bb3` | P09.02 business profile: structured facts, validation, German templates, 4 tests | [EV-P09-002-profile-structured-facts.md](P09/EV-P09-002-profile-structured-facts.md) |
 | EV-P09-003 | P09.02.04 | 2026-10-11 | `f269b3cb504b` | ROUND-1 review BLOCK 4 findings: null-abstain, DB CHECKs, version-required, privacy | [EV-P09-003-round1-review-block.md](P09/EV-P09-003-round1-review-block.md) |
+| EV-P09-004 | P09.03.04 | 2026-10-11 | `90b23e964fce` | P09.03 opening-hours engine: rules, exceptions, queries, 6 tests | [EV-P09-004-opening-hours-engine.md](P09/EV-P09-004-opening-hours-engine.md) |
