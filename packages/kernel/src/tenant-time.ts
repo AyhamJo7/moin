@@ -1,13 +1,20 @@
 /**
  * Tenant time (P07.14.01): the clock plus the tenant time zone, DST-safe by construction.
  *
+ * Berlin-only contract: this is a German pilot product and every tenant runs on
+ * Europe/Berlin (`locations.time_zone` defaults to it). Every function below accepts ONLY
+ * that zone — anything else is a RangeError. Generic-zone support (30-minute zones like
+ * Australia/Lord_Howe, southern-hemisphere folds, non-EU gap sizes) is unowned scope creep:
+ * the gap/fold repair hardcodes EU semantics (60-minute gap, 60-minute fold step-back) and
+ * would silently misresolve elsewhere. A second zone arrives with its own tests, not by
+ * loosening this gate.
+ *
  * Storage is always UTC (`timestamptz`); business logic renders and computes in the tenant
- * zone (`locations.time_zone`, `Europe/Berlin` default). All arithmetic here happens on the
- * UTC instant — adding "24 hours" to an instant is always exactly 24 hours, even across a
- * DST transition — and only the RENDERING resolves the zone. That is the whole DST-safety
- * argument: a "day" in wall-clock terms is 23/24/25 hours long twice a year, but an instant
- * plus a duration never is. DST bugs come from adding days to wall-clock fields; this module
- * never does.
+ * zone. All arithmetic here happens on the UTC instant — adding "24 hours" to an instant
+ * is always exactly 24 hours, even across a DST transition — and only the RENDERING
+ * resolves the zone. That is the whole DST-safety argument: a "day" in wall-clock terms
+ * is 23/24/25 hours long twice a year, but an instant plus a duration never is. DST bugs
+ * come from adding days to wall-clock fields; this module never does.
  */
 
 export const DEFAULT_TIME_ZONE = 'Europe/Berlin';
@@ -19,12 +26,10 @@ export function checkTimeZone(zone: string): string {
   if (!TIME_ZONE_RE.test(zone) || zone.length > 64) {
     throw new RangeError('time zone must be an IANA area/location name');
   }
-  // The zone must actually exist: a well-formed but unknown name would fail late inside
-  // Intl with a confusing error. Resolving it here fails fast at the boundary.
-  try {
-    new Intl.DateTimeFormat('de-DE', { timeZone: zone });
-  } catch {
-    throw new RangeError('unknown time zone');
+  // Berlin-only contract (see module doc): the shape check above keeps the error path for
+  // malformed input, but any well-formed non-Berlin zone is unsupported, not unknown.
+  if (zone !== DEFAULT_TIME_ZONE) {
+    throw new RangeError('only Europe/Berlin is supported');
   }
   return zone;
 }
@@ -239,15 +244,14 @@ export function addCalendarDays(at: Date, days: number, timeZone = DEFAULT_TIME_
 }
 
 function offsetMinutesAt(noonIso: string, timeZone: string): number {
-  if (timeZone === 'Europe/Berlin') {
-    const noon = new Date(noonIso);
-    const first = BERLIN_OFFSETS[0]?.from ?? '';
-    if (
-      noon.getTime() >= Date.parse(first) &&
-      noon.getTime() < Date.parse('2030-11-01T00:00:00Z')
-    ) {
-      return berlinOffsetMinutesAt(noon);
-    }
+  // Berlin-only (checkTimeZone gates every entry point): the parameter is a formality that
+  // keeps the call honest if the gate ever loosens. Inside the pinned table the table
+  // wins; outside it the Intl round-trip — same zone, no separate zone support implied.
+  if (timeZone !== DEFAULT_TIME_ZONE) throw new RangeError('only Europe/Berlin is supported');
+  const noon = new Date(noonIso);
+  const first = BERLIN_OFFSETS[0]?.from ?? '';
+  if (noon.getTime() >= Date.parse(first) && noon.getTime() < Date.parse('2030-11-01T00:00:00Z')) {
+    return berlinOffsetMinutesAt(noon);
   }
-  return genericOffsetMinutesAt(new Date(noonIso), timeZone);
+  return genericOffsetMinutesAt(noon, DEFAULT_TIME_ZONE);
 }

@@ -1,10 +1,12 @@
 /**
  * German formatting (P07.14.03): dates, times, numbers — owner-visible strings, one spelling.
  *
- * "Samstag, 3. Oktober", "19:30 Uhr" — built on Intl `de-DE`, never hand-rolled month tables
- * (a hand-rolled table is how "Oktober" becomes "October" in exactly one code path). Times
- * always carry the "Uhr" suffix the voice scripts and owner app share; numbers use the
- * German decimal comma via the existing `Money.formatDe` precedent.
+ * Berlin-only like the tenant-time module it renders: the timeZone parameter exists so
+ * call sites name the zone explicitly, but only Europe/Berlin is accepted (checkTimeZone
+ * gates it). "Samstag, 3. Oktober", "19:30 Uhr" — built on Intl `de-DE`, never hand-rolled
+ * month tables (a hand-rolled table is how "Oktober" becomes "October" in exactly one code
+ * path). Times always carry the "Uhr" suffix the voice scripts and owner app share; numbers
+ * use the German decimal comma via the existing `Money.formatDe` precedent.
  */
 
 import { checkTimeZone, DEFAULT_TIME_ZONE, zonedFields } from './tenant-time.ts';

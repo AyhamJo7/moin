@@ -112,9 +112,14 @@ describe('tenant time', () => {
     expect(secondOccurrence.getTime() - shifted.getTime()).toBe(3_600_000);
   });
 
-  it('rejects bad zones, bad instants and absurd day counts', () => {
+  it('rejects bad zones, non-Berlin zones, bad instants and absurd day counts', () => {
     expect(() => zonedFields(new Date('2026-01-01T00:00:00Z'), 'Mars/Olympus')).toThrow(RangeError);
     expect(() => zonedFields(new Date('2026-01-01T00:00:00Z'), '../etc')).toThrow(RangeError);
+    // Berlin-only contract: well-formed but unsupported zones are rejected, not rendered.
+    expect(() => zonedFields(new Date('2026-01-01T00:00:00Z'), 'America/New_York')).toThrow(
+      RangeError,
+    );
+    expect(() => addCalendarDays(new Date(), 1, 'Australia/Lord_Howe')).toThrow(RangeError);
     expect(() => berlinOffsetMinutesAt(new Date('invalid'))).toThrow(RangeError);
     expect(() => addCalendarDays(new Date(), 1.5)).toThrow(RangeError);
     expect(() => addCalendarDays(new Date(), 4000)).toThrow(RangeError);
