@@ -228,3 +228,4 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P07-016 | P07.04.04 | 2026-10-11 | `31c801a0f6d6` | ROUND-3 residual: version+updated_at bump on every merge reparent | [EV-P07-016-round3-version-bump.md](P07/EV-P07-016-round3-version-bump.md) |
 | EV-P07-017 | P07.12.03 | 2026-10-11 | `42de06ca3147` | P07.12 search: german FTS + trgm indexes, RLS search API, 5 tests | [EV-P07-017-search-fts-trgm.md](P07/EV-P07-017-search-fts-trgm.md) |
 | EV-P07-018 | P07.12.03 | 2026-10-11 | `00420b73dcfb` | ROUND-1 review BLOCK 4 findings: numeric cursor, phone fold, index alignment | [EV-P07-018-round1-review-block.md](P07/EV-P07-018-round1-review-block.md) |
+| EV-P09-001 | P09.01.04 | 2026-10-11 | `a31c7a810c62` | P09.01 knowledge model: items, immutable versions, approvals, 5 tests | [EV-P09-001-knowledge-model-lifecycle.md](P09/EV-P09-001-knowledge-model-lifecycle.md) |
