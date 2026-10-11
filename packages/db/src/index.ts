@@ -169,3 +169,5 @@ export {
   unmerge,
 } from './merge.ts';
 export type { CandidateSignal, DuplicateCandidate, MergeRecord, UnmergeRecord } from './merge.ts';
+export { searchTenant } from './search.ts';
+export type { SearchHit, SearchPage, SearchScope } from './search.ts';
