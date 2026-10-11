@@ -302,6 +302,16 @@ describe('profile', () => {
         ),
       ),
     ).rejects.toMatchObject({ code: '23514' });
+    // NULL element inside the PLZ array: three-valued logic would pass NOT EXISTS
+    // without the explicit NULL arm — the renderer would emit a literal "null".
+    await expect(
+      withTenant(app, ORG_A, (client) =>
+        client.query(
+          `insert into business_profile (organisation_id, id, category, area_postcodes)
+           values (app.current_org(), gen_random_uuid(), 'service_area', array['20354', NULL])`,
+        ),
+      ),
+    ).rejects.toMatchObject({ code: '23514' });
   });
 
   evidenceTest('tenants isolated per category', async () => {

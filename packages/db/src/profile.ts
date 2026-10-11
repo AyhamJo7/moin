@@ -271,7 +271,14 @@ function buildColumns(input: ProfileFacts): BuiltColumns {
       return { columns: 'services', casts: ['text[]'], values: [list] };
     }
     case 'service_area': {
-      const postcodes = input.facts.postcodes?.map((p) => checkPlz(p)) ?? null;
+      // checkPlz throws on non-strings (RangeError via trim crash → guarded below),
+      // so a null element dies here before it reaches the array — defense in depth
+      // with the DB helper's NULL arm (direct SQL cannot use this path).
+      const postcodes =
+        input.facts.postcodes?.map((p) => {
+          if (typeof p !== 'string') throw new RangeError('postcode must be a string');
+          return checkPlz(p);
+        }) ?? null;
       const radius = input.facts.radiusKm ?? null;
       const center = input.facts.centerPlz === undefined ? null : checkPlz(input.facts.centerPlz);
       const hasList = postcodes !== null && postcodes.length > 0;

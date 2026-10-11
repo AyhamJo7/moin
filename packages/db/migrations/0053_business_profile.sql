@@ -3,10 +3,14 @@
 -- earlier in this same migration, so it is new and empty.
 --
 -- Element-shape helper (CHECK constraints cannot subquery): immutable, pinned path.
+-- NULL elements rejected explicitly: SQL three-valued logic makes `NULL !~ …`
+-- evaluate to NULL (not true), so NOT EXISTS finds no invalid row and ARRAY['20354',
+-- NULL] would pass without the `OR p IS NULL` arm — then the renderer would emit a
+-- literal "null" postcode. NULL array (no list) passes: the XOR CHECK owns presence.
 CREATE FUNCTION app.all_plz_ok(plzs text[]) RETURNS boolean
   LANGUAGE sql IMMUTABLE SET search_path = pg_catalog
 AS $$ SELECT NOT EXISTS (SELECT 1 FROM unnest(plzs) p
-                         WHERE p !~ '^[0-9]{5}$' OR p = '00000' OR p LIKE '00%') $$;
+                         WHERE p IS NULL OR p !~ '^[0-9]{5}$' OR p = '00000' OR p LIKE '00%') $$;
 
 REVOKE ALL ON FUNCTION app.all_plz_ok(text[]) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app.all_plz_ok(text[]) TO moin_app, moin_migrator;
