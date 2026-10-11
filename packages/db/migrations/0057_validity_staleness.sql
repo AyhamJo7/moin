@@ -53,21 +53,16 @@ CREATE TABLE knowledge_reverify_queue (
   id              uuid NOT NULL PRIMARY KEY,
   item_id         uuid NOT NULL,
   due_at          timestamptz NOT NULL,
-  -- Bare uuid, deliberately NOT a database FK (ROUND-1 P2-2): tasks carries
-  -- UNIQUE (organisation_id, id) but its PRIMARY KEY is the bare id, so a
-  -- composite FK is inexpressible and a bare-uuid FK would admit cross-tenant
-  -- task ids. Tenant isolation holds because every write and read runs inside
-  -- withTenant under FORCE RLS — the sweep writes task_id from a task row it
-  -- just created in the SAME tenant transaction, and the cross-tenant test
-  -- below pins that no foreign row is ever visible. See also the
-  -- application-level assertion in staleness.integration.test.ts
-  -- ('queue task ids resolve inside the tenant').
+  -- Tenant-scoped FK (ROUND-2 P2-1): tasks carries UNIQUE (organisation_id,
+  -- id) since 0025, so the composite FK is expressible — a cross-tenant task
+  -- uuid now violates the constraint instead of linking silently.
   task_id         uuid,
   created_at      timestamptz NOT NULL DEFAULT now(),
   UNIQUE (organisation_id, id),
   -- One queue row per item: re-running the sweep upserts, never duplicates.
   UNIQUE (organisation_id, item_id),
-  FOREIGN KEY (organisation_id, item_id) REFERENCES knowledge_items (organisation_id, id) ON DELETE CASCADE
+  FOREIGN KEY (organisation_id, item_id) REFERENCES knowledge_items (organisation_id, id) ON DELETE CASCADE,
+  FOREIGN KEY (organisation_id, task_id) REFERENCES tasks (organisation_id, id) ON DELETE SET NULL
 );
 
 CREATE INDEX knowledge_reverify_queue_due_idx
@@ -86,5 +81,7 @@ COMMENT ON TABLE knowledge_reverify_queue IS 'Re-verification queue (P09.06.02):
 -- Reviewed audit argument keys (P06.10.03, P06.10.07, INV-12). Markers only — never bodies.
 INSERT INTO audit_argument_allowlist(operation, argument_key, value_kind, reason) VALUES
   ('knowledge.reverify_task', 'version_no', 'count', 're-verification task version marker; no ids or content'),
-  ('knowledge.suspend', 'version_no', 'count', 'suspension marker; no ids or content')
+  ('knowledge.suspend', 'version_no', 'count', 'suspension marker; no ids or content'),
+  ('faq.reverify_task', 'version', 'count', 'card re-verification task marker; no ids or content'),
+  ('faq.suspend', 'version', 'count', 'card suspension marker; no ids or content')
 ON CONFLICT (operation, argument_key) DO NOTHING;

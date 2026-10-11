@@ -145,6 +145,18 @@ describe('staleness', () => {
       ),
     );
     expect(queued.rows[0]?.n).toBe('1');
+    // Overdue again → the sweep re-queues and mints a FRESH task: the new
+    // task id differs from the first cycle's and its status is open (ROUND-2
+    // P1-1: a per-item key would first-write-win back the DONE task). Capture
+    // the first task id BEFORE re-approving (approve deletes the queue row).
+    const firstTask = await withTenant(app, ORG_A, (client) =>
+      client.query<{ task_id: string }>(
+        `select task_id::text from knowledge_reverify_queue where item_id = $1`,
+        [itemId],
+      ),
+    );
+    const firstTaskId = firstTask.rows[0]?.task_id ?? '';
+    expect(firstTaskId).toBeTruthy();
     // Re-approve: queue row goes away with the suspension.
     const v2 = await withTenant(app, ORG_A, (client) =>
       editKnowledgeItem(client, itemId, {
@@ -166,17 +178,24 @@ describe('staleness', () => {
       ),
     );
     expect(cleared.rows[0]?.n).toBe('0');
-    // Overdue again → the sweep re-queues and re-tasks.
+    await withTenant(app, ORG_A, (client) =>
+      client.query(`update tasks set status = 'done' where id = $1::uuid`, [firstTaskId]),
+    );
     const later = new Date(Date.now() + 4 * 86_400_000);
     const second = await withTenant(app, ORG_A, (client) => sweepReverify(client, later));
     expect(second.tasksCreated).toBeGreaterThanOrEqual(1);
     const requeued = await withTenant(app, ORG_A, (client) =>
-      client.query<{ n: string }>(
-        `select count(*)::text as n from knowledge_reverify_queue where item_id = $1 and task_id is not null`,
+      client.query<{ task_id: string; status: string }>(
+        `select q.task_id::text, t.status::text from knowledge_reverify_queue q
+         join tasks t on t.organisation_id = q.organisation_id and t.id = q.task_id
+         where q.item_id = $1`,
         [itemId],
       ),
     );
-    expect(requeued.rows[0]?.n).toBe('1');
+    const secondTaskId = requeued.rows[0]?.task_id ?? '';
+    expect(secondTaskId).toBeTruthy();
+    expect(secondTaskId).not.toBe(firstTaskId);
+    expect(requeued.rows[0]?.status).toBe('open');
   });
 
   evidenceTest('overdue public item keeps serving flagged stale', async () => {
@@ -366,33 +385,89 @@ describe('staleness', () => {
     expect(opted.rows[0]?.after).toBeNull();
   });
 
-  evidenceTest('queue task ids resolve inside the tenant', async () => {
-    // ROUND-1 P2-2: task_id is a bare uuid (no composite FK possible — tasks
-    // PKs on bare id). Application-level pin: every queued task_id resolves
-    // to a task row visible in THIS tenant, and B sees none of it.
+  evidenceTest('faq sweep: overdue cards tasked; sensitive deactivates', async () => {
+    // ROUND-2 P2-2: cards were never swept (deadline + marker only). Now the
+    // sweep covers them: public/internal get a task and stay servable;
+    // sensitive deactivates (mirrors item suspension) and stops serving.
+    await withTenant(app, ORG_A, (client) =>
+      createFaqCard(client, {
+        canonical: 'Gibt es heute Kuchen?',
+        spoken: 'Ja, Apfelkuchen solange Vorrat reicht.',
+        reverifyAfterDays: 1,
+      }),
+    );
+    await withTenant(app, ORG_A, (client) =>
+      createFaqCard(client, {
+        canonical: 'Ist das Gericht glutenfrei?',
+        spoken: 'Nein, es enthaelt Weizenmehl.',
+        sensitivity: 'sensitive',
+        reverifyAfterDays: 1,
+      }),
+    );
+    await withTenant(app, ORG_A, (client) =>
+      client.query(
+        `update faq_cards set updated_at = now() - interval '2 days'
+         where canonical in ('Gibt es heute Kuchen?', 'Ist das Gericht glutenfrei?')`,
+      ),
+    );
+    const late = new Date(Date.now() + 2 * 86_400_000);
+    const sweep = await withTenant(app, ORG_A, (client) => sweepReverify(client, late));
+    expect(sweep.tasksCreated).toBeGreaterThanOrEqual(2);
+    // Public card: still served, flagged stale, tasked.
+    const served = await withTenant(app, ORG_A, (client) =>
+      findAnswer(client, 'Gibt es heute Kuchen?'),
+    );
+    expect(served?.stale).toBe(true);
+    // Sensitive card: deactivated, no longer served.
+    const stopped = await withTenant(app, ORG_A, (client) =>
+      findAnswer(client, 'Ist das Gericht glutenfrei?'),
+    );
+    expect(stopped).toBeNull();
+    const flag = await withTenant(app, ORG_A, (client) =>
+      client.query<{ active: boolean }>(
+        `select active from faq_cards where canonical = 'Ist das Gericht glutenfrei?'`,
+      ),
+    );
+    expect(flag.rows[0]?.active).toBe(false);
+    // Repeat sweep: card tasks are idempotent per card (no duplicates) —
+    // the second run creates nothing new for already-handled cards.
+    const before = await withTenant(app, ORG_A, (client) =>
+      client.query<{ n: string }>(
+        `select count(*)::text as n from tasks where title = 'Wissen prüfen'
+         and idempotency_key like 'reverify-card:%'`,
+      ),
+    );
+    await withTenant(app, ORG_A, (client) => sweepReverify(client, late));
+    const after = await withTenant(app, ORG_A, (client) =>
+      client.query<{ n: string }>(
+        `select count(*)::text as n from tasks where title = 'Wissen prüfen'
+         and idempotency_key like 'reverify-card:%'`,
+      ),
+    );
+    expect(after.rows[0]?.n).toBe(before.rows[0]?.n);
+  });
+
+  evidenceTest('queue task ids are tenant-scoped by FK', async () => {
+    // ROUND-2 P2-1: FOREIGN KEY (organisation_id, task_id) → tasks. A
+    // cross-tenant task uuid now violates the constraint instead of linking.
     const { itemId } = await makeLive({ reverifyAfterDays: 1 });
     const late = new Date(Date.now() + 2 * 86_400_000);
     await withTenant(app, ORG_A, (client) => sweepReverify(client, late));
-    await withTenant(app, ORG_A, async (client) => {
-      const queued = await client.query<{ task_id: string }>(
-        `select task_id::text from knowledge_reverify_queue where item_id = $1`,
-        [itemId],
-      );
-      const taskId = queued.rows[0]?.task_id;
-      expect(taskId).toBeTruthy();
-      const task = await client.query<{ n: string }>(
-        `select count(*)::text as n from tasks where id = $1::uuid`,
-        [taskId],
-      );
-      expect(task.rows[0]?.n).toBe('1');
-    });
-    // Cross-tenant: the task id is meaningless in B (RLS hides it).
-    const foreign = await withTenant(app, ORG_B, async (client) => {
-      const queued = await client.query<{ task_id: string }>(
-        `select task_id::text from knowledge_reverify_queue`,
-      );
-      return queued.rows;
-    });
-    expect(foreign).toHaveLength(0);
+    // A task from ORG_B cannot be linked into A's queue row.
+    const foreignTask = randomUUID();
+    await withTenant(app, ORG_B, (client) =>
+      client.query(
+        `insert into tasks (organisation_id, id, title) values (app.current_org(), $1, 'Fremd')`,
+        [foreignTask],
+      ),
+    );
+    await expect(
+      withTenant(app, ORG_A, (client) =>
+        client.query(`update knowledge_reverify_queue set task_id = $1 where item_id = $2`, [
+          foreignTask,
+          itemId,
+        ]),
+      ),
+    ).rejects.toMatchObject({ code: '23503' });
   });
 });

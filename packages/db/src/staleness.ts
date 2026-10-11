@@ -116,10 +116,14 @@ export interface SweepResult {
 /**
  * Reverify sweep: for every approved, non-suspended item whose live version is
  * neither expired nor (yet) handled — suspend it when restricted-overdue,
- * queue it once, and create at most one open task per item.
+ * queue it once, and create at most one open task per item. Overdue faq cards
+ * are swept in the same run (task-only for public/internal; overdue sensitive
+ * cards deactivate via active=false, mirroring item suspension — re-activated
+ * by the next card update, which bumps updated_at and restarts the deadline).
  *
  * Idempotent per item: the queue UNIQUE (org, item) collapses repeats, and the
- * task idempotency key `reverify:<itemId>` returns the existing row on retry.
+ * task idempotency key `reverify:<item>:<version>` mints one fresh task per
+ * approved version per cycle (never recycles a DONE task from a prior cycle).
  */
 export async function sweepReverify(
   client: TenantClient,
@@ -154,9 +158,17 @@ export async function sweepReverify(
     checked += 1;
     const restricted = row.sensitivity === 'restricted';
     if (restricted) {
-      await client.query(`update knowledge_items set suspended = true where id = $1`, [
-        row.item_id,
-      ]);
+      // Version-guarded (ROUND-2 P1-2): an approval committing between the
+      // select and this update moves the live pointer — suspending by item id
+      // alone would freeze the NEWLY approved version. Zero rows affected
+      // means the approval won the race: skip, the new version has a fresh
+      // deadline and the next sweep picks it up if IT goes overdue.
+      const guarded = await client.query(
+        `update knowledge_items set suspended = true
+         where id = $1 and live_version_id = $2`,
+        [row.item_id, row.version_id],
+      );
+      if ((guarded.rowCount ?? 0) === 0) continue;
       suspended += 1;
       await appendAuditEvent(client, {
         source: 'api',
@@ -178,11 +190,16 @@ export async function sweepReverify(
       [row.item_id],
     );
     if (queued.rows[0]?.task_id != null) continue;
+    // Per-CYCLE key (ROUND-2 P1-1): reverify:<item>:<liveVersion>. A bare
+    // per-item key would first-write-win back the DONE task from the previous
+    // cycle — the queue row is deleted on approve, so the next sweep must
+    // mint a FRESH task for the newly approved version, never recycle the
+    // completed one.
     const task = await createTask(client, {
       title: REVERIFY_TASK_TITLE,
       type: 'review',
       priority: restricted ? 'high' : 'normal',
-      idempotencyKey: `reverify:${row.item_id}`,
+      idempotencyKey: `reverify:${row.item_id}:${row.version_id}`,
     });
     await client.query(`update knowledge_reverify_queue set task_id = $1 where item_id = $2`, [
       task.id,
@@ -195,6 +212,54 @@ export async function sweepReverify(
       targetKind: 'knowledge_item',
       targetId: row.item_id,
       argsSanitized: { version_no: row.version_no },
+      result: 'succeeded',
+    });
+  }
+  // FAQ cards (ROUND-2 P2-2): the same predicate over updated_at. Overdue
+  // sensitive cards deactivate (mirrors item suspension — already excluded
+  // from serving; the flag keeps them out of future sweeps until an update
+  // re-activates them). Public/internal get a task and stay servable flagged.
+  const cards = await client.query<{ id: string; sensitivity: string }>(
+    `select id::text, sensitivity from faq_cards
+     where organisation_id = app.current_org() and active = true
+       and coalesce(valid_until < $1::date, false) = false
+       and coalesce(updated_at + reverify_after <= $2::timestamptz, false) = true`,
+    [day, instant],
+  );
+  for (const card of cards.rows) {
+    checked += 1;
+    const sensitive = card.sensitivity === 'sensitive';
+    if (sensitive) {
+      await client.query(`update faq_cards set active = false where id = $1`, [card.id]);
+      await appendAuditEvent(client, {
+        source: 'api',
+        operation: 'faq.suspend',
+        targetKind: 'faq_card',
+        targetId: card.id,
+        argsSanitized: { version: 1 },
+        result: 'succeeded',
+      });
+    }
+    const task = await createTask(client, {
+      title: REVERIFY_TASK_TITLE,
+      type: 'review',
+      priority: sensitive ? 'high' : 'normal',
+      idempotencyKey: `reverify-card:${card.id}`,
+    });
+    // Card tasks are per-card idempotent (same key retries the same row):
+    // assert the row exists so a silent no-op cannot pass unnoticed.
+    const created = await client.query<{ n: string }>(
+      `select count(*)::text as n from tasks where id = $1`,
+      [task.id],
+    );
+    if (created.rows[0]?.n !== '1') throw new Error('card task create returned no row');
+    tasksCreated += 1;
+    await appendAuditEvent(client, {
+      source: 'api',
+      operation: 'faq.reverify_task',
+      targetKind: 'faq_card',
+      targetId: card.id,
+      argsSanitized: { version: 1 },
       result: 'succeeded',
     });
   }
