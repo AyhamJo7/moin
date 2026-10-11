@@ -24,7 +24,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { appendAuditEvent } from './audit.ts';
-import type { TenantClient } from './tenant.ts';
+import { currentTenant, type TenantClient } from './tenant.ts';
 
 export class VersionConflictError extends Error {
   public override readonly name = 'VersionConflictError';
@@ -289,21 +289,31 @@ export async function editKnowledgeItem(
 
 /**
  * Approve a draft version through the DEFINER door: calls
- * `app.approve_knowledge_version` (item lock + latest-draft check + ledger + flip +
- * pointer, atomically, as owner), then audits (markers only) in the same txn.
- * Pre-checks run first so failures 409 (not raw DEFINER exceptions): retired items,
- * non-draft or stale versions.
+ * `app.approve_knowledge_version(item, version, actor)` — the actor comes from
+ * the TenantClient context (`currentTenant().actorId`, SET by withTenant from
+ * the session, INV-02: never caller input above the service). Item lock +
+ * latest-draft check + role gate + hash + ledger + flip + pointer, atomically,
+ * as owner — then audits (markers only) in the same txn. Pre-checks run first so
+ * failures 409/403 (not raw DEFINER exceptions): retired items, non-draft or stale
+ * versions. No approvedBy param (P09.05 identity fix): nominating another user's
+ * UUID is inexpressible — the txn actor IS the approver, bound here.
  */
 export async function approveKnowledgeVersion(
   client: TenantClient,
-  input: { itemId: string; versionId: string; approvedBy: string },
+  input: { itemId: string; versionId: string },
 ): Promise<KnowledgeItem> {
   if (!UUID_RE.test(input.versionId)) throw new RangeError('knowledge version id must be a uuid');
-  if (!UUID_RE.test(input.approvedBy)) throw new RangeError('approver must be a user id');
+  // Actor bound HERE from session context (INV-02) — the fn's p_actor arg
+  // carries this value, never caller input. Direct SQL callers bypass this
+  // binding (privileged-role surface, same as every DEFINER — see 0056 header).
+  const actor = currentTenant()?.actorId ?? null;
+  if (actor === null || !UUID_RE.test(actor)) {
+    throw new VersionConflictError('knowledge approval requires an acting user');
+  }
   const row = await lockItem(client, input.itemId);
   if (row.state === 'retired') throw new VersionConflictError('knowledge item is retired');
-  // Pre-checks BEFORE the DEFINER call (the fn raises invalid_parameter_value on
-  // the same conditions — the service maps everything to 409 so callers never see
+  // Pre-checks BEFORE the DEFINER call (the fn raises 22023 on the same
+  // conditions — the service maps everything to 409 so callers never see
   // raw DB exceptions): the target must be a draft of THIS item AND the latest
   // version_no (latest check + item lock in the same txn: a concurrent newer draft
   // lands first and this 409s).
@@ -319,10 +329,10 @@ export async function approveKnowledgeVersion(
   }
   // The single publish door: ledger + flip + pointer, atomically, as owner. Direct
   // SQL cannot publish (no UPDATE on versions, no INSERT on approvals — 42501).
-  await client.query(`select app.approve_knowledge_version($1, $2, $3)`, [
+  await client.query(`select app.approve_knowledge_version($1, $2, $3::uuid)`, [
     input.itemId,
     input.versionId,
-    input.approvedBy,
+    actor,
   ]);
   const item = await client.query<ItemRow>(
     `select id, state, live_version_id::text, version::text from knowledge_items where id = $1`,

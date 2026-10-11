@@ -223,3 +223,5 @@ export {
   updateFaqCard,
 } from './faq.ts';
 export type { FaqAnswer, FaqCard, FaqInput, FaqSensitivity } from './faq.ts';
+export { approveFaqCard, approveKnowledge, bulkApprove, ForbiddenError } from './approval.ts';
+export type { ApprovalResult, BulkApprovalResult } from './approval.ts';
