@@ -2765,10 +2765,10 @@ Kernel value objects · contacts module · conversations module (calls, messages
   - [ ] P07.13.01 `version` columns and a 409 problem type with the current representation — EV-P07-011
   - [ ] P07.13.02 Concurrency test suite (parallel workers on real PG): task edits, lead transitions, finaliser vs reconciler — EV-P07-011
 - [ ] **P07.14 Time, locale and holidays** `[G:PILOT]`
-  - [ ] P07.14.01 Clock abstraction; tenant time zone; DST-safe arithmetic
-  - [ ] P07.14.02 Public holidays dataset per Bundesland (Hamburg first), yearly update job; Betriebsferien entries per location
-  - [ ] P07.14.03 German formatting (dates "Samstag, 3. Oktober", times "19:30 Uhr", numbers)
-  - [ ] P07.14.04 Tests across DST transitions (last Sunday of March/October) and holidays
+  - [ ] P07.14.01 Clock abstraction; tenant time zone; DST-safe arithmetic — EV-P07-012
+  - [ ] P07.14.02 Public holidays dataset per Bundesland (Hamburg first), yearly update job; Betriebsferien entries per location — EV-P07-012
+  - [ ] P07.14.03 German formatting (dates "Samstag, 3. Oktober", times "19:30 Uhr", numbers) — EV-P07-012
+  - [ ] P07.14.04 Tests across DST transitions (last Sunday of March/October) and holidays — EV-P07-012
 
 ### Security
 All tables RLS-protected; composite FKs; optimistic locking prevents lost updates; audit on every mutation; identity resolution cannot link across tenants or through tenant-owned numbers.

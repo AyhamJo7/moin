@@ -297,6 +297,12 @@ describe('provisioning authority and consistency', () => {
     await expect(provision({ timeZone: 'Not/A_Time_Zone' })).rejects.toThrow(
       /invalid provisioning request/u,
     );
+    // Berlin-only pilot (P07.14): a well-formed but non-Berlin zone passes the function's
+    // pg_timezone_names check but the table CHECK refuses it closed (23514) — defence in
+    // depth until the provision function v2 tightens its own message (P05).
+    await expect(provision({ timeZone: 'America/New_York' })).rejects.toMatchObject({
+      code: '23514',
+    });
     expect(await count('organisations')).toBe(1);
   });
 
