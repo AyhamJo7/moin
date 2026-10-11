@@ -161,3 +161,11 @@ export {
   VERSION_CONFLICT_STATUS,
   VERSION_CONFLICT_TITLE,
 } from './version-conflict.ts';
+export {
+  applyMerge,
+  suggestAiSimilarity,
+  suggestEmailLocal,
+  suggestNamePostal,
+  unmerge,
+} from './merge.ts';
+export type { CandidateSignal, DuplicateCandidate, MergeRecord, UnmergeRecord } from './merge.ts';

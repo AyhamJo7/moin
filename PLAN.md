@@ -2722,10 +2722,10 @@ Kernel value objects · contacts module · conversations module (calls, messages
   - [ ] P07.03.03 Resolution result records the matching rule (shown to the owner as "erkannt über Rufnummer")
   - [ ] P07.03.04 Tests: substituted-caller-ID scenario (FS-26) never merges different callers; CLIR → no match
 - [ ] **P07.04 Duplicate candidates and human merge/unmerge** `[G:SELL]`
-  - [ ] P07.04.01 Candidate generation: deterministic signals (same normalised name + PLZ, same email local part) + optional AI similarity as **suggestion only**
-  - [ ] P07.04.02 Merge service: locks both contacts in UUID order, moves methods and links, records `contact_merges` with moved IDs, audit event
-  - [ ] P07.04.03 Unmerge within 30 days using the merge record
-  - [ ] P07.04.04 Tests: concurrent merge + new interaction; unmerge restores links; RLS
+  - [ ] P07.04.01 Candidate generation: deterministic signals (same normalised name + PLZ, same email local part) + optional AI similarity as **suggestion only** — EV-P07-013
+  - [ ] P07.04.02 Merge service: locks both contacts in UUID order, moves methods and links, records `contact_merges` with moved IDs, audit event — EV-P07-013
+  - [ ] P07.04.03 Unmerge within 30 days using the merge record — EV-P07-013
+  - [ ] P07.04.04 Tests: concurrent merge + new interaction; unmerge restores links; RLS — EV-P07-013
 - [ ] **P07.05 Conversations, interactions and outcomes** `[G:PILOT]`
   - [ ] P07.05.01 `conversations`, `calls`, `call_events`, `interaction_outcomes`; `messages` table stub (P27 fills it)
   - [ ] P07.05.02 Call row created idempotently by `provider_call_sid`; monotonic status updates
