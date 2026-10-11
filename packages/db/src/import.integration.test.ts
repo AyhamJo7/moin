@@ -205,6 +205,9 @@ describe('import-ssrf', () => {
     // an oversize body aborts with too-large WITHOUT ever holding it, and a
     // small body streams through intact. No stubs on this path — the socket,
     // the Host header, and the byte counting are all real.
+    // ROUND-4 P1: the server flushes the FULL body in one write then ends
+    // immediately; the reader drains only AFTER end. finish(null) must
+    // preserve queued chunks (clear-on-success truncated this case).
     const { createServer } = await import('node:http');
     const big = 'x'.repeat(4000);
     const seenHosts: (string | undefined)[] = [];
@@ -214,12 +217,8 @@ describe('import-ssrf', () => {
       // at the server barrier instead of failing the assertion).
       seenHosts.push(req.headers.host);
       res.writeHead(200, { 'content-type': 'text/html' });
-      // Chunked overrun: 4 × 1000 bytes against the tiny cap below.
-      res.write(big.slice(0, 1000));
-      res.write(big.slice(1000, 2000));
-      res.write(big.slice(2000, 3000));
-      res.write(big.slice(3000));
-      res.end();
+      // Single-flush full body + immediate end (ROUND-4 P1 truncation case).
+      res.end(big);
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const port = (server.address() as { port: number }).port;

@@ -382,13 +382,19 @@ async function fetchPinned(
           inbound.pause?.();
         };
         const finish = (error: unknown): void => {
-          if (error !== null) failed = error;
+          // ROUND-4 P1: on SUCCESS the queued chunks are the body — preserve
+          // them for the reader to drain (clearing here truncated any body
+          // that fully arrived before the first read). Clear ONLY on the
+          // failure path (no partial overrun bytes leak to the reader).
+          if (error !== null) {
+            failed = error;
+            queue.splice(0);
+          }
           ended = true;
           for (const waiter of waiting.splice(0)) {
             if (failed !== null) waiter.reject(failed);
             else waiter.resolve({ done: true, value: undefined });
           }
-          queue.splice(0);
         };
         response.on('data', (chunk: Uint8Array) => {
           pump(chunk);
