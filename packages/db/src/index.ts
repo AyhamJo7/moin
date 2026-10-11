@@ -238,6 +238,8 @@ export {
   resolveConflict,
 } from './conflicts.ts';
 export type { ConflictDetector, ConflictSubjectKind, ConflictSweepResult } from './conflicts.ts';
+export { listCardCatalogue, findCandidates, readApprovedVersions } from './retrieval.ts';
+export type { ApprovedVersion, CatalogueCard, RankedCandidate } from './retrieval.ts';
 export {
   FetchRefusal,
   belongsToDomain,

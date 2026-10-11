@@ -1,0 +1,26 @@
+[
+  {
+    "id": "M1-view-conflict-exclusion-removed",
+    "invariant": "Approved-only retrieval: conflicted items are never retrievable (P09.09.01, P09.09.05)",
+    "expected": "A conflicted item would appear in knowledge_approved_current, so readApprovedVersions returns it.",
+    "file": "packages/db/migrations/0060_approved_retrieval_view.sql",
+    "find": "  AND NOT i.suspended\n  AND i.conflict_state = 'clear'",
+    "replace": "  AND NOT i.suspended\n  AND (i.conflict_state = 'clear' OR true)",
+    "killingTest": {
+      "file": "packages/db/src/retrieval.integration.test.ts",
+      "fullName": "retrieval-exclusion > expired, suspended and conflicted never retrievable"
+    }
+  },
+  {
+    "id": "M2-catalogue-active-exclusion-removed",
+    "invariant": "Closed-set catalogue: deactivated cards leave the catalogue (P09.09.02, P09.09.05)",
+    "expected": "A deactivated card would remain in listCardCatalogue, so the NLU could select it.",
+    "file": "packages/db/src/retrieval.ts",
+    "find": "     where organisation_id = app.current_org() and active = true\n       and coalesce(valid_until < current_date, false) = false\n       and not (sensitivity = 'sensitive'\n         and coalesce(updated_at + reverify_after <= now(), false) = true)\n       and ($1::uuid is null and location_id is null",
+    "replace": "     where organisation_id = app.current_org()\n       and coalesce(valid_until < current_date, false) = false\n       and not (sensitivity = 'sensitive'\n         and coalesce(updated_at + reverify_after <= now(), false) = true)\n       and ($1::uuid is null and location_id is null",
+    "killingTest": {
+      "file": "packages/db/src/retrieval.integration.test.ts",
+      "fullName": "retrieval-exclusion > deactivated cards leave catalogue, candidates and answers"
+    }
+  }
+]
