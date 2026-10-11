@@ -171,3 +171,18 @@ export {
 export type { CandidateSignal, DuplicateCandidate, MergeRecord, UnmergeRecord } from './merge.ts';
 export { searchTenant } from './search.ts';
 export type { SearchHit, SearchPage, SearchScope } from './search.ts';
+export {
+  approveKnowledgeVersion,
+  createKnowledgeItem,
+  editKnowledgeItem,
+  getLiveVersion,
+  retireKnowledgeItem,
+} from './knowledge.ts';
+export type {
+  KnowledgeItem,
+  KnowledgeMetadata,
+  KnowledgeSensitivity,
+  KnowledgeSource,
+  KnowledgeState,
+  KnowledgeVersion,
+} from './knowledge.ts';
