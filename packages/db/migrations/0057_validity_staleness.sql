@@ -51,7 +51,11 @@ COMMENT ON COLUMN knowledge_items.suspended IS 'Overdue-sensitive escalation fla
 CREATE TABLE knowledge_reverify_queue (
   organisation_id uuid NOT NULL REFERENCES organisations (id) ON DELETE CASCADE,
   id              uuid NOT NULL PRIMARY KEY,
-  item_id         uuid NOT NULL,
+  -- Exactly one subject per row: a knowledge item OR a faq card (ROUND-3 P1-2:
+  -- cards need handled-state too, or the sweep re-tasks them every run).
+  -- Nullable legs with an exactly-one CHECK (the locations pattern, 0052).
+  item_id         uuid,
+  card_id         uuid,
   due_at          timestamptz NOT NULL,
   -- Tenant-scoped FK (ROUND-2 P2-1): tasks carries UNIQUE (organisation_id,
   -- id) since 0025, so the composite FK is expressible — a cross-tenant task
@@ -59,10 +63,13 @@ CREATE TABLE knowledge_reverify_queue (
   task_id         uuid,
   created_at      timestamptz NOT NULL DEFAULT now(),
   UNIQUE (organisation_id, id),
-  -- One queue row per item: re-running the sweep upserts, never duplicates.
+  -- One queue row per subject: re-running the sweep upserts, never duplicates.
   UNIQUE (organisation_id, item_id),
+  UNIQUE (organisation_id, card_id),
   FOREIGN KEY (organisation_id, item_id) REFERENCES knowledge_items (organisation_id, id) ON DELETE CASCADE,
-  FOREIGN KEY (organisation_id, task_id) REFERENCES tasks (organisation_id, id) ON DELETE SET NULL
+  FOREIGN KEY (organisation_id, card_id) REFERENCES faq_cards (organisation_id, id) ON DELETE CASCADE,
+  FOREIGN KEY (organisation_id, task_id) REFERENCES tasks (organisation_id, id) ON DELETE SET NULL (task_id),
+  CHECK (num_nonnulls(item_id, card_id) = 1)
 );
 
 CREATE INDEX knowledge_reverify_queue_due_idx

@@ -216,7 +216,12 @@ export async function createFaqCard(client: TenantClient, input: FaqInput): Prom
   return toCard(row);
 }
 
-/** Update a card (linted; expectedVersion required — no silent unconditional path). */
+/**
+ * Update a card (linted; expectedVersion required — no silent unconditional path).
+ * Any owner edit re-arms the card (active=true, the re-approval equivalent):
+ * a sweep-deactivated card serves again once its content is reviewed, and the
+ * updated_at bump restarts the reverify deadline.
+ */
 export async function updateFaqCard(
   client: TenantClient,
   cardId: string,
@@ -236,7 +241,7 @@ export async function updateFaqCard(
     `update faq_cards set canonical = $2::text, variants = $3::text[], spoken_answer = $4::text,
        written_answer = $5::text, sensitivity = $6::text, allowed_channels = $7::text[],
        location_id = $8::uuid, valid_until = $10::date, reverify_after = $11::interval,
-       updated_at = clock_timestamp(), version = version + 1
+       active = true, updated_at = clock_timestamp(), version = version + 1
      where organisation_id = app.current_org() and id = $1 and version = $9::integer
      returning id, canonical, sensitivity, spoken_answer, active, version::text`,
     [
@@ -255,6 +260,10 @@ export async function updateFaqCard(
   );
   const row = updated.rows[0];
   if (row === undefined) throw new VersionConflictError('faq card version mismatch');
+  // Re-arm the reverify lifecycle (ROUND-3 P1-1/P1-2, mirrors approval-clears-
+  // queue): the reviewed card leaves the sweep's handled set, so the next
+  // overdue cycle re-tasks it instead of skipping it silently.
+  await client.query(`delete from knowledge_reverify_queue where card_id = $1`, [cardId]);
   await appendAuditEvent(client, {
     source: 'api',
     operation: 'faq.upsert',

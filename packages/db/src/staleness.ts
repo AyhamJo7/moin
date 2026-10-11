@@ -158,14 +158,14 @@ export async function sweepReverify(
     checked += 1;
     const restricted = row.sensitivity === 'restricted';
     if (restricted) {
-      // Version-guarded (ROUND-2 P1-2): an approval committing between the
-      // select and this update moves the live pointer — suspending by item id
-      // alone would freeze the NEWLY approved version. Zero rows affected
-      // means the approval won the race: skip, the new version has a fresh
-      // deadline and the next sweep picks it up if IT goes overdue.
+      // Version-guarded (ROUND-2 P1-2) + already-handled guard (ROUND-3 P2-2):
+      // an approval committing between select and update moves the live
+      // pointer, and a concurrent sweep may have suspended first — both lose
+      // honestly with 0 rows affected (skip side effects: no double suspend
+      // audit, no task for a version that is no longer live).
       const guarded = await client.query(
         `update knowledge_items set suspended = true
-         where id = $1 and live_version_id = $2`,
+         where id = $1 and live_version_id = $2 and not suspended`,
         [row.item_id, row.version_id],
       );
       if ((guarded.rowCount ?? 0) === 0) continue;
@@ -215,15 +215,21 @@ export async function sweepReverify(
       result: 'succeeded',
     });
   }
-  // FAQ cards (ROUND-2 P2-2): the same predicate over updated_at. Overdue
-  // sensitive cards deactivate (mirrors item suspension — already excluded
-  // from serving; the flag keeps them out of future sweeps until an update
-  // re-activates them). Public/internal get a task and stay servable flagged.
-  const cards = await client.query<{ id: string; sensitivity: string }>(
-    `select id::text, sensitivity from faq_cards
-     where organisation_id = app.current_org() and active = true
-       and coalesce(valid_until < $1::date, false) = false
-       and coalesce(updated_at + reverify_after <= $2::timestamptz, false) = true`,
+  // FAQ cards (ROUND-2 P2-2, handled-state ROUND-3 P1-2): the same predicate
+  // over updated_at, excluding cards the sweep already handled (queue row with
+  // this card_id — mirrors the item exclusion, so the sweep converges). The
+  // per-cycle key carries the card's updated_at epoch: an owner update bumps
+  // updated_at (and deletes the queue row, re-arming the card), so the next
+  // overdue cycle mints a fresh task instead of recycling the old one.
+  const cards = await client.query<{ id: string; sensitivity: string; anchor: string }>(
+    `select c.id::text, c.sensitivity, extract(epoch from c.updated_at)::bigint::text as anchor
+     from faq_cards c
+     left join knowledge_reverify_queue q
+       on q.organisation_id = c.organisation_id and q.card_id = c.id
+     where c.organisation_id = app.current_org() and c.active = true
+       and q.card_id is null
+       and coalesce(c.valid_until < $1::date, false) = false
+       and coalesce(c.updated_at + c.reverify_after <= $2::timestamptz, false) = true`,
     [day, instant],
   );
   for (const card of cards.rows) {
@@ -240,19 +246,29 @@ export async function sweepReverify(
         result: 'succeeded',
       });
     }
+    await client.query(
+      `insert into knowledge_reverify_queue (organisation_id, id, card_id, due_at)
+       values (app.current_org(), $1, $2, $3)
+       on conflict (organisation_id, card_id) do nothing`,
+      [randomUUID(), card.id, instant],
+    );
     const task = await createTask(client, {
       title: REVERIFY_TASK_TITLE,
       type: 'review',
       priority: sensitive ? 'high' : 'normal',
-      idempotencyKey: `reverify-card:${card.id}`,
+      idempotencyKey: `reverify-card:${card.id}:${card.anchor}`,
     });
-    // Card tasks are per-card idempotent (same key retries the same row):
+    // Card tasks are per-cycle idempotent (same key retries the same row):
     // assert the row exists so a silent no-op cannot pass unnoticed.
     const created = await client.query<{ n: string }>(
       `select count(*)::text as n from tasks where id = $1`,
       [task.id],
     );
     if (created.rows[0]?.n !== '1') throw new Error('card task create returned no row');
+    await client.query(`update knowledge_reverify_queue set task_id = $1 where card_id = $2`, [
+      task.id,
+      card.id,
+    ]);
     tasksCreated += 1;
     await appendAuditEvent(client, {
       source: 'api',

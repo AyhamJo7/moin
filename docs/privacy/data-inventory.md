@@ -234,6 +234,7 @@ seasonal.
 | `faq_cards.reverify_after`                                        | Knowledge | no alone (interval)                                  | while active               | hard delete             | —                   |
 | `knowledge_reverify_queue.item_id`                                | Knowledge | yes (references)                                     | until re-approved          | hard delete             | —                   |
 | `knowledge_reverify_queue.task_id`                                | Knowledge | yes (references)                                     | until re-approved          | hard delete             | —                   |
+| `knowledge_reverify_queue.card_id`                                | Knowledge | yes (references)                                     | until card updated         | hard delete             | —                   |
 | `opening_rules.location_id`                                       | Business  | yes (references)                                     | while the tenant exists    | hard delete             | —                   |
 | `opening_rules.weekday`                                           | Business  | no (fixed catalogue 0..6)                            | while the tenant exists    | hard delete             | —                   |
 | `opening_rules.opens_min`                                         | Business  | no (wall-clock minutes)                              | while the tenant exists    | hard delete             | —                   |

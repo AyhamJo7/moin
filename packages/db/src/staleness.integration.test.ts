@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { createTestDatabase, evidenceTest, type TestDatabase } from '@moin/testing';
 import { afterAll, beforeAll, describe, expect } from 'vitest';
 import { listAuditEvents } from './audit.ts';
-import { createFaqCard, findAnswer } from './faq.ts';
+import { createFaqCard, findAnswer, updateFaqCard } from './faq.ts';
 import {
   approveKnowledgeVersion,
   createKnowledgeItem,
@@ -389,14 +389,15 @@ describe('staleness', () => {
     // ROUND-2 P2-2: cards were never swept (deadline + marker only). Now the
     // sweep covers them: public/internal get a task and stay servable;
     // sensitive deactivates (mirrors item suspension) and stops serving.
-    await withTenant(app, ORG_A, (client) =>
+    const cake = await withTenant(app, ORG_A, (client) =>
       createFaqCard(client, {
         canonical: 'Gibt es heute Kuchen?',
         spoken: 'Ja, Apfelkuchen solange Vorrat reicht.',
         reverifyAfterDays: 1,
       }),
     );
-    await withTenant(app, ORG_A, (client) =>
+    expect(cake.active).toBe(true);
+    const gluten = await withTenant(app, ORG_A, (client) =>
       createFaqCard(client, {
         canonical: 'Ist das Gericht glutenfrei?',
         spoken: 'Nein, es enthaelt Weizenmehl.',
@@ -429,22 +430,47 @@ describe('staleness', () => {
       ),
     );
     expect(flag.rows[0]?.active).toBe(false);
-    // Repeat sweep: card tasks are idempotent per card (no duplicates) —
-    // the second run creates nothing new for already-handled cards.
-    const before = await withTenant(app, ORG_A, (client) =>
+    // ROUND-3 P1-2: repeat sweep converges — handled cards are excluded, so
+    // the second run reports zero new work and creates no new card tasks.
+    const second = await withTenant(app, ORG_A, (client) => sweepReverify(client, late));
+    expect(second.tasksCreated).toBe(0);
+    const cardTasks = await withTenant(app, ORG_A, (client) =>
       client.query<{ n: string }>(
         `select count(*)::text as n from tasks where title = 'Wissen prüfen'
          and idempotency_key like 'reverify-card:%'`,
       ),
     );
-    await withTenant(app, ORG_A, (client) => sweepReverify(client, late));
-    const after = await withTenant(app, ORG_A, (client) =>
+    expect(Number(cardTasks.rows[0]?.n)).toBeGreaterThanOrEqual(2);
+    // ROUND-3 P1-1 (cards): updating the deactivated card re-arms it — active
+    // again, served again, queue row gone so the next overdue cycle re-tasks.
+    const reactivated = await withTenant(app, ORG_A, (client) =>
+      updateFaqCard(client, gluten.id, {
+        canonical: 'Ist das Gericht glutenfrei?',
+        spoken: 'Nein, es enthaelt Weizenmehl.',
+        sensitivity: 'sensitive',
+        reverifyAfterDays: 30,
+        expectedVersion: 1,
+      }),
+    );
+    expect(reactivated.active).toBe(true);
+    const servedAgain = await withTenant(app, ORG_A, (client) =>
+      findAnswer(client, 'Ist das Gericht glutenfrei?'),
+    );
+    expect(servedAgain?.spoken).toBe('Nein, es enthaelt Weizenmehl.');
+    const cleared = await withTenant(app, ORG_A, (client) =>
       client.query<{ n: string }>(
-        `select count(*)::text as n from tasks where title = 'Wissen prüfen'
-         and idempotency_key like 'reverify-card:%'`,
+        `select count(*)::text as n from knowledge_reverify_queue where card_id = $1`,
+        [gluten.id],
       ),
     );
-    expect(after.rows[0]?.n).toBe(before.rows[0]?.n);
+    expect(cleared.rows[0]?.n).toBe('0');
+    // The public card keeps its queue row (still handled, still tasked).
+    const kept = await withTenant(app, ORG_A, (client) =>
+      client.query<{ n: string }>(
+        `select count(*)::text as n from knowledge_reverify_queue where task_id is not null`,
+      ),
+    );
+    expect(Number(kept.rows[0]?.n)).toBeGreaterThanOrEqual(1);
   });
 
   evidenceTest('queue task ids are tenant-scoped by FK', async () => {
