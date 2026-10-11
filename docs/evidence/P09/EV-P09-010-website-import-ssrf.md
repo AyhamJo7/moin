@@ -4,12 +4,14 @@
 |---|---|
 | Evidence ID | EV-P09-010 |
 | Item | P09.08.05 |
-| Date (UTC) | 2026-10-11 20:47 UTC |
-| Commit | `8b3e3428b9aacaf8e3dd771f6caf37aa107bd7a4` (working tree had uncommitted changes) |
+| Date (UTC) | 2026-10-11 20:50 UTC |
+| Commit | `d94e4da` (impl `567f499` + ledger; branch `feat/p09-08-import`) |
 | Environment | local |
-| Command / procedure | `.claude/bin/gates.py full`: `python3 .claude/bin/control_plane_check.py && python3 -m unittest discover -s .claude/tests -t .claude/tests` → pass (exit 0, 30.8 s); `uvx ruff@0.15.12 format --check --config .claude/ruff.toml .claude && uvx ruff@0.15.12 check --config .claude/ruff.toml .claude && uvx --from mypy==2.3.1 mypy --config-file .claude/mypy.ini` → pass (exit 0, 0.3 s); `node scripts/check-conventional-commit.ts --self-test && node scripts/check-no-ai-mentions.ts --self-test` → pass (exit 0, 0.2 s); `node scripts/check-adr-coverage.ts && node scripts/check-domain-coverage.ts && node scripts/check-dfd-coverage.ts && node scripts/check-threat-model-refs.ts && node scripts/check-data-classification.ts && node scripts/check-subprocessors.ts && node scripts/check-brand-strings.ts` → pass (exit 0, 2.0 s); `pnpm exec prettier --check .` → pass (exit 0, 7.3 s); `pnpm lint` → pass (exit 0, 16.5 s); `pnpm exec depcruise apps packages scripts --config .dependency-cruiser.cjs` → pass (exit 0, 1.3 s); `pnpm typecheck` → pass (exit 0, 7.6 s); `pnpm test` → pass (exit 0, 8.0 s); `pnpm test:integration` → pass (exit 0, 28.4 s); `node scripts/check-migrations.ts` → pass (exit 0, 0.1 s); `pnpm turbo run build` → pass (exit 0, 7.4 s); `node scripts/check-licences.ts` → pass (exit 0, 0.5 s); `gitleaks git --redact --no-banner --config .gitleaks.toml .` → pass (exit 0, 1.1 s) |
+| Command / procedure | `gates.py full` 14/14 PASS (artifact `20261011T204528Z-full.json`): control-plane 30.8 s, control-plane-lint, conventions, docs-consistency, format, lint, boundaries, typecheck, unit, integration 28.4 s, migrations, build, licences, secret-scan. Test env vars exported from the example env file (no worktree secrets file; INV-15); pinned Node 24.21.0 / pnpm 10.34.5 on PATH. |
 | Result | PASS |
-| CI run / artifact | pending |
-| Reviewer | pending |
+| CI run / artifact | PR #103 (draft): CI pending at push time |
+| Reviewer | pending (review requested on PR #103) |
+| Mutation | Semantic KILLED (private-address check disabled: the 2 private-address tests FAIL — rebinding + literal — while the other 8 pass; restored byte-identical). Harness verdict KILLED is file-absence (fix files untracked pre-commit), so the semantic run above is the proof, recorded here. |
+| Design notes | 0059 additive only (business_domains registry + import runs trail + RLS/FORCE + allowlist rows). Domain gate: registrable domain must match a verified tenant row (fetch never attempted otherwise — pinned by test). Fetch guard: DNS pinned up front with every address classified (rebinding-proof), private ranges refused (v4/metadata/loopback/ipv6/mapped), redirects re-verified per hop (max 3), robots honoured, 1 MiB + 10 s caps. HTML→text deterministic; injection markers flagged (never executed). Drafts source=import via createKnowledgeItem, invisible to serving until P09.05 approval. Manual entry rides existing create/edit APIs (P09.08.01, no new surface). PDF/menu LAUNCH deferred (P09.08.03, no columns). Inventory rows added. Tests 10 green 3x (26/26 with knowledge + faq). |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).
