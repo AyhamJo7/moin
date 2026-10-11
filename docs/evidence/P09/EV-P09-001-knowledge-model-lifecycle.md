@@ -5,7 +5,7 @@
 | Evidence ID | EV-P09-001 |
 | Item | P09.01.04 |
 | Date (UTC) | 2026-10-11 06:12 UTC |
-| Commit | `5899f17` |
+| Commit | `d01c338` |
 | Environment | local |
 | Command / procedure | `.claude/bin/gates.py full` 14/14 PASS (evidence `20261011T062135Z-full.json`, on this head — see that artifact for per-gate timings) |
 | Result | PASS |
