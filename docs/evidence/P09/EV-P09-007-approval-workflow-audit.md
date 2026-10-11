@@ -5,7 +5,7 @@
 | Evidence ID | EV-P09-007 |
 | Item | P09.05.03 |
 | Date (UTC) | 2026-10-11 18:35 UTC (ROUND-1 fix; initial 2026-10-11 16:02 UTC) |
-| Commit | `TBD (this push)` — prior pin `35d9d7a` (superseded by ROUND-1) |
+| Commit | `2a6b424` (ROUND-1 fix `66cc775` + ledger; prior pin `35d9d7a` superseded) |
 | Environment | local |
 | Command / procedure | `gates.py full` 14/14 PASS (artifact `20261011T163445Z-full.json`): control-plane, control-plane-lint, conventions, docs-consistency, format, lint, boundaries, typecheck, unit, integration (21.9 s), migrations, build, licences, secret-scan. Test env vars exported from the example env file (no worktree secrets file; INV-15); pinned Node 24.21.0 / pnpm 10.34.5 on PATH. |
 | Result | PASS |
