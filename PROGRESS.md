@@ -887,3 +887,4 @@ true, ok: false }` — is serialized by Vitest with none of the `constructor`/`t
   | P09.09 | IN_PROGRESS | feat/p09-09-retrieval | EV-P09-011 | mutation sweep KILLED_ASSERTION 2/2 (M1 view conflict leg, M2 catalogue active leg) at HEAD 49e15a5, report committed; 7ab1ab3; next: EV + gates + draft PR |
   | P09.09 | IN_PROGRESS | feat/p09-09-retrieval | EV-P09-011 | EV committed with harness verdict (KILLED_ASSERTION 2/2) + gates 14/14 (20261011T233333Z-full.json); 5b19f8c; next: push + draft PR |
   | P09.09 | IN_PROGRESS | feat/p09-09-retrieval | EV-P09-011 | pushed 08ef0db, draft PR #104 open; EV pinned to implementation head 5b19f8c; next: founder review |
+  | P09.09 | IN_PROGRESS | feat/p09-09-retrieval | EV-P09-011 | ROUND-1 P1 location fix (findCandidates locationId + fail-closed predicate, test, M3 manifest); 15d234e; 7 retrieval tests green 3x (23/23 with knowledge+faq); next: re-sweep + EV re-cite + gates + push |
