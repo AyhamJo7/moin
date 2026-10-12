@@ -26,6 +26,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { appendAuditEvent } from './audit.ts';
+import { checkKnowledgeChannel } from './knowledge-channels.ts';
 import { createTask } from './tasks.ts';
 import type { TenantClient } from './tenant.ts';
 
@@ -77,7 +78,9 @@ export async function servedState(
   client: TenantClient,
   itemId: string,
   now: Date = new Date(),
+  channel?: string,
 ): Promise<ServedVersion | null> {
+  checkKnowledgeChannel(channel);
   const found = await client.query<{
     version_id: string;
     expired: boolean;
@@ -96,8 +99,10 @@ export async function servedState(
      left join knowledge_approvals a
        on a.organisation_id = i.organisation_id and a.version_id = v.id
      where i.organisation_id = app.current_org() and i.id = $1
-       and i.state = 'approved' and v.state = 'approved'`,
-    [itemId, now.toISOString().slice(0, 10), now.toISOString()],
+        and i.state = 'approved' and v.state = 'approved'
+        and ($4::text is null and v.allowed_channels @> '{call,message,voice,email,web}'
+             or $4::text = any (v.allowed_channels))`,
+    [itemId, now.toISOString().slice(0, 10), now.toISOString(), channel ?? null],
   );
   const row = found.rows[0];
   if (row === undefined) return null;

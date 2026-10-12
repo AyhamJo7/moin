@@ -24,6 +24,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { appendAuditEvent } from './audit.ts';
+import { checkKnowledgeChannel, checkKnowledgeChannels } from './knowledge-channels.ts';
 import { currentTenant, type TenantClient } from './tenant.ts';
 
 export class VersionConflictError extends Error {
@@ -177,13 +178,7 @@ function checkMetadata(input: KnowledgeMetadata): {
   if (validFrom !== null && validUntil !== null && validFrom > validUntil) {
     throw new RangeError('valid_from must not be after valid_until');
   }
-  const channels = input.allowedChannels ?? ['call', 'message'];
-  for (const channel of channels) {
-    if (channel !== 'call' && channel !== 'message') {
-      throw new RangeError('allowed channel must be call or message');
-    }
-  }
-  if (channels.length === 0) throw new RangeError('at least one channel required');
+  const channels = checkKnowledgeChannels(input.allowedChannels);
   // Reverify deadline (P09.06): explicit days beat the category default; null
   // stays null (no deadline, e.g. pre-0057 rows). Stored as a Postgres interval
   // so deadline math (`decided_at + reverify_after`) stays in SQL.
@@ -468,8 +463,10 @@ export async function getLiveVersion(
   client: TenantClient,
   itemId: string,
   now: Date = new Date(),
+  channel?: string,
 ): Promise<KnowledgeVersion | null> {
   if (!UUID_RE.test(itemId)) throw new RangeError('knowledge item id must be a uuid');
+  checkKnowledgeChannel(channel);
   const found = await client.query<VersionRow>(
     `select v.id, v.item_id, v.version_no, v.title, v.body, v.state
      from knowledge_versions v join knowledge_items i
@@ -480,8 +477,10 @@ export async function getLiveVersion(
        and i.state = 'approved' and not i.suspended and i.conflict_state = 'clear'
        and coalesce(v.valid_until < $2::date, false) = false
        and not (v.sensitivity = 'restricted'
-         and coalesce(a.decided_at + v.reverify_after <= $2::timestamptz, false) = true)`,
-    [itemId, now.toISOString()],
+          and coalesce(a.decided_at + v.reverify_after <= $2::timestamptz, false) = true)
+        and ($3::text is null and v.allowed_channels @> '{call,message,voice,email,web}'
+             or $3::text = any (v.allowed_channels))`,
+    [itemId, now.toISOString(), channel ?? null],
   );
   const row = found.rows[0];
   return row === undefined ? null : toVersion(row);

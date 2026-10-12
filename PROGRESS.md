@@ -1,12 +1,12 @@
 ---
-mission: P02 closed; P04 engineering done bar external; P06 tenancy spine in progress
+mission: P09.10 channel and sensitivity scoping
 status: active
 mode: autonomous
-phase: P06
+phase: P09
 tier: PILOT
-plan: docs/phases/P06-plan.md
-next: founder runs QG-09 on the READY_FOR_REVIEW sections (P06.06.04–.07, .07, .08, .09, .10.03, .11, .12, .13, .03.02); engineering resumes at P06.03.03/.03.07 job half when P08 provides the job envelope, and P06.03.04 when resolve_route exists; EXT-09/P05 gate P06.05, P06.10.05, P06.11.01, WAF
-updated: 2026-10-08
+plan: PLAN.md P09.10
+next: P09.10 mutation proof, full gates, EV allocation and draft PR; no other phase scope
+updated: 2026-10-12
 ---
 
 # PROGRESS — moin
@@ -893,3 +893,9 @@ true, ok: false }` — is serialized by Vitest with none of the `constructor`/`t
   | P09.09 | IN_PROGRESS | feat/p09-09-retrieval | EV-P09-011 | EV cites final artifact 20261012T002532Z (1 transient unit flake green on re-run); 850f1a0; next: final gates on pushed HEAD + report |
   | P09.09 | IN_PROGRESS | feat/p09-09-retrieval | EV-P09-011 | ROUND-2 evidence-only (no code changes): sweep re-run 3/3 at 227906a, mutation_check KILLED latest.json at HEAD, EV re-cited to 20261012T004114Z + results JSON committed; e433670; next: pin + push + final gates |
   | P09.09 | IN_PROGRESS | feat/p09-09-retrieval | EV-P09-011 | pushed 569a2bb, draft PR #104 updated; EV pinned to ROUND-2 head e433670; next: founder re-review |
+
+## P09.10 channel and sensitivity scoping
+
+| Item          | Status      | Commit                           | Evidence                                         | Note                                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------- | ----------- | -------------------------------- | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P09.10.01–.02 | IN_PROGRESS | implementation commit (this row) | integration command below; EV allocation pending | Additive 0061 approved view v2; extend literal grants to call/message/voice/email/web, no legacy aliases or approval broadening. All retrieval paths and servedState fail closed on omission. Seven integration tests passed in three fresh-database invocations: `pnpm exec vitest run --project integration packages/db/src/channels.integration.test.ts`, exit 0 each. No DEFINER changed. |
