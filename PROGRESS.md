@@ -1,11 +1,11 @@
 ---
 mission: P09.10 channel and sensitivity scoping
-status: blocked
+status: active
 mode: autonomous
 phase: P09
 tier: PILOT
 plan: PLAN.md P09.10
-next: unblock P09.10 migration safety scan (0061 add-check-validated persists despite NOT VALID), refresh HEAD-bound proofs and finish full gates; no other phase scope
+next: P09.10 full gates and refreshed final-HEAD mutation evidence, then update draft PR 105; no other phase scope
 updated: 2026-10-12
 ---
 
@@ -909,3 +909,4 @@ true, ok: false }` — is serialized by Vitest with none of the `constructor`/`t
 | P09.10.01     | BLOCKED     | blocked checkpoint commit (this row)         | `node scripts/check-migrations.ts`, exit 1                                                      | BLOCKER correction to preceding row: the NOT VALID + VALIDATE edit did not clear add-check-validated. Same failure twice triggered the session stop rule. Owner: next implementer/founder. Unblock by diagnosing scanner recognition of the new constraints without weakening checks; then fresh integration, mutation and full-gate evidence. The NOT VALID edit remains unverified; no existing/applied migration or DEFINER changed. |
 | P09.10.01     | BLOCKED     | 66563ab                                      | EV-P09-012                                                                                      | Pins preceding checkpoint row; evidence.py new allocated EV-P09-012. No current-HEAD mutation or full-gate PASS is claimed.                                                                                                                                                                                                                                                                                                             |
 | P09.10.01–.02 | BLOCKED     | evidence checkpoint commit (this row)        | EV-P09-012; worktree claude-evidence/20261012T011345Z-full.json                                 | Preserved choice (b), BLUEPRINT reconciliation, privacy update, historical assertion proof, and explicit verification boundaries. PLAN P09.10 only remains unticked. Push branch and open blocked draft PR; never merge.                                                                                                                                                                                                                |
+| P09.10.01     | IN_PROGRESS | scanner exception commit (this row)          | EV-P09-012; `node scripts/check-migrations.ts`, exit 0                                          | Founder diagnosed the scanner's 120-character CHECK lookahead false positive and explicitly authorized the migration-local exception (0016 precedent). Added exact reason annotation to new unshipped 0061; both NOT VALID + separate VALIDATE statements unchanged. Migration scan reports no findings; no applied migration, gate, scanner, or test weakened.                                                                         |

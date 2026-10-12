@@ -1,4 +1,5 @@
 -- 0061 — channel and sensitivity scoping (P09.10), approved retrieval view v2.
+-- migration-check: allow add-check-validated because both CHECK constraints are added NOT VALID with separate VALIDATE CONSTRAINT statements (the check's 120-character lookahead cannot see past the reason lists to the NOT VALID keywords).
 -- Extend rather than rename: call/message grants retain their literal meaning.
 -- No approved row is rewritten or broadened. New unspecified scopes allow all
 -- five channels; omitted retrieval context requires all five (fail closed).
