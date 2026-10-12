@@ -1,0 +1,68 @@
+{
+  "head": "227906a6c09a9582a0db632ce1cf4222dcf9f598",
+  "results": [
+    {
+      "variant": {
+        "id": "M1-view-conflict-exclusion-removed",
+        "invariant": "Approved-only retrieval: conflicted items are never retrievable (P09.09.01, P09.09.05)",
+        "expected": "A conflicted item would appear in knowledge_approved_current, so readApprovedVersions returns it.",
+        "file": "packages/db/migrations/0060_approved_retrieval_view.sql",
+        "find": "  AND NOT i.suspended\n  AND i.conflict_state = 'clear'",
+        "replace": "  AND NOT i.suspended\n  AND (i.conflict_state = 'clear' OR true)",
+        "killingTest": {
+          "file": "packages/db/src/retrieval.integration.test.ts",
+          "fullName": "retrieval-exclusion > expired, suspended and conflicted never retrievable"
+        }
+      },
+      "baseline": "PASSED",
+      "outcome": "KILLED_ASSERTION",
+      "detail": "the intended test ran and rejected the mutation on a trusted matcher failure (the terminal value is the object assert threw)",
+      "matched": 1,
+      "unrelatedFailures": 0,
+      "baselineMs": 2814,
+      "mutantMs": 2731
+    },
+    {
+      "variant": {
+        "id": "M2-catalogue-active-exclusion-removed",
+        "invariant": "Closed-set catalogue: deactivated cards leave the catalogue (P09.09.02, P09.09.05)",
+        "expected": "A deactivated card would remain in listCardCatalogue, so the NLU could select it.",
+        "file": "packages/db/src/retrieval.ts",
+        "find": "     where organisation_id = app.current_org() and active = true\n       and coalesce(valid_until < current_date, false) = false\n       and not (sensitivity = 'sensitive'\n         and coalesce(updated_at + reverify_after <= now(), false) = true)\n       and ($1::uuid is null and location_id is null",
+        "replace": "     where organisation_id = app.current_org()\n       and coalesce(valid_until < current_date, false) = false\n       and not (sensitivity = 'sensitive'\n         and coalesce(updated_at + reverify_after <= now(), false) = true)\n       and ($1::uuid is null and location_id is null",
+        "killingTest": {
+          "file": "packages/db/src/retrieval.integration.test.ts",
+          "fullName": "retrieval-exclusion > deactivated cards leave catalogue, candidates and answers"
+        }
+      },
+      "baseline": "PASSED",
+      "outcome": "KILLED_ASSERTION",
+      "detail": "the intended test ran and rejected the mutation on a trusted matcher failure (the terminal value is the object assert threw)",
+      "matched": 1,
+      "unrelatedFailures": 0,
+      "baselineMs": 2792,
+      "mutantMs": 2502
+    },
+    {
+      "variant": {
+        "id": "M3-candidates-location-exclusion-removed",
+        "invariant": "Candidate generation respects the fail-closed location rule (P09.09.03, P09.09.05)",
+        "expected": "A location-specific card would appear in unfiltered findCandidates, leaking another location's question in-tenant.",
+        "file": "packages/db/src/retrieval.ts",
+        "find": "       and ($3::uuid is null and location_id is null\n            or $3::uuid is not null and (location_id is null or location_id = $3::uuid))\n       and (canonical % $1 or exists (select 1 from unnest(variants) v where v % $1))",
+        "replace": "       and ($3::uuid is null or location_id is null or location_id = $3::uuid)\n       and (canonical % $1 or exists (select 1 from unnest(variants) v where v % $1))",
+        "killingTest": {
+          "file": "packages/db/src/retrieval.integration.test.ts",
+          "fullName": "retrieval-exclusion > candidates respect the fail-closed location rule"
+        }
+      },
+      "baseline": "PASSED",
+      "outcome": "KILLED_ASSERTION",
+      "detail": "the intended test ran and rejected the mutation on a trusted matcher failure (the terminal value is the object assert threw)",
+      "matched": 1,
+      "unrelatedFailures": 0,
+      "baselineMs": 2392,
+      "mutantMs": 2463
+    }
+  ]
+}
