@@ -263,6 +263,14 @@ seasonal.
 | `opening_exceptions.closes_min`                                                                        | Business  | no (wall-clock minutes)                              | while the tenant exists    | hard delete             | —                   |
 | `opening_exceptions.label`                                                                             | Business  | **possibly** — owner-authored holiday/vacation label | while the tenant exists    | hard delete             | —                   |
 
+P09.10 (migration 0061) adds no stored columns or new personal-data categories. The existing
+`knowledge_versions.allowed_channels` and `faq_cards.allowed_channels` catalogues now accept
+`call`, `message`, `voice`, `email`, and `web`. Legacy grants remain literal, not aliases; existing
+approved scopes are never widened. New unspecified scopes default to all five channels. Retrieval
+without a channel requires all five. `app.knowledge_channel` is transaction-local retrieval context,
+not stored business data; the security-invoker approved view enforces it under tenant FORCE RLS.
+Sensitivity, retention, erasure, and subprocessors are unchanged.
+
 Knowledge is flagged **possibly** personal on purpose. An owner writing "bei Notfällen Herrn Meier
 anrufen, 0170…" has put a staff member's number into a field nobody classified as personal. The
 approval step (INV-08) is where that is caught, and the approval UI says so.
