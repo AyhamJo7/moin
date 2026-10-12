@@ -1,5 +1,5 @@
 {
-  "head": "bcb43e18c01a5be9d1e349e07c8819e7b4ed4b4e",
+  "head": "f3a52e64449166a239cb102de9eda7451f0cf947",
   "results": [
     {
       "variant": {
@@ -19,8 +19,8 @@
       "detail": "the intended test ran and rejected the mutation on a trusted matcher failure (the terminal value is the object assert threw)",
       "matched": 1,
       "unrelatedFailures": 0,
-      "baselineMs": 2887,
-      "mutantMs": 2860
+      "baselineMs": 3103,
+      "mutantMs": 2863
     },
     {
       "variant": {
@@ -40,8 +40,8 @@
       "detail": "the intended test ran and rejected the mutation on a trusted matcher failure (the terminal value is the object assert threw)",
       "matched": 1,
       "unrelatedFailures": 0,
-      "baselineMs": 2887,
-      "mutantMs": 1903
+      "baselineMs": 3103,
+      "mutantMs": 2353
     },
     {
       "variant": {
@@ -61,8 +61,8 @@
       "detail": "the intended test ran and rejected the mutation on a trusted matcher failure (the terminal value is the object assert threw)",
       "matched": 1,
       "unrelatedFailures": 0,
-      "baselineMs": 2887,
-      "mutantMs": 3032
+      "baselineMs": 3103,
+      "mutantMs": 3206
     },
     {
       "variant": {
@@ -82,8 +82,8 @@
       "detail": "the intended test ran and rejected the mutation on a trusted matcher failure (the terminal value is the object assert threw)",
       "matched": 1,
       "unrelatedFailures": 0,
-      "baselineMs": 2887,
-      "mutantMs": 2937
+      "baselineMs": 3103,
+      "mutantMs": 3087
     },
     {
       "variant": {
@@ -103,8 +103,8 @@
       "detail": "the intended test ran and rejected the mutation on a trusted matcher failure (the terminal value is the object assert threw)",
       "matched": 1,
       "unrelatedFailures": 0,
-      "baselineMs": 3359,
-      "mutantMs": 2798
+      "baselineMs": 4551,
+      "mutantMs": 2806
     },
     {
       "variant": {
@@ -124,8 +124,8 @@
       "detail": "the intended test ran and rejected the mutation on a trusted matcher failure (the terminal value is the object assert threw)",
       "matched": 1,
       "unrelatedFailures": 0,
-      "baselineMs": 2887,
-      "mutantMs": 2881
+      "baselineMs": 3103,
+      "mutantMs": 2857
     },
     {
       "variant": {
@@ -145,8 +145,8 @@
       "detail": "the intended test ran and rejected the mutation on a trusted matcher failure (the terminal value is the object assert threw)",
       "matched": 1,
       "unrelatedFailures": 0,
-      "baselineMs": 2887,
-      "mutantMs": 2791
+      "baselineMs": 3103,
+      "mutantMs": 3193
     }
   ]
 }
