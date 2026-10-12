@@ -8,13 +8,15 @@ ALTER TABLE knowledge_versions ALTER COLUMN allowed_channels
   SET DEFAULT '{call,message,voice,email,web}';
 ALTER TABLE knowledge_versions ADD CONSTRAINT knowledge_versions_allowed_channels_check
   CHECK (allowed_channels <@ '{call,message,voice,email,web}' AND cardinality(allowed_channels) > 0
-    AND array_position(allowed_channels, NULL) IS NULL);
+    AND array_position(allowed_channels, NULL) IS NULL) NOT VALID;
+ALTER TABLE knowledge_versions VALIDATE CONSTRAINT knowledge_versions_allowed_channels_check;
 
 ALTER TABLE faq_cards DROP CONSTRAINT faq_cards_allowed_channels_check;
 ALTER TABLE faq_cards ALTER COLUMN allowed_channels SET DEFAULT '{call,message,voice,email,web}';
 ALTER TABLE faq_cards ADD CONSTRAINT faq_cards_allowed_channels_check
   CHECK (allowed_channels <@ '{call,message,voice,email,web}' AND cardinality(allowed_channels) > 0
-    AND array_position(allowed_channels, NULL) IS NULL);
+    AND array_position(allowed_channels, NULL) IS NULL) NOT VALID;
+ALTER TABLE faq_cards VALIDATE CONSTRAINT faq_cards_allowed_channels_check;
 
 CREATE OR REPLACE VIEW knowledge_approved_current
 WITH (security_invoker = true)
