@@ -891,3 +891,4 @@ true, ok: false }` — is serialized by Vitest with none of the `constructor`/`t
   | P09.09 | IN_PROGRESS | feat/p09-09-retrieval | EV-P09-011 | ROUND-1 mutation 3/3 KILLED (M3 location leg, assertion-safe shapeshift) + EV re-cited to 20261012T002209Z; 3549780; next: final pin + gates + push |
   | P09.09 | IN_PROGRESS | feat/p09-09-retrieval | EV-P09-011 | pushed 3a5da2b, draft PR #104 updated; EV pinned to ROUND-1 head 3549780; next: founder re-review |
   | P09.09 | IN_PROGRESS | feat/p09-09-retrieval | EV-P09-011 | EV cites final artifact 20261012T002532Z (1 transient unit flake green on re-run); 850f1a0; next: final gates on pushed HEAD + report |
+  | P09.09 | IN_PROGRESS | feat/p09-09-retrieval | EV-P09-011 | ROUND-2 evidence-only (no code changes): sweep re-run 3/3 at 227906a, mutation_check KILLED latest.json at HEAD, EV re-cited to 20261012T004114Z + results JSON committed; e433670; next: pin + push + final gates |
