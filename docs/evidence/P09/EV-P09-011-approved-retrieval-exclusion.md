@@ -7,7 +7,7 @@
 | Date (UTC) | 2026-10-12 02:25 UTC (ROUND-1: P1 location fix + re-cite; initial 01:30 UTC) |
 | Commit | `3549780` (ROUND-1 fix incl. EV + ledger; implementation `15d234e`, mutation measured at `b52c073`, gates at `b52c073` — same tree plus ledger pin) |
 | Environment | local |
-| Command / procedure | `gates.py full` 14/14 PASS (artifact `20261012T002209Z-full.json`): control-plane (30.6 s), control-plane-lint, conventions, docs-consistency, format (7.2 s), lint (15.9 s), boundaries, typecheck, unit (8.0 s), integration (26.6 s), migrations, build, licences, secret-scan. TEST_* vars exported from `.env.example` values (no worktree secrets file; INV-15); pinned Node 24.21.0 / pnpm 10.34.5 on PATH. |
+| Command / procedure | `gates.py full` 14/14 PASS on pushed HEAD (artifact `20261012T002532Z-full.json`): control-plane (30.6 s), control-plane-lint, conventions, docs-consistency, format (7.2 s), lint, boundaries, typecheck, unit (7.9 s), integration (30.9 s), migrations, build, licences, secret-scan. TEST_* vars exported from `.env.example` values (no worktree secrets file; INV-15); pinned Node 24.21.0 / pnpm 10.34.5 on PATH. One intermediate full run hit a transient unit flake (`readiness.test.ts` TTL cache identity, green standalone + on re-run); the cited artifact is the clean re-run. |
 | Result | PASS |
 | CI run / artifact | PR #104 (draft): CI pending at push time |
 | Reviewer | pending (re-review requested on PR #104 after ROUND-1 fix) |
