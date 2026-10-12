@@ -15,7 +15,8 @@
  *    NLU picks among these, never outside them.
  * 3. `findCandidates`: FTS/trigram candidate generation for large catalogues
  *    (> 60 cards): ranked matches above the similarity floor with scores,
- *    same exclusions. Small catalogues use listCardCatalogue instead.
+ *    same exclusions including the fail-closed location rule. Small
+ *    catalogues use listCardCatalogue instead.
  *
  * pgvector HNSW passages are SELL (P09.09.04) — deferred, no code here.
  *
@@ -24,6 +25,8 @@
  */
 
 import type { TenantClient } from './tenant.ts';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** One catalogue entry: what the NLU may select. */
 export interface CatalogueCard {
@@ -91,12 +94,18 @@ export async function listCardCatalogue(
 
 /**
  * Ranked trigram candidates for large catalogues: same exclusions as the
- * catalogue, ordered by similarity score (canonical + best variant).
- * Returns at most `limit` rows above the similarity floor.
+ * catalogue (including the fail-closed location rule: omitted locationId
+ * returns globally-valid cards ONLY), ordered by similarity score (canonical
+ * + best variant). Returns at most `limit` rows above the similarity floor.
  */
 export async function findCandidates(
   client: TenantClient,
-  input: { query: string; channel?: string | undefined; limit?: number | undefined },
+  input: {
+    query: string;
+    channel?: string | undefined;
+    locationId?: string | undefined;
+    limit?: number | undefined;
+  },
 ): Promise<readonly RankedCandidate[]> {
   const trimmed = input.query.trim();
   if (trimmed.length === 0 || trimmed.length > 200) {
@@ -104,6 +113,9 @@ export async function findCandidates(
   }
   if (input.channel !== undefined && input.channel !== 'call' && input.channel !== 'message') {
     throw new RangeError('channel must be call or message');
+  }
+  if (input.locationId !== undefined && !UUID_RE.test(input.locationId)) {
+    throw new RangeError('location id must be a uuid');
   }
   const limit = input.limit ?? 10;
   if (!Number.isInteger(limit) || limit <= 0 || limit > 50) {
@@ -122,9 +134,11 @@ export async function findCandidates(
          and coalesce(updated_at + reverify_after <= now(), false) = true)
        and ($2::text is null and allowed_channels @> '{call,message}'
             or $2::text is not null and $2::text = any (allowed_channels))
+       and ($3::uuid is null and location_id is null
+            or $3::uuid is not null and (location_id is null or location_id = $3::uuid))
        and (canonical % $1 or exists (select 1 from unnest(variants) v where v % $1))
-     order by score desc limit $3::integer`,
-    [trimmed, input.channel ?? null, limit],
+     order by score desc limit $4::integer`,
+    [trimmed, input.channel ?? null, input.locationId ?? null, limit],
   );
   return found.rows
     .filter((r) => r.score >= CANDIDATE_SIMILARITY_FLOOR)

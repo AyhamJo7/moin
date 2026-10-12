@@ -199,6 +199,41 @@ describe('retrieval-exclusion', () => {
     expect(answer?.cardId === card.id ? answer : null).toBeNull();
   });
 
+  evidenceTest('candidates respect the fail-closed location rule', async () => {
+    const locA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    await withTenant(app, ORG_A, (client) =>
+      client.query(`insert into locations (organisation_id, id, name) values ($1, $2, 'Mitte')`, [
+        '11111111-1111-4111-8111-111111111111',
+        locA,
+      ]),
+    );
+    // Location-specific card: unfiltered candidates return globally-valid
+    // cards only (same rule as matchCards and the catalogue); the location
+    // card needs its location named, and a different location stays out.
+    const card = await withTenant(app, ORG_A, (client) =>
+      createFaqCard(client, {
+        canonical: 'Gibt es hier Stampfkartoffeln?',
+        spoken: 'Ja, mit Bratensosse.',
+        locationId: locA,
+      }),
+    );
+    const open = await withTenant(app, ORG_A, (client) =>
+      findCandidates(client, { query: 'Gibt es hier Stampfkartoffeln?' }),
+    );
+    expect(open.map((c) => c.id)).not.toContain(card.id);
+    const here = await withTenant(app, ORG_A, (client) =>
+      findCandidates(client, { query: 'Gibt es hier Stampfkartoffeln?', locationId: locA }),
+    );
+    expect(here.map((c) => c.id)).toContain(card.id);
+    const away = await withTenant(app, ORG_A, (client) =>
+      findCandidates(client, {
+        query: 'Gibt es hier Stampfkartoffeln?',
+        locationId: '99999999-9999-4999-8999-999999999999',
+      }),
+    );
+    expect(away.map((c) => c.id)).not.toContain(card.id);
+  });
+
   evidenceTest('catalogue is closed-set: ids, questions, variants per channel', async () => {
     const card = await withTenant(app, ORG_A, (client) =>
       createFaqCard(client, {
