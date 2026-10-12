@@ -5,7 +5,7 @@
 | Evidence ID | EV-P09-011 |
 | Item | P09.09.05 |
 | Date (UTC) | 2026-10-12 03:00 UTC (ROUND-2: evidence-only re-cite; ROUND-1 P1 fix 02:25 UTC; initial 01:30 UTC) |
-| Commit | `ROUND2-SHA` (ROUND-2 evidence-only: EV + mutation records pin; code unchanged since `15d234e`) |
+| Commit | `e433670` (ROUND-2 evidence-only: EV + mutation records pin; code unchanged since `15d234e`) |
 | Environment | local |
 | Command / procedure | `gates.py full` 14/14 PASS (artifact `20261012T004114Z-full.json`): control-plane (31.6 s), control-plane-lint, conventions, docs-consistency, format (7.2 s), lint, boundaries, typecheck, unit (7.8 s), integration (29.6 s), migrations, build, licences, secret-scan. TEST_* vars exported from `.env.example` values (no worktree secrets file; INV-15); pinned Node 24.21.0 / pnpm 10.34.5 on PATH. |
 | Result | PASS |
