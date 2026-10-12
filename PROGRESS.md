@@ -889,3 +889,4 @@ true, ok: false }` — is serialized by Vitest with none of the `constructor`/`t
   | P09.09 | IN_PROGRESS | feat/p09-09-retrieval | EV-P09-011 | pushed 08ef0db, draft PR #104 open; EV pinned to implementation head 5b19f8c; next: founder review |
   | P09.09 | IN_PROGRESS | feat/p09-09-retrieval | EV-P09-011 | ROUND-1 P1 location fix (findCandidates locationId + fail-closed predicate, test, M3 manifest); 15d234e; 7 retrieval tests green 3x (23/23 with knowledge+faq); next: re-sweep + EV re-cite + gates + push |
   | P09.09 | IN_PROGRESS | feat/p09-09-retrieval | EV-P09-011 | ROUND-1 mutation 3/3 KILLED (M3 location leg, assertion-safe shapeshift) + EV re-cited to 20261012T002209Z; 3549780; next: final pin + gates + push |
+  | P09.09 | IN_PROGRESS | feat/p09-09-retrieval | EV-P09-011 | pushed 3a5da2b, draft PR #104 updated; EV pinned to ROUND-1 head 3549780; next: founder re-review |
