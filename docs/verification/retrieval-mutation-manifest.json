@@ -29,7 +29,7 @@
     "expected": "A location-specific card would appear in unfiltered findCandidates, leaking another location's question in-tenant.",
     "file": "packages/db/src/retrieval.ts",
     "find": "       and ($3::uuid is null and location_id is null\n            or $3::uuid is not null and (location_id is null or location_id = $3::uuid))\n       and (canonical % $1 or exists (select 1 from unnest(variants) v where v % $1))",
-    "replace": "       and (canonical % $1 or exists (select 1 from unnest(variants) v where v % $1))",
+    "replace": "       and ($3::uuid is null or location_id is null or location_id = $3::uuid)\n       and (canonical % $1 or exists (select 1 from unnest(variants) v where v % $1))",
     "killingTest": {
       "file": "packages/db/src/retrieval.integration.test.ts",
       "fullName": "retrieval-exclusion > candidates respect the fail-closed location rule"
