@@ -21,6 +21,7 @@
 import { randomUUID } from 'node:crypto';
 import { lintSpokenAnswer } from '@moin/kernel';
 import { appendAuditEvent } from './audit.ts';
+import { checkKnowledgeChannel, checkKnowledgeChannels } from './knowledge-channels.ts';
 import type { TenantClient } from './tenant.ts';
 
 export class VersionConflictError extends Error {
@@ -116,15 +117,6 @@ function checkSensitivity(sensitivity: string): FaqSensitivity {
   return sensitivity;
 }
 
-function checkChannels(channels: readonly string[] | undefined): string[] {
-  const list = channels ?? ['call', 'message'];
-  if (list.length === 0) throw new RangeError('at least one channel required');
-  for (const c of list) {
-    if (c !== 'call' && c !== 'message') throw new RangeError('channel must be call or message');
-  }
-  return [...list];
-}
-
 export interface FaqInput {
   readonly canonical: string;
   readonly variants?: readonly string[] | undefined;
@@ -178,7 +170,7 @@ export async function createFaqCard(client: TenantClient, input: FaqInput): Prom
   const spoken = checkSpoken(input.spoken);
   const written = checkWritten(input.written);
   const sensitivity = checkSensitivity(input.sensitivity ?? 'public');
-  const channels = checkChannels(input.channels);
+  const channels = checkKnowledgeChannels(input.channels);
   const location = checkLocation(input.locationId);
   const validUntil = checkValidUntil(input.validUntil);
   const reverifyAfter = checkReverifyAfterDays(input.reverifyAfterDays);
@@ -233,7 +225,7 @@ export async function updateFaqCard(
   const spoken = checkSpoken(input.spoken);
   const written = checkWritten(input.written);
   const sensitivity = checkSensitivity(input.sensitivity ?? 'public');
-  const channels = checkChannels(input.channels);
+  const channels = checkKnowledgeChannels(input.channels);
   const location = checkLocation(input.locationId);
   const validUntil = checkValidUntil(input.validUntil);
   const reverifyAfter = checkReverifyAfterDays(input.reverifyAfterDays);
@@ -327,7 +319,7 @@ async function matchCards(
     throw new RangeError('query must be 1..200 characters');
   // Fail-CLOSED defaults: an unfiltered call returns globally-valid cards ONLY.
   // No locationId → location_id IS NULL required (location-specific cards need
-  // their location named). No channel → the card must serve BOTH channels (a
+  // their location named). No channel → the card must serve ALL five channels (a
   // message-only card must not speak on a voice call the caller never named).
   const location =
     input.locationId === undefined
@@ -337,9 +329,7 @@ async function matchCards(
         : (() => {
             throw new RangeError('location id must be a uuid');
           })();
-  if (input.channel !== undefined && input.channel !== 'call' && input.channel !== 'message') {
-    throw new RangeError('channel must be call or message');
-  }
+  checkKnowledgeChannel(input.channel);
   const found = await client.query<MatchRow>(
     `select id::text, spoken_answer, sensitivity,
        greatest(
@@ -358,7 +348,7 @@ async function matchCards(
        and ($2::boolean = false or sensitivity <> 'sensitive')
        and ($3::uuid is null and location_id is null
             or $3::uuid is not null and (location_id is null or location_id = $3::uuid))
-       and ($4::text is null and allowed_channels @> '{call,message}'
+        and ($4::text is null and allowed_channels @> '{call,message,voice,email,web}'
             or $4::text is not null and $4::text = any (allowed_channels))
        and (canonical % $1 or exists (select 1 from unnest(variants) v where v % $1))
      order by score desc limit 3`,

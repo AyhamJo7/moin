@@ -2979,8 +2979,8 @@ Knowledge model + versions + approvals · business profile & structured facts ·
   - [ ] P09.09.04 pgvector HNSW for approved passages with embedding model versioning and a re-embed job (SELL tier)
   - [ ] P09.09.05 Tests: drafts, retired, expired, suspended and disallowed-channel items never retrievable; RLS
 - [ ] **P09.10 Channel and sensitivity scoping** `[G:PILOT]`
-  - [ ] P09.10.01 `allowed_channels` (voice, email, web) enforced in the view
-  - [ ] P09.10.02 Tests per channel
+- [ ] P09.10.01 `allowed_channels` (voice, email, web) enforced in the view — ready for reconfirmation; scanner false positive resolved; EV-P09-012
+- [ ] P09.10.02 Tests per channel — 14/14 gates and 7/7 assertion mutation kills recorded; reconfirmation pending; EV-P09-012
 - [ ] **P09.11 Knowledge eval set** `[G:PILOT]`
   - [ ] P09.11.01 Restaurant knowledge set (synthetic Musterrestaurant + Gurlitt-shaped fictional variant) with question variants, off-catalogue questions and near-miss questions
   - [ ] P09.11.02 Metrics: correct card selection, correct abstention (feeds LG-V06/LG-V07)
