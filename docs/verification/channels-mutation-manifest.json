@@ -16,8 +16,8 @@
     "invariant": "P09.10.02: the closed-set catalogue excludes disallowed channels",
     "expected": "Email-only cards enter the voice catalogue.",
     "file": "packages/db/src/retrieval.ts",
-    "find": "        and ($2::text is null and allowed_channels @> '{call,message,voice,email,web}'\n             or $2::text is not null and $2::text = any (allowed_channels))\n      order by id limit $3::integer",
-    "replace": "      order by id limit $3::integer",
+    "find": "and ($2::text is null and allowed_channels @> '{call,message,voice,email,web}'\n            or $2::text is not null and $2::text = any (allowed_channels))\n     order by id limit $3::integer",
+    "replace": "and ($2::text is null and allowed_channels @> '{call,message,voice,email,web}'\n            or $2::text is not null and $2::text = any (allowed_channels) or true)\n     order by id limit $3::integer",
     "killingTest": {
       "file": "packages/db/src/channels.integration.test.ts",
       "fullName": "channel-scoping > voice sees own and all-channel content only"
@@ -28,8 +28,8 @@
     "invariant": "P09.10.02: ranked candidates exclude disallowed channels",
     "expected": "Email-only cards enter voice candidate generation.",
     "file": "packages/db/src/retrieval.ts",
-    "find": "        and ($2::text is null and allowed_channels @> '{call,message,voice,email,web}'\n             or $2::text is not null and $2::text = any (allowed_channels))\n        and ($3::uuid is null and location_id is null",
-    "replace": "        and ($3::uuid is null and location_id is null",
+    "find": "and ($2::text is null and allowed_channels @> '{call,message,voice,email,web}'\n            or $2::text is not null and $2::text = any (allowed_channels))\n       and ($3::uuid is null and location_id is null",
+    "replace": "and ($2::text is null and allowed_channels @> '{call,message,voice,email,web}'\n            or $2::text is not null and $2::text = any (allowed_channels) or true)\n       and ($3::uuid is null and location_id is null",
     "killingTest": {
       "file": "packages/db/src/channels.integration.test.ts",
       "fullName": "channel-scoping > voice sees own and all-channel content only"
@@ -40,8 +40,8 @@
     "invariant": "P09.10.02: approved answers and grounded candidates share channel isolation",
     "expected": "Disallowed-channel cards enter voice grounded candidates.",
     "file": "packages/db/src/faq.ts",
-    "find": "        and ($4::text is null and allowed_channels @> '{call,message,voice,email,web}'\n             or $4::text is not null and $4::text = any (allowed_channels))",
-    "replace": "",
+    "find": "and ($4::text is null and allowed_channels @> '{call,message,voice,email,web}'\n            or $4::text is not null and $4::text = any (allowed_channels))",
+    "replace": "and ($4::text is null and allowed_channels @> '{call,message,voice,email,web}'\n            or $4::text is not null and $4::text = any (allowed_channels) or true)",
     "killingTest": {
       "file": "packages/db/src/channels.integration.test.ts",
       "fullName": "channel-scoping > voice sees own and all-channel content only"
@@ -52,8 +52,8 @@
     "invariant": "P09.10.02, T-22: fresh sensitive content is verbatim-only on every allowed channel",
     "expected": "A fresh sensitive card enters grounded generation.",
     "file": "packages/db/src/faq.ts",
-    "find": "        and ($2::boolean = false or sensitivity <> 'sensitive')",
-    "replace": "        and ($2::boolean = false or true)",
+    "find": "and ($2::boolean = false or sensitivity <> 'sensitive')",
+    "replace": "and ($2::boolean = false or true)",
     "killingTest": {
       "file": "packages/db/src/channels.integration.test.ts",
       "fullName": "channel-scoping > channel sensitivity matrix preserves verbatim grounded and overdue gates"
@@ -65,7 +65,7 @@
     "expected": "Email-only knowledge is returned by getLiveVersion on voice.",
     "file": "packages/db/src/knowledge.ts",
     "find": "        and ($3::text is null and v.allowed_channels @> '{call,message,voice,email,web}'\n             or $3::text = any (v.allowed_channels))",
-    "replace": "",
+    "replace": "        and ($3::text is null and v.allowed_channels @> '{call,message,voice,email,web}'\n             or $3::text = any (v.allowed_channels) or true)",
     "killingTest": {
       "file": "packages/db/src/channels.integration.test.ts",
       "fullName": "channel-scoping > voice sees own and all-channel content only"
@@ -77,7 +77,7 @@
     "expected": "Email-only knowledge is reported as servable on voice.",
     "file": "packages/db/src/staleness.ts",
     "find": "        and ($4::text is null and v.allowed_channels @> '{call,message,voice,email,web}'\n             or $4::text = any (v.allowed_channels))",
-    "replace": "",
+    "replace": "        and ($4::text is null and v.allowed_channels @> '{call,message,voice,email,web}'\n             or $4::text = any (v.allowed_channels) or true)",
     "killingTest": {
       "file": "packages/db/src/channels.integration.test.ts",
       "fullName": "channel-scoping > voice sees own and all-channel content only"
