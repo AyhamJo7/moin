@@ -40,7 +40,7 @@ async function deadJob(): Promise<string> {
   const claimed = await withTenant(app, ORG_A, (client) =>
     claimJob(client, { queue: job.queue, type: 'sweep-run' }),
   );
-  if (claimed === null || claimed.id !== job.id) throw new Error('claim missed its own row');
+  if (claimed?.id !== job.id) throw new Error('claim missed its own row');
   await withTenant(app, ORG_A, (client) =>
     finishJob(client, job.id, { state: 'dead', errorCode: 'handler-crash' }),
   );
