@@ -23,11 +23,12 @@ export class IdempotencyMismatchError extends Error {
 }
 
 export function hashRequest(body: unknown): string {
-  const canonical = JSON.stringify(body);
-  // JSON.stringify returns undefined for undefined/functions/symbols — the
-  // hash must still be stable, so those canonicalise to 'null'.
+  // JSON.stringify types as `string`, but returns undefined at runtime for
+  // undefined/functions/symbols — the hash must still be stable, so those
+  // canonicalise to 'null'. The typeof guard is runtime truth, not type truth.
+  const canonical: unknown = JSON.stringify(body);
   return createHash('sha256')
-    .update(canonical === undefined ? 'null' : canonical)
+    .update(typeof canonical === 'string' ? canonical : 'null')
     .digest('hex');
 }
 
@@ -94,12 +95,14 @@ export async function executeIdempotent<T>(
     // succeeded row).
     try {
       const result = await input.execute();
-      const stored = JSON.stringify(result);
+      // Same runtime-undefined case as hashRequest: JSON.stringify types as
+      // string but returns undefined for unserialisable results.
+      const stored: unknown = JSON.stringify(result);
       await client.query(
         `update idempotency_keys set status = 'succeeded', response = $4::jsonb
          where organisation_id = app.current_org() and operation = $1::text and key = $2::text
            and request_hash = $3::text`,
-        [operation, key, digest, stored === undefined ? 'null' : stored],
+        [operation, key, digest, typeof stored === 'string' ? stored : 'null'],
       );
       return { result, replayed: false };
     } catch (error) {
@@ -134,12 +137,12 @@ export async function executeIdempotent<T>(
   // Winner is executing or failed: run exactly once here (the lock held the
   // concurrency; a failed winner never stored, so executing is safe).
   const result = await input.execute();
-  const stored = JSON.stringify(result);
+  const stored: unknown = JSON.stringify(result);
   await client.query(
     `update idempotency_keys set status = 'succeeded', response = $4::jsonb
      where organisation_id = app.current_org() and operation = $1::text and key = $2::text
        and request_hash = $3::text`,
-    [operation, key, digest, stored === undefined ? 'null' : stored],
+    [operation, key, digest, typeof stored === 'string' ? stored : 'null'],
   );
   return { result, replayed: false };
 }
