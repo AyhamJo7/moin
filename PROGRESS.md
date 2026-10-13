@@ -931,3 +931,9 @@ true, ok: false }` — is serialized by Vitest with none of the `constructor`/`t
 | Item          | Status           | Commit  | Evidence   | Note                                                                                                                                                                                       |
 | ------------- | ---------------- | ------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | P08.03.01–.04 | READY_FOR_REVIEW | be24d71 | EV-P08-003 | Migration 0064 global inbox; insert-then-ack dedup; withTenant handling; poison DLQ; FS-01 + monotonic tests; 3x green; mutation KILLED; gates 14/14. Stacked on P08.02 (rebase on merge). |
+
+## P08.04 idempotency-key service
+
+| Item          | Status           | Commit  | Evidence   | Note                                                                                                                                        |
+| ------------- | ---------------- | ------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| P08.04.01–.03 | READY_FOR_REVIEW | 730159c | EV-P08-004 | Migration 0065 tenant keys table; replay/422/row-lock service; 3x green; mutation KILLED; gates 14/14. Stacked on P08.03 (rebase on merge). |
