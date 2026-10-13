@@ -923,6 +923,6 @@ true, ok: false }` — is serialized by Vitest with none of the `constructor`/`t
 
 ## P09.11 closeout — stall note (awaiting external relay)
 
-| Item | Status | Commit | Evidence | Note |
-| ---- | ------ | ------ | -------- | ---- |
+| Item            | Status               | Commit  | Evidence                           | Note                                                                                                                                                                                                                                                                                                                                                                                                                |
+| --------------- | -------------------- | ------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | P09.11 closeout | WAITING_FOR_EXTERNAL | 4b34b80 | EV-P09-013; PR #106 CI 16/16 green | What was tried: Step 1 complete (format fix, push, CI verified green via run watch). Why not progressing: independent review verdict + founder merge decision not yet relayed; PLAN ticks and P08.01 start are gated on that relay per owner brief. Counterparty: founder (relays review OK/BLOCK + merge decision). Request date: 2026-10-13. Fallback: none — P08.01 branch creation explicitly held until relay. |
