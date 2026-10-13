@@ -120,7 +120,6 @@ describe('fault-injection', () => {
   it('FS-14: backlog alarms at 5 min age; priority order preserved, no loss', async () => {
     // Backlog: oldest message age drives the alarm (5 min), workers drain in
     // priority order, every message eventually acks — delayed, never lost.
-    const now = Date.now();
     const ages = [7 * 60_000, 2 * 60_000, 30_000];
     const oldestAgeS = Math.max(...ages) / 1000;
     const ALARM_AGE_S = 5 * 60;
@@ -133,7 +132,6 @@ describe('fault-injection', () => {
         message({ id: 'normal-1' }),
       ]),
     });
-    void now;
     // Priority drain: urgent first (the transport orders; the worker acks all).
     const byPriority = ['urgent-1', 'normal-1', 'low-1'];
     await runOnce(transport, (m) => {
