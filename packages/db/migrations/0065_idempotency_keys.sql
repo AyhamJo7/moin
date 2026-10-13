@@ -17,6 +17,7 @@ CREATE TABLE idempotency_keys (
                     CHECK (status IN ('executing', 'succeeded', 'failed')),
   expires_at      timestamptz NOT NULL,
   created_at      timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (organisation_id, id),
   UNIQUE (organisation_id, operation, key)
 );
 
