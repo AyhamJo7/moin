@@ -150,9 +150,8 @@ describe('outbox', () => {
     await insert(ORG_A);
     const lag = await withTenant(app, ORG_A, (client) => outboxLagSeconds(client));
     expect(typeof lag).toBe('number');
-    // Tenant B dispatch never touches tenant A's rows: the dispatcher
-    // boundary is the WHERE clause on app.current_org(), not RLS (the
-    // table is global by dispatcher design, ADR-0007).
+    // Tenant B dispatch never touches tenant A's rows: FORCE RLS hides
+    // every other tenant (migration 0063), same as every tenant table.
     const foreign = await withTenant(app, ORG_B, (client) =>
       dispatchOutboxBatch(client, () => Promise.resolve()),
     );

@@ -96,11 +96,10 @@ export async function insertOutboxEvent(
 export async function outboxLagSeconds(client: TenantClient): Promise<number | null> {
   const found = await client.query<{ lag_s: number | null }>(
     `select coalesce(extract(epoch from now() - min(created_at)), 0)::integer as lag_s
-     from outbox where dispatched_at is null and organisation_id = app.current_org()`,
+     from outbox where dispatched_at is null`,
   );
   const empty = await client.query<{ n: string }>(
-    `select count(*)::text as n from outbox
-     where dispatched_at is null and organisation_id = app.current_org()`,
+    `select count(*)::text as n from outbox where dispatched_at is null`,
   );
   if (empty.rows[0]?.n === '0') return null;
   const lag = found.rows[0]?.lag_s;
@@ -112,11 +111,10 @@ export async function outboxLagSeconds(client: TenantClient): Promise<number | n
  * dispatched; on publish failure bump attempts + next_attempt_at (backoff).
  * Returns the published count.
  *
- * Tenant scoping is the CALLER's job: pass a `withTenant` client and only
- * that tenant's rows are visible (outbox.organisation_id is a plain column —
- * the table is global by dispatcher design, ADR-0007 — so the WHERE clause
- * below, not RLS, enforces the boundary). Workers iterate tenants via
- * `withSystemWork` (P08.02.02); tests pass the tenant client directly.
+ * Tenant scoping is the CALLER's job: pass a `withTenant` client and RLS
+ * (FORCE, migration 0063) hides every other tenant's rows. Workers iterate
+ * tenants via `withSystemWork` (P08.02.02); tests pass the tenant client
+ * directly.
  */
 export async function dispatchOutboxBatch(
   client: TenantClient,
@@ -140,7 +138,6 @@ export async function dispatchOutboxBatch(
             aggregate_ver, event_type, payload, attempts
      from outbox
      where dispatched_at is null
-       and organisation_id = app.current_org()
        and (next_attempt_at is null or next_attempt_at <= now())
      order by created_at, id limit $1::integer
      for update skip locked`,
