@@ -125,8 +125,8 @@ describe('outbox', () => {
           [agg],
         ),
       );
-      expect(failed.rows[0]?.['attempts']).toBe(1);
-      expect(failed.rows[0]?.['has_backoff']).toBe(true);
+      expect(failed.rows[0]?.attempts).toBe(1);
+      expect(failed.rows[0]?.has_backoff).toBe(true);
       // Backoff elapsed (test fast-forwards): republish recurs with the same
       // aggregate version — the idempotent consumer dedups on it.
       await withTenant(app, ORG_A, (client) =>

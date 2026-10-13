@@ -102,8 +102,8 @@ export async function outboxLagSeconds(client: TenantClient): Promise<number | n
     `select count(*)::text as n from outbox
      where dispatched_at is null and organisation_id = app.current_org()`,
   );
-  if (empty.rows[0]?.['n'] === '0') return null;
-  const lag = found.rows[0]?.['lag_s'];
+  if (empty.rows[0]?.n === '0') return null;
+  const lag = found.rows[0]?.lag_s;
   return typeof lag === 'number' ? lag : 0;
 }
 
