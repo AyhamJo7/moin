@@ -150,4 +150,46 @@ describe('worker', () => {
     expect(outcome.processed).toBe(2);
     expect(transport.acked).toHaveLength(2);
   });
+
+  it('bounded concurrency never exceeds the limit', async () => {
+    const transport = stub({
+      receive: (() => {
+        let n = 0;
+        return () => {
+          n += 1;
+          if (n === 1)
+            return Promise.resolve([
+              message({ id: 'a' }),
+              message({ id: 'b' }),
+              message({ id: 'c' }),
+              message({ id: 'd' }),
+            ]);
+          return Promise.resolve([]);
+        };
+      })(),
+    });
+    let live = 0;
+    let peak = 0;
+    const worker = new Worker(
+      transport,
+      () =>
+        new Promise<void>((resolve) => {
+          live += 1;
+          peak = Math.max(peak, live);
+          setTimeout(() => {
+            live -= 1;
+            resolve();
+          }, 20);
+        }),
+      { concurrency: 2 },
+    );
+    let polls = 0;
+    const outcome = await worker.run(() => {
+      polls += 1;
+      return polls > 1;
+    });
+    expect(outcome.processed).toBe(4);
+    expect(peak).toBeLessThanOrEqual(2);
+    expect(peak).toBeGreaterThan(1);
+  });
 });
