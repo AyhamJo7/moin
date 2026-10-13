@@ -53,7 +53,10 @@ function ports() {
           [e164],
         )
         .then((r) =>
-          r.rows.map((row) => ({ organisationId: row.organisation_id, locationId: row.location_id })),
+          r.rows.map((row) => ({
+            organisationId: row.organisation_id,
+            locationId: row.location_id,
+          })),
         ),
     countUnassigned: vi.fn(),
   };
