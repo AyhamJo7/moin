@@ -66,7 +66,13 @@ export class MemoryRateStore implements RateStore {
 }
 
 function checkScope(scope: string): RateScope {
-  if (scope !== 'ip' && scope !== 'session' && scope !== 'user' && scope !== 'tenant' && scope !== 'endpoint') {
+  if (
+    scope !== 'ip' &&
+    scope !== 'session' &&
+    scope !== 'user' &&
+    scope !== 'tenant' &&
+    scope !== 'endpoint'
+  ) {
     throw new RangeError('rate scope must be ip, session, user, tenant or endpoint');
   }
   return scope;
