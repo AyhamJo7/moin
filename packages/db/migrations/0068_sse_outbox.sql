@@ -1,4 +1,6 @@
 -- 0068 — SSE replay window (P08.08.02, ADR-0009).
+-- migration-check: allow create-index-blocking because the index is on a table
+-- created earlier in this same migration, so it is new and empty.
 --
 -- `sse_events` is a TENANT table (RLS + FORCE): the 15-minute replay window
 -- for Last-Event-ID reconnects. The dispatcher writes one row per fan-out
