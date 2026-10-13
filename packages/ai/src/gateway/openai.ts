@@ -101,6 +101,7 @@ export function createOpenAiAdapter(config: OpenAiAdapterConfig): ModelGateway {
   const baseUrl = checkEuEndpoint(config.baseUrl);
   if (config.apiKey.length === 0) throw new RangeError('openai apiKey must not be empty');
   for (const tier of ['fast', 'strong'] as const) {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Record<ModelTier,string> types as complete, but a partial object arrives at runtime; the check is the constructor's contract.
     if (config.models[tier] === undefined || config.models[tier].length === 0) {
       throw new RangeError(`openai model for tier ${tier} is not configured`);
     }
@@ -111,9 +112,14 @@ export function createOpenAiAdapter(config: OpenAiAdapterConfig): ModelGateway {
     async complete<T>(request: GatewayRequest<T>): Promise<GatewayResult<T>> {
       const started = Date.now();
       const latency = (): number => Date.now() - started;
-      const model = config.models[request.tier];
+      // Tiers are validated at construction, so the lookup cannot miss at
+      // runtime — the fallback documents the invariant for the type checker.
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- see above: construction-validated, fallback is documentation.
+      const model: string = config.models[request.tier] ?? 'unconfigured-tier';
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), request.timeoutMs);
+      const timer = setTimeout(() => {
+        controller.abort();
+      }, request.timeoutMs);
       try {
         const response = await fetchFn(`${baseUrl}/responses`, {
           method: 'POST',
@@ -169,7 +175,7 @@ export function createOpenAiAdapter(config: OpenAiAdapterConfig): ModelGateway {
           inputTokens: typeof body.usage?.input_tokens === 'number' ? body.usage.input_tokens : 0,
           outputTokens:
             typeof body.usage?.output_tokens === 'number' ? body.usage.output_tokens : 0,
-          model: model ?? 'unknown',
+          model,
         };
         return { ok: true, value: checked.data, usage, latencyMs: latency() };
       } catch (error) {
