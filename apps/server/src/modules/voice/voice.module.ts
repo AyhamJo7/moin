@@ -11,12 +11,19 @@
  * therefore before Fastify's plugin registration closes.
  */
 
-import { Inject, Module, type OnModuleInit } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Module,
+  type OnApplicationShutdown,
+  type OnModuleInit,
+} from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
 import type { FastifyInstance } from 'fastify';
 import { systemClock, type Clock } from '@moin/kernel';
 import type { Logger } from '@moin/observability';
 import { createInMemorySessionTokenStore, type SessionTokenStore } from '@moin/telephony';
+import { createPool, type Pool } from '@moin/db/pool';
 import { CONFIG } from '../../config/config.module.ts';
 import type { Config } from '../../config/env.ts';
 import { LOGGER } from '../../observability/logger.module.ts';
@@ -25,7 +32,17 @@ import { VoiceController } from './http/voice.controller.ts';
 import { TwilioSignatureGuard } from './http/twilio-signature.guard.ts';
 import { createFileMeasurementSink } from './infrastructure/measurement-sink.ts';
 import { registerRelayTransport } from './infrastructure/relay-transport.ts';
-import { CLOCK, MEASUREMENT_SINK, SESSION_TOKENS } from './voice.tokens.ts';
+import { CLOCK, MEASUREMENT_SINK, ROUTE_POOL, SESSION_TOKENS } from './voice.tokens.ts';
+
+/** Releases the route pool on shutdown, so `app.close()` leaves no socket open. */
+@Injectable()
+class RoutePoolLifecycle implements OnApplicationShutdown {
+  constructor(@Inject(ROUTE_POOL) private readonly pool: Pool) {}
+
+  async onApplicationShutdown(): Promise<void> {
+    await this.pool.end();
+  }
+}
 
 @Module({
   controllers: [VoiceController],
@@ -46,6 +63,20 @@ import { CLOCK, MEASUREMENT_SINK, SESSION_TOKENS } from './voice.tokens.ts';
           ? noMeasurementSink
           : createFileMeasurementSink(config.VOICE_MEASUREMENT_SINK),
     },
+    {
+      // Voice resolves the dialled number before any session exists (P11.01):
+      // a moin_app pool for the DEFINER-only resolve_route call, released on
+      // shutdown like the tenant pool.
+      provide: ROUTE_POOL,
+      inject: [CONFIG],
+      useFactory: (config: Config): Pool =>
+        createPool({
+          connectionString: config.DATABASE_URL,
+          max: 2,
+          application_name: `${config.SERVICE_NAME}-${config.SERVER_ROLE}-route`,
+        }),
+    },
+    RoutePoolLifecycle,
   ],
 })
 export class VoiceModule implements OnModuleInit {

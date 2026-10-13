@@ -11,8 +11,18 @@
  * could exploit.
  */
 
-import { Controller, Header, HttpCode, Inject, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Header,
+  HttpCode,
+  Inject,
+  Optional,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
+import type { Pool } from '@moin/db/pool';
 import type { Clock } from '@moin/kernel';
 import type { Logger } from '@moin/observability';
 import {
@@ -23,9 +33,10 @@ import {
 import { CONFIG } from '../../../config/config.module.ts';
 import type { Config } from '../../../config/env.ts';
 import { LOGGER } from '../../../observability/logger.module.ts';
-import { buildDisclosure, FEASIBILITY_BUSINESS_NAME } from '../domain/disclosure.ts';
+import { routeInboundCall } from '../application/inbound-route.ts';
+import { buildDisclosure } from '../domain/disclosure.ts';
 import { RELAY_PATH, SESSION_TOKEN_PARAMETER } from '../domain/relay-contract.ts';
-import { CLOCK, FEASIBILITY_TENANT_ID, SESSION_TOKENS } from '../voice.tokens.ts';
+import { CLOCK, ROUTE_POOL, SESSION_TOKENS } from '../voice.tokens.ts';
 import { TwilioSignatureGuard } from './twilio-signature.guard.ts';
 
 const HTTP_OK = 200;
@@ -39,21 +50,24 @@ export class VoiceController {
     @Inject(LOGGER) private readonly logger: Logger,
     @Inject(SESSION_TOKENS) private readonly tokens: SessionTokenStore,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Optional() @Inject(ROUTE_POOL) private readonly routePool: Pool | null = null,
   ) {}
 
   /**
    * Answers an inbound call.
    *
-   * The token is minted per call and expires in sixty seconds, so the TwiML is worthless the
-   * moment Twilio has used it — which matters because TwiML is fetched over the public internet
-   * and is visible in the tenant's own provider console.
+   * The dialled number (`To`) resolves to its tenant first (P11.01): unknown
+   * or quarantined numbers get the neutral message, never another tenant.
+   * Routed calls mint a per-call session token (sixty seconds, single use)
+   * and answer with the disclosure TwiML. INV-12: the dialled number never
+   * reaches the logs.
    */
   @Post('inbound')
   // Nest answers POST with 201 by default. TwiML is a representation of the call's next step, not
   // a created resource, and 200 is what the provider's documentation and every example show.
   @HttpCode(HTTP_OK)
   @Header('content-type', 'text/xml; charset=utf-8')
-  async inbound(): Promise<string> {
+  async inbound(@Req() request: FastifyRequest): Promise<string> {
     const websocketOrigin = this.config.VOICE_WEBSOCKET_ORIGIN;
     const publicOrigin = this.config.VOICE_PUBLIC_ORIGIN;
     /* c8 ignore next 3 -- the configuration loader refuses to start the voice role without these. */
@@ -61,9 +75,35 @@ export class VoiceController {
       throw new Error('voice role started without its telephony configuration');
     }
 
+    const body = (request.body ?? {}) as Record<string, string>;
+    const dialled = body['To'] ?? '';
+    const decision = await routeInboundCall(dialled, {
+      resolveRoute: (e164) =>
+        this.routePool === null
+          ? Promise.resolve([])
+          : this.routePool
+              .query<{ organisation_id: string; location_id: string }>(
+                'select * from app.resolve_route($1::text)',
+                [e164],
+              )
+              .then((r) =>
+                r.rows.map((row) => ({
+                  organisationId: row.organisation_id,
+                  locationId: row.location_id,
+                })),
+              ),
+      countUnassigned: () => {
+        this.logger.info(
+          { route: '/voice/inbound', outcome: 'unassigned-number', direction: 'inbound' },
+          'answering an unassigned number',
+        );
+      },
+    });
+    if (!decision.routed) return decision.twiml;
+
     const issued = await issueSessionToken(
       this.tokens,
-      FEASIBILITY_TENANT_ID,
+      decision.organisationId,
       this.clock.now().getTime(),
     );
 
@@ -75,7 +115,7 @@ export class VoiceController {
     return buildConversationRelayTwiML({
       websocketUrl: `${websocketOrigin}${RELAY_PATH}`,
       actionUrl: `${publicOrigin}/voice/session-end`,
-      disclosure: buildDisclosure(FEASIBILITY_BUSINESS_NAME),
+      disclosure: buildDisclosure(this.config.VOICE_BUSINESS_NAME),
       language: this.config.VOICE_LANGUAGE,
       transcription: {
         provider: this.config.VOICE_TRANSCRIPTION_PROVIDER,
