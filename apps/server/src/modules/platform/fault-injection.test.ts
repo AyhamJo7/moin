@@ -10,11 +10,7 @@
  * produces is docs/verification/failure-injection-report.md (P08.11.03).
  */
 import { describe, expect, it } from 'vitest';
-import {
-  MemoryRateStore,
-  checkRate,
-  type RateStore,
-} from './rate-limiter.ts';
+import { MemoryRateStore, checkRate, type RateStore } from './rate-limiter.ts';
 import { Worker, type WorkerTransport, type WorkMessage } from './worker.ts';
 
 function message(over: Partial<WorkMessage> = {}): WorkMessage {
