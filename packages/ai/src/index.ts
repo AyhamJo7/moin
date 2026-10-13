@@ -45,6 +45,29 @@ export type {
   PolicyNlu,
   ReasonCode,
 } from './gateway/policy.ts';
+export {
+  COMMITMENT_WITHOUT_TOKEN,
+  defineTool,
+  guardedExecute,
+  reconcileUnknown,
+} from './gateway/tools.ts';
+export type {
+  GuardCall,
+  GuardOutcome,
+  GuardPorts,
+  GuardRejection,
+  ResultToken,
+  ToolChannel,
+  ToolDef,
+} from './gateway/tools.ts';
+export {
+  VOICE_TOOLS,
+  captureCallback,
+  createAppointmentRequest,
+  createLead,
+  endCall,
+  escalate,
+} from './gateway/voice-tools.ts';
 
 export {
   nearestRankPercentile,
