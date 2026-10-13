@@ -128,12 +128,15 @@ export class Worker {
     const budgetMs = (visibility * 1000) / 2;
     const started = Date.now();
     let extended = false;
-    const extendTimer = setInterval(() => {
-      if (Date.now() - started >= budgetMs && !extended) {
-        extended = true;
-        void this.transport.extendVisibility(message.id, visibility).catch(() => undefined);
-      }
-    }, Math.max(budgetMs, 100));
+    const extendTimer = setInterval(
+      () => {
+        if (Date.now() - started >= budgetMs && !extended) {
+          extended = true;
+          void this.transport.extendVisibility(message.id, visibility).catch(() => undefined);
+        }
+      },
+      Math.max(budgetMs, 100),
+    );
     try {
       await this.handle(message);
       await this.transport.ack(message.id);
