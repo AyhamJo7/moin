@@ -99,6 +99,14 @@ export {
   SCRIPTS_REVIEWED,
 } from './gateway/lifesafety.ts';
 export type { EmergencyCategory, EmergencyHit } from './gateway/lifesafety.ts';
+export {
+  ANOMALY_BLOCKED,
+  delimitUntrusted,
+  detectAnomaly,
+  SYSTEM_GUARD_RAIL,
+  toolAllowedByTemplate,
+} from './gateway/injection.ts';
+export type { AnomalyClass, AnomalyHit } from './gateway/injection.ts';
 
 export {
   nearestRankPercentile,
