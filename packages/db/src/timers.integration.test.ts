@@ -84,15 +84,16 @@ describe('timers', () => {
     expect(lease?.refId).toBeDefined();
     // Crash before complete (restart): lease expires → re-claimable.
     await withTenant(app, ORG_A, (client) =>
-      client.query(`update timers set lease_until = now() - interval '1 second' where id = $1::uuid`, [
-        lease?.id ?? '',
-      ]),
+      client.query(
+        `update timers set lease_until = now() - interval '1 second' where id = $1::uuid`,
+        [lease?.id ?? ''],
+      ),
     );
     const reclaimed = await withTenant(app, ORG_A, (client) => claimDueTimers(client, 10));
     expect(reclaimed.map((t) => t.id)).toContain(lease?.id);
-    expect(
-      await withTenant(app, ORG_A, (client) => completeTimer(client, lease?.id ?? '')),
-    ).toBe(true);
+    expect(await withTenant(app, ORG_A, (client) => completeTimer(client, lease?.id ?? ''))).toBe(
+      true,
+    );
     // Done rows never refire, even past due.
     const after = await withTenant(app, ORG_A, (client) => claimDueTimers(client, 10));
     expect(after.map((t) => t.id)).not.toContain(lease?.id);
