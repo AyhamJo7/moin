@@ -4,11 +4,7 @@
  */
 import { createTestDatabase, evidenceTest, type TestDatabase } from '@moin/testing';
 import { afterAll, beforeAll, describe, expect } from 'vitest';
-import {
-  DuplicateEventError,
-  processInboxEvent,
-  receiveProviderEvent,
-} from './inbox.ts';
+import { DuplicateEventError, processInboxEvent, receiveProviderEvent } from './inbox.ts';
 import { createPool, type Pool } from './pool.ts';
 
 const ORG_A = '11111111-1111-4111-8111-111111111111';
@@ -21,9 +17,10 @@ beforeAll(async () => {
   database = await createTestDatabase('inbox');
   app = database.pool();
   admin = createPool({ connectionString: database.migrationUrl, max: 1 });
-  await admin.query(`insert into organisations (id, slug, name) values ($1, 'alpha', 'Alpha GmbH')`, [
-    ORG_A,
-  ]);
+  await admin.query(
+    `insert into organisations (id, slug, name) values ($1, 'alpha', 'Alpha GmbH')`,
+    [ORG_A],
+  );
 });
 
 afterAll(async () => {
@@ -58,10 +55,15 @@ describe('inbox', () => {
     expect(status).toBe('resolved');
     expect(effects).toBe(1);
     // Reprocessing a resolved row is a no-op, never a second effect.
-    const again = await processInboxEvent(app, first.id, () => Promise.resolve(ORG_A), () => {
-      effects += 1;
-      return Promise.resolve();
-    });
+    const again = await processInboxEvent(
+      app,
+      first.id,
+      () => Promise.resolve(ORG_A),
+      () => {
+        effects += 1;
+        return Promise.resolve();
+      },
+    );
     expect(again).toBe('resolved');
     expect(effects).toBe(1);
   });
@@ -131,14 +133,24 @@ describe('inbox', () => {
       provider: 'twilio',
       providerEventId: 'evt-order-v1',
     });
-    await processInboxEvent(app, v2.id, () => Promise.resolve(ORG_A), () => {
-      applyVersion(2);
-      return Promise.resolve();
-    });
-    await processInboxEvent(app, v1.id, () => Promise.resolve(ORG_A), () => {
-      applyVersion(1);
-      return Promise.resolve();
-    });
+    await processInboxEvent(
+      app,
+      v2.id,
+      () => Promise.resolve(ORG_A),
+      () => {
+        applyVersion(2);
+        return Promise.resolve();
+      },
+    );
+    await processInboxEvent(
+      app,
+      v1.id,
+      () => Promise.resolve(ORG_A),
+      () => {
+        applyVersion(1);
+        return Promise.resolve();
+      },
+    );
     expect(applied).toEqual([2]);
   });
 });
