@@ -81,6 +81,16 @@ export type {
   TemplatePackage,
   TenantOverrides,
 } from './gateway/templates.ts';
+export { evaluateRules, RESTAURANT_DEFAULT_RULES, validateRule } from './gateway/rules.ts';
+export type {
+  OwnerRule,
+  RuleActions,
+  RuleChannel,
+  RuleFacts,
+  RuleTrigger,
+  RuleUrgency,
+  WorkflowRun,
+} from './gateway/rules.ts';
 
 export {
   nearestRankPercentile,
