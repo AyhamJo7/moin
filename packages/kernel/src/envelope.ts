@@ -78,7 +78,8 @@ function checkPayload(payload: unknown): string[] {
     return ['payload must be an object of id strings'];
   }
   for (const [key, value] of Object.entries(payload)) {
-    if (key.length === 0 || key.length > 64) errors.push(`payload key "${key}" must be 1..64 chars`);
+    if (key.length === 0 || key.length > 64)
+      errors.push(`payload key "${key}" must be 1..64 chars`);
     if (!isUuid(value)) errors.push(`payload["${key}"] must be a uuid (ID-only payload)`);
   }
   return errors;

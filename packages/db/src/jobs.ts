@@ -9,12 +9,7 @@
  * on each other; claim + status flip is one guarded UPDATE (stale claim 409s).
  */
 
-import {
-  lintEnvelope,
-  queueFor,
-  type JobEnvelope,
-  type JobType,
-} from '@moin/kernel';
+import { lintEnvelope, queueFor, type JobEnvelope, type JobType } from '@moin/kernel';
 import type { TenantClient } from './tenant.ts';
 
 export class JobConflictError extends Error {

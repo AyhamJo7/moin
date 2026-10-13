@@ -102,6 +102,8 @@ describe('jobs', () => {
       ),
     ).toBeNull();
     // Tenant B never sees tenant A's queue.
-    expect(await withTenant(app, ORG_B, (client) => claimJob(client, { queue: 'sweeps' }))).toBeNull();
+    expect(
+      await withTenant(app, ORG_B, (client) => claimJob(client, { queue: 'sweeps' })),
+    ).toBeNull();
   });
 });
