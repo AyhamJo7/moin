@@ -118,7 +118,7 @@ export function lintEnvelope(input: unknown): EnvelopeLint {
 /** Queue name for a job type (P08.01.02). Unknown types throw — never a default queue. */
 export function queueFor(type: JobType): string {
   const queue = (JOB_QUEUES as Record<string, string>)[type];
-  if (queue === undefined) throw new RangeError(`unknown job type: ${String(type)}`);
+  if (queue === undefined) throw new RangeError(`unknown job type: ${type as string}`);
   return queue;
 }
 

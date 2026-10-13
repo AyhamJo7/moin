@@ -57,8 +57,14 @@ describe('envelope', () => {
   });
 
   it('visibility floors reject short timeouts', () => {
-    expect(() => checkVisibilityTimeout('sweeps', 30)).toThrow(RangeError);
-    expect(() => checkVisibilityTimeout('nope', 360)).toThrow(RangeError);
-    expect(() => checkVisibilityTimeout('sweeps', 360)).not.toThrow();
+    expect(() => {
+      checkVisibilityTimeout('sweeps', 30);
+    }).toThrow(RangeError);
+    expect(() => {
+      checkVisibilityTimeout('nope', 360);
+    }).toThrow(RangeError);
+    expect(() => {
+      checkVisibilityTimeout('sweeps', 360);
+    }).not.toThrow();
   });
 });
