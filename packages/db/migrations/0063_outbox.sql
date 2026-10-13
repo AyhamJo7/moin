@@ -1,4 +1,6 @@
 -- 0063 — transactional outbox (P08.02.01, ADR-0007).
+-- migration-check: allow create-index-blocking because the index is on a table
+-- created earlier in this same migration, so it is new and empty.
 --
 -- `outbox` is GLOBAL (no tenant RLS): the dispatcher crosses tenants by
 -- design, but never reads tenant tables — it carries IDs, handlers re-read
