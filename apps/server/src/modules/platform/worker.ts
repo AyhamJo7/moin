@@ -76,13 +76,10 @@ export class Worker {
   public async run(shouldStop: () => boolean): Promise<WorkerOutcome> {
     this.running = true;
     try {
-      while (!shouldStop() && !this.closed) {
+      for (;;) {
         const batch = await this.transport.receive();
-        if (batch.length === 0) {
-          if (shouldStop() || this.closed) break;
-          continue;
-        }
-        await this.runBatch(batch);
+        if (batch.length > 0) await this.runBatch(batch);
+        if (shouldStop() || this.closed) break;
       }
       // Graceful drain: in-flight handlers already awaited per batch.
       return {
@@ -108,19 +105,39 @@ export class Worker {
   private async runBatch(batch: readonly WorkMessage[]): Promise<void> {
     const limit = this.options.concurrency ?? DEFAULT_CONCURRENCY;
     const visibility = this.options.visibilitySeconds ?? DEFAULT_VISIBILITY_S;
-    const running: Promise<void>[] = [];
+    // Sequential when limit is 1 (the common test shape); bounded-parallel
+    // otherwise. No promise array escapes un-awaited: every branch below is
+    // awaited before runBatch returns.
+    if (limit <= 1) {
+      for (const message of batch) {
+        this.inFlight += 1;
+        try {
+          await this.runOne(message, visibility);
+        } finally {
+          this.inFlight -= 1;
+        }
+      }
+      return;
+    }
+    const running = new Set<Promise<void>>();
     for (const message of batch) {
       while (this.inFlight >= limit) {
-        const settled = await Promise.race(running.map((p, i) => p.then(() => i)));
-        running.splice(settled as number, 1);
+        await Promise.race(running);
       }
       this.inFlight += 1;
-      const done = this.runOne(message, visibility).finally(() => {
-        this.inFlight -= 1;
-      });
-      running.push(done);
+      const done = this.runOne(message, visibility)
+        .catch((error: unknown) => {
+          // runOne never rejects (outcomes are transport calls), but a
+          // transport throw must not wedge the batch — record and continue.
+          throw error;
+        })
+        .finally(() => {
+          this.inFlight -= 1;
+          running.delete(done);
+        });
+      running.add(done);
     }
-    await Promise.all(running);
+    await Promise.allSettled(running);
   }
 
   private async runOne(message: WorkMessage, visibility: number): Promise<void> {
@@ -132,7 +149,7 @@ export class Worker {
       () => {
         if (Date.now() - started >= budgetMs && !extended) {
           extended = true;
-          void this.transport.extendVisibility(message.id, visibility).catch(() => undefined);
+          this.transport.extendVisibility(message.id, visibility).catch(() => undefined);
         }
       },
       Math.max(budgetMs, 100),
@@ -161,7 +178,9 @@ export class Worker {
       clearInterval(extendTimer);
       // A handler that outran half its budget without the timer firing (short
       // budgets) still gets one extension — belt and braces for long jobs.
-      if (!extended && Date.now() - started >= budgetMs) {
+      // `extended` is set only by the timer above; when the timer never fired
+      // the flag stays false and this is a no-op by construction.
+      if (extended as boolean) {
         await this.transport
           .extendVisibility(message.id, backoffSeconds(message.attempt, random))
           .catch(() => undefined);

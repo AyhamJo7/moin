@@ -7,16 +7,16 @@ import { Worker, type WorkerTransport, type WorkMessage } from './worker.ts';
 
 interface StubTransport extends WorkerTransport {
   acked: string[];
-  retried: Array<{ id: string; delay: number }>;
-  deadCalls: Array<{ id: string; reason: string }>;
+  retried: { id: string; delay: number }[];
+  deadCalls: { id: string; reason: string }[];
   extended: string[];
 }
 
 function stub(over: Partial<WorkerTransport> = {}): StubTransport {
   const calls = {
     acked: [] as string[],
-    retried: [] as Array<{ id: string; delay: number }>,
-    deadCalls: [] as Array<{ id: string; reason: string }>,
+    retried: [] as { id: string; delay: number }[],
+    deadCalls: [] as { id: string; reason: string }[],
     extended: [] as string[],
   };
   return {
@@ -73,7 +73,7 @@ describe('worker', () => {
       polls += 1;
       return polls > 1;
     });
-    void outcome;
+    expect(outcome.retried).toBe(1);
     expect(calls).toBe(1);
     expect(transport.retried).toHaveLength(1);
     expect(transport.retried[0]?.delay).toBeGreaterThan(0);
