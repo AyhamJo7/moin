@@ -285,6 +285,18 @@ the ledger carries routing and bookkeeping, never content.
 | `job_runs.error_code`                               | Platform | no — fixed error catalogue                | 30 d      | hard delete | —            |
 | `job_runs.claimed_at`, `job_runs.finished_at`       | Platform | no alone (timestamps)                     | 30 d      | hard delete | —            |
 
+P08.02 (migration 0063) adds the `outbox` table. Same shape as the ledger:
+ID-only references plus dispatch bookkeeping, never content.
+
+| Field                                            | Category | Personal?                                 | Retention | Method      | Subprocessor |
+| ------------------------------------------------ | -------- | ----------------------------------------- | --------- | ----------- | ------------ |
+| `outbox.aggregate`, `outbox.event_type`          | Platform | no — fixed domain catalogue and event     | 30 d      | hard delete | SQS          |
+| `outbox.aggregate_id`                            | Platform | yes (references) — the domain row         | 30 d      | hard delete | —            |
+| `outbox.aggregate_ver`                           | Platform | no — monotonic per-aggregate counter      | 30 d      | hard delete | —            |
+| `outbox.payload`                                 | Platform | yes (references) — ID-only row references | 30 d      | hard delete | —            |
+| `outbox.attempts`                                | Platform | no — counter                              | 30 d      | hard delete | —            |
+| `outbox.next_attempt_at`, `outbox.dispatched_at` | Platform | no alone (timestamps)                     | 30 d      | hard delete | —            |
+
 Knowledge is flagged **possibly** personal on purpose. An owner writing "bei Notfällen Herrn Meier
 anrufen, 0170…" has put a staff member's number into a field nobody classified as personal. The
 approval step (INV-08) is where that is caught, and the approval UI says so.

@@ -93,53 +93,58 @@ describe('outbox', () => {
     expect(again.published).toBe(0);
   });
 
-  evidenceTest('crash between publish and mark republishes; versions order per aggregate', async () => {
-    const agg = randomUUID();
-    await withTenant(app, ORG_A, (client) =>
-      insertOutboxEvent(client, {
-        aggregate: 'tasks',
-        aggregateId: agg,
-        aggregateVersion: 2,
-        eventType: 'task.updated',
-      }),
-    );
-    // Publish fails after the side effect (crash before mark): the row stays
-    // undispatched with attempts bumped and next_attempt_at set (backoff).
-    let crashed = false;
-    await withTenant(app, ORG_A, (client) =>
-      dispatchOutboxBatch(client, (event) => {
-        if (event.aggregateId === agg) {
-          crashed = true;
-          throw new Error('crash after side effect');
-        }
-        return Promise.resolve();
-      }),
-    );
-    expect(crashed).toBe(true);
-    const failed = await withTenant(app, ORG_A, (client) =>
-      client.query<{ attempts: number; has_backoff: boolean }>(
-        `select attempts, (next_attempt_at is not null) as has_backoff from outbox
+  evidenceTest(
+    'crash between publish and mark republishes; versions order per aggregate',
+    async () => {
+      const agg = randomUUID();
+      await withTenant(app, ORG_A, (client) =>
+        insertOutboxEvent(client, {
+          aggregate: 'tasks',
+          aggregateId: agg,
+          aggregateVersion: 2,
+          eventType: 'task.updated',
+        }),
+      );
+      // Publish fails after the side effect (crash before mark): the row stays
+      // undispatched with attempts bumped and next_attempt_at set (backoff).
+      let crashed = false;
+      await withTenant(app, ORG_A, (client) =>
+        dispatchOutboxBatch(client, (event) => {
+          if (event.aggregateId === agg) {
+            crashed = true;
+            throw new Error('crash after side effect');
+          }
+          return Promise.resolve();
+        }),
+      );
+      expect(crashed).toBe(true);
+      const failed = await withTenant(app, ORG_A, (client) =>
+        client.query<{ attempts: number; has_backoff: boolean }>(
+          `select attempts, (next_attempt_at is not null) as has_backoff from outbox
          where aggregate_id = $1::uuid and dispatched_at is null`,
-        [agg],
-      ),
-    );
-    expect(failed.rows[0]?.['attempts']).toBe(1);
-    expect(failed.rows[0]?.['has_backoff']).toBe(true);
-    // Backoff elapsed (test fast-forwards): republish recurs with the same
-    // aggregate version — the idempotent consumer dedups on it.
-    await withTenant(app, ORG_A, (client) =>
-      client.query(`update outbox set next_attempt_at = now() where aggregate_id = $1::uuid`, [agg]),
-    );
-    const redelivered: OutboxEvent[] = [];
-    await withTenant(app, ORG_A, (client) =>
-      dispatchOutboxBatch(client, (event) => {
-        if (event.aggregateId === agg) redelivered.push(event);
-        return Promise.resolve();
-      }),
-    );
-    expect(redelivered).toHaveLength(1);
-    expect(redelivered[0]?.aggregateVersion).toBe(2);
-  });
+          [agg],
+        ),
+      );
+      expect(failed.rows[0]?.['attempts']).toBe(1);
+      expect(failed.rows[0]?.['has_backoff']).toBe(true);
+      // Backoff elapsed (test fast-forwards): republish recurs with the same
+      // aggregate version — the idempotent consumer dedups on it.
+      await withTenant(app, ORG_A, (client) =>
+        client.query(`update outbox set next_attempt_at = now() where aggregate_id = $1::uuid`, [
+          agg,
+        ]),
+      );
+      const redelivered: OutboxEvent[] = [];
+      await withTenant(app, ORG_A, (client) =>
+        dispatchOutboxBatch(client, (event) => {
+          if (event.aggregateId === agg) redelivered.push(event);
+          return Promise.resolve();
+        }),
+      );
+      expect(redelivered).toHaveLength(1);
+      expect(redelivered[0]?.aggregateVersion).toBe(2);
+    },
+  );
 
   evidenceTest('lag reports when backlog exists; tenants isolated', async () => {
     await insert(ORG_A);

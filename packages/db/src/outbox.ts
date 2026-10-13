@@ -80,7 +80,14 @@ export async function insertOutboxEvent(
     `insert into outbox
        (id, organisation_id, aggregate, aggregate_id, aggregate_ver, event_type, payload)
      values ($1, app.current_org(), $2, $3, $4, $5, $6::jsonb)`,
-    [id, aggregate, input.aggregateId, input.aggregateVersion, eventType, JSON.stringify(input.payload ?? {})],
+    [
+      id,
+      aggregate,
+      input.aggregateId,
+      input.aggregateVersion,
+      eventType,
+      JSON.stringify(input.payload ?? {}),
+    ],
   );
   return id;
 }
