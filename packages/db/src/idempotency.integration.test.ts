@@ -35,7 +35,9 @@ describe('idempotency', () => {
   evidenceTest('same key + same body replays without re-executing', async () => {
     const key = randomUUID();
     let executions = 0;
-    const present = (body: { title: string }): Promise<{ result: { n: number }; replayed: boolean }> =>
+    const present = (body: {
+      title: string;
+    }): Promise<{ result: { n: number }; replayed: boolean }> =>
       withTenant(app, ORG_A, (client) =>
         executeIdempotent(client, {
           operation: 'task.create',

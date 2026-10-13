@@ -23,7 +23,9 @@ export class IdempotencyMismatchError extends Error {
 }
 
 export function hashRequest(body: unknown): string {
-  return createHash('sha256').update(JSON.stringify(body) ?? 'null').digest('hex');
+  return createHash('sha256')
+    .update(JSON.stringify(body) ?? 'null')
+    .digest('hex');
 }
 
 function checkOperation(operation: string): string {
@@ -68,7 +70,11 @@ export async function executeIdempotent<T>(
        and key = $2::text and expires_at <= now()`,
     [operation, key],
   );
-  const inserted = await client.query<{ request_hash: string; status: string; response: string | null }>(
+  const inserted = await client.query<{
+    request_hash: string;
+    status: string;
+    response: string | null;
+  }>(
     `insert into idempotency_keys
        (organisation_id, id, operation, key, request_hash, expires_at)
      values (app.current_org(), $1::uuid, $2::text, $3::text, $4::text,
