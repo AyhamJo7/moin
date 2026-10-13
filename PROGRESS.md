@@ -916,7 +916,7 @@ true, ok: false }` — is serialized by Vitest with none of the `constructor`/`t
 
 ## P09.11 knowledge eval set
 
-| Item      | Status           | Commit  | Evidence  | Note |
-| --------- | ---------------- | ------- | --------- | ---- |
+| Item      | Status           | Commit  | Evidence   | Note                                                                                                                                                                                                                                                                                      |
+| --------- | ---------------- | ------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | P09.11.01 | READY_FOR_REVIEW | d362576 | EV-P09-013 | packages/db/src/evalset.ts: 8 synthetic cards (Musterrestaurant + fictional Gurlitt-shaped variant) via public createFaqCard; evalQuestions 15-question fixed set (8 variants, 4 near-miss, 3 off-catalogue); runEvalSet via findAnswer. No migration, no DEFINER change, synthetic only. |
-| P09.11.02 | READY_FOR_REVIEW | d362576 | EV-P09-013 | 2 integration tests; 3x green on evalset+faq+retrieval suites (15/15 each); mutation_check KILLED (without fix exit 1, with fix exit 0, byte-identical); gates full 14/14 at d362576; format fix 366734a whitespace-only. |
+| P09.11.02 | READY_FOR_REVIEW | d362576 | EV-P09-013 | 2 integration tests; 3x green on evalset+faq+retrieval suites (15/15 each); mutation_check KILLED (without fix exit 1, with fix exit 0, byte-identical); gates full 14/14 at d362576; format fix 366734a whitespace-only.                                                                 |
