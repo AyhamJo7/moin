@@ -77,7 +77,11 @@ export async function replaySince(
   if (!Number.isInteger(limit) || limit <= 0 || limit > 500) {
     throw new RangeError('limit must be 1..500');
   }
-  const found = await client.query<{ event_id: string; event_type: string; payload: Record<string, string> }>(
+  const found = await client.query<{
+    event_id: string;
+    event_type: string;
+    payload: Record<string, string>;
+  }>(
     `select event_id::text, event_type, payload from sse_events
      where user_id = $1::uuid and event_id > $2::bigint
        and created_at > now() - ($3::integer || ' minutes')::interval

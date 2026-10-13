@@ -35,10 +35,18 @@ afterAll(async () => {
 describe('sse', () => {
   evidenceTest('reconnect replays missed events in order', async () => {
     const first = await withTenant(app, ORG_A, (client) =>
-      publishEvent(client, { userId: USER_A, type: 'task.created', payload: { taskId: randomUUID() } }),
+      publishEvent(client, {
+        userId: USER_A,
+        type: 'task.created',
+        payload: { taskId: randomUUID() },
+      }),
     );
     const second = await withTenant(app, ORG_A, (client) =>
-      publishEvent(client, { userId: USER_A, type: 'task.updated', payload: { taskId: randomUUID() } }),
+      publishEvent(client, {
+        userId: USER_A,
+        type: 'task.updated',
+        payload: { taskId: randomUUID() },
+      }),
     );
     expect(second).toBeGreaterThan(first);
     // Fresh connect replays everything; reconnect replays only the miss.
