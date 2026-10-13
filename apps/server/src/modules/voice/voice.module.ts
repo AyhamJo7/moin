@@ -28,7 +28,8 @@ import { VoiceController } from './http/voice.controller.ts';
 import { TwilioSignatureGuard } from './http/twilio-signature.guard.ts';
 import { createFileMeasurementSink } from './infrastructure/measurement-sink.ts';
 import { registerRelayTransport } from './infrastructure/relay-transport.ts';
-import { CLOCK, MEASUREMENT_SINK, SESSION_TOKENS } from './voice.tokens.ts';
+import { createInMemoryCallDedup } from './application/call-dedup.ts';
+import { CALL_DEDUP, CLOCK, MEASUREMENT_SINK, SESSION_TOKENS } from './voice.tokens.ts';
 
 @Module({
   imports: [RouteResolverModule],
@@ -49,6 +50,12 @@ import { CLOCK, MEASUREMENT_SINK, SESSION_TOKENS } from './voice.tokens.ts';
         config.VOICE_MEASUREMENT_SINK === undefined
           ? noMeasurementSink
           : createFileMeasurementSink(config.VOICE_MEASUREMENT_SINK),
+    },
+    {
+      // In-process CallSid claims. Same scaling note as the session tokens:
+      // a second voice instance needs Valkey; the port is already the one.
+      provide: CALL_DEDUP,
+      useFactory: () => createInMemoryCallDedup(),
     },
   ],
 })
