@@ -35,15 +35,15 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 describe('openai adapter', () => {
   it('refuses non-EU endpoints and unconfigured tiers at construction', () => {
-    expect(() =>
-      createOpenAiAdapter({ ...CONFIG, baseUrl: 'https://api.openai.com/v1' }),
-    ).toThrow(RangeError);
+    expect(() => createOpenAiAdapter({ ...CONFIG, baseUrl: 'https://api.openai.com/v1' })).toThrow(
+      RangeError,
+    );
     expect(() =>
       createOpenAiAdapter({ ...CONFIG, baseUrl: 'http://api.eu-central.openai.example/v1' }),
     ).toThrow(RangeError);
-    expect(() =>
-      createOpenAiAdapter({ ...CONFIG, models: { fast: '', strong: 'x' } }),
-    ).toThrow(RangeError);
+    expect(() => createOpenAiAdapter({ ...CONFIG, models: { fast: '', strong: 'x' } })).toThrow(
+      RangeError,
+    );
   });
 
   it('hashes caller ids opaquely and pins the snapshot', async () => {
@@ -53,7 +53,10 @@ describe('openai adapter', () => {
     const adapter = createOpenAiAdapter({
       ...CONFIG,
       fetchFn: (async (url: string | URL | Request, init?: RequestInit) => {
-        seen = { url: String(url), body: JSON.parse(String(init?.body)) as Record<string, unknown> };
+        seen = {
+          url: String(url),
+          body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+        };
         return jsonResponse({
           output_text: JSON.stringify({ intent: 'booking_create', confidence: 0.9 }),
           usage: { input_tokens: 10, output_tokens: 5 },
@@ -81,19 +84,15 @@ describe('openai adapter', () => {
     );
     expect(limited).toMatchObject({ ok: false, reason: 'rate_limited', retryAfterMs: 2000 });
     // Provider 500.
-    const broken = await failing(
-      (async () => jsonResponse({}, 500)) as typeof fetch,
-    );
+    const broken = await failing((async () => jsonResponse({}, 500)) as typeof fetch);
     expect(broken).toMatchObject({ ok: false, reason: 'provider_error' });
     // Non-JSON output.
-    const prose = await failing(
-      (async () => jsonResponse({ output_text: 'leider nein' })) as typeof fetch,
-    );
+    const prose = await failing((async () =>
+      jsonResponse({ output_text: 'leider nein' })) as typeof fetch);
     expect(prose).toMatchObject({ ok: false, reason: 'invalid_output' });
     // Schema mismatch (missing confidence).
-    const mismatch = await failing(
-      (async () => jsonResponse({ output_text: JSON.stringify({ intent: 'x' }) })) as typeof fetch,
-    );
+    const mismatch = await failing((async () =>
+      jsonResponse({ output_text: JSON.stringify({ intent: 'x' }) })) as typeof fetch);
     expect(mismatch).toMatchObject({ ok: false, reason: 'invalid_output' });
     // Details never carry model output or prompts.
     if (!mismatch.ok && mismatch.reason === 'invalid_output') {

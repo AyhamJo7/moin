@@ -86,8 +86,14 @@ function failure(
   detail?: string,
   retryAfterMs?: number,
 ): GatewayFailure {
-  return retryAfterMs === undefined
-    ? { ok: false, reason, latencyMs, detail }
+  // exactOptionalPropertyTypes: absent, never explicit-undefined.
+  if (retryAfterMs === undefined) {
+    return detail === undefined
+      ? { ok: false, reason, latencyMs }
+      : { ok: false, reason, latencyMs, detail };
+  }
+  return detail === undefined
+    ? { ok: false, reason, latencyMs, retryAfterMs }
     : { ok: false, reason, latencyMs, detail, retryAfterMs };
 }
 
@@ -114,9 +120,7 @@ export function createOpenAiAdapter(config: OpenAiAdapterConfig): ModelGateway {
           headers: {
             'content-type': 'application/json',
             authorization: `Bearer ${config.apiKey}`,
-            ...(config.projectId === undefined
-              ? {}
-              : { 'openai-project': config.projectId }),
+            ...(config.projectId === undefined ? {} : { 'openai-project': config.projectId }),
           },
           body: JSON.stringify({
             model,
@@ -140,8 +144,7 @@ export function createOpenAiAdapter(config: OpenAiAdapterConfig): ModelGateway {
         });
         if (response.status === 429) {
           const retryAfter = response.headers.get('retry-after');
-          const retryAfterMs =
-            retryAfter === null ? undefined : Number(retryAfter) * 1000;
+          const retryAfterMs = retryAfter === null ? undefined : Number(retryAfter) * 1000;
           return failure('rate_limited', latency(), `http 429 from ${model}`, retryAfterMs);
         }
         if (!response.ok) {
@@ -163,8 +166,7 @@ export function createOpenAiAdapter(config: OpenAiAdapterConfig): ModelGateway {
           return failure('invalid_output', latency(), `schema mismatch: ${paths}`);
         }
         const usage: GatewayUsage = {
-          inputTokens:
-            typeof body.usage?.input_tokens === 'number' ? body.usage.input_tokens : 0,
+          inputTokens: typeof body.usage?.input_tokens === 'number' ? body.usage.input_tokens : 0,
           outputTokens:
             typeof body.usage?.output_tokens === 'number' ? body.usage.output_tokens : 0,
           model: model ?? 'unknown',
