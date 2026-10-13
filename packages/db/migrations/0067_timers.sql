@@ -1,4 +1,6 @@
 -- 0067 — timers table (P08.07.01, ADR-0008).
+-- migration-check: allow create-index-blocking because the index is on a table
+-- created earlier in this same migration, so it is new and empty.
 --
 -- `timers` is a TENANT table (RLS + FORCE): one row per scheduled effect —
 -- task reminders, escalation acknowledgement timers (P14.05), summary expiry,
