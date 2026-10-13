@@ -925,3 +925,9 @@ true, ok: false }` — is serialized by Vitest with none of the `constructor`/`t
 | Item          | Status           | Commit  | Evidence   | Note                                                                                                                                                                                                             |
 | ------------- | ---------------- | ------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | P08.02.01–.04 | READY_FOR_REVIEW | 2c9c938 | EV-P08-002 | Migration 0063 tenant outbox table; in-txn insert; SKIP LOCKED dispatch with backoff; lag input; crash-republish + isolation tests; 3x green; mutation KILLED; gates 14/14. Stacked on P08.01 (rebase on merge). |
+
+## P08.03 provider inbox and deduplication
+
+| Item          | Status           | Commit  | Evidence   | Note                                                                                                                                                                                       |
+| ------------- | ---------------- | ------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| P08.03.01–.04 | READY_FOR_REVIEW | be24d71 | EV-P08-003 | Migration 0064 global inbox; insert-then-ack dedup; withTenant handling; poison DLQ; FS-01 + monotonic tests; 3x green; mutation KILLED; gates 14/14. Stacked on P08.02 (rebase on merge). |
