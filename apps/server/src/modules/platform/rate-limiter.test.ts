@@ -26,7 +26,7 @@ describe('rate-limiter', () => {
     expect(RATE_BUDGETS.ip.limit).toBeLessThanOrEqual(RATE_BUDGETS.tenant.limit);
   });
 
-  it('429 carries Retry-After and no budget oracle', async () => {
+  it('429 carries Retry-After and no budget oracle', () => {
     const problem = rateLimitProblem(17);
     expect(problem.status).toBe(429);
     expect(problem.headers['retry-after']).toBe('17');

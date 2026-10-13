@@ -49,6 +49,9 @@ export class MemoryRateStore implements RateStore {
 
   public constructor(private readonly now: () => number = Date.now) {}
 
+  // Sync body, async seam: the Valkey implementation awaits the network
+  // here; the memory fallback resolves immediately under the same contract.
+  // eslint-disable-next-line @typescript-eslint/require-await -- seam parity, see above
   public async hit(
     key: string,
     windowSeconds: number,
