@@ -346,6 +346,17 @@ bookkeeping — who gets what type — with ID-only payloads, never content.
 | `sse_events.event_type` | Platform | no — fixed event catalogue                | 15 min    | hard delete | —            |
 | `sse_events.payload`    | Platform | yes (references) — ID-only row references | 15 min    | hard delete | —            |
 
+P08.10 (migrations 0069/0070) adds the flag catalogue + tenant overrides.
+Flag names name behaviour, never people; values are booleans.
+
+| Field                                  | Category | Personal?                           | Retention           | Method      | Subprocessor |
+| -------------------------------------- | -------- | ----------------------------------- | ------------------- | ----------- | ------------ |
+| `feature_flag_definitions.name`        | Platform | no — fixed kill-switch catalogue    | permanent policy    | retain      | —            |
+| `feature_flag_definitions.default_on`  | Platform | no — the platform default, not whom | permanent policy    | retain      | —            |
+| `feature_flag_definitions.description` | Platform | no — operator-facing behaviour text | permanent policy    | retain      | —            |
+| `tenant_flag_overrides.flag_name`      | Platform | no — which behaviour the row sets   | while tenant exists | hard delete | —            |
+| `tenant_flag_overrides.enabled`        | Platform | no — a boolean, never identity      | while tenant exists | hard delete | —            |
+
 Knowledge is flagged **possibly** personal on purpose. An owner writing "bei Notfällen Herrn Meier
 anrufen, 0170…" has put a staff member's number into a field nobody classified as personal. The
 approval step (INV-08) is where that is caught, and the approval UI says so.

@@ -46,9 +46,9 @@ describe('flags', () => {
     await expect(withTenant(app, ORG_A, (client) => isEnabled(client, 'nope'))).rejects.toThrow(
       RangeError,
     );
-    await expect(
-      withTenant(app, ORG_A, (client) => setFlag(client, 'nope', true)),
-    ).rejects.toThrow(RangeError);
+    await expect(withTenant(app, ORG_A, (client) => setFlag(client, 'nope', true))).rejects.toThrow(
+      RangeError,
+    );
   });
 
   evidenceTest('ai_answering off means deterministic capture only', async () => {
