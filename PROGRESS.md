@@ -955,3 +955,9 @@ true, ok: false }` — is serialized by Vitest with none of the `constructor`/`t
 | Item          | Status           | Commit  | Evidence   | Note                                                                                                                                                                                                        |
 | ------------- | ---------------- | ------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | P08.07.01–.04 | READY_FOR_REVIEW | 1c71fe7 | EV-P08-007 | Migration 0067 tenant timers; idempotent schedule; leased SKIP LOCKED claims; exactly-once under 3 sweepers; restart survival; 3x green; mutation KILLED; gates 14/14. Stacked on P08.06 (rebase on merge). |
+
+## P08.08 realtime SSE
+
+| Item          | Status           | Commit  | Evidence   | Note                                                                                                                                                                                                                                                                  |
+| ------------- | ---------------- | ------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P08.08.01–.04 | READY_FOR_REVIEW | 0d35767 | EV-P08-008 | Migration 0068 replay window; channel format + heartbeat; reconnect/isol/fallback tests; 3x green; mutation KILLED; gates 14/14. Stacked on P08.07 (rebase on merge). HTTP route + Valkey fan-out wiring deferred to worker integration (no new route in this slice). |
