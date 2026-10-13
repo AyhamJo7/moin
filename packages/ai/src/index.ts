@@ -37,6 +37,14 @@ export {
 export type { GatewayPurpose, PurposePolicy, ResilienceOptions } from './gateway/resilience.ts';
 export { checkEvalFreshness, releaseManifest, versionSet } from './gateway/registry.ts';
 export type { ReleaseManifest, VersionRef, VersionSetSources } from './gateway/registry.ts';
+export { decide } from './gateway/policy.ts';
+export type {
+  PolicyAction,
+  PolicyContext,
+  PolicyDecision,
+  PolicyNlu,
+  ReasonCode,
+} from './gateway/policy.ts';
 
 export {
   nearestRankPercentile,
