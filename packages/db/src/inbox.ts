@@ -114,7 +114,9 @@ export async function processInboxEvent(
     return 'poisoned';
   }
   try {
-    await withTenant(pool, organisationId, (_client) => handle(organisationId, row.id));
+    // The handler receives ids; it opens its own client inside withTenant.
+    // The tenant scope here is what confines it — no client escapes.
+    await withTenant(pool, organisationId, () => handle(organisationId, row.id));
   } catch (error) {
     if (error instanceof RangeError) {
       const reason = error.message.slice(0, 200);
