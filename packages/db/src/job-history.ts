@@ -129,7 +129,11 @@ export async function finishJob(
   id: string,
   outcome:
     | { readonly state: 'succeeded' }
-    | { readonly state: 'failed'; readonly errorCode: string; readonly notBefore?: Date | undefined }
+    | {
+        readonly state: 'failed';
+        readonly errorCode: string;
+        readonly notBefore?: Date | undefined;
+      }
     | { readonly state: 'dead'; readonly errorCode: string },
 ): Promise<void> {
   const job = checkId(id);

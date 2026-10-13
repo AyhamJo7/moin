@@ -6,13 +6,7 @@ import { uuidv7 } from '@moin/kernel';
 import { createTestDatabase, evidenceTest, type TestDatabase } from '@moin/testing';
 import { afterAll, beforeAll, describe, expect } from 'vitest';
 import { listAuditEvents } from './audit.ts';
-import {
-  discardJob,
-  finishJob,
-  inspectJob,
-  listDeadJobs,
-  replayJob,
-} from './job-history.ts';
+import { discardJob, finishJob, inspectJob, listDeadJobs, replayJob } from './job-history.ts';
 import { claimJob, enqueueJob } from './jobs.ts';
 import { createPool, type Pool } from './pool.ts';
 import { withTenant } from './tenant.ts';
@@ -93,9 +87,9 @@ describe('job-history', () => {
     await expect(
       withTenant(app, ORG_A, (client) => discardJob(client, id, 'short')),
     ).rejects.toBeInstanceOf(RangeError);
-    expect(await withTenant(app, ORG_A, (client) => discardJob(client, id, 'superseded by rerun'))).toBe(
-      true,
-    );
+    expect(
+      await withTenant(app, ORG_A, (client) => discardJob(client, id, 'superseded by rerun')),
+    ).toBe(true);
     const events = await withTenant(app, ORG_A, (client) =>
       listAuditEvents(client, { targetId: id }),
     );
