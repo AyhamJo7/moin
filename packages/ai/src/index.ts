@@ -25,6 +25,7 @@ export { createFakeGateway } from './gateway/fake.ts';
 export type { FakeGatewayOptions, ScriptedAnswer, ScriptedOutcome } from './gateway/fake.ts';
 export { createOpenAiAdapter, hashCallerId } from './gateway/openai.ts';
 export type { OpenAiAdapterConfig } from './gateway/openai.ts';
+export { SCHEMA_REJECTIONS, toProviderSchema } from './gateway/structured.ts';
 
 export {
   nearestRankPercentile,

@@ -23,6 +23,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { toProviderSchema } from './structured.ts';
 import type {
   GatewayFailure,
   GatewayRequest,
@@ -71,8 +72,18 @@ export function hashCallerId(raw: string): string {
 }
 
 function requiredKeys(schema: unknown): readonly string[] {
-  // Strict mode needs the required list; Zod strictObjects carry it as the
-  // shape keys. Anything else degrades to no required list (still strict).
+  // Strict mode needs the required list. Prefer the declaration the provider
+  // actually receives (P10.03: declaration and validation share one source);
+  // fall back to the Zod shape keys for contracts toJSONSchema cannot express.
+  try {
+    const generated = toProviderSchema(schema as Parameters<typeof toProviderSchema>[0]);
+    const required = (generated as { required?: unknown }).required;
+    if (Array.isArray(required) && required.every((k): k is string => typeof k === 'string')) {
+      return required;
+    }
+  } catch {
+    // Fall through to the shape-key heuristic below.
+  }
   if (typeof schema === 'object' && schema !== null && '_def' in schema) {
     const def = (schema as { _def: { shape?: Record<string, unknown> } })._def;
     if (def.shape !== undefined && typeof def.shape === 'object') return Object.keys(def.shape);
@@ -166,6 +177,8 @@ export function createOpenAiAdapter(config: OpenAiAdapterConfig): ModelGateway {
         } catch {
           return failure('invalid_output', latency(), 'output is not JSON');
         }
+        // P10.03: re-validation shares the structured-output boundary, so the
+        // provider declaration and the check cannot drift (LG-V04, FS-08).
         const checked = request.schema.safeParse(parsed);
         if (!checked.success) {
           const paths = checked.error.issues.map((i) => i.path.join('.')).join(',');
