@@ -91,6 +91,14 @@ export type {
   RuleUrgency,
   WorkflowRun,
 } from './gateway/rules.ts';
+export {
+  detectEmergency,
+  emergencyFromNlu,
+  HANDWERK_CATEGORIES,
+  RESTAURANT_CATEGORIES,
+  SCRIPTS_REVIEWED,
+} from './gateway/lifesafety.ts';
+export type { EmergencyCategory, EmergencyHit } from './gateway/lifesafety.ts';
 
 export {
   nearestRankPercentile,
