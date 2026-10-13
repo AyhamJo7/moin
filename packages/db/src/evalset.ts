@@ -51,7 +51,8 @@ const MUSTER_CARDS: readonly CardDef[] = [
     key: 'musterrestaurant-hours',
     canonical: 'Wann hat das Musterrestaurant geöffnet?',
     variants: ['Öffnungszeiten Musterrestaurant', 'Wann ist das Musterrestaurant offen?'],
-    spoken: 'Montag bis Freitag elf bis zweiundzwanzig Uhr, Samstag siebzehn bis dreiundzwanzig Uhr.',
+    spoken:
+      'Montag bis Freitag elf bis zweiundzwanzig Uhr, Samstag siebzehn bis dreiundzwanzig Uhr.',
   },
   {
     key: 'musterrestaurant-dayoff',
@@ -109,9 +110,7 @@ export const EVAL_CARDS: readonly CardDef[] = [...MUSTER_CARDS, ...GURLITT_CARDS
  * Seed via the public boundary only. No approval path touched (cards serve
  * directly like every other FaqCard); ids returned keyed by card key.
  */
-export async function seedEvalSet(
-  client: TenantClient,
-): Promise<Readonly<Record<string, string>>> {
+export async function seedEvalSet(client: TenantClient): Promise<Readonly<Record<string, string>>> {
   const ids: Record<string, string> = {};
   for (const card of EVAL_CARDS) {
     const created = await createFaqCard(client, {
