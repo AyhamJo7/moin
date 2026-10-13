@@ -2,7 +2,6 @@
 export const SESSION_TOKENS = Symbol('SESSION_TOKENS');
 export const CLOCK = Symbol('CLOCK');
 export const MEASUREMENT_SINK = Symbol('MEASUREMENT_SINK');
-export const ROUTE_POOL = Symbol('ROUTE_POOL');
 
 /**
  * The single tenant the feasibility spike runs as.

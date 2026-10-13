@@ -22,7 +22,6 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
-import type { Pool } from '@moin/db/pool';
 import type { Clock } from '@moin/kernel';
 import type { Logger } from '@moin/observability';
 import {
@@ -33,10 +32,12 @@ import {
 import { CONFIG } from '../../../config/config.module.ts';
 import type { Config } from '../../../config/env.ts';
 import { LOGGER } from '../../../observability/logger.module.ts';
+import type { RouteResolver } from '../../platform/route-resolver.ts';
+import { ROUTE_RESOLVER } from '../../platform/route-resolver.module.ts';
 import { routeInboundCall } from '../application/inbound-route.ts';
 import { buildDisclosure } from '../domain/disclosure.ts';
 import { RELAY_PATH, SESSION_TOKEN_PARAMETER } from '../domain/relay-contract.ts';
-import { CLOCK, ROUTE_POOL, SESSION_TOKENS } from '../voice.tokens.ts';
+import { CLOCK, SESSION_TOKENS } from '../voice.tokens.ts';
 import { TwilioSignatureGuard } from './twilio-signature.guard.ts';
 
 const HTTP_OK = 200;
@@ -50,7 +51,7 @@ export class VoiceController {
     @Inject(LOGGER) private readonly logger: Logger,
     @Inject(SESSION_TOKENS) private readonly tokens: SessionTokenStore,
     @Inject(CLOCK) private readonly clock: Clock,
-    @Optional() @Inject(ROUTE_POOL) private readonly routePool: Pool | null = null,
+    @Optional() @Inject(ROUTE_RESOLVER) private readonly resolver?: RouteResolver | null,
   ) {}
 
   /**
@@ -79,19 +80,9 @@ export class VoiceController {
     const dialled = body['To'] ?? '';
     const decision = await routeInboundCall(dialled, {
       resolveRoute: (e164) =>
-        this.routePool === null
+        this.resolver === undefined || this.resolver === null
           ? Promise.resolve([])
-          : this.routePool
-              .query<{ organisation_id: string; location_id: string }>(
-                'select * from app.resolve_route($1::text)',
-                [e164],
-              )
-              .then((r) =>
-                r.rows.map((row) => ({
-                  organisationId: row.organisation_id,
-                  locationId: row.location_id,
-                })),
-              ),
+          : this.resolver.resolve(e164),
       countUnassigned: () => {
         this.logger.info(
           { route: '/voice/inbound', outcome: 'unassigned-number', direction: 'inbound' },

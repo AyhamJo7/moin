@@ -12,7 +12,8 @@ import { CONFIG } from '../../../config/config.module.ts';
 import { loadConfig, type Config } from '../../../config/env.ts';
 import { LOGGER } from '../../../observability/logger.module.ts';
 import { noMeasurementSink } from '../application/relay-connection.ts';
-import { CLOCK, MEASUREMENT_SINK, ROUTE_POOL, SESSION_TOKENS } from '../voice.tokens.ts';
+import { ROUTE_RESOLVER } from '../../platform/route-resolver.module.ts';
+import { CLOCK, MEASUREMENT_SINK, SESSION_TOKENS } from '../voice.tokens.ts';
 import { TwilioSignatureGuard } from './twilio-signature.guard.ts';
 import { VoiceController } from './voice.controller.ts';
 
@@ -48,10 +49,10 @@ beforeEach(async () => {
       { provide: CLOCK, useValue: systemClock },
       { provide: MEASUREMENT_SINK, useValue: noMeasurementSink },
       {
-        // No pool in unit tests: every number is unassigned, which is exactly
-        // the unknown-number path P11.02.06 pins. Routed paths ride the
-        // integration test against resolve_route.
-        provide: ROUTE_POOL,
+        // No resolver in unit tests: every number is unassigned, which is
+        // exactly the unknown-number path P11.02.06 pins. Routed paths ride
+        // the integration test against resolve_route.
+        provide: ROUTE_RESOLVER,
         useValue: null,
       },
     ],

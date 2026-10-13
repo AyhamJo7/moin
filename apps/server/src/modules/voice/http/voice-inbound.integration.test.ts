@@ -9,7 +9,6 @@ import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fa
 import { Test } from '@nestjs/testing';
 import { afterAll, beforeAll, describe, expect, vi } from 'vitest';
 import { systemClock } from '@moin/kernel';
-import { createPool, type Pool } from '@moin/db/pool';
 import {
   computeSignature,
   consumeSessionToken,
@@ -21,7 +20,9 @@ import { CONFIG } from '../../../config/config.module.ts';
 import { loadConfig } from '../../../config/env.ts';
 import { LOGGER } from '../../../observability/logger.module.ts';
 import { noMeasurementSink } from '../application/relay-connection.ts';
-import { CLOCK, MEASUREMENT_SINK, ROUTE_POOL, SESSION_TOKENS } from '../voice.tokens.ts';
+import { createRouteResolver, type RouteResolver } from '../../platform/route-resolver.ts';
+import { ROUTE_RESOLVER } from '../../platform/route-resolver.module.ts';
+import { CLOCK, MEASUREMENT_SINK, SESSION_TOKENS } from '../voice.tokens.ts';
 import { TwilioSignatureGuard } from './twilio-signature.guard.ts';
 import { VoiceController } from './voice.controller.ts';
 
@@ -30,7 +31,7 @@ const PUBLIC_ORIGIN = 'https://voice.example.de';
 
 let database: TestDatabase;
 let admin: ReturnType<TestDatabase['fixturePool']>;
-let routePool: Pool;
+let resolver: RouteResolver;
 let app: NestFastifyApplication;
 let tokens: SessionTokenStore;
 
@@ -43,7 +44,7 @@ function number(): string {
 beforeAll(async () => {
   database = await createTestDatabase('voice-inbound');
   admin = database.fixturePool();
-  routePool = createPool({ connectionString: database.migrationUrl, max: 1 });
+  resolver = createRouteResolver(database.migrationUrl, 'voice-inbound-test');
   tokens = createInMemorySessionTokenStore();
   const config = loadConfig({
     SERVER_ROLE: 'voice',
@@ -64,7 +65,7 @@ beforeAll(async () => {
       { provide: SESSION_TOKENS, useValue: tokens },
       { provide: CLOCK, useValue: systemClock },
       { provide: MEASUREMENT_SINK, useValue: noMeasurementSink },
-      { provide: ROUTE_POOL, useValue: routePool },
+      { provide: ROUTE_RESOLVER, useValue: resolver },
     ],
   }).compile();
 
@@ -75,7 +76,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await app.close();
-  await routePool.end();
+  await resolver.end();
   await database.drop();
 });
 

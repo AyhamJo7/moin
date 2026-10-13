@@ -1,50 +1,37 @@
 /**
- * The voice module (P04.04.04).
+ * The voice module (P04.04.04, P11.02).
  *
- * It wires two things that the framework cannot wire for us:
+ * It wires three things that the framework cannot wire for us:
  *
  *   - **the WebSocket route**, because Nest's Fastify adapter does not model one;
  *   - **the measurement sink**, which is the no-op implementation unless a development
- *     configuration explicitly asks for a file.
+ *     configuration explicitly asks for a file;
+ *   - **the route resolver**, the platform-owned pre-tenancy dialled-number lookup.
  *
- * All three happen in `onModuleInit`, which Nest runs during `app.init()` — before `listen()`, and
+ * All happen in `onModuleInit`, which Nest runs during `app.init()` — before `listen()`, and
  * therefore before Fastify's plugin registration closes.
  */
 
-import {
-  Inject,
-  Injectable,
-  Module,
-  type OnApplicationShutdown,
-  type OnModuleInit,
-} from '@nestjs/common';
+import { Module, type OnModuleInit } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
 import type { FastifyInstance } from 'fastify';
 import { systemClock, type Clock } from '@moin/kernel';
 import type { Logger } from '@moin/observability';
 import { createInMemorySessionTokenStore, type SessionTokenStore } from '@moin/telephony';
-import { createPool, type Pool } from '@moin/db/pool';
+import { Inject } from '@nestjs/common';
 import { CONFIG } from '../../config/config.module.ts';
 import type { Config } from '../../config/env.ts';
 import { LOGGER } from '../../observability/logger.module.ts';
+import { RouteResolverModule } from '../platform/route-resolver.module.ts';
 import { noMeasurementSink, type MeasurementSink } from './application/relay-connection.ts';
 import { VoiceController } from './http/voice.controller.ts';
 import { TwilioSignatureGuard } from './http/twilio-signature.guard.ts';
 import { createFileMeasurementSink } from './infrastructure/measurement-sink.ts';
 import { registerRelayTransport } from './infrastructure/relay-transport.ts';
-import { CLOCK, MEASUREMENT_SINK, ROUTE_POOL, SESSION_TOKENS } from './voice.tokens.ts';
-
-/** Releases the route pool on shutdown, so `app.close()` leaves no socket open. */
-@Injectable()
-class RoutePoolLifecycle implements OnApplicationShutdown {
-  constructor(@Inject(ROUTE_POOL) private readonly pool: Pool) {}
-
-  async onApplicationShutdown(): Promise<void> {
-    await this.pool.end();
-  }
-}
+import { CLOCK, MEASUREMENT_SINK, SESSION_TOKENS } from './voice.tokens.ts';
 
 @Module({
+  imports: [RouteResolverModule],
   controllers: [VoiceController],
   providers: [
     TwilioSignatureGuard,
@@ -63,20 +50,6 @@ class RoutePoolLifecycle implements OnApplicationShutdown {
           ? noMeasurementSink
           : createFileMeasurementSink(config.VOICE_MEASUREMENT_SINK),
     },
-    {
-      // Voice resolves the dialled number before any session exists (P11.01):
-      // a moin_app pool for the DEFINER-only resolve_route call, released on
-      // shutdown like the tenant pool.
-      provide: ROUTE_POOL,
-      inject: [CONFIG],
-      useFactory: (config: Config): Pool =>
-        createPool({
-          connectionString: config.DATABASE_URL,
-          max: 2,
-          application_name: `${config.SERVICE_NAME}-${config.SERVER_ROLE}-route`,
-        }),
-    },
-    RoutePoolLifecycle,
   ],
 })
 export class VoiceModule implements OnModuleInit {
