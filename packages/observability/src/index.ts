@@ -4,3 +4,4 @@
 export { createLogger, withRequestContext, currentRequestContext } from './logger.ts';
 export type { Logger, LoggerConfig, RequestContext } from './logger.ts';
 export { redactToAllowlist, ALLOWED_FIELDS, REDACTED } from './redaction.ts';
+export { METRIC_CATALOGUE, isKnownMetric, dashboardMetrics } from './metrics.ts';
