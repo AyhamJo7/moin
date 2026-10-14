@@ -357,6 +357,22 @@ Flag names name behaviour, never people; values are booleans.
 | `tenant_flag_overrides.flag_name`      | Platform | no — which behaviour the row sets   | while tenant exists | hard delete | —            |
 | `tenant_flag_overrides.enabled`        | Platform | no — a boolean, never identity      | while tenant exists | hard delete | —            |
 
+P14.01 (migration 0071) adds the notification model + preferences. Rows are
+delivery bookkeeping — dedup keys, ID-only refs, channel prefs — never content.
+
+| Field                              | Category | Personal?                            | Retention           | Method      | Subprocessor     |
+| ---------------------------------- | -------- | ------------------------------------ | ------------------- | ----------- | ---------------- |
+| `notifications.dedup_key`          | Platform | no — opaque trigger key              | 90 d                | hard delete | channel provider |
+| `notifications.priority`           | Platform | no — routine/urgent                  | 90 d                | hard delete | channel provider |
+| `notifications.ref_kind`           | Platform | no — fixed ref catalogue             | 90 d                | hard delete | —                |
+| `notifications.ref_id`             | Platform | yes (references) — the row to act on | 90 d                | hard delete | —                |
+| `notification_prefs.user_id`       | Platform | pseudonymous (links prefs to a user) | while tenant exists | hard delete | —                |
+| `notification_prefs.channels`      | Platform | no — channel catalogue               | while tenant exists | hard delete | —                |
+| `notification_prefs.urgent_only`   | Platform | no — a boolean, never identity       | while tenant exists | hard delete | —                |
+| `notification_prefs.quiet_from`    | Platform | no — a schedule, never identity      | while tenant exists | hard delete | —                |
+| `notification_prefs.quiet_to`      | Platform | no — a schedule, never identity      | while tenant exists | hard delete | —                |
+| `notification_prefs.urgent_bypass` | Platform | no — a boolean, never identity       | while tenant exists | hard delete | —                |
+
 Knowledge is flagged **possibly** personal on purpose. An owner writing "bei Notfällen Herrn Meier
 anrufen, 0170…" has put a staff member's number into a field nobody classified as personal. The
 approval step (INV-08) is where that is caught, and the approval UI says so.
