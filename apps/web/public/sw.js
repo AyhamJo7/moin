@@ -1,3 +1,4 @@
+/* eslint-disable no-undef -- service-worker globals (self, caches), not app code. */
 /**
  * PWA service worker, app shell only (P13.11.03).
  *
