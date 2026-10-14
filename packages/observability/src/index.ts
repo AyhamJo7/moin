@@ -16,3 +16,5 @@ export {
 export type { CanaryRun } from './call-canary.ts';
 export { orderTimeline, eventIsRedacted } from './debug-timeline.ts';
 export type { TimelineEvent, TimelineKind } from './debug-timeline.ts';
+export { opsAllowed, opsAudit } from './ops-cli.ts';
+export type { OpsAudit, OpsCommand } from './ops-cli.ts';
