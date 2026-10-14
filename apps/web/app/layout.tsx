@@ -7,6 +7,7 @@ const brandName = process.env['NEXT_PUBLIC_BRAND_NAME'] ?? 'Front Office';
 export const metadata = {
   title: brandName,
   description: 'Digitales Front Office für kleine Betriebe',
+  manifest: '/manifest.webmanifest',
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
