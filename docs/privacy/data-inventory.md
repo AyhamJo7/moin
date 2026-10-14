@@ -373,6 +373,20 @@ delivery bookkeeping — dedup keys, ID-only refs, channel prefs — never conte
 | `notification_prefs.quiet_to`      | Platform | no — a schedule, never identity      | while tenant exists | hard delete | —                |
 | `notification_prefs.urgent_bypass` | Platform | no — a boolean, never identity       | while tenant exists | hard delete | —                |
 
+P14.05 (migration 0072) adds escalation chains + acknowledgements. Rows are
+escalation bookkeeping — ordered levels, deadlines, stop states — never content.
+
+| Field                               | Category | Personal?                             | Retention | Method      | Subprocessor |
+| ----------------------------------- | -------- | ------------------------------------- | --------- | ----------- | ------------ |
+| `escalation_chains.ref_kind`        | Platform | no — fixed ref catalogue              | 90 d      | hard delete | —            |
+| `escalation_chains.ref_id`          | Platform | yes (references) — the row to act on  | 90 d      | hard delete | —            |
+| `escalation_chains.level`           | Platform | no — escalation order, never identity | 90 d      | hard delete | —            |
+| `escalation_chains.contact_user_id` | Platform | pseudonymous (links level to a user)  | 90 d      | hard delete | —            |
+| `escalation_chains.due_at`          | Platform | no — a deadline, never identity       | 90 d      | hard delete | —            |
+| `escalation_acks.ref_kind`          | Platform | no — fixed ref catalogue              | 90 d      | hard delete | —            |
+| `escalation_acks.ref_id`            | Platform | yes (references) — the row to act on  | 90 d      | hard delete | —            |
+| `escalation_acks.state`             | Platform | no — ack/done/exhausted               | 90 d      | hard delete | —            |
+
 Knowledge is flagged **possibly** personal on purpose. An owner writing "bei Notfällen Herrn Meier
 anrufen, 0170…" has put a staff member's number into a field nobody classified as personal. The
 approval step (INV-08) is where that is caught, and the approval UI says so.
