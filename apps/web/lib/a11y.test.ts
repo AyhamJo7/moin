@@ -7,7 +7,14 @@ import { focusOrder, meetsTouchFloor, MIN_TOUCH_PX, viewLabel } from './a11y.ts'
 describe('owner-app a11y helpers', () => {
   it('labels every owner view in German without AI jargon', () => {
     const labels = focusOrder().map(viewLabel);
-    expect(labels).toEqual(['Guten Morgen', 'Heute', 'Posteingang', 'Kunden', 'Wissen', 'Einstellungen']);
+    expect(labels).toEqual([
+      'Guten Morgen',
+      'Heute',
+      'Posteingang',
+      'Kunden',
+      'Wissen',
+      'Einstellungen',
+    ]);
     for (const label of labels) {
       expect(label.length).toBeGreaterThan(0);
       expect(label.toLowerCase()).not.toContain('ki');
