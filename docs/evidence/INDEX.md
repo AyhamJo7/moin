@@ -297,3 +297,4 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P13-005 | P13.05.03 | 2026-10-14 | `f7a373a445e2` | customers-lookup | [EV-P13-005-customers-timeline.md](P13/EV-P13-005-customers-timeline.md) |
 | EV-P13-006 | P13.06.05 | 2026-10-14 | `c625c724db29` | knowledge-shapes | [EV-P13-006-knowledge-cards-approval.md](P13/EV-P13-006-knowledge-cards-approval.md) |
 | EV-P13-007 | P13.08.07 | 2026-10-14 | `07bd2ec9b412` | settings-shapes | [EV-P13-007-owner-settings-shapes.md](P13/EV-P13-007-owner-settings-shapes.md) |
+| EV-P13-008 | P13.09.01 | 2026-10-14 | `7c604f621ac8` | Morning summary banner shape + breakdown: buildMorningSummary total/line + hasBreakdown; digest-email comparison rides with P14.06; lib 2/2 3x + mutation KILLED + gates full 14/14. | [EV-P13-008-morning-summary-shapes.md](P13/EV-P13-008-morning-summary-shapes.md) |
