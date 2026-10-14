@@ -296,3 +296,4 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P13-004 | P13.04.03 | 2026-10-14 | `5b1381888754` | inbox-order | [EV-P13-004-inbox-stream-filters.md](P13/EV-P13-004-inbox-stream-filters.md) |
 | EV-P13-005 | P13.05.03 | 2026-10-14 | `f7a373a445e2` | customers-lookup | [EV-P13-005-customers-timeline.md](P13/EV-P13-005-customers-timeline.md) |
 | EV-P13-006 | P13.06.05 | 2026-10-14 | `c625c724db29` | knowledge-shapes | [EV-P13-006-knowledge-cards-approval.md](P13/EV-P13-006-knowledge-cards-approval.md) |
+| EV-P13-007 | P13.08.07 | 2026-10-14 | `07bd2ec9b412` | settings-shapes | [EV-P13-007-owner-settings-shapes.md](P13/EV-P13-007-owner-settings-shapes.md) |
