@@ -1,0 +1,13 @@
+{
+  "nav.today": "Heute",
+  "nav.inbox": "Posteingang",
+  "nav.customers": "Kunden",
+  "nav.knowledge": "Wissen",
+  "nav.rules": "Regeln",
+  "nav.settings": "Einstellungen",
+  "auth.login": "Anmelden",
+  "auth.logout": "Abmelden",
+  "auth.sessionExpired": "Sitzung abgelaufen. Bitte erneut anmelden.",
+  "auth.stepUp": "Bitte erneut bestätigen.",
+  "auth.mfaEnroll": "Zweiten Faktor einrichten."
+}
