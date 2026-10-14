@@ -387,6 +387,18 @@ escalation bookkeeping — ordered levels, deadlines, stop states — never cont
 | `escalation_acks.ref_id`            | Platform | yes (references) — the row to act on  | 90 d      | hard delete | —            |
 | `escalation_acks.state`             | Platform | no — ack/done/exhausted               | 90 d      | hard delete | —            |
 
+P14.07 (migration 0073) adds delivery receipts. Rows are delivery
+bookkeeping — channel, attempt, status, provider IDs — never content.
+
+| Field                                     | Category | Personal?                           | Retention | Method      | Subprocessor     |
+| ----------------------------------------- | -------- | ----------------------------------- | --------- | ----------- | ---------------- |
+| `notification_deliveries.notification_id` | Platform | yes (references) — the notification | 90 d      | hard delete | —                |
+| `notification_deliveries.channel`         | Platform | no — channel catalogue              | 90 d      | hard delete | channel provider |
+| `notification_deliveries.attempt`         | Platform | no — counter                        | 90 d      | hard delete | —                |
+| `notification_deliveries.status`          | Platform | no — pending/sent/failed/dlq        | 90 d      | hard delete | —                |
+| `notification_deliveries.provider_id`     | Platform | no — opaque provider receipt        | 90 d      | hard delete | channel provider |
+| `notification_deliveries.idempotency_key` | Platform | no — opaque redelivery key          | 90 d      | hard delete | —                |
+
 Knowledge is flagged **possibly** personal on purpose. An owner writing "bei Notfällen Herrn Meier
 anrufen, 0170…" has put a staff member's number into a field nobody classified as personal. The
 approval step (INV-08) is where that is caught, and the approval UI says so.
