@@ -42,3 +42,10 @@ export { wafRules, rateLimits, limitPresent } from './waf.ts';
 export type { WafRule, WafRuleKind, RateLimit } from './waf.ts';
 export { rotationDue, breakGlassAllowed, ROTATION_DAYS } from './secrets.ts';
 export type { BreakGlass } from './secrets.ts';
+export {
+  backupConfigValid,
+  restoreTargetValid,
+  PITR_DAYS,
+  BACKUP_RETENTION_DAYS,
+} from './backup.ts';
+export type { BackupConfig } from './backup.ts';
