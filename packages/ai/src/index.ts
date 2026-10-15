@@ -35,6 +35,8 @@ export {
   withResilience,
 } from './gateway/resilience.ts';
 export type { GatewayPurpose, PurposePolicy, ResilienceOptions } from './gateway/resilience.ts';
+export { checkEvalFreshness, releaseManifest, versionSet } from './gateway/registry.ts';
+export type { ReleaseManifest, VersionRef, VersionSetSources } from './gateway/registry.ts';
 
 export {
   nearestRankPercentile,
