@@ -1,0 +1,3 @@
+# Reusable modules per the P05.03.02 registry
+# (network, edge, ecs-service, rds, valkey, sqs-queue, s3-bucket, scheduler,
+# ses, kms, observability, backup, waf). Live applies are founder-only (EXT-09).
