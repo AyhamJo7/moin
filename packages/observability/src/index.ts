@@ -5,3 +5,5 @@ export { createLogger, withRequestContext, currentRequestContext } from './logge
 export type { Logger, LoggerConfig, RequestContext } from './logger.ts';
 export { redactToAllowlist, ALLOWED_FIELDS, REDACTED } from './redaction.ts';
 export { METRIC_CATALOGUE, isKnownMetric, dashboardMetrics } from './metrics.ts';
+export { alarmThresholds, routeAlarm } from './alarms.ts';
+export type { AlarmThreshold, OnCallRouting, RouteChannel, Severity } from './alarms.ts';
