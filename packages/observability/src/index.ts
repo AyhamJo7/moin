@@ -24,3 +24,5 @@ export { aggregateKpis } from './kpi.ts';
 export type { KpiCounts, KpiDashboard } from './kpi.ts';
 export { tenantCostMicros, attributionTotal, costAnomaly } from './cost-attribution.ts';
 export type { TenantUsage, CostRates } from './cost-attribution.ts';
+export { disclosureRecorded, traceLinks } from './disclosure.ts';
+export type { DisclosureRecord, TraceLink } from './disclosure.ts';
