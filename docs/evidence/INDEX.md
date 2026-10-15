@@ -291,3 +291,4 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P12-008 | P12.11.05 | 2026-10-14 | `032dea14e2bb` | silence-turns | [EV-P12-008-silence-speech-bargein.md](P12/EV-P12-008-silence-speech-bargein.md) |
 | EV-P12-009 | P12.12.03 | 2026-10-14 | `9a75a10c7c1b` | outcome-rows | [EV-P12-009-outcome-written-once.md](P12/EV-P12-009-outcome-written-once.md) |
 | EV-P12-010 | P12.13.05 | 2026-10-14 | `ac17237b7024` | summary-drafts | [EV-P12-010-structured-call-summary.md](P12/EV-P12-010-structured-call-summary.md) |
+| EV-P13-001 | P13.01.05 | 2026-10-14 | `901dfe5deb54` | shell-i18n | [EV-P13-001-app-shell-i18n.md](P13/EV-P13-001-app-shell-i18n.md) |
