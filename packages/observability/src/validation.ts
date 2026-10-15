@@ -35,3 +35,24 @@ export function checklistPasses(evidence: Readonly<Record<LaunchItem, boolean>>)
   }
   return true;
 }
+
+export interface GoLiveSignoff {
+  readonly signer: string;
+  readonly dateIso: string;
+}
+
+/** Valid sign-off: non-empty signer + valid ISO date (YYYY-MM-DD). */
+export function signoffValid(signoff: GoLiveSignoff): boolean {
+  if (signoff.signer.trim().length === 0) return false;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(signoff.dateIso)) return false;
+  const date = new Date(`${signoff.dateIso}T00:00:00Z`);
+  return !Number.isNaN(date.getTime());
+}
+
+/** Launch gate: checklist passes AND a valid go-live sign-off is recorded. */
+export function launchReady(
+  evidence: Readonly<Record<LaunchItem, boolean>>,
+  signoff: GoLiveSignoff,
+): boolean {
+  return checklistPasses(evidence) && signoffValid(signoff);
+}

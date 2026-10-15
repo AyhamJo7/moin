@@ -91,5 +91,5 @@ export {
   SCALE_HEADROOM,
 } from './reliability.ts';
 export type { SloSample, LoadState, ScaleCapacity, DrCost } from './reliability.ts';
-export { matrixComplete, launchChecklist, checklistPasses } from './validation.ts';
-export type { ValidationMatrix, LaunchItem } from './validation.ts';
+export { matrixComplete, launchChecklist, checklistPasses, signoffValid, launchReady } from './validation.ts';
+export type { ValidationMatrix, LaunchItem, GoLiveSignoff } from './validation.ts';

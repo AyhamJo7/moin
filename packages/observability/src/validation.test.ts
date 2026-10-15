@@ -1,8 +1,14 @@
 /**
- * Multi-customer validation (P32 SELL): matrix-complete + checklist-passes.
+ * Multi-customer validation (P32 SELL): matrix-complete + checklist-passes + signoff.
  */
 import { describe, expect, it } from 'vitest';
-import { checklistPasses, launchChecklist, matrixComplete } from './validation.ts';
+import {
+  checklistPasses,
+  launchChecklist,
+  launchReady,
+  matrixComplete,
+  signoffValid,
+} from './validation.ts';
 
 describe('multi-customer validation', () => {
   it('completes the matrix at 3 tenants × 30 days × 1 non-restaurant', () => {
@@ -34,5 +40,23 @@ describe('multi-customer validation', () => {
     };
     expect(checklistPasses({ ...full })).toBe(true);
     expect(checklistPasses({ ...full, signoff: false })).toBe(false);
+  });
+
+  it('validates the go-live sign-off and wires it into the gate', () => {
+    const full = {
+      entitlements: true,
+      billing: true,
+      support: true,
+      onboarding: true,
+      signoff: true,
+    };
+    expect(signoffValid({ signer: 'founder', dateIso: '2027-01-15' })).toBe(true);
+    expect(signoffValid({ signer: '  ', dateIso: '2027-01-15' })).toBe(false);
+    expect(signoffValid({ signer: 'founder', dateIso: 'not-a-date' })).toBe(false);
+    expect(launchReady({ ...full }, { signer: 'founder', dateIso: '2027-01-15' })).toBe(true);
+    expect(launchReady({ ...full, signoff: false }, { signer: 'founder', dateIso: '2027-01-15' })).toBe(
+      false,
+    );
+    expect(launchReady({ ...full }, { signer: '', dateIso: '2027-01-15' })).toBe(false);
   });
 });
