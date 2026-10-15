@@ -1,11 +1,11 @@
 /**
- * Booking core (P20 SELL): hold-confirm + double-book-refused.
+ * Booking core (P20 SELL): hold-confirm + genuine two-caller refusal.
  * Synthetic (INV-16).
  */
 import { randomUUID } from 'node:crypto';
 import { createTestDatabase, evidenceTest, type TestDatabase } from '@moin/testing';
 import { afterAll, beforeAll, describe, expect } from 'vitest';
-import { confirmHold, holdSlot } from './booking.ts';
+import { confirmHold, HoldRefused, holdSlot } from './booking.ts';
 import { createPool, type Pool } from './pool.ts';
 import { withTenant } from './tenant.ts';
 
@@ -37,7 +37,7 @@ function slot() {
 }
 
 describe('booking', () => {
-  evidenceTest('hold then confirm succeeds', async () => {
+  evidenceTest('hold then confirm succeeds; confirm retry reuses the marker', async () => {
     const { start, end } = slot();
     const resourceId = randomUUID();
     const holdId = await withTenant(app, ORG_A, (client) =>
@@ -48,13 +48,41 @@ describe('booking', () => {
         idempotencyKey: `h:${resourceId}`,
       }),
     );
+    const key = `c:${resourceId}`;
     const ok = await withTenant(app, ORG_A, (client) =>
-      confirmHold(client, { holdId, idempotencyKey: `c:${resourceId}` }),
+      confirmHold(client, { holdId, idempotencyKey: key }),
     );
     expect(ok).toBe(true);
+    const again = await withTenant(app, ORG_A, (client) =>
+      confirmHold(client, { holdId, idempotencyKey: key }),
+    );
+    expect(again).toBe(true);
   });
 
-  evidenceTest('double-book refused: retry reuses the hold; tenants isolated', async () => {
+  evidenceTest('two callers same slot: second key refused (HoldRefused)', async () => {
+    const { start, end } = slot();
+    const resourceId = randomUUID();
+    await withTenant(app, ORG_A, (client) =>
+      holdSlot(client, {
+        resourceId,
+        startsAt: start,
+        endsAt: end,
+        idempotencyKey: `caller-a:${resourceId}`,
+      }),
+    );
+    await expect(
+      withTenant(app, ORG_A, (client) =>
+        holdSlot(client, {
+          resourceId,
+          startsAt: start,
+          endsAt: end,
+          idempotencyKey: `caller-b:${resourceId}`,
+        }),
+      ),
+    ).rejects.toThrow(HoldRefused);
+  });
+
+  evidenceTest('same-key retry reuses the hold; tenants isolated', async () => {
     const { start, end } = slot();
     const resourceId = randomUUID();
     const key = `dbl:${resourceId}`;
