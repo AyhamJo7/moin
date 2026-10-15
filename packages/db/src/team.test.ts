@@ -37,9 +37,10 @@ describe('team workflows', () => {
       { id: 't3', assigneeUserId: null, assigneeRole: null, sensitive: false },
     ] as const;
     expect(viewTasks([...tasks], { userId: A, role: 'owner' })).toHaveLength(3);
-    expect(
-      viewTasks([...tasks], { userId: B, role: 'admin' }).map((t) => t.id),
-    ).toEqual(['t1', 't3']);
+    expect(viewTasks([...tasks], { userId: B, role: 'admin' }).map((t) => t.id)).toEqual([
+      't1',
+      't3',
+    ]);
     expect(viewTasks([...tasks], { userId: B, role: 'staff' }).map((t) => t.id)).toEqual([
       't1',
       't3',
