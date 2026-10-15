@@ -286,3 +286,4 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P12-003 | P12.06.04 | 2026-10-13 | `a3f9659ad387` | answerFaq approved-card verbatim-or-escalate (sensitive same path, miss BR-129 uncertainty + callback offer); DB findAnswer wiring rides separately; verbatim + miss tests; unit 51/51 3x + integration green in gates; mutation KILLED; gates 14/14 | [EV-P12-003-faq-verbatim-answers.md](P12/EV-P12-003-faq-verbatim-answers.md) |
 | EV-P12-004 | P12.09.04 | 2026-10-13 | `553b95d6d386` | callback-capture-turns | [EV-P12-004-callback-capture-readback.md](P12/EV-P12-004-callback-capture-readback.md) |
 | EV-P12-005 | P12.08.03 | 2026-10-14 | `391d54af2aaf` | lead-turns | [EV-P12-005-lead-slot-loop.md](P12/EV-P12-005-lead-slot-loop.md) |
+| EV-P12-006 | P12.07.04 | 2026-10-14 | `3b804777fbdc` | appointment-turns | [EV-P12-006-appointment-request-capture.md](P12/EV-P12-006-appointment-request-capture.md) |
