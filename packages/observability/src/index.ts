@@ -59,3 +59,5 @@ export { drSteps, drPlanComplete, DR_RTO_HOURS, DR_RPO_HOURS } from './dr-plan.t
 export type { DrPlan, DrStep } from './dr-plan.ts';
 export { readinessGates, readinessComplete } from './readiness-review.ts';
 export type { ReadinessGate, ReadinessReview } from './readiness-review.ts';
+export { dailyReviewQueue, weeklyReportInputs, monitoringCovers } from './pilot-monitoring.ts';
+export type { ReviewItem, ReportInput } from './pilot-monitoring.ts';
