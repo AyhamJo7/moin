@@ -81,8 +81,13 @@ export type { FindingSeverity, FindingState, PentestFinding } from './hardening-
 export {
   sloHolds,
   shedFires,
+  scaleMeets,
+  drCostHolds,
   TURN_P95_MS,
   API_READ_P95_MS,
   API_WRITE_P95_MS,
+  SCALE_SESSIONS,
+  SCALE_API_RPS,
+  SCALE_HEADROOM,
 } from './reliability.ts';
-export type { SloSample, LoadState } from './reliability.ts';
+export type { SloSample, LoadState, ScaleCapacity, DrCost } from './reliability.ts';

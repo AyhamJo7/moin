@@ -37,3 +37,39 @@ export interface LoadState {
 export function shedFires(state: LoadState): boolean {
   return state.queueAgeMs > 300_000 || state.dbCpu > 0.6;
 }
+
+/** Scale targets: concurrent voice sessions + API rps + headroom ratio. */
+export const SCALE_SESSIONS = 100;
+export const SCALE_API_RPS = 50;
+export const SCALE_HEADROOM = 1.5;
+
+export interface ScaleCapacity {
+  readonly sessions: number;
+  readonly apiRps: number;
+  readonly headroom: number;
+}
+
+/** True when capacity meets sessions + rps with headroom. */
+export function scaleMeets(capacity: ScaleCapacity): boolean {
+  if (!Number.isFinite(capacity.sessions) || capacity.sessions < SCALE_SESSIONS) return false;
+  if (!Number.isFinite(capacity.apiRps) || capacity.apiRps < SCALE_API_RPS) return false;
+  if (!Number.isFinite(capacity.headroom) || capacity.headroom < SCALE_HEADROOM) return false;
+  return true;
+}
+
+export interface DrCost {
+  readonly rtoHours: number;
+  readonly rpoHours: number;
+  readonly costPerTenantMicros: number;
+  readonly cogsLimitMicros: number;
+}
+
+/** DR-cost guardrails: RTO ≤ 48 h, RPO ≤ 24 h, per-tenant cost within COGS. */
+export function drCostHolds(guard: DrCost): boolean {
+  if (!Number.isFinite(guard.rtoHours) || guard.rtoHours > 48) return false;
+  if (!Number.isFinite(guard.rpoHours) || guard.rpoHours > 24) return false;
+  if (!Number.isFinite(guard.costPerTenantMicros) || !Number.isFinite(guard.cogsLimitMicros)) {
+    return false;
+  }
+  return guard.costPerTenantMicros <= guard.cogsLimitMicros;
+}
