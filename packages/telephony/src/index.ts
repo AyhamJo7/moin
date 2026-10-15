@@ -6,6 +6,7 @@
 // in the product (PLAN P04). P11 consumes it; nothing here is a spike to be thrown away.
 
 export { escapeXml } from './twiml/escape.ts';
+export { assertNoRecording, hasNoRecording } from './twiml/no-recording.ts';
 export { buildUnassignedTwiML, UNASSIGNED_MESSAGE } from './twiml/unassigned.ts';
 export { buildConversationRelayTwiML, TwiMLBuildError } from './twiml/connect-relay.ts';
 export type {
