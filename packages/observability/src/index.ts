@@ -53,3 +53,5 @@ export { drillCompletes, signoffRecorded } from './restore-drill.ts';
 export type { DrillCheck, DrillRecord } from './restore-drill.ts';
 export { triageSlaDays, baselineHolds } from './scan-baseline.ts';
 export type { ScanFinding, ScanSeverity, TriageState } from './scan-baseline.ts';
+export { elevationAllowed, accessPath } from './access-policy.ts';
+export type { Elevation, ProdRole } from './access-policy.ts';
