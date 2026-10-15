@@ -26,6 +26,13 @@ export type { FakeGatewayOptions, ScriptedAnswer, ScriptedOutcome } from './gate
 export { createOpenAiAdapter, hashCallerId } from './gateway/openai.ts';
 export type { OpenAiAdapterConfig } from './gateway/openai.ts';
 export { SCHEMA_REJECTIONS, toProviderSchema } from './gateway/structured.ts';
+export {
+  MAX_INPUT_TOKENS_PER_CALL,
+  PURPOSE_POLICIES,
+  resetBreakers,
+  withResilience,
+} from './gateway/resilience.ts';
+export type { GatewayPurpose, PurposePolicy, ResilienceOptions } from './gateway/resilience.ts';
 
 export {
   nearestRankPercentile,
