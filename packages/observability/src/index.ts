@@ -22,3 +22,5 @@ export { logIsValid, breachPackComplete } from './incident.ts';
 export type { IncidentLog, IncidentSeverity, BreachPack } from './incident.ts';
 export { aggregateKpis } from './kpi.ts';
 export type { KpiCounts, KpiDashboard } from './kpi.ts';
+export { tenantCostMicros, attributionTotal, costAnomaly } from './cost-attribution.ts';
+export type { TenantUsage, CostRates } from './cost-attribution.ts';
