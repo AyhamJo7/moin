@@ -27,3 +27,10 @@ export type { TenantUsage, CostRates } from './cost-attribution.ts';
 export { disclosureRecorded, traceLinks } from './disclosure.ts';
 export type { DisclosureRecord, TraceLink } from './disclosure.ts';
 export { businessInScope, intentDenied, scopePasses, SCOPE_REFUSAL } from './scope-guard.ts';
+export {
+  turnFieldsValid,
+  turnLogAllowed,
+  FREE_TEXT_MAX,
+  TURN_LOG_TTL_DAYS,
+} from './turnlog-policy.ts';
+export type { TurnFields, TurnLogOptIn } from './turnlog-policy.ts';
