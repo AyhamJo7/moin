@@ -40,3 +40,5 @@ export { hardeningComplete, hardeningOpen } from './hardening.ts';
 export type { HardeningCheck } from './hardening.ts';
 export { wafRules, rateLimits, limitPresent } from './waf.ts';
 export type { WafRule, WafRuleKind, RateLimit } from './waf.ts';
+export { rotationDue, breakGlassAllowed, ROTATION_DAYS } from './secrets.ts';
+export type { BreakGlass } from './secrets.ts';
