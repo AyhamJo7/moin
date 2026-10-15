@@ -311,6 +311,19 @@ provider's identifiers, not ours. Payload retention 30 days.
 | `provider_inbox.poison_reason`                             | Platform | no — fixed error catalogue text                       | 30 d      | hard delete | —            |
 | `provider_inbox.received_at`, `provider_inbox.resolved_at` | Platform | no alone (timestamps)                                 | 30 d      | hard delete | —            |
 
+P08.04 (migration 0065) adds the `idempotency_keys` table. The request body is
+never stored — only its SHA-256 — and the stored response replays 24 h
+(expires_at is the retention hook).
+
+| Field                           | Category | Personal?                                         | Retention | Method      | Subprocessor |
+| ------------------------------- | -------- | ------------------------------------------------- | --------- | ----------- | ------------ |
+| `idempotency_keys.operation`    | Platform | no — fixed operation catalogue                    | 24 h      | hard delete | —            |
+| `idempotency_keys.key`          | Platform | pseudonymous (client-supplied request reference)  | 24 h      | hard delete | —            |
+| `idempotency_keys.request_hash` | Platform | no — SHA-256 of the body, never the body (INV-12) | 24 h      | hard delete | —            |
+| `idempotency_keys.response`     | Platform | **possibly** — stored mutation result, minimised  | 24 h      | hard delete | —            |
+| `idempotency_keys.status`       | Platform | no — fixed key state                              | 24 h      | hard delete | —            |
+| `idempotency_keys.expires_at`   | Platform | no — a deadline derived from creation             | 24 h      | hard delete | —            |
+
 Knowledge is flagged **possibly** personal on purpose. An owner writing "bei Notfällen Herrn Meier
 anrufen, 0170…" has put a staff member's number into a field nobody classified as personal. The
 approval step (INV-08) is where that is caught, and the approval UI says so.
