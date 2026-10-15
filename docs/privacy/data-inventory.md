@@ -336,6 +336,16 @@ bookkeeping — what fires when — never content.
 | `timers.attempts`    | Platform | no — counter                           | until done + 30 d | hard delete | —            |
 | `timers.done_at`     | Platform | no — a completion timestamp            | until done + 30 d | hard delete | —            |
 
+P08.08 (migration 0068) adds the `sse_events` replay window. Rows are fan-out
+bookkeeping — who gets what type — with ID-only payloads, never content.
+
+| Field                   | Category | Personal?                                 | Retention | Method      | Subprocessor |
+| ----------------------- | -------- | ----------------------------------------- | --------- | ----------- | ------------ |
+| `sse_events.user_id`    | Platform | pseudonymous (links the event to a user)  | 15 min    | hard delete | Valkey       |
+| `sse_events.event_id`   | Platform | no — monotonic stream counter             | 15 min    | hard delete | —            |
+| `sse_events.event_type` | Platform | no — fixed event catalogue                | 15 min    | hard delete | —            |
+| `sse_events.payload`    | Platform | yes (references) — ID-only row references | 15 min    | hard delete | —            |
+
 Knowledge is flagged **possibly** personal on purpose. An owner writing "bei Notfällen Herrn Meier
 anrufen, 0170…" has put a staff member's number into a field nobody classified as personal. The
 approval step (INV-08) is where that is caught, and the approval UI says so.
