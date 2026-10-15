@@ -26,3 +26,4 @@ export { tenantCostMicros, attributionTotal, costAnomaly } from './cost-attribut
 export type { TenantUsage, CostRates } from './cost-attribution.ts';
 export { disclosureRecorded, traceLinks } from './disclosure.ts';
 export type { DisclosureRecord, TraceLink } from './disclosure.ts';
+export { businessInScope, intentDenied, scopePasses, SCOPE_REFUSAL } from './scope-guard.ts';
