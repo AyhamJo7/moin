@@ -54,9 +54,9 @@ describe('multi-customer validation', () => {
     expect(signoffValid({ signer: '  ', dateIso: '2027-01-15' })).toBe(false);
     expect(signoffValid({ signer: 'founder', dateIso: 'not-a-date' })).toBe(false);
     expect(launchReady({ ...full }, { signer: 'founder', dateIso: '2027-01-15' })).toBe(true);
-    expect(launchReady({ ...full, signoff: false }, { signer: 'founder', dateIso: '2027-01-15' })).toBe(
-      false,
-    );
+    expect(
+      launchReady({ ...full, signoff: false }, { signer: 'founder', dateIso: '2027-01-15' }),
+    ).toBe(false);
     expect(launchReady({ ...full }, { signer: '', dateIso: '2027-01-15' })).toBe(false);
   });
 });
