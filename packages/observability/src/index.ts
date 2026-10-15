@@ -61,3 +61,5 @@ export { readinessGates, readinessComplete } from './readiness-review.ts';
 export type { ReadinessGate, ReadinessReview } from './readiness-review.ts';
 export { dailyReviewQueue, weeklyReportInputs, monitoringCovers } from './pilot-monitoring.ts';
 export type { ReviewItem, ReportInput } from './pilot-monitoring.ts';
+export { pg3Gate, gateGaps } from './pg3-gate.ts';
+export type { GateInputs, GateVerdict } from './pg3-gate.ts';
