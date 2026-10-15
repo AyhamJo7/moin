@@ -68,6 +68,19 @@ export {
   endCall,
   escalate,
 } from './gateway/voice-tools.ts';
+export {
+  bindTemplate,
+  hashTemplate,
+  loadTemplate,
+  RESTAURANT_V1,
+  SENSITIVE_DENYLIST,
+} from './gateway/templates.ts';
+export type {
+  BoundTemplate,
+  TemplateIntent,
+  TemplatePackage,
+  TenantOverrides,
+} from './gateway/templates.ts';
 
 export {
   nearestRankPercentile,
