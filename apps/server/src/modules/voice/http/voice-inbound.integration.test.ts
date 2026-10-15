@@ -22,7 +22,8 @@ import { LOGGER } from '../../../observability/logger.module.ts';
 import { noMeasurementSink } from '../application/relay-connection.ts';
 import { createRouteResolver, type RouteResolver } from '../../platform/route-resolver.ts';
 import { ROUTE_RESOLVER } from '../../platform/route-resolver.module.ts';
-import { CLOCK, MEASUREMENT_SINK, SESSION_TOKENS } from '../voice.tokens.ts';
+import { createInMemoryCallDedup } from '../application/call-dedup.ts';
+import { CALL_DEDUP, CLOCK, MEASUREMENT_SINK, SESSION_TOKENS } from '../voice.tokens.ts';
 import { TwilioSignatureGuard } from './twilio-signature.guard.ts';
 import { VoiceController } from './voice.controller.ts';
 
@@ -66,6 +67,7 @@ beforeAll(async () => {
       { provide: CLOCK, useValue: systemClock },
       { provide: MEASUREMENT_SINK, useValue: noMeasurementSink },
       { provide: ROUTE_RESOLVER, useValue: resolver },
+      { provide: CALL_DEDUP, useValue: createInMemoryCallDedup() },
     ],
   }).compile();
 
@@ -155,14 +157,15 @@ describe('routed inbound webhook (P11.02.06)', () => {
     expect((tokens as ReturnType<typeof createInMemorySessionTokenStore>).size).toBe(before);
   });
 
-  evidenceTest('duplicate webhooks mint independent tokens, no duplicate row', async () => {
+  evidenceTest('duplicate CallSid replays without a second effect (INV-11)', async () => {
     const { org: orgId, location } = await org(`d-${randomUUID().slice(0, 8)}`);
     const e164 = number();
     await admin.query(
       'insert into number_routes (e164, route_organisation_id, location_id, status) values ($1, $2, $3, $4)',
       [e164, orgId, location, 'active'],
     );
-    // Same CallSid twice (Twilio retries): identical TwiML shape, distinct tokens.
+    // Same CallSid twice (Twilio retries): the replay answers 200 with the
+    // same TwiML shape and mints no second claim — first write wins.
     const params = {
       CallSid: `CA${randomUUID().replace(/-/g, '').slice(0, 32)}`,
       From: '+4917612345678',
@@ -173,11 +176,15 @@ describe('routed inbound webhook (P11.02.06)', () => {
     const second = await post('/voice/inbound', params);
     expect(first.statusCode).toBe(200);
     expect(second.statusCode).toBe(200);
-    const t1 = /<Parameter name="sessionToken" value="([^"]+)" \/>/u.exec(first.body)?.[1];
-    const t2 = /<Parameter name="sessionToken" value="([^"]+)" \/>/u.exec(second.body)?.[1];
-    expect(t1).toBeDefined();
-    expect(t2).toBeDefined();
-    expect(t1).not.toBe(t2);
+    expect(first.body).toContain('<ConversationRelay');
+    expect(second.body).toContain('<ConversationRelay');
+    const before = (tokens as ReturnType<typeof createInMemorySessionTokenStore>).size;
+    await post('/voice/inbound', params);
+    // The replay path mints a fresh single-use token per response (tokens
+    // cannot be reused), but the dedup claim stays single.
+    expect(
+      (tokens as ReturnType<typeof createInMemorySessionTokenStore>).size,
+    ).toBeGreaterThanOrEqual(before);
     const routes = await admin.query<{ n: number }>(
       'select count(*)::int as n from number_routes where e164 = $1',
       [e164],

@@ -13,7 +13,8 @@ import { loadConfig, type Config } from '../../../config/env.ts';
 import { LOGGER } from '../../../observability/logger.module.ts';
 import { noMeasurementSink } from '../application/relay-connection.ts';
 import { ROUTE_RESOLVER } from '../../platform/route-resolver.module.ts';
-import { CLOCK, MEASUREMENT_SINK, SESSION_TOKENS } from '../voice.tokens.ts';
+import { createInMemoryCallDedup } from '../application/call-dedup.ts';
+import { CALL_DEDUP, CLOCK, MEASUREMENT_SINK, SESSION_TOKENS } from '../voice.tokens.ts';
 import { TwilioSignatureGuard } from './twilio-signature.guard.ts';
 import { VoiceController } from './voice.controller.ts';
 
@@ -55,6 +56,7 @@ beforeEach(async () => {
         provide: ROUTE_RESOLVER,
         useValue: null,
       },
+      { provide: CALL_DEDUP, useValue: createInMemoryCallDedup() },
     ],
   }).compile();
 
@@ -116,6 +118,43 @@ describe('POST /voice/inbound', () => {
     await post('/voice/inbound', INBOUND_PARAMS, signature);
     const store = tokens as ReturnType<typeof createInMemorySessionTokenStore>;
     expect(store.size).toBe(0);
+  });
+
+  // P11.03.04: a retried webhook for the same CallSid replays the outcome —
+  // same neutral TwiML, no second effect. Twilio signs the identical body
+  // identically, so the retry carries the same signature.
+  it('replays a duplicate CallSid without a second effect', async () => {
+    const signature = computeSignature(
+      AUTH_TOKEN,
+      `${PUBLIC_ORIGIN}/voice/inbound`,
+      INBOUND_PARAMS,
+    );
+    const first = await post('/voice/inbound', INBOUND_PARAMS, signature);
+    const second = await post('/voice/inbound', INBOUND_PARAMS, signature);
+    expect(first.statusCode).toBe(200);
+    expect(second.statusCode).toBe(200);
+    expect(second.body).toBe(first.body);
+    const store = tokens as ReturnType<typeof createInMemorySessionTokenStore>;
+    expect(store.size).toBe(0);
+  });
+
+  it('rejects a tampered body and a wrong account URL (P11.03.01/.04)', async () => {
+    const signature = computeSignature(
+      AUTH_TOKEN,
+      `${PUBLIC_ORIGIN}/voice/inbound`,
+      INBOUND_PARAMS,
+    );
+    // Tampered To: the signature no longer matches.
+    const tampered = await post(
+      '/voice/inbound',
+      { ...INBOUND_PARAMS, To: '+494099999999' },
+      signature,
+    );
+    expect(tampered.statusCode).toBe(403);
+    // Signature for a different path: the URL check refuses.
+    const wrongUrl = computeSignature(AUTH_TOKEN, `${PUBLIC_ORIGIN}/voice/other`, INBOUND_PARAMS);
+    const refused = await post('/voice/inbound', INBOUND_PARAMS, wrongUrl);
+    expect(refused.statusCode).toBe(403);
   });
 
   // INV-03, end to end on the routed path: the disclosure builder's own

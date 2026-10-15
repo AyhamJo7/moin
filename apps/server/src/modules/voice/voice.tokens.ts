@@ -2,6 +2,7 @@
 export const SESSION_TOKENS = Symbol('SESSION_TOKENS');
 export const CLOCK = Symbol('CLOCK');
 export const MEASUREMENT_SINK = Symbol('MEASUREMENT_SINK');
+export const CALL_DEDUP = Symbol('CALL_DEDUP');
 
 /**
  * The single tenant the feasibility spike runs as.
