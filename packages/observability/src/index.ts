@@ -34,3 +34,5 @@ export {
   TURN_LOG_TTL_DAYS,
 } from './turnlog-policy.ts';
 export type { TurnFields, TurnLogOptIn } from './turnlog-policy.ts';
+export { prodShapeValid, prodWriteAllowed } from './prod-env.ts';
+export type { Environment, ProdShape } from './prod-env.ts';
