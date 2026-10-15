@@ -77,11 +77,11 @@ provider and both are measured (ADR-0012).
 
 ## AWS (EXT-09)
 
-|        |                                     |
-| ------ | ----------------------------------- |
-| Status | **NOT_STARTED** — blocks all of P05 |
-| Region | eu-central-1                        |
-| DPA    | AWS standard terms                  |
+|        |                                                                                                                    |
+| ------ | ------------------------------------------------------------------------------------------------------------------ |
+| Status | **IN_PROGRESS** — organisation and five accounts exist; SES and SCPs open. Details: `aws-organization-baseline.md` |
+| Region | eu-central-1                                                                                                       |
+| DPA    | AWS standard terms                                                                                                 |
 
 ## Stripe, Google, Microsoft, PostHog
 
