@@ -26,6 +26,8 @@ export type { FakeGatewayOptions, ScriptedAnswer, ScriptedOutcome } from './gate
 export { createOpenAiAdapter, hashCallerId } from './gateway/openai.ts';
 export type { OpenAiAdapterConfig } from './gateway/openai.ts';
 export { SCHEMA_REJECTIONS, toProviderSchema } from './gateway/structured.ts';
+export { buildNluMessages, containsPii, redactProposedOutput } from './gateway/context.ts';
+export type { NluContext } from './gateway/context.ts';
 export {
   MAX_INPUT_TOKENS_PER_CALL,
   PURPOSE_POLICIES,
