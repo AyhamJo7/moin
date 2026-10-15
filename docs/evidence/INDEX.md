@@ -294,3 +294,4 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P13-001 | P13.01.05 | 2026-10-14 | `901dfe5deb54` | shell-i18n | [EV-P13-001-app-shell-i18n.md](P13/EV-P13-001-app-shell-i18n.md) |
 | EV-P13-002 | P13.02.04 | 2026-10-14 | `a627c4aad38c` | today-groups | [EV-P13-002-today-aggregation.md](P13/EV-P13-002-today-aggregation.md) |
 | EV-P13-003 | P13.03.05 | 2026-10-14 | `be174d34b973` | cards-shapes | [EV-P13-003-interaction-cards-actions.md](P13/EV-P13-003-interaction-cards-actions.md) |
+| EV-P13-004 | P13.04.03 | 2026-10-14 | `5b1381888754` | inbox-order | [EV-P13-004-inbox-stream-filters.md](P13/EV-P13-004-inbox-stream-filters.md) |
