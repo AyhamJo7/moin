@@ -99,3 +99,5 @@ export {
   launchReady,
 } from './validation.ts';
 export type { ValidationMatrix, LaunchItem, GoLiveSignoff } from './validation.ts';
+export { sellGate, sellGaps, SELL_PHASES, SELL_CATEGORIES, SELL_EXTS } from './sell-gate.ts';
+export type { SellCategory, SellExt, SellInputs, SellPhase, SellVerdict } from './sell-gate.ts';
