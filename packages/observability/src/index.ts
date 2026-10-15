@@ -36,3 +36,5 @@ export {
 export type { TurnFields, TurnLogOptIn } from './turnlog-policy.ts';
 export { prodShapeValid, prodWriteAllowed } from './prod-env.ts';
 export type { Environment, ProdShape } from './prod-env.ts';
+export { hardeningComplete, hardeningOpen } from './hardening.ts';
+export type { HardeningCheck } from './hardening.ts';
