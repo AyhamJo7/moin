@@ -287,3 +287,4 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P12-004 | P12.09.04 | 2026-10-13 | `553b95d6d386` | callback-capture-turns | [EV-P12-004-callback-capture-readback.md](P12/EV-P12-004-callback-capture-readback.md) |
 | EV-P12-005 | P12.08.03 | 2026-10-14 | `391d54af2aaf` | lead-turns | [EV-P12-005-lead-slot-loop.md](P12/EV-P12-005-lead-slot-loop.md) |
 | EV-P12-006 | P12.07.04 | 2026-10-14 | `3b804777fbdc` | appointment-turns | [EV-P12-006-appointment-request-capture.md](P12/EV-P12-006-appointment-request-capture.md) |
+| EV-P12-007 | P12.09.04 | 2026-10-14 | `29859c065a6e` | escalation-turns | [EV-P12-007-escalation-handoff-turn.md](P12/EV-P12-007-escalation-handoff-turn.md) |
