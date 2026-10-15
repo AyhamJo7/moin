@@ -49,3 +49,5 @@ export {
   BACKUP_RETENTION_DAYS,
 } from './backup.ts';
 export type { BackupConfig } from './backup.ts';
+export { drillCompletes, signoffRecorded } from './restore-drill.ts';
+export type { DrillCheck, DrillRecord } from './restore-drill.ts';
