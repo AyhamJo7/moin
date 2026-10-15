@@ -35,3 +35,14 @@ export { coveredYears, isPublicHoliday, publicHolidayOn } from './holidays.ts';
 export type { Bundesland, PublicHoliday } from './holidays.ts';
 export { lintSpokenAnswer } from './spoken-lint.ts';
 export type { SpokenLint } from './spoken-lint.ts';
+export {
+  JOB_QUEUES,
+  JOB_TYPES,
+  QUEUE_VISIBILITY_FLOOR_S,
+  checkVisibilityTimeout,
+  lintEnvelope,
+  queueFor,
+} from './envelope.ts';
+export type { EnvelopeLint, JobEnvelope, JobType } from './envelope.ts';
+export { MAX_ATTEMPTS, backoffSeconds, decideRetry, isPoison } from './retry.ts';
+export type { RetryDecision } from './retry.ts';

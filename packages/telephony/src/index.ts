@@ -6,6 +6,8 @@
 // in the product (PLAN P04). P11 consumes it; nothing here is a spike to be thrown away.
 
 export { escapeXml } from './twiml/escape.ts';
+export { assertNoRecording, hasNoRecording } from './twiml/no-recording.ts';
+export { buildUnassignedTwiML, UNASSIGNED_MESSAGE } from './twiml/unassigned.ts';
 export { buildConversationRelayTwiML, TwiMLBuildError } from './twiml/connect-relay.ts';
 export type {
   ConversationRelayOptions,
@@ -55,6 +57,8 @@ export type {
 
 export { decodeInbound, encodeOutbound } from './protocol/codec.ts';
 export type { DecodeResult } from './protocol/codec.ts';
+export { FULL_PATH_SCENARIO, runScenario } from './protocol/simulator.ts';
+export type { SimulatedExchange, SimulatorScenario, SimulatorStep } from './protocol/simulator.ts';
 
 export { reconstructRequestUrl, OriginConfigError } from './signature/url.ts';
 export type { ReconstructInput, ReconstructResult, OriginMismatch } from './signature/url.ts';

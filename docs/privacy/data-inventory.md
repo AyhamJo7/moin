@@ -271,6 +271,134 @@ without a channel requires all five. `app.knowledge_channel` is transaction-loca
 not stored business data; the security-invoker approved view enforces it under tenant FORCE RLS.
 Sensitivity, retention, erasure, and subprocessors are unchanged.
 
+P08.01 (migration 0062) adds the `job_runs` envelope ledger. Payloads are ID-only references;
+the ledger carries routing and bookkeeping, never content.
+
+| Field                                               | Category | Personal?                                 | Retention | Method      | Subprocessor |
+| --------------------------------------------------- | -------- | ----------------------------------------- | --------- | ----------- | ------------ |
+| `job_runs.type`, `job_runs.queue_name`              | Platform | no — fixed workload catalogue and queue   | 30 d      | hard delete | SQS          |
+| `job_runs.version`, `job_runs.attempt`              | Platform | no — counters                             | 30 d      | hard delete | —            |
+| `job_runs.correlation_id`, `job_runs.trace_context` | Platform | pseudonymous (links runs across services) | 30 d      | hard delete | —            |
+| `job_runs.not_before`                               | Platform | no — a schedule derived from creation     | 30 d      | hard delete | —            |
+| `job_runs.payload`                                  | Platform | yes (references) — ID-only row references | 30 d      | hard delete | —            |
+| `job_runs.status`                                   | Platform | no — fixed run state                      | 30 d      | hard delete | —            |
+| `job_runs.error_code`                               | Platform | no — fixed error catalogue                | 30 d      | hard delete | —            |
+| `job_runs.claimed_at`, `job_runs.finished_at`       | Platform | no alone (timestamps)                     | 30 d      | hard delete | —            |
+
+P08.02 (migration 0063) adds the `outbox` table. Same shape as the ledger:
+ID-only references plus dispatch bookkeeping, never content.
+
+| Field                                            | Category | Personal?                                 | Retention | Method      | Subprocessor |
+| ------------------------------------------------ | -------- | ----------------------------------------- | --------- | ----------- | ------------ |
+| `outbox.aggregate`, `outbox.event_type`          | Platform | no — fixed domain catalogue and event     | 30 d      | hard delete | SQS          |
+| `outbox.aggregate_id`                            | Platform | yes (references) — the domain row         | 30 d      | hard delete | —            |
+| `outbox.aggregate_ver`                           | Platform | no — monotonic per-aggregate counter      | 30 d      | hard delete | —            |
+| `outbox.payload`                                 | Platform | yes (references) — ID-only row references | 30 d      | hard delete | —            |
+| `outbox.attempts`                                | Platform | no — counter                              | 30 d      | hard delete | —            |
+| `outbox.next_attempt_at`, `outbox.dispatched_at` | Platform | no alone (timestamps)                     | 30 d      | hard delete | —            |
+
+P08.03 (migration 0064) adds the `provider_inbox` table. Pre-tenant by design
+(ADR-0007): events land before tenant resolution, so the row carries the
+provider's identifiers, not ours. Payload retention 30 days.
+
+| Field                                                      | Category | Personal?                                             | Retention | Method      | Subprocessor |
+| ---------------------------------------------------------- | -------- | ----------------------------------------------------- | --------- | ----------- | ------------ |
+| `provider_inbox.provider`                                  | Platform | no — fixed provider catalogue (which sender)          | 30 d      | hard delete | provider     |
+| `provider_inbox.provider_event_id`                         | Platform | pseudonymous (the provider's event reference)         | 30 d      | hard delete | provider     |
+| `provider_inbox.resolved_org`                              | Platform | pseudonymous (links the event to a tenant)            | 30 d      | hard delete | —            |
+| `provider_inbox.payload`                                   | Platform | **possibly** — provider-shaped, minimised at handling | 30 d      | hard delete | provider     |
+| `provider_inbox.status`                                    | Platform | no — fixed inbox state                                | 30 d      | hard delete | —            |
+| `provider_inbox.poison_reason`                             | Platform | no — fixed error catalogue text                       | 30 d      | hard delete | —            |
+| `provider_inbox.received_at`, `provider_inbox.resolved_at` | Platform | no alone (timestamps)                                 | 30 d      | hard delete | —            |
+
+P08.04 (migration 0065) adds the `idempotency_keys` table. The request body is
+never stored — only its SHA-256 — and the stored response replays 24 h
+(expires_at is the retention hook).
+
+| Field                           | Category | Personal?                                         | Retention | Method      | Subprocessor |
+| ------------------------------- | -------- | ------------------------------------------------- | --------- | ----------- | ------------ |
+| `idempotency_keys.operation`    | Platform | no — fixed operation catalogue                    | 24 h      | hard delete | —            |
+| `idempotency_keys.key`          | Platform | pseudonymous (client-supplied request reference)  | 24 h      | hard delete | —            |
+| `idempotency_keys.request_hash` | Platform | no — SHA-256 of the body, never the body (INV-12) | 24 h      | hard delete | —            |
+| `idempotency_keys.response`     | Platform | **possibly** — stored mutation result, minimised  | 24 h      | hard delete | —            |
+| `idempotency_keys.status`       | Platform | no — fixed key state                              | 24 h      | hard delete | —            |
+| `idempotency_keys.expires_at`   | Platform | no — a deadline derived from creation             | 24 h      | hard delete | —            |
+
+P08.07 (migration 0067) adds the `timers` table. Rows are schedule
+bookkeeping — what fires when — never content.
+
+| Field                | Category | Personal?                              | Retention         | Method      | Subprocessor |
+| -------------------- | -------- | -------------------------------------- | ----------------- | ----------- | ------------ |
+| `timers.kind`        | Platform | no — fixed timer catalogue             | until done + 30 d | hard delete | —            |
+| `timers.ref_id`      | Platform | yes (references) — the row to act on   | until done + 30 d | hard delete | —            |
+| `timers.due_at`      | Platform | no — a schedule derived from creation  | until done + 30 d | hard delete | —            |
+| `timers.lease_until` | Platform | no — sweep bookkeeping, never identity | until done + 30 d | hard delete | —            |
+| `timers.attempts`    | Platform | no — counter                           | until done + 30 d | hard delete | —            |
+| `timers.done_at`     | Platform | no — a completion timestamp            | until done + 30 d | hard delete | —            |
+
+P08.08 (migration 0068) adds the `sse_events` replay window. Rows are fan-out
+bookkeeping — who gets what type — with ID-only payloads, never content.
+
+| Field                   | Category | Personal?                                 | Retention | Method      | Subprocessor |
+| ----------------------- | -------- | ----------------------------------------- | --------- | ----------- | ------------ |
+| `sse_events.user_id`    | Platform | pseudonymous (links the event to a user)  | 15 min    | hard delete | Valkey       |
+| `sse_events.event_id`   | Platform | no — monotonic stream counter             | 15 min    | hard delete | —            |
+| `sse_events.event_type` | Platform | no — fixed event catalogue                | 15 min    | hard delete | —            |
+| `sse_events.payload`    | Platform | yes (references) — ID-only row references | 15 min    | hard delete | —            |
+
+P08.10 (migrations 0069/0070) adds the flag catalogue + tenant overrides.
+Flag names name behaviour, never people; values are booleans.
+
+| Field                                  | Category | Personal?                           | Retention           | Method      | Subprocessor |
+| -------------------------------------- | -------- | ----------------------------------- | ------------------- | ----------- | ------------ |
+| `feature_flag_definitions.name`        | Platform | no — fixed kill-switch catalogue    | permanent policy    | retain      | —            |
+| `feature_flag_definitions.default_on`  | Platform | no — the platform default, not whom | permanent policy    | retain      | —            |
+| `feature_flag_definitions.description` | Platform | no — operator-facing behaviour text | permanent policy    | retain      | —            |
+| `tenant_flag_overrides.flag_name`      | Platform | no — which behaviour the row sets   | while tenant exists | hard delete | —            |
+| `tenant_flag_overrides.enabled`        | Platform | no — a boolean, never identity      | while tenant exists | hard delete | —            |
+
+P14.01 (migration 0071) adds the notification model + preferences. Rows are
+delivery bookkeeping — dedup keys, ID-only refs, channel prefs — never content.
+
+| Field                              | Category | Personal?                            | Retention           | Method      | Subprocessor     |
+| ---------------------------------- | -------- | ------------------------------------ | ------------------- | ----------- | ---------------- |
+| `notifications.dedup_key`          | Platform | no — opaque trigger key              | 90 d                | hard delete | channel provider |
+| `notifications.priority`           | Platform | no — routine/urgent                  | 90 d                | hard delete | channel provider |
+| `notifications.ref_kind`           | Platform | no — fixed ref catalogue             | 90 d                | hard delete | —                |
+| `notifications.ref_id`             | Platform | yes (references) — the row to act on | 90 d                | hard delete | —                |
+| `notification_prefs.user_id`       | Platform | pseudonymous (links prefs to a user) | while tenant exists | hard delete | —                |
+| `notification_prefs.channels`      | Platform | no — channel catalogue               | while tenant exists | hard delete | —                |
+| `notification_prefs.urgent_only`   | Platform | no — a boolean, never identity       | while tenant exists | hard delete | —                |
+| `notification_prefs.quiet_from`    | Platform | no — a schedule, never identity      | while tenant exists | hard delete | —                |
+| `notification_prefs.quiet_to`      | Platform | no — a schedule, never identity      | while tenant exists | hard delete | —                |
+| `notification_prefs.urgent_bypass` | Platform | no — a boolean, never identity       | while tenant exists | hard delete | —                |
+
+P14.05 (migration 0072) adds escalation chains + acknowledgements. Rows are
+escalation bookkeeping — ordered levels, deadlines, stop states — never content.
+
+| Field                               | Category | Personal?                             | Retention | Method      | Subprocessor |
+| ----------------------------------- | -------- | ------------------------------------- | --------- | ----------- | ------------ |
+| `escalation_chains.ref_kind`        | Platform | no — fixed ref catalogue              | 90 d      | hard delete | —            |
+| `escalation_chains.ref_id`          | Platform | yes (references) — the row to act on  | 90 d      | hard delete | —            |
+| `escalation_chains.level`           | Platform | no — escalation order, never identity | 90 d      | hard delete | —            |
+| `escalation_chains.contact_user_id` | Platform | pseudonymous (links level to a user)  | 90 d      | hard delete | —            |
+| `escalation_chains.due_at`          | Platform | no — a deadline, never identity       | 90 d      | hard delete | —            |
+| `escalation_acks.ref_kind`          | Platform | no — fixed ref catalogue              | 90 d      | hard delete | —            |
+| `escalation_acks.ref_id`            | Platform | yes (references) — the row to act on  | 90 d      | hard delete | —            |
+| `escalation_acks.state`             | Platform | no — ack/done/exhausted               | 90 d      | hard delete | —            |
+
+P14.07 (migration 0073) adds delivery receipts. Rows are delivery
+bookkeeping — channel, attempt, status, provider IDs — never content.
+
+| Field                                     | Category | Personal?                           | Retention | Method      | Subprocessor     |
+| ----------------------------------------- | -------- | ----------------------------------- | --------- | ----------- | ---------------- |
+| `notification_deliveries.notification_id` | Platform | yes (references) — the notification | 90 d      | hard delete | —                |
+| `notification_deliveries.channel`         | Platform | no — channel catalogue              | 90 d      | hard delete | channel provider |
+| `notification_deliveries.attempt`         | Platform | no — counter                        | 90 d      | hard delete | —                |
+| `notification_deliveries.status`          | Platform | no — pending/sent/failed/dlq        | 90 d      | hard delete | —                |
+| `notification_deliveries.provider_id`     | Platform | no — opaque provider receipt        | 90 d      | hard delete | channel provider |
+| `notification_deliveries.idempotency_key` | Platform | no — opaque redelivery key          | 90 d      | hard delete | —                |
+
 Knowledge is flagged **possibly** personal on purpose. An owner writing "bei Notfällen Herrn Meier
 anrufen, 0170…" has put a staff member's number into a field nobody classified as personal. The
 approval step (INV-08) is where that is caught, and the approval UI says so.

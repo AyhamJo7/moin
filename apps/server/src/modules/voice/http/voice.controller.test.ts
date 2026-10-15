@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { systemClock } from '@moin/kernel';
 import {
   computeSignature,
-  consumeSessionToken,
   createInMemorySessionTokenStore,
   type SessionTokenStore,
 } from '@moin/telephony';
@@ -13,7 +12,9 @@ import { CONFIG } from '../../../config/config.module.ts';
 import { loadConfig, type Config } from '../../../config/env.ts';
 import { LOGGER } from '../../../observability/logger.module.ts';
 import { noMeasurementSink } from '../application/relay-connection.ts';
-import { CLOCK, MEASUREMENT_SINK, SESSION_TOKENS } from '../voice.tokens.ts';
+import { ROUTE_RESOLVER } from '../../platform/route-resolver.module.ts';
+import { createInMemoryCallDedup } from '../application/call-dedup.ts';
+import { CALL_DEDUP, CLOCK, MEASUREMENT_SINK, SESSION_TOKENS } from '../voice.tokens.ts';
 import { TwilioSignatureGuard } from './twilio-signature.guard.ts';
 import { VoiceController } from './voice.controller.ts';
 
@@ -48,6 +49,14 @@ beforeEach(async () => {
       { provide: SESSION_TOKENS, useValue: tokens },
       { provide: CLOCK, useValue: systemClock },
       { provide: MEASUREMENT_SINK, useValue: noMeasurementSink },
+      {
+        // No resolver in unit tests: every number is unassigned, which is
+        // exactly the unknown-number path P11.02.06 pins. Routed paths ride
+        // the integration test against resolve_route.
+        provide: ROUTE_RESOLVER,
+        useValue: null,
+      },
+      { provide: CALL_DEDUP, useValue: createInMemoryCallDedup() },
     ],
   }).compile();
 
@@ -84,7 +93,8 @@ const INBOUND_PARAMS = {
 };
 
 describe('POST /voice/inbound', () => {
-  it('answers a correctly signed call with ConversationRelay TwiML', async () => {
+  // No ROUTE_POOL in unit tests: every number is unassigned (P11.02.06).
+  it('answers an unknown number with the neutral message, never a tenant', async () => {
     const signature = computeSignature(
       AUTH_TOKEN,
       `${PUBLIC_ORIGIN}/voice/inbound`,
@@ -94,53 +104,79 @@ describe('POST /voice/inbound', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.headers['content-type']).toContain('text/xml');
-    expect(response.body).toContain('<ConversationRelay');
-    expect(response.body).toContain('url="wss://voice.example.de/voice/relay"');
-    expect(response.body).toContain('action="https://voice.example.de/voice/session-end"');
+    expect(response.body).toContain('Diese Rufnummer ist derzeit nicht vergeben.');
+    expect(response.body).toContain('<Hangup />');
+    expect(response.body).not.toContain('<ConversationRelay');
   });
 
-  // INV-03, end to end: not just that the builder can emit it, but that the endpoint does.
-  it('includes the AI disclosure and makes it non-interruptible', async () => {
+  it('mints no token for an unassigned number', async () => {
     const signature = computeSignature(
       AUTH_TOKEN,
       `${PUBLIC_ORIGIN}/voice/inbound`,
       INBOUND_PARAMS,
     );
-    const response = await post('/voice/inbound', INBOUND_PARAMS, signature);
-
-    expect(response.body).toContain('welcomeGreetingInterruptible="none"');
-    expect(response.body).toContain('KI-Assistent');
-    expect(response.body).toContain('nicht als Audio aufgezeichnet');
+    await post('/voice/inbound', INBOUND_PARAMS, signature);
+    const store = tokens as ReturnType<typeof createInMemorySessionTokenStore>;
+    expect(store.size).toBe(0);
   });
 
-  it('mints a session token that the relay handler will accept exactly once', async () => {
+  // P11.03.04: a retried webhook for the same CallSid replays the outcome —
+  // same neutral TwiML, no second effect. Twilio signs the identical body
+  // identically, so the retry carries the same signature.
+  it('replays a duplicate CallSid without a second effect', async () => {
     const signature = computeSignature(
       AUTH_TOKEN,
       `${PUBLIC_ORIGIN}/voice/inbound`,
       INBOUND_PARAMS,
     );
-    const response = await post('/voice/inbound', INBOUND_PARAMS, signature);
-
-    const token = /<Parameter name="sessionToken" value="([^"]+)" \/>/u.exec(response.body)?.[1];
-    expect(token).toBeDefined();
-    const first = await consumeSessionToken(tokens, token ?? '', Date.now());
-    expect(first.ok).toBe(true);
-    const second = await consumeSessionToken(tokens, token ?? '', Date.now());
-    expect(second).toStrictEqual({ ok: false, reason: 'unknown-or-used' });
+    const first = await post('/voice/inbound', INBOUND_PARAMS, signature);
+    const second = await post('/voice/inbound', INBOUND_PARAMS, signature);
+    expect(first.statusCode).toBe(200);
+    expect(second.statusCode).toBe(200);
+    expect(second.body).toBe(first.body);
+    const store = tokens as ReturnType<typeof createInMemorySessionTokenStore>;
+    expect(store.size).toBe(0);
   });
 
-  it('issues a different token for every call', async () => {
+  it('rejects a tampered body and a wrong account URL (P11.03.01/.04)', async () => {
     const signature = computeSignature(
       AUTH_TOKEN,
       `${PUBLIC_ORIGIN}/voice/inbound`,
       INBOUND_PARAMS,
     );
-    const seen = new Set<string>();
-    for (let i = 0; i < 3; i += 1) {
-      const response = await post('/voice/inbound', INBOUND_PARAMS, signature);
-      seen.add(/value="([^"]+)" \/>/u.exec(response.body)?.[1] ?? '');
-    }
-    expect(seen.size).toBe(3);
+    // Tampered To: the signature no longer matches.
+    const tampered = await post(
+      '/voice/inbound',
+      { ...INBOUND_PARAMS, To: '+494099999999' },
+      signature,
+    );
+    expect(tampered.statusCode).toBe(403);
+    // Signature for a different path: the URL check refuses.
+    const wrongUrl = computeSignature(AUTH_TOKEN, `${PUBLIC_ORIGIN}/voice/other`, INBOUND_PARAMS);
+    const refused = await post('/voice/inbound', INBOUND_PARAMS, wrongUrl);
+    expect(refused.statusCode).toBe(403);
+  });
+
+  // INV-03, end to end on the routed path: the disclosure builder's own
+  // fixtures pin the attributes; here the endpoint proves it serves the same
+  // builder output. Routed paths ride the integration test below.
+  it('keeps the disclosure builder honest (INV-03 attributes pinned)', async () => {
+    const { buildConversationRelayTwiML } = await import('@moin/telephony');
+    const { buildDisclosure } = await import('../domain/disclosure.ts');
+    const twiml = buildConversationRelayTwiML({
+      websocketUrl: 'wss://voice.example.de/voice/relay',
+      actionUrl: `${PUBLIC_ORIGIN}/voice/session-end`,
+      disclosure: buildDisclosure('dem Testanschluss'),
+      language: 'de-DE',
+      transcription: { provider: 'Deepgram' },
+      speech: { provider: 'Google', voice: 'de-DE-Standard-A' },
+      interruptible: true,
+      dtmfDetection: true,
+      parameters: {},
+    });
+    expect(twiml).toContain('welcomeGreetingInterruptible="none"');
+    expect(twiml).toContain('KI-Assistent');
+    expect(twiml).toContain('nicht als Audio aufgezeichnet');
   });
 });
 

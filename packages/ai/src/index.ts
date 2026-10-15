@@ -5,8 +5,9 @@
 // (EXT-12, DG-14) costs a configuration change rather than a rewrite, and the harness so that the
 // latency figures P04 is judged on have a definition before they have values.
 //
-// No provider adapter lives here yet. That is P10, and building one against an account that does
-// not exist would produce code nobody could verify.
+// P10.01 adds the first provider adapter (OpenAI EU). The fake gateway stays:
+// every test of a dialogue, tool call or fallback needs a model that is
+// deterministic, instant and free.
 
 export type {
   ModelTier,
@@ -22,6 +23,100 @@ export type {
 
 export { createFakeGateway } from './gateway/fake.ts';
 export type { FakeGatewayOptions, ScriptedAnswer, ScriptedOutcome } from './gateway/fake.ts';
+export { createOpenAiAdapter, hashCallerId } from './gateway/openai.ts';
+export type { OpenAiAdapterConfig } from './gateway/openai.ts';
+export { SCHEMA_REJECTIONS, toProviderSchema } from './gateway/structured.ts';
+export { buildNluMessages, containsPii, redactProposedOutput } from './gateway/context.ts';
+export type { NluContext } from './gateway/context.ts';
+export {
+  MAX_INPUT_TOKENS_PER_CALL,
+  PURPOSE_POLICIES,
+  resetBreakers,
+  withResilience,
+} from './gateway/resilience.ts';
+export type { GatewayPurpose, PurposePolicy, ResilienceOptions } from './gateway/resilience.ts';
+export { checkEvalFreshness, releaseManifest, versionSet } from './gateway/registry.ts';
+export type { ReleaseManifest, VersionRef, VersionSetSources } from './gateway/registry.ts';
+export { decide } from './gateway/policy.ts';
+export type {
+  PolicyAction,
+  PolicyContext,
+  PolicyDecision,
+  PolicyNlu,
+  ReasonCode,
+} from './gateway/policy.ts';
+export {
+  COMMITMENT_WITHOUT_TOKEN,
+  defineTool,
+  guardedExecute,
+  reconcileUnknown,
+} from './gateway/tools.ts';
+export type {
+  GuardCall,
+  GuardOutcome,
+  GuardPorts,
+  GuardRejection,
+  ResultToken,
+  ToolChannel,
+  ToolDef,
+} from './gateway/tools.ts';
+export {
+  VOICE_TOOLS,
+  captureCallback,
+  createAppointmentRequest,
+  createLead,
+  endCall,
+  escalate,
+} from './gateway/voice-tools.ts';
+export {
+  bindTemplate,
+  hashTemplate,
+  loadTemplate,
+  RESTAURANT_V1,
+  SENSITIVE_DENYLIST,
+} from './gateway/templates.ts';
+export type {
+  BoundTemplate,
+  TemplateIntent,
+  TemplatePackage,
+  TenantOverrides,
+} from './gateway/templates.ts';
+export { evaluateRules, RESTAURANT_DEFAULT_RULES, validateRule } from './gateway/rules.ts';
+export type {
+  OwnerRule,
+  RuleActions,
+  RuleChannel,
+  RuleFacts,
+  RuleTrigger,
+  RuleUrgency,
+  WorkflowRun,
+} from './gateway/rules.ts';
+export {
+  detectEmergency,
+  emergencyFromNlu,
+  HANDWERK_CATEGORIES,
+  RESTAURANT_CATEGORIES,
+  SCRIPTS_REVIEWED,
+} from './gateway/lifesafety.ts';
+export type { EmergencyCategory, EmergencyHit } from './gateway/lifesafety.ts';
+export {
+  ANOMALY_BLOCKED,
+  delimitUntrusted,
+  detectAnomaly,
+  SYSTEM_GUARD_RAIL,
+  toolAllowedByTemplate,
+} from './gateway/injection.ts';
+export type { AnomalyClass, AnomalyHit } from './gateway/injection.ts';
+export { checkQualityGate, scoreAnswers, wilsonLow } from './gateway/evalharness.ts';
+export type {
+  EvalCase,
+  EvalDataset,
+  EvalReport,
+  EvalSuite,
+  IntentMetric,
+  QualityGate,
+  ScoredCase,
+} from './gateway/evalharness.ts';
 
 export {
   nearestRankPercentile,
@@ -33,3 +128,5 @@ export {
   REQUIRED_MODEL_SAMPLES,
 } from './measurement/latency.ts';
 export type { LatencySample, LatencySummary } from './measurement/latency.ts';
+export { costMicros, ledgerEntry } from './measurement/cost.ts';
+export type { LlmLedgerEntry, PriceTable, TokenUsage } from './measurement/cost.ts';
