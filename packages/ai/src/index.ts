@@ -5,8 +5,9 @@
 // (EXT-12, DG-14) costs a configuration change rather than a rewrite, and the harness so that the
 // latency figures P04 is judged on have a definition before they have values.
 //
-// No provider adapter lives here yet. That is P10, and building one against an account that does
-// not exist would produce code nobody could verify.
+// P10.01 adds the first provider adapter (OpenAI EU). The fake gateway stays:
+// every test of a dialogue, tool call or fallback needs a model that is
+// deterministic, instant and free.
 
 export type {
   ModelTier,
@@ -22,6 +23,8 @@ export type {
 
 export { createFakeGateway } from './gateway/fake.ts';
 export type { FakeGatewayOptions, ScriptedAnswer, ScriptedOutcome } from './gateway/fake.ts';
+export { createOpenAiAdapter, hashCallerId } from './gateway/openai.ts';
+export type { OpenAiAdapterConfig } from './gateway/openai.ts';
 
 export {
   nearestRankPercentile,
