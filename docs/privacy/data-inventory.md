@@ -324,6 +324,18 @@ never stored — only its SHA-256 — and the stored response replays 24 h
 | `idempotency_keys.status`       | Platform | no — fixed key state                              | 24 h      | hard delete | —            |
 | `idempotency_keys.expires_at`   | Platform | no — a deadline derived from creation             | 24 h      | hard delete | —            |
 
+P08.07 (migration 0067) adds the `timers` table. Rows are schedule
+bookkeeping — what fires when — never content.
+
+| Field                | Category | Personal?                              | Retention         | Method      | Subprocessor |
+| -------------------- | -------- | -------------------------------------- | ----------------- | ----------- | ------------ |
+| `timers.kind`        | Platform | no — fixed timer catalogue             | until done + 30 d | hard delete | —            |
+| `timers.ref_id`      | Platform | yes (references) — the row to act on   | until done + 30 d | hard delete | —            |
+| `timers.due_at`      | Platform | no — a schedule derived from creation  | until done + 30 d | hard delete | —            |
+| `timers.lease_until` | Platform | no — sweep bookkeeping, never identity | until done + 30 d | hard delete | —            |
+| `timers.attempts`    | Platform | no — counter                           | until done + 30 d | hard delete | —            |
+| `timers.done_at`     | Platform | no — a completion timestamp            | until done + 30 d | hard delete | —            |
+
 Knowledge is flagged **possibly** personal on purpose. An owner writing "bei Notfällen Herrn Meier
 anrufen, 0170…" has put a staff member's number into a field nobody classified as personal. The
 approval step (INV-08) is where that is caught, and the approval UI says so.

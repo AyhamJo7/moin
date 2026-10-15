@@ -963,3 +963,9 @@ true, ok: false }` — is serialized by Vitest with none of the `constructor`/`t
 | Item          | Status           | Commit  | Evidence   | Note                                                                                                                                                                                                     |
 | ------------- | ---------------- | ------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | P08.06.01–.03 | READY_FOR_REVIEW | 8aede37 | EV-P08-006 | finishJob terminal writes; metadata-only DLQ list; idempotent replay; reason-required audited discard (0066 allowlist key); 3x green; mutation KILLED; gates 14/14. Stacked on P08.05 (rebase on merge). |
+
+## P08.07 timers and sweeps
+
+| Item          | Status           | Commit  | Evidence   | Note                                                                                                                                                                                                        |
+| ------------- | ---------------- | ------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P08.07.01–.04 | READY_FOR_REVIEW | 1c71fe7 | EV-P08-007 | Migration 0067 tenant timers; idempotent schedule; leased SKIP LOCKED claims; exactly-once under 3 sweepers; restart survival; 3x green; mutation KILLED; gates 14/14. Stacked on P08.06 (rebase on merge). |
