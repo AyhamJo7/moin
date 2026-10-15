@@ -78,3 +78,11 @@ export { buildValid, stagingFlow, prodFlow, manifestValid, rollbackValid } from 
 export type { BuildShape, DeployStage, ReleaseManifest, Rollback } from './pipeline.ts';
 export { findingValid, auditTriaged } from './hardening-sweep.ts';
 export type { FindingSeverity, FindingState, PentestFinding } from './hardening-sweep.ts';
+export {
+  sloHolds,
+  shedFires,
+  TURN_P95_MS,
+  API_READ_P95_MS,
+  API_WRITE_P95_MS,
+} from './reliability.ts';
+export type { SloSample, LoadState } from './reliability.ts';
