@@ -183,6 +183,14 @@ const baseSchema = z.object({
     .transform((value) => value === 'true'),
 
   /**
+   * The business the disclosure is spoken on behalf of (P11.02.02). The name
+   * is the only tenant-controlled part of the disclosure; the template and
+   * its non-interruptibility are fixed in code (INV-03). Per-tenant names
+   * from the voice config snapshot replace this default in P11.03.
+   */
+  VOICE_BUSINESS_NAME: z.string().min(1).default('dem Testanschluss'),
+
+  /**
    * Where per-turn measurements are written during the feasibility work (P04.05.03).
    *
    * The file holds what callers said, so it is personal data collected under volunteer consent
