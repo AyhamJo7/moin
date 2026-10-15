@@ -951,3 +951,9 @@ true, ok: false }` — is serialized by Vitest with none of the `constructor`/`t
 | Item          | Status           | Commit  | Evidence   | Note                                                                                                                                        |
 | ------------- | ---------------- | ------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | P08.04.01–.03 | READY_FOR_REVIEW | 730159c | EV-P08-004 | Migration 0065 tenant keys table; replay/422/row-lock service; 3x green; mutation KILLED; gates 14/14. Stacked on P08.03 (rebase on merge). |
+
+## P08.05 worker runtime
+
+| Item          | Status           | Commit  | Evidence   | Note                                                                                                                                                                                                                                                                                                   |
+| ------------- | ---------------- | ------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| P08.05.01–.04 | READY_FOR_REVIEW | 35591ae | EV-P08-005 | Kernel retry arithmetic + Worker loop (bounded concurrency, visibility ext, drain, retry/DLQ, poison); 7 unit tests 3x green; mutation KILLED on retry policy; worker-runtime mutation noted SURVIVED-then-covered (concurrency ceiling test added); gates 14/14. Stacked on P08.04 (rebase on merge). |
