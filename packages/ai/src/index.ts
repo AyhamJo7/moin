@@ -107,6 +107,16 @@ export {
   toolAllowedByTemplate,
 } from './gateway/injection.ts';
 export type { AnomalyClass, AnomalyHit } from './gateway/injection.ts';
+export { checkQualityGate, scoreAnswers, wilsonLow } from './gateway/evalharness.ts';
+export type {
+  EvalCase,
+  EvalDataset,
+  EvalReport,
+  EvalSuite,
+  IntentMetric,
+  QualityGate,
+  ScoredCase,
+} from './gateway/evalharness.ts';
 
 export {
   nearestRankPercentile,
