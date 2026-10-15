@@ -297,6 +297,20 @@ ID-only references plus dispatch bookkeeping, never content.
 | `outbox.attempts`                                | Platform | no — counter                              | 30 d      | hard delete | —            |
 | `outbox.next_attempt_at`, `outbox.dispatched_at` | Platform | no alone (timestamps)                     | 30 d      | hard delete | —            |
 
+P08.03 (migration 0064) adds the `provider_inbox` table. Pre-tenant by design
+(ADR-0007): events land before tenant resolution, so the row carries the
+provider's identifiers, not ours. Payload retention 30 days.
+
+| Field                                                      | Category | Personal?                                             | Retention | Method      | Subprocessor |
+| ---------------------------------------------------------- | -------- | ----------------------------------------------------- | --------- | ----------- | ------------ |
+| `provider_inbox.provider`                                  | Platform | no — fixed provider catalogue (which sender)          | 30 d      | hard delete | provider     |
+| `provider_inbox.provider_event_id`                         | Platform | pseudonymous (the provider's event reference)         | 30 d      | hard delete | provider     |
+| `provider_inbox.resolved_org`                              | Platform | pseudonymous (links the event to a tenant)            | 30 d      | hard delete | —            |
+| `provider_inbox.payload`                                   | Platform | **possibly** — provider-shaped, minimised at handling | 30 d      | hard delete | provider     |
+| `provider_inbox.status`                                    | Platform | no — fixed inbox state                                | 30 d      | hard delete | —            |
+| `provider_inbox.poison_reason`                             | Platform | no — fixed error catalogue text                       | 30 d      | hard delete | —            |
+| `provider_inbox.received_at`, `provider_inbox.resolved_at` | Platform | no alone (timestamps)                                 | 30 d      | hard delete | —            |
+
 Knowledge is flagged **possibly** personal on purpose. An owner writing "bei Notfällen Herrn Meier
 anrufen, 0170…" has put a staff member's number into a field nobody classified as personal. The
 approval step (INV-08) is where that is caught, and the approval UI says so.
