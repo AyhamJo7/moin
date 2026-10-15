@@ -289,3 +289,4 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P12-006 | P12.07.04 | 2026-10-14 | `3b804777fbdc` | appointment-turns | [EV-P12-006-appointment-request-capture.md](P12/EV-P12-006-appointment-request-capture.md) |
 | EV-P12-007 | P12.09.04 | 2026-10-14 | `29859c065a6e` | escalation-turns | [EV-P12-007-escalation-handoff-turn.md](P12/EV-P12-007-escalation-handoff-turn.md) |
 | EV-P12-008 | P12.11.05 | 2026-10-14 | `032dea14e2bb` | silence-turns | [EV-P12-008-silence-speech-bargein.md](P12/EV-P12-008-silence-speech-bargein.md) |
+| EV-P12-009 | P12.12.03 | 2026-10-14 | `9a75a10c7c1b` | outcome-rows | [EV-P12-009-outcome-written-once.md](P12/EV-P12-009-outcome-written-once.md) |
