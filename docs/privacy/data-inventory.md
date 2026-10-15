@@ -271,6 +271,20 @@ without a channel requires all five. `app.knowledge_channel` is transaction-loca
 not stored business data; the security-invoker approved view enforces it under tenant FORCE RLS.
 Sensitivity, retention, erasure, and subprocessors are unchanged.
 
+P08.01 (migration 0062) adds the `job_runs` envelope ledger. Payloads are ID-only references;
+the ledger carries routing and bookkeeping, never content.
+
+| Field                                               | Category | Personal?                                 | Retention | Method      | Subprocessor |
+| --------------------------------------------------- | -------- | ----------------------------------------- | --------- | ----------- | ------------ |
+| `job_runs.type`, `job_runs.queue_name`              | Platform | no — fixed workload catalogue and queue   | 30 d      | hard delete | SQS          |
+| `job_runs.version`, `job_runs.attempt`              | Platform | no — counters                             | 30 d      | hard delete | —            |
+| `job_runs.correlation_id`, `job_runs.trace_context` | Platform | pseudonymous (links runs across services) | 30 d      | hard delete | —            |
+| `job_runs.not_before`                               | Platform | no — a schedule derived from creation     | 30 d      | hard delete | —            |
+| `job_runs.payload`                                  | Platform | yes (references) — ID-only row references | 30 d      | hard delete | —            |
+| `job_runs.status`                                   | Platform | no — fixed run state                      | 30 d      | hard delete | —            |
+| `job_runs.error_code`                               | Platform | no — fixed error catalogue                | 30 d      | hard delete | —            |
+| `job_runs.claimed_at`, `job_runs.finished_at`       | Platform | no alone (timestamps)                     | 30 d      | hard delete | —            |
+
 Knowledge is flagged **possibly** personal on purpose. An owner writing "bei Notfällen Herrn Meier
 anrufen, 0170…" has put a staff member's number into a field nobody classified as personal. The
 approval step (INV-08) is where that is caught, and the approval UI says so.
