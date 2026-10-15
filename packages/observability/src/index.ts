@@ -20,3 +20,5 @@ export { opsAllowed, opsAudit } from './ops-cli.ts';
 export type { OpsAudit, OpsCommand } from './ops-cli.ts';
 export { logIsValid, breachPackComplete } from './incident.ts';
 export type { IncidentLog, IncidentSeverity, BreachPack } from './incident.ts';
+export { aggregateKpis } from './kpi.ts';
+export type { KpiCounts, KpiDashboard } from './kpi.ts';
