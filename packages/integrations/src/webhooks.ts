@@ -9,6 +9,8 @@
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+
 /** Versioned public events (P29.02.01 catalogue, subset). */
 export const WEBHOOK_EVENTS: readonly string[] = [
   'lead.created',
@@ -24,15 +26,26 @@ export function eventAllowed(event: string): boolean {
 }
 
 export interface Subscription {
+  readonly organisationId: string;
   readonly endpoint: string;
   readonly event: string;
 }
 
-/** Subscribe: HTTPS endpoint + allowlisted event. */
-export function subscribe(endpoint: string, event: string): Subscription | null {
+/** Subscribe: tenant-scoped (UUID-validated org) + HTTPS + allowlisted event. */
+export function subscribe(
+  organisationId: string,
+  endpoint: string,
+  event: string,
+): Subscription | null {
+  if (!UUID_RE.test(organisationId)) return null;
   if (!endpoint.startsWith('https://') || endpoint.length > 500) return null;
   if (!eventAllowed(event)) return null;
-  return { endpoint, event };
+  return { organisationId, endpoint, event };
+}
+
+/** True when the delivery targets the subscription's tenant (cross-tenant refused). */
+export function deliveryAllowed(subscription: Subscription, organisationId: string): boolean {
+  return subscription.organisationId === organisationId;
 }
 
 /** Sign a delivery: HMAC-SHA256 over id.timestamp.body (Standard Webhooks). */
