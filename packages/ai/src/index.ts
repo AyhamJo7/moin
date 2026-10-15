@@ -128,3 +128,5 @@ export {
   REQUIRED_MODEL_SAMPLES,
 } from './measurement/latency.ts';
 export type { LatencySample, LatencySummary } from './measurement/latency.ts';
+export { costMicros, ledgerEntry } from './measurement/cost.ts';
+export type { LlmLedgerEntry, PriceTable, TokenUsage } from './measurement/cost.ts';
