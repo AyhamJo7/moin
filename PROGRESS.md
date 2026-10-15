@@ -933,3 +933,9 @@ true, ok: false }` — is serialized by Vitest with none of the `constructor`/`t
 | Item          | Status           | Commit  | Evidence   | Note                                                                                                                                                                                                                                         |
 | ------------- | ---------------- | ------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | P08.01.01–.03 | READY_FOR_REVIEW | 68918fc | EV-P08-001 | Kernel envelope lint + queue topology + visibility floors; migration 0062 job_runs ledger (additive, RLS+FORCE); enqueue/claim services; data-inventory classification; 5 unit + 2 integration tests 3x green; mutation KILLED; gates 14/14. |
+
+## P08.02 transactional outbox and dispatcher
+
+| Item          | Status           | Commit  | Evidence   | Note                                                                                                                                                                                                             |
+| ------------- | ---------------- | ------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P08.02.01–.04 | READY_FOR_REVIEW | 2c9c938 | EV-P08-002 | Migration 0063 tenant outbox table; in-txn insert; SKIP LOCKED dispatch with backoff; lag input; crash-republish + isolation tests; 3x green; mutation KILLED; gates 14/14. Stacked on P08.01 (rebase on merge). |
