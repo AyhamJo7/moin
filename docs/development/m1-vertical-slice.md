@@ -75,7 +75,7 @@ finaliser fallback, the fallback kept its key and no marker was written. A repla
 completed the task then reopened it, and reported a new delivery. Adopting an existing call also
 kept a missing caller number and the fallback's generic title. Both are corrected by the
 acceptance record, the write-once number and the adoption rule above. The regression tests for
-these cases fail against the merged code (EV-P12-0XX).
+these cases fail against the merged code (EV-P12-011).
 
 Heute lists at most 100 live tasks, urgent first and then newest first. When more exist, the
 response says `truncated`, the page says so, and an empty section reads "In dieser Auswahl
@@ -185,5 +185,9 @@ here:
   tombstone, so an erased call cannot be resurrected by a retry. P16 must define their purge.
 - **The hash covers the derived summary (LOW).** If `interpretCall` changes between a delivery
   and its retry, the retry gets a 409 instead of a replay.
+- **Pre-0077 calls have no tombstone (LOW).** A call captured before migration 0077 is
+  recognised by its call and outcome rows. If those are erased, a retry is a first delivery
+  again. Erasure (P16) is not built, and no deployed environment holds pre-0077 data (none
+  exists).
 - **Shared advisory-lock keyspace (LOW).** CallSid and conversation locks both use `hashtext`. A
   collision can deadlock, which PostgreSQL detects (40P01) and rolls back.
