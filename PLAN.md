@@ -138,7 +138,7 @@ Single source of status. Tier columns show the status of that phase's items for 
 |---|---|---|---|---|---|---|---|---|
 | P00 | Planning baseline | READY_FOR_REVIEW | — | — | — | — | Founder review | Founder reads and adopts plan (P00.05) |
 | P01 | Discovery & Gurlitt observation | NOT_STARTED | NOT_STARTED | — | — | — | EXT-16 Gurlitt; the planned 2026-09-28 kickoff has no recorded outcome (M0, 2026-10-16) | Founder confirms the Gurlitt cooperation and schedules the kickoff (P01.02.01) |
-| P02 | Engineering foundation | READY_FOR_REVIEW | — | — | — | — | — | EXT-24 satisfied; every P02 item implemented and verified |
+| P02 | Engineering foundation | READY_FOR_REVIEW | — | — | — | — | — | EXT-24 READY_FOR_REVIEW: ruleset configuration evidenced (EV-P02-047), founder acceptance pending; every P02 item implemented with evidence, none founder-VERIFIED (M0) |
 | P03 | Architecture decisions & threat model | IN_PROGRESS | — | — | — | — | EXT-02 counsel not engaged | P03.05 review findings; founder sends the legal pack |
 | P04 | Feasibility proof & long-lead track | IN_PROGRESS | — | — | NOT_STARTED | — | EXT-01/07/10/11/12 | Adapter, gateway port and measurement harness built; every measurement waits on EXT-10/11/12 |
 | P05 | Cloud foundation & walking skeleton | IN_PROGRESS | — | — | — | — | EXT-09 AWS IN_PROGRESS: organisation and five accounts, Identity Center, root MFA and budget alerts exist (founder, 2026-10-14, `docs/operations/aws-organization-baseline.md`); SCPs, SES and quotas open. P05.03/.07/.09 "shape" helpers (#207–#209) implement no P05 item: the repository holds 0 Terraform files (M0) | Terraform bootstrap and modules (engineering, plan-ready); founder applies |
