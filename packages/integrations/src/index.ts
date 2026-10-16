@@ -4,3 +4,12 @@
 export const PACKAGE_NAME = '@moin/integrations';
 export { normalizeSubject, threadGroups, draftReply } from './email.ts';
 export type { EmailMessage, ReplyDraft } from './email.ts';
+export {
+  WEBHOOK_EVENTS,
+  eventAllowed,
+  subscribe,
+  signDelivery,
+  signatureValid,
+  retryDelayMs,
+} from './webhooks.ts';
+export type { Subscription } from './webhooks.ts';
