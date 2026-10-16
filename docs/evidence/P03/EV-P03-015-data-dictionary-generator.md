@@ -9,7 +9,7 @@
 | Environment | local |
 | Command / procedure | scripts/check-data-classification.ts parses CREATE TABLE statements out of the migrations, skips constraints, and fails on any column the inventory has never seen unless it is on a deliberately narrow structural list (keys, timestamps, tenant scope). organisation_id is structural because it identifies a BUSINESS, not a person; anything that could name, locate or contact a human is not on that list. 6 unit tests, including a fixture migration containing an unclassified personal column. |
 | Result | PASS — and proven non-vacuous, which mattered here: the real schema has only five columns today, so a bare pass would have shown nothing. The fixture proves the check flags contacts.secret_nickname while accepting contacts.display_name, which the inventory does classify, and treats id, organisation_id and created_at as structural. Once Drizzle table definitions exist in P06 the check reads those instead, which is stricter because it sees types. |
-| CI run / artifact | pending |
+| CI run / artifact | exact-commit CI, back-filled 2026-10-16 (M0): container-scan success https://github.com/AyhamJo7/moin/actions/runs/36496604741; pr-title success https://github.com/AyhamJo7/moin/actions/runs/36574588863; security-scan success https://github.com/AyhamJo7/moin/actions/runs/36496604736; verify success https://github.com/AyhamJo7/moin/actions/runs/36496604738 |
 | Reviewer | pending |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).

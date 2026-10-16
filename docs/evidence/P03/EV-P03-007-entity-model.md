@@ -9,7 +9,7 @@
 | Environment | local |
 | Command / procedure | docs/architecture/domain-model.md lists the entities of every module from PLAN Domain Boundaries, extending BLUEPRINT.md L1028-1087, and records the relationships that carry rules rather than every relationship. Verified mechanically by scripts/check-domain-coverage.ts, which extracts entity names from the blueprint range and asserts each appears in the model or the glossary, matching code term, snake_case table name or plural. |
 | Result | PASS — 26 blueprint entities, all accounted for, 5 explicitly deferred (Document and Invoice to P34, Workflow and WorkflowRun to P10, Consent to P16). The deferred list is in the script rather than implied, because a deferred entity is a decision and an absent one is an oversight, and the two must not look the same. The check also found a bug in itself on first run: naive pluralisation reported retention_policy as unmapped when the table is retention_policies — a false positive, which in a coverage check is worse than none because it teaches the reader to skim the output. |
-| CI run / artifact | pending |
+| CI run / artifact | exact-commit CI, back-filled 2026-10-16 (M0): container-scan success https://github.com/AyhamJo7/moin/actions/runs/36457622050; pr-title success https://github.com/AyhamJo7/moin/actions/runs/36457621863; security-scan success https://github.com/AyhamJo7/moin/actions/runs/36457621910; verify success https://github.com/AyhamJo7/moin/actions/runs/36457621861 |
 | Reviewer | pending |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).

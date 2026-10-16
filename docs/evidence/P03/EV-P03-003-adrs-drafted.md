@@ -9,7 +9,7 @@
 | Environment | local |
 | Command / procedure | ADR-0011 (dialogue manager: a deterministic state machine drives the conversation, the model interprets and never decides; responses come from an allowlist; a commitment follows a verified tool success), ADR-0018 (retention and deletion: retention is a property of a data category, every module implements an ErasureHandler in a compile-time registry, and the backup interaction is stated rather than avoided), ADR-0019 (turn logs: the conservative default is no transcripts and no turn logs, with the five questions EXT-02 must settle listed explicitly). |
 | Result | PASS — all three PROPOSED, none accepted. ADR-0019 in particular is not a decision this session is entitled to make: it depends on German data-protection and telecom-law input, and the ADR says so and describes the default that holds if counsel never answers. |
-| CI run / artifact | pending |
+| CI run / artifact | exact-commit CI, back-filled 2026-10-16 (M0): container-scan success https://github.com/AyhamJo7/moin/actions/runs/36457405770; pr-title success https://github.com/AyhamJo7/moin/actions/runs/36574586847; security-scan success https://github.com/AyhamJo7/moin/actions/runs/36457405878; verify success https://github.com/AyhamJo7/moin/actions/runs/36457405843 |
 | Reviewer | pending |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).

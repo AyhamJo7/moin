@@ -9,7 +9,7 @@
 | Environment | local |
 | Command / procedure | node scripts/check-domain-coverage.ts -> exit 0, "26 blueprint entities, all accounted for (5 explicitly deferred)". The check reads the blueprint range PLAN cites for this item rather than the whole file, extracts CamelCase entity names from its tree diagrams, and requires each to appear in the domain model or the glossary under its code term, table name or plural — or to be listed as deferred with the phase that builds it. |
 | Result | PASS — 0 unmapped. |
-| CI run / artifact | pending |
+| CI run / artifact | exact-commit CI, back-filled 2026-10-16 (M0): container-scan success https://github.com/AyhamJo7/moin/actions/runs/36457622050; pr-title success https://github.com/AyhamJo7/moin/actions/runs/36457621863; security-scan success https://github.com/AyhamJo7/moin/actions/runs/36457621910; verify success https://github.com/AyhamJo7/moin/actions/runs/36457621861 |
 | Reviewer | pending |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).

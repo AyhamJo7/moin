@@ -9,7 +9,7 @@
 | Environment | dependency-cruiser 18.4.0 |
 | Command / procedure | pnpm vitest run --project unit packages/config/src/boundaries; pnpm depcruise |
 | Result | the rule fires on a fixture and is clean on the tree; withTenant is now the sanctioned alternative it points callers to |
-| CI run / artifact | pending |
+| CI run / artifact | exact-commit CI, back-filled 2026-10-16 (M0): container-scan success https://github.com/AyhamJo7/moin/actions/runs/36621792019; pr-title success https://github.com/AyhamJo7/moin/actions/runs/36621791979; security-scan success https://github.com/AyhamJo7/moin/actions/runs/36621792166; verify success https://github.com/AyhamJo7/moin/actions/runs/36621792242 |
 | Reviewer | pending |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).

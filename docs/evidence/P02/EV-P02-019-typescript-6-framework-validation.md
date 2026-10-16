@@ -9,7 +9,7 @@
 | Environment | local (typescript 6.0.3, Node 24.21.0) |
 | Command / procedure | ADR-0002 recorded VALIDATION REQUIRED for TypeScript 6 against the two frameworks, which arrive in P02.03. NestJS 12.1.1: pnpm --filter @moin/server exec tsc --noEmit -p tsconfig.json -> exit 0 over four role entrypoints, decorated controllers and modules and symbol-token dependency injection; the emitted output runs and all four roles boot in a container. Next.js 16.3.6: pnpm --filter @moin/web build -> exit 0, "Compiled successfully", its own TypeScript pass "Finished TypeScript in 980ms", app-router routes prerendered. |
 | Result | PASS — both frameworks work on TypeScript 6.0.3, so the TypeScript 5.9.3 fallback in ADR-0002 is not taken. NestJS requires three overrides of the shared base (erasableSyntaxOnly off, experimentalDecorators and emitDecoratorMetadata on) because Nest resolves providers from emitter-produced decorator metadata; they are confined to apps/server/tsconfig.json and every strictness option is still inherited. |
-| CI run / artifact | pending |
+| CI run / artifact | exact-commit CI, back-filled 2026-10-16 (M0): pr-title success https://github.com/AyhamJo7/moin/actions/runs/36417632936 |
 | Reviewer | pending |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).

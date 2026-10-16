@@ -9,7 +9,7 @@
 | Environment | local |
 | Command / procedure | Files created and inspected: .github/CODEOWNERS (catch-all plus explicit owners for the control plane, PLAN/BLUEPRINT/PROGRESS, docs/evidence, packages/db, the identity-access / tenancy / audit / privacy / billing modules and infrastructure); .github/pull_request_template.md carrying all seven P02.01.02 fields (what/why, risk, tests, evidence IDs, docs, migration/rollback, privacy impact) plus a QG-09 trigger checkbox; .github/ISSUE_TEMPLATE/{bug_report.yml,feature_request.yml,config.yml}. The PR template was exercised end to end by PR #3, which fills every field. |
 | Result | PASS — PR #3 (https://github.com/AyhamJo7/moin/pull/3) was authored against the template with every field filled, so the template is exercised rather than merely present. |
-| CI run / artifact | pending |
+| CI run / artifact | exact-commit CI, back-filled 2026-10-16 (M0): pr-title failure https://github.com/AyhamJo7/moin/actions/runs/36379477690 |
 | Reviewer | pending |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).

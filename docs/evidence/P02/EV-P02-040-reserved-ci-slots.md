@@ -9,7 +9,7 @@
 | Environment | local |
 | Command / procedure | The verify workflow declares rls-catalog and openapi-drift jobs. Each prints the phase that activates it and FAILS if its script appears without the job being wired to run it (`if [ -f scripts/check-rls-catalog.ts ]; then exit 1`). Both are in the aggregate `verify` job needs list, which refuses to pass unless every needed job reports success. |
 | Result | PASS. The failing-when-the-script-appears behaviour is the point: a reserved job that silently passes is worse than no job, because it reports green and checks nothing. This way the slot cannot stay dormant once P06.02.04 creates the script. |
-| CI run / artifact | pending |
+| CI run / artifact | exact-commit CI, back-filled 2026-10-16 (M0): pr-title success https://github.com/AyhamJo7/moin/actions/runs/36452556424 |
 | Reviewer | pending |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).

@@ -9,7 +9,7 @@
 | Environment | local |
 | Command / procedure | docs/adr/README.md states when a decision earns an ADR (expensive to reverse, and the alternatives were real), the four statuses, and the rule that an ADR is superseded rather than edited — the record of what was believed and why is the point. docs/adr/TEMPLATE.md carries a mandatory Verification section and an Alternatives table whose instruction says that an ADR with strawman alternatives records nothing. The index lists all 17 ADRs with status and phase. |
 | Result | PASS |
-| CI run / artifact | pending |
+| CI run / artifact | exact-commit CI, back-filled 2026-10-16 (M0): container-scan success https://github.com/AyhamJo7/moin/actions/runs/36457405770; pr-title success https://github.com/AyhamJo7/moin/actions/runs/36574586847; security-scan success https://github.com/AyhamJo7/moin/actions/runs/36457405878; verify success https://github.com/AyhamJo7/moin/actions/runs/36457405843 |
 | Reviewer | pending |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).

@@ -9,7 +9,7 @@
 | Environment | PostgreSQL 17, per-file test database |
 | Command / procedure | pnpm test:integration — packages/db/src/tenant.integration.test.ts |
 | Result | 22 assertions: commits, rolls back, releases the client either way, and leaves nothing on the pooled connection |
-| CI run / artifact | pending |
+| CI run / artifact | exact-commit CI, back-filled 2026-10-16 (M0): container-scan success https://github.com/AyhamJo7/moin/actions/runs/36621792019; pr-title success https://github.com/AyhamJo7/moin/actions/runs/36621791979; security-scan success https://github.com/AyhamJo7/moin/actions/runs/36621792166; verify success https://github.com/AyhamJo7/moin/actions/runs/36621792242 |
 | Reviewer | pending |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).

@@ -9,7 +9,7 @@
 | Environment | local (vitest 5.0.2) + arm64 container |
 | Command / procedure | packages/observability: createLogger() routes every line through redactToAllowlist() in pino formatters.log, so no structured field can reach an appender unclassified. Correlation travels in AsyncLocalStorage (withRequestContext). 8 tests pass: allowlisted operational fields pass through; phone, email, callerName, address and transcript are redacted; an unclassified field is redacted (the failure mode of forgetting is a redaction, not a leak); nested objects and arrays are redacted; an error keeps type and stack but never its message; deep nesting terminates; and no field naming a person, number or message content is allowlisted. Container log line observed: {"level":30,"time":...,"service":"moin","role":"api","env":"production","route":"/healthz","statusCode":200,"msg":"server listening"} — only allowlisted fields. |
 | Result | PASS — 8/8. The tests found two real leaks in the first implementation: "name" was allowlisted (pinos logger name, which collides with a persons name), and a V8 stack trace begins with "<Name>: <message>", so logging err.stack reintroduced exactly the message that is withheld. Both were fixed; the stack is now filtered to call frames only. |
-| CI run / artifact | pending |
+| CI run / artifact | exact-commit CI, back-filled 2026-10-16 (M0): pr-title success https://github.com/AyhamJo7/moin/actions/runs/36417632936 |
 | Reviewer | pending |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).

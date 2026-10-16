@@ -9,7 +9,7 @@
 | Environment | local |
 | Command / procedure | Around 40 events across nine modules, named module.aggregate.past_tense — past tense because an event is a fact that has already happened, and a consumer that can refuse it is a bug. Every payload carries identifiers only, never data, so a consumer re-reads what it needs inside its own tenant-scoped transaction: this keeps personal data out of queues and logs (INV-12) and stops a consumer acting on a stale copy. Six rules are stated, including that adding a field is a minor version while removing or repurposing one is a new event type, with the old type kept until nothing consumes it — the same expand/contract rule as migrations. |
 | Result | PASS. One event is explicitly documented as a notification rather than the mechanism: identity.membership.revoked tells other modules, but session revocation itself is synchronous, because revoking access eventually would defeat the purpose (ADR-0005). |
-| CI run / artifact | pending |
+| CI run / artifact | exact-commit CI, back-filled 2026-10-16 (M0): container-scan success https://github.com/AyhamJo7/moin/actions/runs/36457622050; pr-title success https://github.com/AyhamJo7/moin/actions/runs/36457621863; security-scan success https://github.com/AyhamJo7/moin/actions/runs/36457621910; verify success https://github.com/AyhamJo7/moin/actions/runs/36457621861 |
 | Reviewer | pending |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).

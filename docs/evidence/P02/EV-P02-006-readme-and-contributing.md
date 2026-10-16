@@ -9,7 +9,7 @@
 | Environment | local |
 | Command / procedure | README.md: purpose, status, document map, quickstart, repository layout, verification commands, privacy note. CONTRIBUTING.md: branch and commit conventions, PR and review rules incl. QG-09, the evidence rules and the no-fake-completion list, gate commands incl. mutation_check, test rules (real Postgres for RLS, standalone runs, synthetic data, flake policy) and the invariants most likely to be touched. Both link PLAN, ARCHITECTURE, SECURITY, the development docs and the evidence registry; PRIVACY.md and OPERATIONS.md are named as arriving with P16 and P15. Verified with pnpm exec prettier --check . (exit 0) and by following every relative link. |
 | Result | PASS — both files present and internally consistent. The quickstart is independently re-verified end to end by P02.04.06 and P02.07.03; this item covers authorship only. |
-| CI run / artifact | pending |
+| CI run / artifact | exact-commit CI, back-filled 2026-10-16 (M0): pr-title failure https://github.com/AyhamJo7/moin/actions/runs/36379477690 |
 | Reviewer | pending |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).

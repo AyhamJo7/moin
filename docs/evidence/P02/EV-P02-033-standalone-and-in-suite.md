@@ -9,7 +9,7 @@
 | Environment | local (PostgreSQL 17 + pgvector, Node 24.21.0) |
 | Command / procedure | The database was destroyed and rebuilt first — docker compose down --volumes, then up --wait, then db:migrate, which applied 0001 and 0002 to an empty database — so "standalone" means against a genuinely fresh, freshly migrated database rather than one left over from an earlier run. UNIT in-suite: vitest run --project unit -> 13 files, 108 tests passed. UNIT standalone: vitest run --project unit packages/kernel/src/clock.test.ts -> 1 file, 4 tests passed. INTEGRATION in-suite: vitest run --project integration -> 1 file, 5 tests passed. INTEGRATION standalone: vitest run --project integration packages/testing/src/pg/harness.integration.test.ts -> 1 file, 5 tests passed. E2E in-suite: playwright test --project chromium -> 4 passed. E2E standalone: playwright test apps/web/e2e/smoke.spec.ts --project=chromium -> 4 passed. |
 | Result | PASS — every type passes both ways. The property that makes this hold rather than being luck is structural: each integration file clones its own database from the template, so no file can leave state another file depends on. That is what stops a suite from passing while each file fails alone. |
-| CI run / artifact | pending |
+| CI run / artifact | exact-commit CI, back-filled 2026-10-16 (M0): pr-title success https://github.com/AyhamJo7/moin/actions/runs/36427057145 |
 | Reviewer | pending |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).

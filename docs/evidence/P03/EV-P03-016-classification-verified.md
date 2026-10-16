@@ -9,7 +9,7 @@
 | Environment | local |
 | Command / procedure | node scripts/check-data-classification.ts -> exit 0, every column classified or structural. Wired to run in CI with the rest of the checks once P06 creates the first tenant tables, where it becomes load-bearing. |
 | Result | PASS — 0 unclassified. Honest scope: the schema is five columns today, so this verifies the mechanism rather than a large surface. The mechanism is what P06 onward depends on, and the fixture test is what proves it works. |
-| CI run / artifact | pending |
+| CI run / artifact | exact-commit CI, back-filled 2026-10-16 (M0): container-scan success https://github.com/AyhamJo7/moin/actions/runs/36496604741; pr-title success https://github.com/AyhamJo7/moin/actions/runs/36574588863; security-scan success https://github.com/AyhamJo7/moin/actions/runs/36496604736; verify success https://github.com/AyhamJo7/moin/actions/runs/36496604738 |
 | Reviewer | pending |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).

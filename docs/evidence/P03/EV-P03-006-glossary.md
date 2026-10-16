@@ -9,7 +9,7 @@
 | Environment | local |
 | Command / procedure | docs/architecture/glossary.md maps every business object, state and caller action between the code term and what a Betriebsinhaber would actually say — the German column is what an owner says, not a translation, because several code terms have no natural German equivalent and forcing one produces UI copy that reads like software. It also records the words deliberately NOT used in the UI (Mandant, Ticket, Lead, Transkript, Bot, and the implementation vocabulary of intents, slots and prompts) with the reason for each, and fixes Sie as the form of address throughout including in what the assistant says to callers. |
 | Result | PASS. One term is flagged as genuinely at risk rather than settled: Vorgang is broader in German business usage than Conversation is in the code — an owner may mean the whole matter from first call to finished job. The alternatives are worse (Gespräch is wrong the moment the channel is email; Unterhaltung sounds like a chat app), so the UI keeps Vorgang to one interaction and P01 pilot observation decides whether that holds. If it does not, the UI term changes and the code term does not, which is what ADR-0034 exists for. |
-| CI run / artifact | pending |
+| CI run / artifact | exact-commit CI, back-filled 2026-10-16 (M0): container-scan success https://github.com/AyhamJo7/moin/actions/runs/36457622050; pr-title success https://github.com/AyhamJo7/moin/actions/runs/36457621863; security-scan success https://github.com/AyhamJo7/moin/actions/runs/36457621910; verify success https://github.com/AyhamJo7/moin/actions/runs/36457621861 |
 | Reviewer | pending |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).

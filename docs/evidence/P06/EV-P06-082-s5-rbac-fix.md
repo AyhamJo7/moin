@@ -9,7 +9,7 @@
 | Environment | CI |
 | Command / procedure | eslint prettier tsc check-migrations plus vitest roles and CI integration |
 | Result | RED static-clean CI-green pending |
-| CI run / artifact | pending |
+| CI run / artifact | exact-commit CI, back-filled 2026-10-16 (M0): container-scan failure https://github.com/AyhamJo7/moin/actions/runs/37991607983; pr-title success https://github.com/AyhamJo7/moin/actions/runs/37992533124; security-scan failure https://github.com/AyhamJo7/moin/actions/runs/37991607990; verify failure https://github.com/AyhamJo7/moin/actions/runs/37991607966 |
 | Reviewer | pending full PR review |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).

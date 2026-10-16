@@ -9,7 +9,7 @@
 | Environment | local (Node 24.21.0, pnpm 10.34.5) |
 | Command / procedure | Created the tree from PLAN.md Repository Structure: apps/{web,server}, packages/{contracts,db,kernel,ai,telephony,integrations,observability,ui,testing,config}, templates/, evals/{datasets,adversarial}, infrastructure/terraform/{bootstrap,modules,envs/{shared,backup,staging,production}}, scripts/, docs/{architecture,adr,runbooks,security,privacy,operations,product,pilot,onboarding,legal-briefs,evidence}. Verified: pnpm install resolves all 12 workspace projects; pnpm turbo run typecheck -> 16 successful, 16 total; pnpm turbo run build -> 12 successful, 12 total; pnpm exec depcruise apps packages scripts --config .dependency-cruiser.cjs -> "no dependency violations found (78 modules, 91 dependencies cruised)", exit 0. |
 | Result | PASS. Packages not yet needed by P02 carry a typed placeholder export and name the phase that fills them, so the workspace graph and the boundary rules are complete from the start. |
-| CI run / artifact | pending |
+| CI run / artifact | exact-commit CI, back-filled 2026-10-16 (M0): pr-title success https://github.com/AyhamJo7/moin/actions/runs/36417632936 |
 | Reviewer | pending |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).

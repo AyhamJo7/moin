@@ -9,7 +9,7 @@
 | Environment | local (prettier 3.9.9) |
 | Command / procedure | Added .prettierrc.json (printWidth 100, single quotes, trailing commas, semicolons, LF), .prettierignore (lockfile, build output, PLAN.md, BLUEPRINT.md, docs/evidence, docs/control-plane) and .editorconfig (UTF-8, LF, 2-space, final newline, trailing whitespace trimmed; markdown keeps trailing whitespace, Makefiles keep tabs). PLAN.md and BLUEPRINT.md are ignored deliberately: BLUEPRINT.md is read-only and PLAN.md is read by line-anchored tooling that reformatting would break. Verified: pnpm exec prettier --write . then pnpm exec prettier --check . -> "All matched files use Prettier code style!" (exit 0). |
 | Result | PASS — prettier --check exits 0 over the whole repository. |
-| CI run / artifact | pending |
+| CI run / artifact | exact-commit CI, back-filled 2026-10-16 (M0): pr-title failure https://github.com/AyhamJo7/moin/actions/runs/36379477690 |
 | Reviewer | pending |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).
