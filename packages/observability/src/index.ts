@@ -57,3 +57,5 @@ export { elevationAllowed, accessPath } from './access-policy.ts';
 export type { Elevation, ProdRole } from './access-policy.ts';
 export { drSteps, drPlanComplete, DR_RTO_HOURS, DR_RPO_HOURS } from './dr-plan.ts';
 export type { DrPlan, DrStep } from './dr-plan.ts';
+export { readinessGates, readinessComplete } from './readiness-review.ts';
+export type { ReadinessGate, ReadinessReview } from './readiness-review.ts';
