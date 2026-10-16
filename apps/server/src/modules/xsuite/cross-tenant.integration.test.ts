@@ -37,6 +37,8 @@ import { CONTEXT_CLOCK, IDENTITY_CLOCK } from '../identity-access/identity-acces
 import { registerCorrelation } from '../../observability/correlation.ts';
 import { HealthModule } from '../../health/health.module.ts';
 import { VoiceModule } from '../voice/voice.module.ts';
+import { WorkModule } from '../work/work.module.ts';
+import { CallSimulatorModule } from '../call-simulator/call-simulator.module.ts';
 import { EXPECTED_ROUTE_COUNT, INVENTORY } from './inventory.ts';
 import { reconstructRoutes } from './routes.ts';
 import { seedTwoTenants, type SeededWorld } from './seed.ts';
@@ -52,6 +54,7 @@ const NON_PRODUCT_ROUTES = new Set(['GET /voice/relay']);
 const LOCAL_KEY = 'local-v1:local-development-only';
 const APP_ORIGIN = 'http://localhost:3000';
 const CSRF_HEADER = 'x-csrf-token';
+const SIMULATOR_TOKEN = 'xsuite-simulator-token-0123456789abcdef';
 
 let database: TestDatabase;
 let admin: ReturnType<TestDatabase['fixturePool']>;
@@ -83,6 +86,7 @@ async function build(): Promise<NestFastifyApplication> {
           OIDC_REDIRECT_URI: 'http://localhost:3000/api/auth/callback',
           AUTH_LOCAL_TOKEN_KEY: LOCAL_KEY,
           IDENTITY_DATABASE_URL: identityUrl(),
+          CALL_SIMULATOR_TOKEN: SIMULATOR_TOKEN,
         }),
       ),
       LoggerModule,
@@ -90,6 +94,8 @@ async function build(): Promise<NestFastifyApplication> {
       TenantPoolModule,
       HealthModule,
       VoiceModule,
+      WorkModule,
+      CallSimulatorModule,
     ],
     controllers: [],
     providers: [],
@@ -315,6 +321,21 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
     expect(body).toContain(world.a.grantId);
     expect(body).not.toContain(world.b.grantId);
     expect(body).not.toContain('xsuite-beta');
+
+    // Today (M1): one task per tenant, staged by the fixture pool like the seed (no audit
+    // rows, so the DB-layer counts below stay exact); A's read holds A's task only.
+    const taskA = randomUUID();
+    const taskB = randomUUID();
+    await admin.query(
+      `insert into tasks (organisation_id, id, title, type)
+       values ($1, $2, 'xsuite-alpha task', 'callback'), ($3, $4, 'xsuite-beta task', 'callback')`,
+      [world.a.organisationId, taskA, world.b.organisationId, taskB],
+    );
+    const todayA = await authed(session, 'GET', '/api/today');
+    expect(todayA.statusCode).toBe(200);
+    expect(todayA.body).toContain(taskA);
+    expect(todayA.body).not.toContain(taskB);
+    expect(todayA.body).not.toContain('xsuite-beta');
   });
 
   evidenceTest('public routes answer without tenant data', async () => {
@@ -345,6 +366,25 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
       expect([401, 403].includes(response.statusCode), `${url} → ${response.statusCode}`).toBe(
         true,
       );
+    }
+    // The simulated-call entry: no token and a forged token are both refused before tenancy.
+    for (const authorization of [undefined, `Bearer ${SIMULATOR_TOKEN}-forged`]) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/dev/simulated-calls',
+        headers: {
+          'content-type': 'application/json',
+          ...(authorization === undefined ? {} : { authorization }),
+        },
+        payload: JSON.stringify({
+          callSid: 'SIMforged0001',
+          from: '+4915100000000',
+          to: '+4940000000000',
+          utterance: 'Rückruf bitte',
+        }),
+      });
+      expect(response.statusCode).toBe(401);
+      expect(response.body).not.toContain('xsuite-alpha');
     }
   });
 });

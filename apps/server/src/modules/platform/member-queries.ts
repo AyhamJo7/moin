@@ -29,7 +29,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  * every row of one request is findable by one id and a malformed header can never fail an audit
  * write.
  */
-function auditCorrelationId(): string | undefined {
+export function auditCorrelationId(): string | undefined {
   // Tests build the Nest app without bootstrap's onRequest hook, so no request context exists
   // there; production always has one. Fall back to a fresh uuid (never NULL, never caller
   // input) so the audit write cannot fail for lack of correlation anywhere.

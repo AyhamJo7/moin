@@ -4,6 +4,8 @@ import { LoggerModule } from '../observability/logger.module.ts';
 import { HealthModule } from '../health/health.module.ts';
 import { IdentityAccessModule } from '../modules/identity-access/identity-access.module.ts';
 import { TenantPoolModule } from '../modules/platform/tenant-pool.module.ts';
+import { WorkModule } from '../modules/work/work.module.ts';
+import { CallSimulatorModule } from '../modules/call-simulator/call-simulator.module.ts';
 
 /**
  * The owner-facing HTTP API.
@@ -14,7 +16,9 @@ import { TenantPoolModule } from '../modules/platform/tenant-pool.module.ts';
  *
  * The business modules (identity-access, tenancy, audit, contacts, conversations, work, …) are
  * added by the phases that build them, P06 onward. Identity and access (P06.06) is the first;
- * its tenant pool (P06.06.03) is wired here so the first guarded business route finds it.
+ * its tenant pool (P06.06.03) is wired here so the first guarded business route finds it. Work
+ * serves the owner's Today read; the call simulator is a development-and-test entry point that
+ * stays inert (404) unless its token is configured, which deployed environments refuse.
  */
 @Module({
   imports: [
@@ -23,6 +27,8 @@ import { TenantPoolModule } from '../modules/platform/tenant-pool.module.ts';
     HealthModule,
     IdentityAccessModule,
     TenantPoolModule,
+    WorkModule,
+    CallSimulatorModule,
   ],
 })
 export class ApiRootModule {}

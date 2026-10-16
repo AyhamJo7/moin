@@ -117,6 +117,7 @@ export function buildSignInGate(
     AuthThrottleStore,
     MemberQueries,
   ],
-  exports: [SESSIONS, REQUEST_CONTEXTS],
+  // AuthThrottleStore: other modules' routes mount AccountThrottleGuard (session-guards.ts).
+  exports: [SESSIONS, REQUEST_CONTEXTS, AuthThrottleStore],
 })
 export class IdentityAccessModule {}

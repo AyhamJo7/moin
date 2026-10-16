@@ -102,11 +102,14 @@ export {
   completeTask,
   createTask,
   listOpenTasks,
+  listTodayTasks,
   reopenTask,
   setTaskStatus,
   snoozeTask,
 } from './tasks.ts';
-export type { NewTask, Task, TaskPriority, TaskStatus, TaskType } from './tasks.ts';
+export type { NewTask, Task, TaskPriority, TaskStatus, TaskType, TodayTaskRow } from './tasks.ts';
+export { captureCallbackRequest } from './callback-intake.ts';
+export type { CallbackRequest, CapturedCallback } from './callback-intake.ts';
 export { createLead, getLead, listLeads, setLeadStatus } from './leads.ts';
 export type { Lead, LeadStatus, LostReason } from './leads.ts';
 export {

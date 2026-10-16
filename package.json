@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "KlarDesk \u2014 Digitales Front Office f\u00fcr kleine Betriebe",
+  "description": "KlarDesk — Digitales Front Office für kleine Betriebe",
   "license": "UNLICENSED",
   "packageManager": "pnpm@10.34.5",
   "engines": {
@@ -31,7 +31,7 @@
     "dev:up": "docker compose up -d --wait",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "lint": "turbo run lint && eslint scripts eslint.config.ts vitest.config.ts playwright.config.ts",
+    "lint": "turbo run lint && eslint scripts eslint.config.ts vitest.config.ts playwright.config.ts playwright.slice.config.ts e2e",
     "preflight": "node --env-file-if-exists=.env scripts/doctor.ts",
     "test": "vitest run --project unit",
     "test:e2e": "playwright test",
@@ -43,6 +43,7 @@
   "devDependencies": {
     "@axe-core/playwright": "4.13.0",
     "@eslint/js": "10.0.1",
+    "@moin/contracts": "workspace:*",
     "@moin/db": "workspace:*",
     "@moin/testing": "workspace:*",
     "@playwright/test": "1.63.0",

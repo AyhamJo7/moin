@@ -102,7 +102,10 @@ export interface NewTask {
 
 function checkTitle(title: string): string {
   const trimmed = title.trim();
-  if (trimmed.length === 0 || trimmed.length > 72) {
+  // Characters as PostgreSQL's length() counts them (code points), so a title the CHECK
+  // accepts is never refused here for its emoji or other astral characters.
+  const characters = Array.from(trimmed).length;
+  if (characters === 0 || characters > 72) {
     throw new RangeError('task title must be 1..72 characters');
   }
   return trimmed;
@@ -324,6 +327,56 @@ export async function snoozeTask(
     result: 'succeeded',
   });
   return toTask(row);
+}
+
+/** One row of the owner's Today view (P13.02): the live task plus the call it came from. */
+export interface TodayTaskRow {
+  readonly id: string;
+  readonly title: string;
+  readonly status: TaskStatus;
+  readonly type: TaskType | null;
+  readonly priority: TaskPriority;
+  readonly createdAt: Date;
+  /** The calling number when the task came from a call and the number is E.164; else null. */
+  readonly callerNumber: string | null;
+}
+
+/**
+ * Live tasks for the Today view, newest first: open, in progress or waiting, and not snoozed.
+ * Read under the caller's tenant like every query here, so the calls join sees only this
+ * tenant's calls. A withheld or malformed `from_number` reads as null, never as a raw string.
+ */
+export async function listTodayTasks(client: TenantClient, limit = 100): Promise<TodayTaskRow[]> {
+  const capped = Math.min(Math.max(limit, 1), 100);
+  const result = await client.query<{
+    id: string;
+    title: string;
+    status: string;
+    type: string | null;
+    priority: string;
+    created_at: Date;
+    caller_number: string | null;
+  }>(
+    `select t.id, t.title, t.status, t.type, t.priority, t.created_at,
+       (select case when c.from_number ~ '^\\+[1-9][0-9]{6,14}$' then c.from_number end
+          from calls c where c.conversation_id = t.conversation_id
+          order by c.created_at limit 1) as caller_number
+     from tasks t
+     where t.status in ('open', 'in_progress', 'waiting')
+       and (t.snoozed_until is null or t.snoozed_until <= clock_timestamp())
+     order by t.created_at desc, t.id
+     limit $1`,
+    [capped],
+  );
+  return result.rows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    status: row.status as TaskStatus,
+    type: (row.type ?? null) as TaskType | null,
+    priority: row.priority as TaskPriority,
+    createdAt: row.created_at,
+    callerNumber: row.caller_number,
+  }));
 }
 
 export async function listOpenTasks(client: TenantClient, limit = 50): Promise<Task[]> {
