@@ -1,8 +1,8 @@
-# EV-P09-014: knowledge_passages per approved version + embedding model version, idempotent re-embed, version-mismatch + cross-tenant exclusion; HNSW/vector rides P10.01 gateway; inventory classified; unit 1/1 + integration 2/2 3x + mutation KILLED + gates full 14/14.
+# EV-P09-015: knowledge_passages per approved version + embedding model version, idempotent re-embed, version-mismatch + cross-tenant exclusion; HNSW/vector rides P10.01 gateway; inventory classified; unit 1/1 + integration 2/2 3x + mutation KILLED + gates full 14/14.
 
 | Field | Value |
 |---|---|
-| Evidence ID | EV-P09-014 |
+| Evidence ID | EV-P09-015 |
 | Item | P09.09.04 |
 | Date (UTC) | 2026-10-15 08:29 UTC |
 | Commit | `8afbbb3173b6344bf0516cf87b8970444f84216b` |
