@@ -1,6 +1,6 @@
 # Provider accounts
 
-- **Status:** skeleton — nothing here is configured yet
+- **Status:** partly started — AWS organisation exists (EXT-09); unverified 2026-10-15 session notes mention Twilio and OpenAI accounts (not re-verified, statuses unchanged); nothing else is configured. Reconciled 2026-10-16 (M0).
 - **Owner:** founder. Account creation, plan upgrades and credential rotation are founder-only in
   every environment (CLAUDE.md §12).
 
@@ -17,18 +17,18 @@ A missing cell is the point of the table.
 
 ## Twilio (EXT-10)
 
-|                   |                                                                                                          |
-| ----------------- | -------------------------------------------------------------------------------------------------------- |
-| Status            | **NOT_STARTED**                                                                                          |
-| Account SID       | —                                                                                                        |
-| Business profile  | not submitted                                                                                            |
-| DPA               | not signed                                                                                               |
-| Processing region | IE1 intended (ADR-0010) — **not enabled**                                                                |
-| Subaccounts       | `staging`, `production`, `monitor` — not created                                                         |
-| Geo permissions   | outbound voice and SMS to Germany only; international and premium destinations disabled — not configured |
-| Usage triggers    | daily and monthly spend thresholds to founder alerts — not configured                                    |
-| Credentials       | —                                                                                                        |
-| Blocks            | P04.01, P04.04.06, P04.05, P11                                                                           |
+|                   |                                                                                                                                                                         |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Status            | **NOT_STARTED** — an unverified 2026-10-15 session note reports an account suspended by Twilio pending a use-case/identity reply; re-verify before changing this status |
+| Account SID       | —                                                                                                                                                                       |
+| Business profile  | not submitted                                                                                                                                                           |
+| DPA               | not signed                                                                                                                                                              |
+| Processing region | IE1 intended (ADR-0010) — **not enabled**                                                                                                                               |
+| Subaccounts       | `staging`, `production`, `monitor` — not created                                                                                                                        |
+| Geo permissions   | outbound voice and SMS to Germany only; international and premium destinations disabled — not configured                                                                |
+| Usage triggers    | daily and monthly spend thresholds to founder alerts — not configured                                                                                                   |
+| Credentials       | —                                                                                                                                                                       |
+| Blocks            | P04.01, P04.04.06, P04.05, P11                                                                                                                                          |
 
 Toll fraud is the reason geo permissions and usage triggers are in this table rather than in a
 runbook: an account that can dial premium international destinations is a liability from the
@@ -51,17 +51,17 @@ control to start.
 
 ## OpenAI (EXT-12)
 
-|                    |                                                                      |
-| ------------------ | -------------------------------------------------------------------- |
-| Status             | **NOT_STARTED**                                                      |
-| Project            | a **new** project with Europe data residency — not created           |
-| Enhanced privacy   | modified abuse monitoring / ZDR — not requested                      |
-| DPA                | not signed                                                           |
-| `store`            | must be `false` on every call                                        |
-| Budget limits      | not set                                                              |
-| Eligible endpoints | Responses API, strict structured outputs, embeddings — not confirmed |
-| Credentials        | —                                                                    |
-| Blocks             | P04.03, P10                                                          |
+|                    |                                                                                                                                                                               |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Status             | **NOT_STARTED** — an unverified 2026-10-15 session note reports a Build-plan account with no data-residency option at project creation; re-verify before changing this status |
+| Project            | a **new** project with Europe data residency — not created                                                                                                                    |
+| Enhanced privacy   | modified abuse monitoring / ZDR — not requested                                                                                                                               |
+| DPA                | not signed                                                                                                                                                                    |
+| `store`            | must be `false` on every call                                                                                                                                                 |
+| Budget limits      | not set                                                                                                                                                                       |
+| Eligible endpoints | Responses API, strict structured outputs, embeddings — not confirmed                                                                                                          |
+| Credentials        | —                                                                                                                                                                             |
+| Blocks             | P04.03, P10                                                                                                                                                                   |
 
 ## Alternative EU model provider (DG-14)
 

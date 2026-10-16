@@ -5,8 +5,8 @@
 
 ## 1. What this repository is
 
-KlarDesk ("Digitales Front Office für kleine Betriebe"), codename `moin`. Greenfield: no application
-code exists until P02. **`PLAN.md` is the authoritative execution plan** (phases P00–P33, Status Ledger,
+KlarDesk ("Digitales Front Office für kleine Betriebe"), codename `moin`. Application code exists from
+P02 on; much of it is not wired into a running path. **`PLAN.md` is the authoritative execution plan** (phases P00–P33, Status Ledger,
 gates, INV/EXT/DG/LG/QG IDs, evidence rules). `BLUEPRINT.md` is the founder's product spec: read-only
 (a deny rule and a hook block writes). Where they differ, PLAN.md records the resolution.
 
@@ -109,7 +109,7 @@ Ledger, Invariants, the target phase, and the IDs that phase references.
 
 ## 9. Commands
 
-Greenfield until P02.02; P02.07.01 adds the pnpm/turbo/docker commands here.
+pnpm/turbo/docker commands: README.md Quickstart and `docs/development/`.
 
 | Purpose                                     | Command                                                                                         |
 | ------------------------------------------- | ----------------------------------------------------------------------------------------------- |

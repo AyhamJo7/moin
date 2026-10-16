@@ -1,0 +1,343 @@
+# M0 — Truth reconciliation (2026-10-16)
+
+Status records corrected against the code on `main` at `993ea23` and the evidence registry. The
+starting point was `docs/audits/2026-10-16-state-audit.md`, which found the Status Ledger, the phase
+headers, `PROGRESS.md`, the EXT table and parts of the evidence registry disagreeing with each other
+and with the code. This document records every change and the reason for it. **No status was raised
+to VERIFIED except EXT-24, which the founder confirmed. No scope, gate, threshold or invariant changed.**
+
+## Method
+
+1. Every claim was re-checked against the PLAN item's own text, not the PR title or the evidence
+   summary: _does the deliverable the item names exist, and does the test it names exist?_
+2. Facts used throughout (checked on `993ea23`):
+   - no metric is emitted anywhere; metric names exist only as constants;
+   - no SQS, Valkey, S3, SES or SMS client; the worker role serves health checks only;
+   - HTTP routes exist only for auth, members, recovery, support, voice and health;
+   - `templates/` and `evals/` are empty; there is no `usage_ledger` or `template_versions` table;
+   - no QG-07 eval gate in CI;
+   - the owner web app is one placeholder page;
+   - the P10–P13 modules are imported by no runtime entrypoint (`main-*.ts`, web pages, db CLI).
+3. Phase tiers were classified by what the merged code is:
+   - **DB layer** (migration + functions + real-Postgres tests) → `IN_PROGRESS`;
+   - **reusable domain logic** (state machines, decision functions, routing, guards) → `IN_PROGRESS`;
+   - **declaration-only shapes** (constant arrays or boolean checklists that restate an
+     infrastructure, operations or gate requirement) → unchanged `NOT_STARTED`, with an annotation.
+4. Unit-tested code that the item text describes counts as met even when nothing calls it yet
+   (for example the circuit breaker). An item that names wiring, persistence, a route, a UI, a
+   metric, a job, an E2E test, a drill or a live provider is not met by a helper.
+
+## Status Ledger and phase headers
+
+| Phase   | Before (PILOT · MTLIVE · LAUNCH · SELL · TEN)                        | After                                       | Why                                                                                                                                          |
+| ------- | -------------------------------------------------------------------- | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| P01     | NOT_STARTED · NOT_STARTED                                            | unchanged; next action corrected            | The 2026-09-28 kickoff has no recorded outcome.                                                                                              |
+| P05     | NOT_STARTED                                                          | PILOT IN_PROGRESS                           | The founder created the AWS organisation and accounts (P05.01, 2026-10-14). The #207–#209 shapes implement nothing; there are 0 `.tf` files. |
+| P07     | IN_PROGRESS · — · NOT_STARTED · NOT_STARTED (row shifted one column) | IN_PROGRESS · — · IN_PROGRESS · IN_PROGRESS | Column shift fixed (TEN was missing). P07.12 search (LAUNCH) and P07.04 merge (SELL) are built with evidence. Phase header aligned.          |
+| P08     | NOT_STARTED                                                          | PILOT IN_PROGRESS                           | DB layer for every section; transports, processes, route and middleware missing.                                                             |
+| P09     | NOT_STARTED · NOT_STARTED · NOT_STARTED                              | IN_PROGRESS · IN_PROGRESS · IN_PROGRESS     | DB layer for P09.01–.11; PDF stage gate (LAUNCH); passage rows (SELL).                                                                       |
+| P10     | NOT_STARTED · NOT_STARTED                                            | IN_PROGRESS · IN_PROGRESS                   | Libraries built and unit-tested, unwired; alternative provider and rollout helpers (LAUNCH).                                                 |
+| P11     | NOT_STARTED · NOT_STARTED                                            | IN_PROGRESS · IN_PROGRESS                   | Inbound webhook path wired; the rest are unwired helpers; transfer validation (LAUNCH).                                                      |
+| P12     | NOT_STARTED                                                          | PILOT IN_PROGRESS                           | Turn helpers, unwired.                                                                                                                       |
+| P13     | NOT_STARTED · NOT_STARTED                                            | IN_PROGRESS · NOT_STARTED                   | Placeholder page + pure helpers; no LAUNCH section touched.                                                                                  |
+| P14     | NOT_STARTED · NOT_STARTED                                            | IN_PROGRESS · NOT_STARTED                   | Tables and services; no senders.                                                                                                             |
+| P15     | NOT_STARTED · NOT_STARTED                                            | IN_PROGRESS · NOT_STARTED                   | Runbooks + helpers; nothing deployed.                                                                                                        |
+| P16     | NOT_STARTED · NOT_STARTED                                            | IN_PROGRESS · IN_PROGRESS                   | Decision/state helpers; self-service export and termination state machine (LAUNCH).                                                          |
+| P17     | NOT_STARTED ×3                                                       | unchanged, annotated                        | #193–#202 are declaration-only shapes; no infrastructure.                                                                                    |
+| P18     | NOT_STARTED                                                          | unchanged, annotated                        | #203–#206 are declaration-only shapes.                                                                                                       |
+| P20     | SELL NOT_STARTED                                                     | SELL IN_PROGRESS                            | Slot holds at the DB level with an EXCLUDE constraint.                                                                                       |
+| P21     | MTLIVE NOT_STARTED                                                   | MTLIVE IN_PROGRESS                          | Handwerk template data (P21.02 is MTLIVE in PLAN).                                                                                           |
+| P22     | SELL NOT_STARTED                                                     | SELL IN_PROGRESS                            | Assignment-routing helpers (P22.02 is SELL).                                                                                                 |
+| P27     | SELL NOT_STARTED                                                     | SELL IN_PROGRESS                            | Thread-grouping/draft helpers.                                                                                                               |
+| P28     | SELL NOT_STARTED                                                     | SELL IN_PROGRESS                            | Timeline-merge helpers.                                                                                                                      |
+| P29     | TEN NOT_STARTED                                                      | TEN IN_PROGRESS                             | Webhook signing helpers.                                                                                                                     |
+| P30–P33 | SELL NOT_STARTED                                                     | unchanged, annotated                        | Declaration-only shapes; their EV records cite items that were not done.                                                                     |
+
+PLAN.md also: Document Status rows corrected (no longer "greenfield"); change-log row added;
+P09.10.01/.02 re-indented (PR #105 had out-dented them, which hid both items from
+`plan_section.py` and made PLAN count 1,202 items instead of 1,204).
+
+## External gates
+
+| ID         | Before      | After                | Evidence                                                                                                             |
+| ---------- | ----------- | -------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| EXT-09     | NOT_STARTED | IN_PROGRESS          | `docs/operations/aws-organization-baseline.md` (2026-10-14, partly CLI-verified)                                     |
+| EXT-10     | NOT_STARTED | unchanged, annotated | an unverified session note (2026-10-15, archived, not committed) reports an account Twilio suspended pending a reply |
+| EXT-12     | NOT_STARTED | unchanged, annotated | an unverified session note (2026-10-15) reports no data-residency option at project creation; no ticket recorded     |
+| EXT-24     | NOT_STARTED | VERIFIED             | ruleset `main-protection` read via the GitHub API 2026-10-16; EV-P02-047; founder's M0 brief                         |
+| all others | NOT_STARTED | unchanged            | no evidence of any action                                                                                            |
+
+EXT-10 and EXT-12 stay `NOT_STARTED`: the 2026-10-15 observations come from session notes that were
+not re-verified, so they are recorded as annotations, not as status (founder instruction in the M0
+recovery brief, 2026-10-16). Re-verifying them is the founder's step.
+
+## Evidence registry
+
+- **EV-P06-054** cited `0748a86230b4…`, which is not a commit in this repository (`evidence.py`
+  reported STALE). The 7-character prefix `0748a86` resolves uniquely to
+  `0748a8691eef70197a154993e1d7aa599273571c` ("feat(auth): invitations and membership lifecycle",
+  2026-10-07 22:41:01 UTC, the time the record states). The full hash was corrected; a note in the
+  record says so.
+- **CI links back-filled only where a workflow ran on the record's exact commit:** 85 records
+  (26 commits). The conclusions are copied as GitHub reports them, including the failures:
+  EV-P02-001…011 and EV-P02-021 (`pr-title` failure), EV-P02-041/042 (`container-scan` cancelled),
+  EV-P06-001…010 (`security-scan` failure, `container-scan` cancelled), EV-P06-082 (`verify`,
+  `security-scan`, `container-scan` failure). The other 175 "pending" records were taken on commits that never ran CI in that form;
+  they stay `pending` — a later run on a different commit is not evidence for them.
+- **Reviewer fields were not changed.** 246 records still say "pending"; no review was invented.
+- **Evidence filed under items it does not implement** (records unchanged, listed here and in
+  `docs/evidence/INDEX.md`): EV-P27-001 (P27.01 DG-04 decision), EV-P30-001 (P30.01 threat-model
+  refresh), EV-P31-001/002 (P31.01 load tests), EV-P32-001/002 (P32.01 package activation),
+  EV-P33-001 (P33.01 evidence compilation), EV-P12-001 (P12.01 slot-filling engine), EV-P12-002
+  (P12.02 German normalisation).
+
+## PROGRESS.md
+
+`PROGRESS.md` is append-only, so the original rows stay as written and a corrective section is
+appended. 238 item-level READY_FOR_REVIEW claims outside P02/P03/P04/P06 were re-checked:
+
+| Verdict                     | Items | Corrected status                                 |
+| --------------------------- | ----- | ------------------------------------------------ |
+| met                         | 64    | READY_FOR_REVIEW (unchanged, still not VERIFIED) |
+| partial                     | 97    | IN_PROGRESS                                      |
+| not met                     | 66    | IN_PROGRESS                                      |
+| wrong PLAN item cited       | 9     | IN_PROGRESS                                      |
+| item does not exist in PLAN | 2     | void                                             |
+
+P02/P03/P04/P06 claims match their PLAN ticks and the P06 QG-09 record; they were not re-audited
+item by item here. P07 and P09.01–.09 rows were already `IN_PROGRESS`.
+
+## Follow-ups recorded (not done in M0)
+
+1. Retroactive QG-09 over the merged sensitive changes (RLS tables 0062–0076, webhooks, tool
+   guard, idempotency/outbox/timers, privacy handlers, upload, booking).
+2. Cross-tenant suite catch-up: the xsuite seeds and probes 10 of the ≥ 40 tenant tables.
+3. T2-5 no-orphans rule: fail CI when a product module is imported by no entrypoint (92 files,
+   6,551 LOC today).
+4. Control-plane test fix: `docs/control-plane/patches/0006-control-plane-test-fixture-copy.md`
+   (founder applies). It is a storage hazard, not only a timeout: the unbounded fixture copy is
+   the probable mechanism of the 2026-10-16 host-disk exhaustion (measurements in the patch
+   document; recovery record in `PROGRESS.md`).
+
+## Item verdicts
+
+| Item(s)       | Claimed          | M0 verdict          | Corrected status | Reason                                                                                                                                                                 |
+| ------------- | ---------------- | ------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P08.01.01     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | envelope schema in kernel + 0062 job ledger                                                                                                                            |
+| P08.01.02     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | queue topology/visibility floors are constants; no queue exists                                                                                                        |
+| P08.01.03     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | envelope contract lint over job types                                                                                                                                  |
+| P08.02.01     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | in-transaction outbox insert (0063)                                                                                                                                    |
+| P08.02.02     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | SKIP LOCKED claim + backoff at DB level; no dispatcher process, no SQS/pub-sub publish                                                                                 |
+| P08.02.03     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no outbox.lag metric emission, no alarm                                                                                                                                |
+| P08.02.04     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | crash-republish + ordering tests at DB level                                                                                                                           |
+| P08.03.01     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | provider_inbox UNIQUE + insert-then-ack (0064)                                                                                                                         |
+| P08.03.02     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | withTenant handling + poison status at DB level; no processing worker/DLQ                                                                                              |
+| P08.03.03     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no 30-day payload purge (retention engine is a pure helper)                                                                                                            |
+| P08.03.04     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | 3x delivery -> one effect; monotonic state tests                                                                                                                       |
+| P08.04.01     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | service exists; no POST/PATCH middleware on any route                                                                                                                  |
+| P08.04.02     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | same key + different body -> 422; concurrent -> one executes (service)                                                                                                 |
+| P08.04.03     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | service-level tests                                                                                                                                                    |
+| P08.05.01     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | worker loop with injected transport; no SQS long-poll, no SIGTERM wiring                                                                                               |
+| P08.05.02     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | retry arithmetic exists; no ChangeMessageVisibility/DLQ calls                                                                                                          |
+| P08.05.03     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | poison detection logic                                                                                                                                                 |
+| P08.05.04     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | unit tests with injected transport                                                                                                                                     |
+| P08.06.01     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | job_runs history exists; 30-day retention not enforced                                                                                                                 |
+| P08.06.02     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | DB functions for DLQ list/replay/discard; no ops CLI                                                                                                                   |
+| P08.06.03     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | idempotent replay; reason-required audited discard                                                                                                                     |
+| P08.07.01     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | timers table + SKIP LOCKED lease claims (0067)                                                                                                                         |
+| P08.07.02     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no scheduler, no sweeps queue, no sweep handler                                                                                                                        |
+| P08.07.03     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no timer use is wired (reminders, escalation acks, expiry, renewals)                                                                                                   |
+| P08.07.04     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | exactly-once under 3 concurrent sweepers; restart survival                                                                                                             |
+| P08.08.01     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no GET /api/v1/events route; channel format helper only                                                                                                                |
+| P08.08.02     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | 15-min replay window table (0068); no Valkey fan-out                                                                                                                   |
+| P08.08.03     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no degraded polling path in any client                                                                                                                                 |
+| P08.08.04     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | DB-level isolation/replay tests; no Valkey outage test                                                                                                                 |
+| P08.09.01     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | limiter logic + in-memory store; no Valkey store; not mounted on routes                                                                                                |
+| P08.09.02     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | 429 + Retry-After helper; not served by any route                                                                                                                      |
+| P08.09.03     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | unit tests on the memory store only                                                                                                                                    |
+| P08.10.01     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | tables + overrides + typed accessors; 60 s propagation is caller-supplied                                                                                              |
+| P08.10.02     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | kill-switch catalogue                                                                                                                                                  |
+| P08.10.03     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | flag changes audited; no ops CLI                                                                                                                                       |
+| P08.10.04     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | mapping test only; no call path exists to prove deterministic capture                                                                                                  |
+| P08.11.01     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | faults simulated in process; no SQS, Valkey or DB failover injected                                                                                                    |
+| P08.11.02     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | FS expectations asserted against simulations                                                                                                                           |
+| P08.11.03     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | report stored (docs/verification/failure-injection-report.md) for simulated faults                                                                                     |
+| P09.10.01     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | allowed_channels enforced in the approved-retrieval view                                                                                                               |
+| P09.10.02     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | per-channel tests + 7/7 mutation kills                                                                                                                                 |
+| P09.11.01     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | synthetic set incl. off-catalogue and near-miss questions (packages/db/src/evalset.ts)                                                                                 |
+| P09.11.02     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | selection/abstention metrics via integration tests (feeds LG-V06/V07; the gates themselves are not measured)                                                           |
+| P10.01.01     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | port has structured/text; no embed(); IDs not from configuration                                                                                                       |
+| P10.01.02     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | OpenAI Responses adapter: EU endpoint guard, store:false, strict schema, hashed ids, pinned snapshot (never called live)                                               |
+| P10.01.03     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | recorded-response contracts; no live staging smoke (EXT-12/DG-14, no staging)                                                                                          |
+| P10.03.01     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | Zod->JSON Schema mechanism exists, but no NLU-turn/summary/import contracts exist                                                                                      |
+| P10.03.02     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | reject + deterministic fallback; ai.schema.rejections never emitted                                                                                                    |
+| P10.03.03     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | malformed/truncated/extra-field tests                                                                                                                                  |
+| P10.04.01     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | per-purpose deadlines and retry policies                                                                                                                               |
+| P10.04.02     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | circuit breaker with half-open probes                                                                                                                                  |
+| P10.04.03     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | per-call token cap; no per-tenant daily cost budget alarm                                                                                                              |
+| P10.04.04     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | timeout -> fallback; breaker open/recover tests                                                                                                                        |
+| P10.05.01     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | context builders send no caller number/slot values                                                                                                                     |
+| P10.05.02     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | redaction function exists; no stored proposed_output is written through it                                                                                             |
+| P10.05.03     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | prompt tests pass; no stored AI records to scan                                                                                                                        |
+| P10.06.01     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | content-hash version sets; no prompt files with front-matter exist                                                                                                     |
+| P10.06.03     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | release-manifest helper; no release pipeline uses it                                                                                                                   |
+| P10.06.04     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | freshness check unit-tested; not wired into CI (QG-07)                                                                                                                 |
+| P10.07.01     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | pure decision function with reason codes                                                                                                                               |
+| P10.07.02     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | no template decision tables (templates/ empty); after-hours is a caller boolean, not the hours engine; no entitlement check                                            |
+| P10.07.03     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | unsupported requests escalate                                                                                                                                          |
+| P10.07.04     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | table tests + no-commitment-without-token property                                                                                                                     |
+| P10.08.01     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | defineTool                                                                                                                                                             |
+| P10.08.02     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | 11-step guard pipeline (storage via caller ports)                                                                                                                      |
+| P10.08.03     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | result tokens enforced; commitment.without_token never emitted                                                                                                         |
+| P10.08.04     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | reconcileUnknown helper; no tool_invocations reconciler job                                                                                                            |
+| P10.08.05     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | voice tool definitions only; no executors bound to P07 services                                                                                                        |
+| P10.08.06     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | per-guard-step tests                                                                                                                                                   |
+| P10.09.01     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | template package schema + validation                                                                                                                                   |
+| P10.09.02     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no templates/<key>/<version>/ packages; no template_versions table                                                                                                     |
+| P10.09.03     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | bounded tenant overrides                                                                                                                                               |
+| P10.09.04     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | INV-18/INV-14 lint                                                                                                                                                     |
+| P10.09.05     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | restaurant v1 skeleton lives in code, not as a template package                                                                                                        |
+| P10.09.06     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | invalid templates/overrides rejected; deterministic binding                                                                                                            |
+| P10.10.01     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | rule model                                                                                                                                                             |
+| P10.10.02     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | most-specific-wins, ties by order                                                                                                                                      |
+| P10.10.03     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | restaurant default rules                                                                                                                                               |
+| P10.10.04     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no workflow_runs row written per rule execution                                                                                                                        |
+| P10.10.05     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | rule tables; invalid rules rejected                                                                                                                                    |
+| P10.11.01     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | emergency categories per template                                                                                                                                      |
+| P10.11.02     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | deterministic lexicon -> EMERGENCY template first (not on any call path)                                                                                               |
+| P10.11.04     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | sensitive-use denylist in template validation                                                                                                                          |
+| P10.11.05     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no emergency eval set (LG-V12 N>=300); unit tests only                                                                                                                 |
+| P10.12.01     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | delimited untrusted content + guard-rail prompt                                                                                                                        |
+| P10.12.02     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | tools outside the template set rejected                                                                                                                                |
+| P10.12.03     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | anomaly detection; security.anomaly.blocked never emitted; blocking not wired                                                                                          |
+| P10.12.04     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | >=200 generated adversarial cases against the deterministic guard (not the LG-V08 model evaluation)                                                                    |
+| P10.13.01     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | evals/ is empty (no dev/heldout/adversarial/emergency/knowledge sets, no manifests)                                                                                    |
+| P10.13.02     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | recorded-answers runner + Wilson bound + min-N; no live-model mode                                                                                                     |
+| P10.13.03     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | no report bound to a version set has been produced                                                                                                                     |
+| P10.13.04     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no QG-07 CI job                                                                                                                                                        |
+| P10.13.05     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | runner metrics on a synthetic dataset                                                                                                                                  |
+| P10.14.01     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | per-call tokens and cost_micros from config price table                                                                                                                |
+| P10.14.02     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | ledgerEntry shape only; no usage_ledger table exists (INV-20 ledger not built)                                                                                         |
+| P11.01.01     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | number_routes + resolve_route (P06.03.04), wired into the inbound webhook                                                                                              |
+| P11.01.02     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | voice-config helper unimported; business name comes from env, not a per-tenant snapshot                                                                                |
+| P11.01.03     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | neutral TwiML served; no metric emitted (log only)                                                                                                                     |
+| P11.01.04     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | routing/quarantine tests; no config cache to invalidate                                                                                                                |
+| P11.02.01     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | single TwiML builder requiring a Disclosure (P04.04.01), wired                                                                                                         |
+| P11.02.02     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | fixed disclosure prefix template                                                                                                                                       |
+| P11.02.03     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no tenant status / allowance check before AI                                                                                                                           |
+| P11.02.04     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no calls upsert by CallSid from the webhook (in-memory dedup only); no disclosure_version                                                                              |
+| P11.02.05     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | 300 ms p95 budget never measured                                                                                                                                       |
+| P11.02.06     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | snapshot + duplicate-webhook tests; no per-tenant-state matrix                                                                                                         |
+| P11.03.01     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | X-Twilio-Signature guard on voice endpoints; URL from configured origins                                                                                               |
+| P11.03.02     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no AccountSid/subaccount check outside tests                                                                                                                           |
+| P11.03.03     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | 403 on invalid signature; webhook.signature.invalid never emitted; no WAF                                                                                              |
+| P11.03.04     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | tampered/wrong-URL/replay tests                                                                                                                                        |
+| P11.04.01     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | WSS endpoint, signature on upgrade, single-use hashed 60 s token (P04)                                                                                                 |
+| P11.04.02     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | session registry helper unimported; readiness does not report saturation                                                                                               |
+| P11.04.03     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | unknown types ignored in the P04 connection; error -> fallback transitions not wired                                                                                   |
+| P11.04.04     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | idle detection helper; socket close does not run a finaliser                                                                                                           |
+| P11.04.05     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | token tests; no simulator conformance run against the reception path                                                                                                   |
+| P11.05.01     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | pure call state machine (timeouts, transitions)                                                                                                                        |
+| P11.05.02     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no checkpoints to Postgres; no call_events timeline writes                                                                                                             |
+| P11.05.03     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no resume-from-checkpoint via finaliser/reconciler                                                                                                                     |
+| P11.05.04     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | transition tests; no process-kill test                                                                                                                                 |
+| P11.06.01     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | dedup/monotonic logic exists; no status-callback endpoint                                                                                                              |
+| P11.06.02     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | session-end handler is the P04 report; no SessionStatus/HandoffData handling                                                                                           |
+| P11.06.03     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no post-call jobs enqueued (no queue exists)                                                                                                                           |
+| P11.06.04     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | permutation tests for one outcome; no usage/notification sets exist                                                                                                    |
+| P11.07.01     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | layer table + texts; no action URL handler                                                                                                                             |
+| P11.07.02     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no Twilio-hosted fallback (needs EXT-10/infra)                                                                                                                         |
+| P11.07.03     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no #ct/#rt connection overrides                                                                                                                                        |
+| P11.07.04     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | German fallback texts (BR-129)                                                                                                                                         |
+| P11.07.05     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | fallback suite needs real app/WS/DB/Valkey failures (LG-V10)                                                                                                           |
+| P11.08.01     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | degraded-capture shape only; no SQS publish                                                                                                                            |
+| P11.08.02     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no worker persists degraded captures                                                                                                                                   |
+| P11.08.03     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no SEV1 alarm                                                                                                                                                          |
+| P11.08.04     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no game day                                                                                                                                                            |
+| P11.09.01     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | reconcile diff logic; no 15-min Twilio list job (EXT-10)                                                                                                               |
+| P11.09.02     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no Twilio record deletion                                                                                                                                              |
+| P11.09.03     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | diff tests; no task created from a simulated loss end to end                                                                                                           |
+| P11.11.01     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | four-class caller-ID classification                                                                                                                                    |
+| P11.11.02     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | callback-number flow not wired into a call                                                                                                                             |
+| P11.11.03     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | tenant-owned/suspicious excluded from identity resolution (P07.03)                                                                                                     |
+| P11.11.04     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | four classes + FS-26 fixture                                                                                                                                           |
+| P11.12.01     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | per-caller rate cap logic; not applied to calls                                                                                                                        |
+| P11.12.02     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | concurrent-session cap logic; not applied                                                                                                                              |
+| P11.12.03     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | duration/NLU caps logic; not applied                                                                                                                                   |
+| P11.12.04     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | allowance alert ladder; no allowance tracking                                                                                                                          |
+| P11.12.05     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | block-list check; no owner-managed list                                                                                                                                |
+| P11.12.06     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | unit tests; no cost-cap drill (LG-P17)                                                                                                                                 |
+| P11.13.01     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no usage_ledger table; metering is an in-process helper                                                                                                                |
+| P11.13.02     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | separate meters in the helper only                                                                                                                                     |
+| P11.13.03     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | no double-meter unit test; no reconciliation path                                                                                                                      |
+| P11.14.01     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | TwiML builder has no recording surface; lint asserts it                                                                                                                |
+| P11.14.02     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no weekly Twilio recordings job                                                                                                                                        |
+| P11.14.03     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no written Twilio confirmation (EXT-10, P04.10)                                                                                                                        |
+| P11.14.04     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no test campaign has run                                                                                                                                               |
+| P11.15.01     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | drain state helper; SIGTERM/readiness not wired to sessions                                                                                                            |
+| P11.15.02     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no closing line + callback task at forced shutdown                                                                                                                     |
+| P11.15.03     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no staging deploy test (no staging)                                                                                                                                    |
+| P11.16.01     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | scenario DSL through the real codec; no signed-webhook/status-callback simulation                                                                                      |
+| P11.16.02     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | DSL exists; not used by E2E, load or regression suites                                                                                                                 |
+| P11.16.03     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no recorded real Twilio traffic to test against                                                                                                                        |
+| P11.18.01     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no baseline (needs P01 data and live traffic)                                                                                                                          |
+| P11.18.02     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | silence-window logic; no alarm or owner notification                                                                                                                   |
+| P11.18.03     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no canary-line drill                                                                                                                                                   |
+| P12.01.01–.04 | READY_FOR_REVIEW | wrong PLAN item     | IN_PROGRESS      | code is a disclosure-first greeting composer (relevant to P11.02.02/INV-03), not the slot-filling engine, intent stack, limits or simulator tests PLAN P12.01 requires |
+| P12.02.01–.05 | READY_FOR_REVIEW | wrong PLAN item     | IN_PROGRESS      | code is an utterance -> turn-action router (P10.07 territory), not German number/time/PLZ/plate normalisation or the >=500-case corpus PLAN P12.02 requires            |
+| P12.06.01     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no deterministic structured-question answers (open now, address, parking)                                                                                              |
+| P12.06.02     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | approved card verbatim-or-escalate; no NLU closed-set selection                                                                                                        |
+| P12.06.03     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | approved-retrieval view excludes suspended/expired/sensitive cards (P09.09)                                                                                            |
+| P12.06.04     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | LG-V06/V07 eval sets not run                                                                                                                                           |
+| P12.07.01     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | slot loop + read-back; no appointment_request/task write, not on a call path                                                                                           |
+| P12.07.02     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no change/cancel capture                                                                                                                                               |
+| P12.07.03     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | no confirmation-phrase test against tool success (LG-V11)                                                                                                              |
+| P12.07.04     | READY_FOR_REVIEW | item does not exist | —                | P12.07.04 does not exist in PLAN                                                                                                                                       |
+| P12.08.01     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | ordered lead slot loop; no lead write                                                                                                                                  |
+| P12.08.02     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no email capture with spelling support                                                                                                                                 |
+| P12.08.03     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no simulator scenario                                                                                                                                                  |
+| P12.09.01     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | callback-number capture + read-back; no callback task with summary                                                                                                     |
+| P12.09.02     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | escalation turn; no complaint template/priority-high task/urgent notification                                                                                          |
+| P12.09.03     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | handoff message; no transfer/priority callback write                                                                                                                   |
+| P12.09.04     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no simulator scenarios producing tasks and notifications                                                                                                               |
+| P12.11.01     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | silence 8 s -> reprompt once -> wrap                                                                                                                                   |
+| P12.11.02     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | unintelligible -> BR-117 reprompt -> fallback                                                                                                                          |
+| P12.11.03     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | barge-in keeps utteranceUntilInterrupt; interrupted commitments not delivered                                                                                          |
+| P12.11.04     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no non-German detection                                                                                                                                                |
+| P12.11.05     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no simulator scenarios, no harness calls                                                                                                                               |
+| P12.12.01     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | in-memory writer; no contact resolution, conversation, task writes, audit or SSE on end                                                                                |
+| P12.12.02     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | handled-vs-needs-attention result codes                                                                                                                                |
+| P12.12.03     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | duplicate-end idempotency tested in memory; per-intent object creation not                                                                                             |
+| P12.13.01     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | draft summary shape; no summary job, no model call                                                                                                                     |
+| P12.13.02     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no faithfulness check                                                                                                                                                  |
+| P12.13.03     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no expiry                                                                                                                                                              |
+| P12.13.04     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no faithfulness test                                                                                                                                                   |
+| P12.13.05     | READY_FOR_REVIEW | item does not exist | —                | P12.13.05 does not exist in PLAN                                                                                                                                       |
+| P13.01.01     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no login redirect/MFA guidance/logout/step-up UI                                                                                                                       |
+| P13.01.02     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | German nav labels on the placeholder page; no pages behind them                                                                                                        |
+| P13.01.03     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | German catalogue helper; no next-intl, no missing-key CI check                                                                                                         |
+| P13.01.04     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no design tokens (DG-10 open)                                                                                                                                          |
+| P13.01.05     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no E2E login/MFA/step-up/logout                                                                                                                                        |
+| P13.02.01–.03 | READY_FOR_REVIEW | partial             | IN_PROGRESS      | pure grouping/summary/empty-line helpers; no Today page                                                                                                                |
+| P13.02.04     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no E2E (LG-P13)                                                                                                                                                        |
+| P13.03.01–.04 | READY_FOR_REVIEW | partial             | IN_PROGRESS      | card shape + action keys; no cards, actions, feedback or drawer UI                                                                                                     |
+| P13.03.05     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no E2E                                                                                                                                                                 |
+| P13.04.01     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | order/filter helpers; no stream UI                                                                                                                                     |
+| P13.04.02     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no pagination/search UI                                                                                                                                                |
+| P13.04.03     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no E2E                                                                                                                                                                 |
+| P13.05.01     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | timeline/lookup helpers; no contact list/detail/edit UI                                                                                                                |
+| P13.05.02     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no duplicate banner                                                                                                                                                    |
+| P13.05.03     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no E2E                                                                                                                                                                 |
+| P13.06.01–.04 | READY_FOR_REVIEW | partial             | IN_PROGRESS      | grouping/badge/decision helpers; no editors, diff, TTS preview or import review screen                                                                                 |
+| P13.06.05     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no E2E                                                                                                                                                                 |
+| P13.08.01–.06 | READY_FOR_REVIEW | partial             | IN_PROGRESS      | settings shapes; no settings UI, no persistence                                                                                                                        |
+| P13.08.07     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no E2E                                                                                                                                                                 |
+| P13.09.01     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | banner text builder; no banner                                                                                                                                         |
+| P13.09.02     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no digest e-mail (P14.06)                                                                                                                                              |
+| P13.09.03     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no automated banner/digest comparison                                                                                                                                  |
+| P13.10.01     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no SSE subscription (no SSE endpoint exists)                                                                                                                           |
+| P13.10.02     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | stale/poll decision helper; no polling client                                                                                                                          |
+| P13.10.03     | READY_FOR_REVIEW | not met             | IN_PROGRESS      | no E2E                                                                                                                                                                 |
+| P13.11.01     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | view-state resolver; no skeleton/error components                                                                                                                      |
+| P13.11.02     | READY_FOR_REVIEW | partial             | IN_PROGRESS      | breakpoints on the placeholder page; not tested at 360/768/1280                                                                                                        |
+| P13.11.03     | READY_FOR_REVIEW | met                 | READY_FOR_REVIEW | PWA manifest + app-shell service worker (apps/web/public)                                                                                                              |
