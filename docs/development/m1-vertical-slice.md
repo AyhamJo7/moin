@@ -37,7 +37,15 @@ apps/web  /  (Heute, server-rendered)
 ```
 
 A repeated CallSid answers `200 {"replayed": true}` with the first delivery's task and writes
-nothing. Logs carry outcome codes only: no numbers, CallSid or utterance (INV-12).
+nothing, even if the owner has closed that task since. A call first recorded by another path
+gets its task on capture. If the finaliser's fallback task already covers it, that task carries
+the request and is made live again: a done task is reopened, and a cancelled one gets a
+replacement. The capture takes the finaliser's conversation lock, so the two never race. Logs
+carry outcome codes only: no numbers, CallSid or utterance (INV-12).
+
+Heute lists at most 100 live tasks, urgent first and then newest first. When more exist, the
+response says `truncated`, the page says so, and an empty section reads "In dieser Auswahl
+keine." instead of "Alles erledigt.".
 
 ## Run it locally
 
@@ -110,3 +118,25 @@ What this slice does not do, and where each piece belongs:
   compiled entry point (`start:api`, `dist/`) works and is what the browser test runs.
 - **Display time zone is fixed** to Europe/Berlin until the organisation's own setting is served
   (P07.14).
+
+## Open review findings
+
+From the QG-09 reviews and the advisory review of this change. None is HIGH, and none is fixed
+here:
+
+- **One CallSid, two tenants (LOW, INV-11).** CallSid uniqueness is per tenant. The same SID sent
+  to two different tenants' numbers is recorded once in each. Closing this needs a global
+  provider-event claim, which means a migration and a DEFINER function.
+- **The simulator module is always mounted (LOW).** Unconfigured, it answers exactly like a route
+  that does not exist, and the configuration loader refuses the token in deployed environments.
+  Mounting it conditionally would be stronger.
+- **Guards cross into the identity module (MEDIUM, Domain Boundaries).** `work` imports the
+  session guards through `identity-access/session-guards.ts`. A cross-cutting guard surface
+  (a global guard with an opt-out, or a recorded public entry and a boundary rule) is a decision
+  for the PLAN.
+- **Call handling sits in the simulator controller (LOW).** The relay session end will need the
+  same steps, so they belong in a `voice` application service.
+- **Caller number checked against the dialled number only (LOW, FS-26).** The tenant's other
+  numbers are not read: `number_routes` is readable through the DEFINER lookup only.
+- **No log line for the owner app's error state (LOW).** The owner app has no structured logger
+  yet.

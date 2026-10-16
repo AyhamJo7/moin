@@ -30,5 +30,7 @@
   "today.status.in_progress": "In Bearbeitung",
   "today.status.waiting": "Wartet",
   "today.status.done": "Erledigt",
-  "today.status.cancelled": "Abgebrochen"
+  "today.status.cancelled": "Abgebrochen",
+  "today.truncated": "Es gibt mehr offene Aufgaben, als hier Platz haben. Angezeigt werden zuerst die dringenden, dann die neuesten.",
+  "today.noneShown": "In dieser Auswahl keine."
 }

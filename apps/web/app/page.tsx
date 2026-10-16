@@ -5,7 +5,8 @@
  * now. The page forwards only the session cookie to the API; the organisation comes from that
  * session on the API side, never from anything the browser sends (INV-02). Four visible states
  * (P13.11.01): signed out (with the sign-in link), error (with reload), and the sections, each
- * with its reassuring empty line (P13.02.03); loading is `loading.tsx`.
+ * with its reassuring empty line (P13.02.03) — unless the API truncated the list, when an empty
+ * section only means none is shown; loading is `loading.tsx`.
  */
 
 import { cookies } from 'next/headers';
@@ -80,11 +81,16 @@ export default async function TodayPage() {
       {grouped === null ? null : (
         <>
           <a href="/">{t('today.refresh')}</a>
+          {load.state === 'ready' && load.truncated ? (
+            <p role="note">{t('today.truncated')}</p>
+          ) : null}
           {SECTION_ORDER.map((section) => (
             <section key={section} aria-labelledby={`section-${section}`}>
               <h2 id={`section-${section}`}>{sectionHeading(section)}</h2>
               {grouped[section].length === 0 ? (
-                <p>{emptyLine()}</p>
+                <p>
+                  {load.state === 'ready' && load.truncated ? t('today.noneShown') : emptyLine()}
+                </p>
               ) : (
                 <ul>
                   {grouped[section].map(({ task }) => (

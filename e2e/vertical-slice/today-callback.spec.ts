@@ -21,9 +21,13 @@ import { expect, test } from '@playwright/test';
 import { SIMULATED_CALL_PATH } from '@moin/contracts';
 import { createTestDatabase, type TestDatabase } from '@moin/testing';
 // The integration suite's template builder (migrations applied once); not a package export.
-// Used only when no template exists: rebuilding or dropping the shared template would kill a
-// concurrent integration run on the same PostgreSQL.
-import { setup as buildTemplate } from '../../packages/testing/src/pg/global-setup.ts';
+// Used only when no template exists, and then dropped again at the end, so the cluster is left as
+// found: rebuilding a template that exists would kill a concurrent integration run, and leaving
+// one behind would fail the next run's setup (it drops without unmarking).
+import {
+  setup as buildTemplate,
+  teardown as dropTemplate,
+} from '../../packages/testing/src/pg/global-setup.ts';
 
 const ROOT = resolve(import.meta.dirname, '../..');
 const API_PORT = 3101;
@@ -87,6 +91,7 @@ async function ownerSubject(): Promise<string> {
 }
 
 let database: TestDatabase;
+let builtTemplate = false;
 let api: ChildProcess | undefined;
 let web: ChildProcess | undefined;
 
@@ -217,6 +222,7 @@ test.beforeAll(async () => {
     // 3D000: the template database does not exist yet on this cluster.
     if ((error as { code?: unknown }).code !== '3D000') throw error;
     await buildTemplate();
+    builtTemplate = true;
     return createTestDatabase('e2e-slice');
   });
   const admin = database.fixturePool();
@@ -246,6 +252,7 @@ test.afterAll(async () => {
   await stop(api);
   // If beforeAll failed before the database existed, this throws as well; the run has failed.
   await database.drop();
+  if (builtTemplate) await dropTemplate();
 });
 
 test('a simulated callback call reaches the owner on Heute and stays there', async ({ page }) => {

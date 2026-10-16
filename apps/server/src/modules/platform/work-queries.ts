@@ -34,7 +34,7 @@ export class WorkQueries {
   }
 
   /** Live tasks of the current request's organisation (guarded routes only). */
-  today(limit: number): Promise<TodayTaskRow[]> {
+  today(limit: number): Promise<{ tasks: TodayTaskRow[]; truncated: boolean }> {
     const scope = currentTenantScope();
     if (scope === undefined) {
       throw new Error('no tenant scope: the route is not guarded by SessionMembershipGuard');

@@ -342,11 +342,16 @@ export interface TodayTaskRow {
 }
 
 /**
- * Live tasks for the Today view, newest first: open, in progress or waiting, and not snoozed.
- * Read under the caller's tenant like every query here, so the calls join sees only this
+ * Live tasks for the Today view: open, in progress or waiting, and not snoozed. Urgent work comes
+ * first, then newest first, so a long list can never push an urgent task out of view; when more
+ * live tasks exist than `limit`, `truncated` says so and the view must not claim a section is
+ * empty. Read under the caller's tenant like every query here, so the calls join sees only this
  * tenant's calls. A withheld or malformed `from_number` reads as null, never as a raw string.
  */
-export async function listTodayTasks(client: TenantClient, limit = 100): Promise<TodayTaskRow[]> {
+export async function listTodayTasks(
+  client: TenantClient,
+  limit = 100,
+): Promise<{ tasks: TodayTaskRow[]; truncated: boolean }> {
   const capped = Math.min(Math.max(limit, 1), 100);
   const result = await client.query<{
     id: string;
@@ -364,11 +369,11 @@ export async function listTodayTasks(client: TenantClient, limit = 100): Promise
      from tasks t
      where t.status in ('open', 'in_progress', 'waiting')
        and (t.snoozed_until is null or t.snoozed_until <= clock_timestamp())
-     order by t.created_at desc, t.id
+     order by (t.priority = 'urgent') desc, t.created_at desc, t.id
      limit $1`,
-    [capped],
+    [capped + 1],
   );
-  return result.rows.map((row) => ({
+  const rows = result.rows.slice(0, capped).map((row) => ({
     id: row.id,
     title: row.title,
     status: row.status as TaskStatus,
@@ -377,6 +382,7 @@ export async function listTodayTasks(client: TenantClient, limit = 100): Promise
     createdAt: row.created_at,
     callerNumber: row.caller_number,
   }));
+  return { tasks: rows, truncated: result.rows.length > capped };
 }
 
 export async function listOpenTasks(client: TenantClient, limit = 50): Promise<Task[]> {

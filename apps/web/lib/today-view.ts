@@ -51,7 +51,7 @@ export function safeApiOrigin(apiOrigin: string | undefined): apiOrigin is strin
 
 export type TodayLoad =
   | { readonly state: 'signed-out' }
-  | { readonly state: 'ready'; readonly tasks: readonly TodayTask[] }
+  | { readonly state: 'ready'; readonly tasks: readonly TodayTask[]; readonly truncated: boolean }
   | { readonly state: 'error'; readonly reason: 'unconfigured' | 'unavailable' | 'contract' };
 
 export const SECTION_ORDER: readonly TodaySection[] = [
@@ -144,5 +144,5 @@ export async function loadToday(
   }
   const parsed = todayResponseSchema.safeParse(body);
   if (!parsed.success) return { state: 'error', reason: 'contract' };
-  return { state: 'ready', tasks: parsed.data.tasks };
+  return { state: 'ready', tasks: parsed.data.tasks, truncated: parsed.data.truncated };
 }

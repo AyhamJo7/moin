@@ -61,9 +61,9 @@ describe('loadToday', () => {
     const result = await loadToday(
       TOKEN,
       API,
-      fakeFetch(() => json(200, { tasks: [TASK] }), seen),
+      fakeFetch(() => json(200, { tasks: [TASK], truncated: false }), seen),
     );
-    expect(result).toStrictEqual({ state: 'ready', tasks: [TASK] });
+    expect(result).toStrictEqual({ state: 'ready', tasks: [TASK], truncated: false });
     expect(seen).toHaveLength(1);
     expect(seen[0]?.url).toBe(`${API}/api/today`);
     expect(seen[0]?.init?.headers).toStrictEqual({
@@ -115,8 +115,9 @@ describe('loadToday', () => {
 
   it('refuses a body that does not match the contract', async () => {
     const drifted = [
-      { tasks: [{ ...TASK, createdAt: 'yesterday' }] },
-      { tasks: [{ ...TASK, organisationId: 'b' }] },
+      { tasks: [{ ...TASK, createdAt: 'yesterday' }], truncated: false },
+      { tasks: [{ ...TASK, organisationId: 'b' }], truncated: false },
+      { tasks: [TASK] },
       { items: [] },
       'not json at all',
     ];

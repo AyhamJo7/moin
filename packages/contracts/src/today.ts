@@ -52,7 +52,10 @@ export const todayTaskSchema = z.strictObject({
 });
 
 export const todayResponseSchema = z.strictObject({
+  /** Urgent first, then newest first. */
   tasks: z.array(todayTaskSchema).max(TODAY_TASK_LIMIT),
+  /** More live tasks exist than were returned: no section may be called empty. */
+  truncated: z.boolean(),
 });
 
 export type TodayTask = z.infer<typeof todayTaskSchema>;

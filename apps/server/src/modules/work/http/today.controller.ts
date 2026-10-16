@@ -34,9 +34,10 @@ export class TodayController {
 
   @Get()
   async today(): Promise<TodayResponse> {
-    const rows = await this.work.today(TODAY_TASK_LIMIT);
+    const { tasks, truncated } = await this.work.today(TODAY_TASK_LIMIT);
     return todayResponseSchema.parse({
-      tasks: rows.map((row) => ({
+      truncated,
+      tasks: tasks.map((row) => ({
         id: row.id,
         title: row.title,
         type: row.type,

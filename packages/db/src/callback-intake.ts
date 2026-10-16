@@ -6,16 +6,17 @@
  * callback task linked to the conversation. Repeated delivery of the same CallSid is a replay:
  * `ingestCall` serialises same-SID ingests under an advisory lock and finds the recorded call;
  * when this capture's own task (deterministic key `callback:<conversation>`) exists, it is
- * returned with nothing written (INV-11). A call first recorded by another path (no task yet)
- * gets its task now. The conversation lock is the finaliser's, so a fallback task and this one
- * can never race into the one-callback-task-per-interaction index.
+ * returned with nothing written (INV-11). A call first recorded by another path gets its task
+ * now; if the finaliser's fallback already exists it carries the request and is made live work
+ * again (done reopens; cancelled gets a replacement), because the outcome this writes ends
+ * every later repair. The conversation lock is the finaliser's, so the two never race.
  *
  * Runs inside `withTenant`; the organisation is whatever the caller entered, which for calls is
  * the dialled number's route — never a value from the event body (INV-02).
  */
 
 import { advanceCallStatus, getOutcome, ingestCall, recordOutcome } from './conversations.ts';
-import { createTask } from './tasks.ts';
+import { createTask, reopenTask } from './tasks.ts';
 import type { TenantClient } from './tenant.ts';
 
 export interface CallbackRequest {
@@ -61,26 +62,47 @@ export async function captureCallbackRequest(
   // its fallback task first, and is found below, or waits until this capture has committed.
   await client.query(`select pg_advisory_xact_lock(hashtext($1))`, [conversationId]);
   if (!created) {
-    const existing = await client.query<{ id: string; idempotency_key: string | null }>(
-      `select id, idempotency_key from tasks where conversation_id = $1 and type = 'callback'
-       order by created_at limit 1`,
-      [conversationId],
+    // This capture's own task (any state, any type): a true replay, nothing written. A task
+    // the owner has since completed stays completed.
+    const own = await client.query<{ id: string }>(
+      'select id from tasks where idempotency_key = $1',
+      [callbackKey(conversationId)],
     );
-    const found = existing.rows[0];
-    // This capture's own task: a true replay, nothing written.
-    if (found?.idempotency_key === callbackKey(conversationId)) {
-      return { taskId: found.id, conversationId, replayed: true };
-    }
-    // Another writer's callback task (the finaliser's fallback) already covers the call. The
-    // one-system-task-per-interaction-and-type index allows no second one, so it stands for
-    // this request, and the call's outcome is recorded if it has none yet.
-    if (found !== undefined) {
-      await recordCallbackOutcome(client, conversationId);
-      return { taskId: found.id, conversationId, replayed: false };
-    }
+    const replayed = own.rows[0];
+    if (replayed !== undefined) return { taskId: replayed.id, conversationId, replayed: true };
   }
   await advanceCallStatus(client, call.id, 'completed');
   await recordCallbackOutcome(client, conversationId);
+  if (!created) {
+    // Another writer's callback task (the finaliser's fallback) for this call. The
+    // one-callback-task-per-interaction index allows no second one, so it carries this request —
+    // but only once it is live work again: the outcome recorded above stops the finaliser and
+    // the reconciler from ever repairing this conversation, so a closed task must not absorb it.
+    const other = await client.query<{ id: string; status: string; version: string }>(
+      `select id, status, version::text from tasks
+       where conversation_id = $1 and type = 'callback' order by created_at limit 1 for update`,
+      [conversationId],
+    );
+    const found = other.rows[0];
+    if (found !== undefined && found.status !== 'cancelled') {
+      const live =
+        found.status === 'done'
+          ? await reopenTask(client, found.id, Number(found.version))
+          : { id: found.id };
+      return { taskId: live.id, conversationId, replayed: false };
+    }
+    if (found !== undefined) {
+      // Cancelled is terminal. The replacement carries no type, which keeps it outside the
+      // one-callback-task-per-interaction index (the finaliser's repair does the same).
+      const replacement = await createTask(client, {
+        title: input.title,
+        priority: 'normal',
+        conversationId,
+        idempotencyKey: callbackKey(conversationId),
+      });
+      return { taskId: replacement.id, conversationId, replayed: false };
+    }
+  }
   const task = await createTask(client, {
     title: input.title,
     type: 'callback',

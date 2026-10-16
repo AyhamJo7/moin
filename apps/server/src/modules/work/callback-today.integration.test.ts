@@ -542,6 +542,72 @@ describe('calls recorded by another path first (M1)', () => {
   });
 });
 
+describe('a closed fallback never absorbs a callback (M1)', () => {
+  for (const closed of ['done', 'cancelled'] as const) {
+    evidenceTest(`a ${closed} finaliser fallback leaves the request visible on Today`, async () => {
+      const body = call();
+      const { conversationId, fallback } = await withTenant(
+        database.pool(),
+        restaurant,
+        async (client) => {
+          const ingested = await ingestCall(client, { providerCallSid: String(body['callSid']) });
+          const finalised = await finaliseInteraction(client, ingested.call.conversationId);
+          return { conversationId: ingested.call.conversationId, fallback: finalised.taskId };
+        },
+      );
+      await admin.query('update tasks set status = $2 where id = $1', [fallback, closed]);
+      const response = await simulate(body);
+      expect(response.statusCode).toBe(201);
+      const { taskId } = response.json<{ taskId: string }>();
+      if (closed === 'done') expect(taskId).toBe(fallback);
+      else expect(taskId).not.toBe(fallback);
+      const live = await admin.query<{ status: string }>('select status from tasks where id = $1', [
+        taskId,
+      ]);
+      expect(live.rows[0]?.status).toBe('open');
+      const view = todayResponseSchema.parse((await today(await signIn(restaurantOwner))).json());
+      expect(view.tasks.map((t) => t.id)).toContain(taskId);
+      // A second delivery is a replay of the task that carries the request.
+      const again = await simulate(body);
+      if (closed === 'cancelled') expect(again.json()).toStrictEqual({ taskId, replayed: true });
+      const outcomes = await admin.query<{ n: number }>(
+        'select count(*)::int as n from interaction_outcomes where conversation_id = $1',
+        [conversationId],
+      );
+      expect(outcomes.rows[0]?.n).toBe(1);
+    });
+  }
+});
+
+describe('Today never hides urgent work behind a long list (M1)', () => {
+  evidenceTest('an older urgent task survives 100 newer ones, and truncation is said', async () => {
+    const tenantId = randomUUID();
+    const owner = await person('m1-busy-owner');
+    await tenant(tenantId, 'm1-busy', owner, {});
+    const urgent = randomUUID();
+    await admin.query(
+      `insert into tasks (organisation_id, id, title, type, priority, created_at)
+       values ($1, $2, 'Dringend: Kühlung ausgefallen', 'general', 'urgent', now() - interval '2 days')`,
+      [tenantId, urgent],
+    );
+    await admin.query(
+      `insert into tasks (organisation_id, id, title, type, created_at)
+       select $1, gen_random_uuid(), 'Rückruf ' || n, 'callback', now() - n * interval '1 second'
+       from generate_series(1, 105) as n`,
+      [tenantId],
+    );
+    const view = todayResponseSchema.parse((await today(await signIn(owner))).json());
+    expect(view.truncated).toBe(true);
+    expect(view.tasks).toHaveLength(100);
+    expect(view.tasks[0]?.id).toBe(urgent);
+  });
+
+  evidenceTest('a short list is not truncated', async () => {
+    const view = todayResponseSchema.parse((await today(await signIn(otherOwner))).json());
+    expect(view.truncated).toBe(false);
+  });
+});
+
 describe('titles count characters as the database does (M1)', () => {
   evidenceTest('an emoji topic is stored and served, not refused', async () => {
     const response = await simulate(call({ utterance: `Rückruf wegen ${'🎂'.repeat(100)}` }));
