@@ -177,6 +177,12 @@ seasonal.
 | `appointment_requests.notes`                                                                     | Appointment | **yes, free text**                                                    | same                           | hard delete | —                        |
 | `appointment_requests.converted_to_booking_ref`                                                  | Appointment | yes in combination (opaque external handover reference)               | same                           | hard delete | —                        |
 | `appointments.*`                                                                                 | Appointment | yes (references)                                                      | 12 months                      | hard delete | Google / Microsoft (P20) |
+| `slot_holds.resource_id`                                                                         | Appointment | yes (references) — the resource held                                  | until hold expiry + 30 d       | hard delete | —                        |
+| `slot_holds.starts_at`, `slot_holds.ends_at`                                                     | Appointment | yes in combination (when — the hold itself)                           | until hold expiry + 30 d       | hard delete | —                        |
+| `slot_holds.idempotency_key`                                                                     | Appointment | no — opaque retry key                                                 | until hold expiry + 30 d       | hard delete | —                        |
+| `booking_confirms.hold_id`                                                                       | Appointment | yes (references) — the hold confirmed                                 | until hold expiry + 30 d       | hard delete | —                        |
+| `booking_confirms.idempotency_key`                                                               | Appointment | no — opaque retry key                                                 | until hold expiry + 30 d       | hard delete | —                        |
+| `booking_confirms.status`                                                                        | Appointment | no — confirmed/refused outcome                                        | until hold expiry + 30 d       | hard delete | —                        |
 
 ### Knowledge
 
