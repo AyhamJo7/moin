@@ -38,29 +38,31 @@ No assertion is weakened and no guardrail behaviour changes; only the fixture co
   9 tests in 0.5 s, all passing; the other 69 control-plane tests (no full-tree copy) passed
   unmodified in 19.6 s. No control-plane defect remains besides the fixture copy itself.
 
-## Storage hazard (measured 2026-10-16)
+## Storage hazard (2026-10-16)
 
-The unbounded copy is a disk-exhaustion hazard, not only a timeout:
+**Measured and reproducible:** one linked worktree is 550 MB on disk, but 3.2 GB when copied with
+symlinks followed (`du -sLl --apparent-size`; pnpm's `node_modules` links are expanded). With the
+51 worktrees still present, each `setUp` would write about 160 GB to `/tmp`; with the 168 of the
+audit, over 500 GB. A killed run never reaches `tearDown`/`addCleanup`, so its
+`/tmp/moin-cp-test-*` copy stays behind; `/tmp` is on the root filesystem and is emptied only at
+boot.
 
-- One linked worktree is 550 MB on disk, but 3.2 GB when copied with symlinks followed
-  (`du -sLl --apparent-size`; pnpm's `node_modules` links are expanded). With the 51 worktrees
-  still present, each `setUp` would write about 160 GB to `/tmp`; with the 168 of the audit,
-  over 500 GB.
-- The gate timed out at 610 s on 2026-10-14 and on 2026-10-16 (it ran in 27 s on 2026-10-12/13).
-  A killed run never reaches `tearDown`/`addCleanup`, so its `/tmp/moin-cp-test-*` copy stays
-  behind. `/tmp` is on the root filesystem and is emptied only at boot.
-- Two such runs (04:40 and 04:51 UTC) preceded the 2026-10-16 WSL host-disk exhaustion; the space
-  was released at the next boot. No `/tmp` listing from before the reboot survives, so this is the
-  probable mechanism, not a proven one.
+**Observed:** the gate ran in 27 s on 2026-10-12/13 and timed out at 610 s on 2026-10-14 and twice
+on 2026-10-16 (04:40 and 04:51 UTC), shortly before the WSL host disk filled. Storage recovered
+after a WSL shutdown, `fstrim` and VHD compaction.
+
+**Supported inference, not established:** that those interrupted runs wrote large copies into
+`/tmp` and contributed to the host-disk exhaustion. No listing of `/tmp` from before the reboot
+survives, so neither the copies' presence nor their share of the full disk can be confirmed.
 
 Until the patch is applied, do not run the `control-plane` gate (`gates.py fast`/`full`) while
 `.claude/worktrees/` holds worktrees with `node_modules`.
 
-Confirmed the same day: after the founder removed the 51 worktrees, the **unmodified** gate passed
-in 21.7 s (`.git/claude-evidence/20261016T162007Z-run.json`); the fixture copies in `/tmp` stayed
-under 1 MiB and root usage did not change. The worktree population was sufficient to cause the
-timeouts and the amplification. The patch is still needed to keep the gate bounded when worktrees
-accumulate again.
+**Observed the same day:** after the founder removed the 51 worktrees, the **unmodified** gate
+passed in 21.7 s (`.git/claude-evidence/20261016T162007Z-run.json`); sampled once a second, the
+fixture copies in `/tmp` stayed under 1 MiB and root usage did not change. This strongly supports
+the worktree copies as the cause of the timeouts. The patch is still needed to keep the gate
+bounded when worktrees accumulate again.
 
 ## Apply (founder)
 
