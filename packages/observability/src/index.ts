@@ -65,3 +65,12 @@ export { pg3Gate, gateGaps } from './pg3-gate.ts';
 export type { GateInputs, GateVerdict } from './pg3-gate.ts';
 export { stateBucketValid, tagsValid, moduleRegistered, TF_MODULES } from './tf-foundation.ts';
 export type { StateBucket, TagSet } from './tf-foundation.ts';
+export {
+  rdsValid,
+  valkeyValid,
+  queueValid,
+  bucketValid,
+  sesValid,
+  encryptionAtRest,
+} from './data-services.ts';
+export type { RdsShape, ValkeyShape, QueueShape, BucketShape, SesShape } from './data-services.ts';
