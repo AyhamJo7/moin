@@ -63,3 +63,5 @@ export { dailyReviewQueue, weeklyReportInputs, monitoringCovers } from './pilot-
 export type { ReviewItem, ReportInput } from './pilot-monitoring.ts';
 export { pg3Gate, gateGaps } from './pg3-gate.ts';
 export type { GateInputs, GateVerdict } from './pg3-gate.ts';
+export { stateBucketValid, tagsValid, moduleRegistered, TF_MODULES } from './tf-foundation.ts';
+export type { StateBucket, TagSet } from './tf-foundation.ts';
