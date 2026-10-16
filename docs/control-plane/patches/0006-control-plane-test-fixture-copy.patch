@@ -1,23 +1,38 @@
 diff --git a/.claude/tests/test_control_plane.py b/.claude/tests/test_control_plane.py
-index 3d0f679..d658fb8 100644
+index 3d0f679..339221c 100644
 --- a/.claude/tests/test_control_plane.py
 +++ b/.claude/tests/test_control_plane.py
-@@ -25,8 +25,13 @@ def clone_control_plane(dest: Path) -> Path:
+@@ -18,6 +18,18 @@ PLAN_TOOL = BIN / "plan_section.py"
+ HAS_PLAN = (REPO_ROOT / "PLAN.md").is_file()
+ REFERENCE_RE = re.compile(r'--section "([^"]+)"|--id ([A-Z]+-\d+)(?![0-9x])')
+ PLACEHOLDER = "${CLAUDE_PROJECT_DIR}"
++RUNTIME_TREES = shutil.ignore_patterns("__pycache__", "state", "worktrees", "node_modules")
++
++
++def control_plane_only(directory: str, names: list[str]) -> set[str]:
++    """Skip runtime trees (worktrees hold whole dependency graphs) and refuse symlinks: a followed
++    link can expand into gigabytes, and a preserved one lets the tamper tests below write through
++    to its target. The control plane itself has none."""
++    skipped = RUNTIME_TREES(directory, names)
++    links = sorted(n for n in names if n not in skipped and os.path.islink(Path(directory, n)))
++    if links:
++        raise ValueError(f"symlink in the control-plane fixture source {directory}: {links}")
++    return skipped
+ 
+ 
+ def clone_control_plane(dest: Path) -> Path:
+@@ -25,9 +37,7 @@ def clone_control_plane(dest: Path) -> Path:
      root = dest / "clone"
      root.mkdir()
      git(root, "init", "-q", "-b", "main")
-+    # Runtime worktrees contain dependency graphs, not control-plane fixtures.
-+    # Preserve symlinks so shared dependencies cannot expand into duplicate trees.
-     shutil.copytree(
+-    shutil.copytree(
 -        CLAUDE_DIR, root / ".claude", ignore=shutil.ignore_patterns("__pycache__", "state")
-+        CLAUDE_DIR,
-+        root / ".claude",
-+        symlinks=True,
-+        ignore=shutil.ignore_patterns("__pycache__", "state", "worktrees", "node_modules"),
-     )
+-    )
++    shutil.copytree(CLAUDE_DIR, root / ".claude", ignore=control_plane_only)
      shutil.copy2(REPO_ROOT / "CLAUDE.md", root / "CLAUDE.md")
      shutil.copy2(REPO_ROOT / "PLAN.md", root / "PLAN.md")
-@@ -37,11 +42,9 @@ def clone_control_plane(dest: Path) -> Path:
+     return root
+@@ -37,11 +47,9 @@ def clone_control_plane(dest: Path) -> Path:
  class ControlPlaneCheckTest(unittest.TestCase):
      def setUp(self) -> None:
          self._tmp = temp_dir()
@@ -30,7 +45,7 @@ index 3d0f679..d658fb8 100644
      def check(self) -> tuple[int, str]:
          res = run(CHECK, [str(self.root)])
          return res.returncode, res.stdout
-@@ -144,14 +147,12 @@ class HookWiringTest(unittest.TestCase):
+@@ -144,14 +152,12 @@ class HookWiringTest(unittest.TestCase):
  
      def setUp(self) -> None:
          self._tmp = temp_dir()
@@ -48,10 +63,10 @@ index 3d0f679..d658fb8 100644
      ) -> subprocess.CompletedProcess[str]:
 diff --git a/.claude/tests/test_fixture_copy.py b/.claude/tests/test_fixture_copy.py
 new file mode 100644
-index 0000000..f22e1a3
+index 0000000..538c11e
 --- /dev/null
 +++ b/.claude/tests/test_fixture_copy.py
-@@ -0,0 +1,69 @@
+@@ -0,0 +1,84 @@
 +"""Keep temporary control-plane fixtures bounded independently of live worktrees."""
 +
 +from __future__ import annotations
@@ -63,61 +78,76 @@ index 0000000..f22e1a3
 +
 +import test_control_plane
 +
++EXCLUDED = ("worktrees", "node_modules", "state", "__pycache__")
++
++
++def make_source(parent: Path) -> tuple[Path, Path]:
++    """A control-plane source with configuration and hooks, plus an external directory."""
++    source = parent / "source"
++    (source / "hooks").mkdir(parents=True)
++    (source / "settings.json").write_text("{}")
++    (source / "hooks/guard.py").write_text("# fixture")
++    external = parent / "external"
++    external.mkdir()
++    (external / "payload").write_text("must not be duplicated")
++    output = parent / "output"
++    output.mkdir()
++    return source, external
++
++
++def clone(source: Path, parent: Path) -> Path:
++    with patch.object(test_control_plane, "CLAUDE_DIR", source):
++        return test_control_plane.clone_control_plane(parent / "output")
++
 +
 +class FixtureCopyTest(unittest.TestCase):
 +    def test_copy_excludes_runtime_trees_and_preserves_configuration(self) -> None:
 +        with tempfile.TemporaryDirectory() as tmp:
 +            parent = Path(tmp)
-+            source = parent / "source"
-+            source.mkdir()
-+            (source / "settings.json").write_text("{}")
-+            for excluded in ("worktrees", "node_modules", "state", "__pycache__"):
-+                directory = source / excluded
-+                directory.mkdir()
-+                (directory / "do-not-copy").write_text("runtime data")
-+            hooks = source / "hooks"
-+            hooks.mkdir()
-+            (hooks / "guard.py").write_text("# fixture")
-+            output = parent / "output"
-+            output.mkdir()
-+            with patch.object(test_control_plane, "CLAUDE_DIR", source):
-+                clone = test_control_plane.clone_control_plane(output)
-+            self.assertEqual((clone / ".claude/settings.json").read_text(), "{}")
-+            self.assertTrue((clone / ".claude/hooks/guard.py").is_file())
-+            for excluded in ("worktrees", "node_modules", "state", "__pycache__"):
++            source, external = make_source(parent)
++            for excluded in EXCLUDED:
++                (source / excluded).mkdir()
++                (source / excluded / "do-not-copy").write_text("runtime data")
++            # pnpm links inside a runtime tree are skipped with it, not refused.
++            (source / "node_modules/linked").symlink_to(external, target_is_directory=True)
++            copy = clone(source, parent)
++            self.assertEqual((copy / ".claude/settings.json").read_text(), "{}")
++            self.assertTrue((copy / ".claude/hooks/guard.py").is_file())
++            for excluded in EXCLUDED:
 +                with self.subTest(excluded=excluded):
-+                    self.assertFalse((clone / ".claude" / excluded).exists())
++                    self.assertFalse((copy / ".claude" / excluded).exists())
 +
-+    def test_copy_does_not_follow_directory_symlinks(self) -> None:
-+        with tempfile.TemporaryDirectory() as tmp:
-+            parent = Path(tmp)
-+            source = parent / "source"
-+            source.mkdir()
-+            external = parent / "external"
-+            external.mkdir()
-+            (external / "payload").write_text("must not be duplicated")
-+            (source / "linked-data").symlink_to(external, target_is_directory=True)
-+            output = parent / "output"
-+            output.mkdir()
-+            with patch.object(test_control_plane, "CLAUDE_DIR", source):
-+                clone = test_control_plane.clone_control_plane(output)
-+            copied_link = clone / ".claude/linked-data"
-+            self.assertTrue(copied_link.is_symlink())
-+            self.assertEqual(copied_link.readlink(), external)
++    def test_copy_refuses_symlinks_instead_of_following_or_keeping_them(self) -> None:
++        for name in ("linked-dir", "hooks/linked-file.py"):
++            with self.subTest(link=name), tempfile.TemporaryDirectory() as tmp:
++                parent = Path(tmp)
++                source, external = make_source(parent)
++                target = external if name == "linked-dir" else external / "payload"
++                (source / name).symlink_to(target, target_is_directory=target.is_dir())
++                with self.assertRaisesRegex(ValueError, "symlink in the control-plane fixture"):
++                    clone(source, parent)
++                self.assertEqual([p.name for p in (parent / "output").rglob("payload")], [])
++                self.assertEqual((external / "payload").read_text(), "must not be duplicated")
 +
 +    def test_failed_setup_cleans_up_its_temporary_directory(self) -> None:
-+        with tempfile.TemporaryDirectory() as parent:
-+            temporary = tempfile.TemporaryDirectory(dir=parent)
-+            path = Path(temporary.name)
-+            case = test_control_plane.ControlPlaneCheckTest("test_clean_copy_passes")
-+            with (
-+                patch.object(test_control_plane, "temp_dir", return_value=temporary),
-+                patch.object(test_control_plane, "HAS_PLAN", True),
-+                patch.object(
-+                    test_control_plane, "clone_control_plane", side_effect=OSError("copy failed")
-+                ),
-+            ):
-+                result = unittest.TestResult()
-+                case.run(result)
-+            self.assertEqual(len(result.errors), 1)
-+            self.assertFalse(path.exists())
++        cases = (
++            ("ControlPlaneCheckTest", "test_clean_copy_passes", "clone_control_plane"),
++            (
++                "HookWiringTest",
++                "test_every_handler_starts_and_accepts_a_harmless_event",
++                "make_repo",
++            ),
++        )
++        for cls, method, failing in cases:
++            with self.subTest(cls=cls), tempfile.TemporaryDirectory() as parent:
++                temporary = tempfile.TemporaryDirectory(dir=parent)
++                path = Path(temporary.name)
++                case = getattr(test_control_plane, cls)(method)
++                with (
++                    patch.object(test_control_plane, "temp_dir", return_value=temporary),
++                    patch.object(test_control_plane, failing, side_effect=OSError("setup failed")),
++                ):
++                    result = unittest.TestResult()
++                    case.run(result)
++                self.assertEqual(len(result.errors), 1, result.errors)
++                self.assertFalse(path.exists())

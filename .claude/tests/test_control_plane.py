@@ -18,6 +18,18 @@ PLAN_TOOL = BIN / "plan_section.py"
 HAS_PLAN = (REPO_ROOT / "PLAN.md").is_file()
 REFERENCE_RE = re.compile(r'--section "([^"]+)"|--id ([A-Z]+-\d+)(?![0-9x])')
 PLACEHOLDER = "${CLAUDE_PROJECT_DIR}"
+RUNTIME_TREES = shutil.ignore_patterns("__pycache__", "state", "worktrees", "node_modules")
+
+
+def control_plane_only(directory: str, names: list[str]) -> set[str]:
+    """Skip runtime trees (worktrees hold whole dependency graphs) and refuse symlinks: a followed
+    link can expand into gigabytes, and a preserved one lets the tamper tests below write through
+    to its target. The control plane itself has none."""
+    skipped = RUNTIME_TREES(directory, names)
+    links = sorted(n for n in names if n not in skipped and os.path.islink(Path(directory, n)))
+    if links:
+        raise ValueError(f"symlink in the control-plane fixture source {directory}: {links}")
+    return skipped
 
 
 def clone_control_plane(dest: Path) -> Path:
@@ -25,9 +37,7 @@ def clone_control_plane(dest: Path) -> Path:
     root = dest / "clone"
     root.mkdir()
     git(root, "init", "-q", "-b", "main")
-    shutil.copytree(
-        CLAUDE_DIR, root / ".claude", ignore=shutil.ignore_patterns("__pycache__", "state")
-    )
+    shutil.copytree(CLAUDE_DIR, root / ".claude", ignore=control_plane_only)
     shutil.copy2(REPO_ROOT / "CLAUDE.md", root / "CLAUDE.md")
     shutil.copy2(REPO_ROOT / "PLAN.md", root / "PLAN.md")
     return root
@@ -37,10 +47,8 @@ def clone_control_plane(dest: Path) -> Path:
 class ControlPlaneCheckTest(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = temp_dir()
+        self.addCleanup(self._tmp.cleanup)
         self.root = clone_control_plane(Path(self._tmp.name))
-
-    def tearDown(self) -> None:
-        self._tmp.cleanup()
 
     def check(self) -> tuple[int, str]:
         res = run(CHECK, [str(self.root)])
@@ -144,13 +152,11 @@ class HookWiringTest(unittest.TestCase):
 
     def setUp(self) -> None:
         self._tmp = temp_dir()
+        self.addCleanup(self._tmp.cleanup)
         self.state = Path(self._tmp.name) / "state"
         self.state.mkdir()
         self.repo = make_repo(Path(self._tmp.name))
         self.settings = json.loads((CLAUDE_DIR / "settings.json").read_text(encoding="utf-8"))
-
-    def tearDown(self) -> None:
-        self._tmp.cleanup()
 
     def invoke(
         self, hook: dict[str, object], payload: dict[str, object]
