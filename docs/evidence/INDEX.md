@@ -385,3 +385,4 @@ Appended by the M0 truth reconciliation; rows above are unchanged. Detail:
   (P27.01), EV-P30-001 (P30.01), EV-P31-001 and EV-P31-002 (P31.01), EV-P32-001 and EV-P32-002
   (P32.01), EV-P33-001 (P33.01).
 - Reviewer fields were not changed: no review was performed by this reconciliation.
+| EV-P13-014 | P13.02.03 | 2026-10-16 | `c6dc83f9352d` | M1 vertical slice: simulated callback call to tenant callback task to the owner's Heute view; Heute empty states | [EV-P13-014-m1-today-callback-slice.md](P13/EV-P13-014-m1-today-callback-slice.md) |
