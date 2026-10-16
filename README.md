@@ -11,9 +11,13 @@ lost.
 
 ## Status
 
-Greenfield. Phase **P02 — Engineering Foundation** is the first phase that produces application
-code. `PLAN.md` is the authoritative execution plan (phases P00–P33); `BLUEPRINT.md` is the
-founder's product specification and is read-only.
+In development; nothing is deployed. The engineering foundation (P02), tenancy, identity and audit
+(P06), the core business model (P07) and the knowledge system (P09) are built, the last two at the
+database layer only. Telephony, AI orchestration, the owner app, notifications, privacy controls
+and operations exist in part and are mostly not wired into a running path yet; there is no staging
+or production environment and no infrastructure code. The PLAN.md Status Ledger is the current
+truth (reconciled 2026-10-16; see `docs/audits/`). `PLAN.md` is the authoritative execution plan
+(phases P00–P33); `BLUEPRINT.md` is the founder's product specification and is read-only.
 
 | Document                                 | What it is                                                                            |
 | ---------------------------------------- | ------------------------------------------------------------------------------------- |
@@ -52,7 +56,7 @@ to do when a step fails, is in
 [`docs/development/local-setup.md`](docs/development/local-setup.md).
 
 `pnpm db:seed` exists and currently applies **no rows**: the demo tenants "Musterrestaurant" and
-"Musterbetrieb SHK" are defined, but the tenancy schema they belong to arrives in P06.
+"Musterbetrieb SHK" are defined, and the tenancy schema exists (P06), but seeding them is still open.
 
 ## Repository layout
 
@@ -62,9 +66,9 @@ apps/server/      NestJS (Fastify adapter) modular monolith
                   role entrypoints: main-api · main-voice · main-worker · main-migrate
 packages/         contracts · db · kernel · ai · telephony · integrations
                   observability · ui · testing · config
-templates/        vertical templates as versioned data          (empty until P10)
-evals/            AI evaluation datasets and adversarial suites  (empty until P10)
-infrastructure/   Terraform                                      (empty until P05)
+templates/        vertical templates as versioned data          (empty)
+evals/            AI evaluation datasets and adversarial suites  (empty)
+infrastructure/   Terraform                                      (empty)
 scripts/          preflight, migration checks, licence checks, ADR coverage
 ```
 

@@ -9,7 +9,7 @@
 | Environment | local |
 | Command / procedure | pnpm-workspace.yaml lists onlyBuiltDependencies with a reason beside each entry: esbuild (platform binary for vite/vitest) and the sharp/libvips platform packages (Next.js image optimisation). pnpm 10 blocks lifecycle scripts by default, so anything not listed cannot execute code at install time — an unreviewed postinstall is arbitrary code execution on every developer machine and every CI runner. The Dockerfile additionally passes --ignore-scripts in both the dependency and production-dependency stages, so the control survives a change to the pnpm configuration rather than depending on its default. Verified: pnpm install --frozen-lockfile reports no ignored build scripts. |
 | Result | PASS — the allowlist is explicit, justified per entry and enforced at two independent layers. |
-| CI run / artifact | pending |
+| CI run / artifact | exact-commit CI, back-filled 2026-10-16 (M0): pr-title success https://github.com/AyhamJo7/moin/actions/runs/36452556424 |
 | Reviewer | pending |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).

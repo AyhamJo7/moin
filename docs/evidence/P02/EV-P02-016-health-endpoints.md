@@ -9,7 +9,7 @@
 | Environment | local + arm64 container |
 | Command / procedure | Liveness and readiness are deliberately separate: /healthz checks nothing external, because a liveness probe that queried the database would restart every container during a database blip; /readyz checks dependencies so an instance leaves the load balancer without being killed. Verified in the arm64 container with no database reachable: GET /healthz -> {"status":"ok","role":"api"} HTTP 200; GET /readyz -> {"status":"not_ready","role":"api","checks":[{"name":"postgres","ready":false,"durationMs":11,"reason":"connection refused"}]} HTTP 503. 4 packages/db tests pass: not ready when unreachable; the reason never contains the connection string, host, user or password; the reason comes from a fixed vocabulary rather than the driver message; the probe returns within its deadline. |
 | Result | PASS. /readyz is unauthenticated, so the reason vocabulary is fixed and nothing from the driver error text is passed through (INV-12, INV-15). An early version made the probe timeout and the driver timeout equal, which meant every specific reason was unreachable and the probe always said "timed out"; the deadlines are now staggered and "connection refused" is observed in the container. |
-| CI run / artifact | pending |
+| CI run / artifact | exact-commit CI, back-filled 2026-10-16 (M0): pr-title success https://github.com/AyhamJo7/moin/actions/runs/36417632936 |
 | Reviewer | pending |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).

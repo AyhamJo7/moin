@@ -9,7 +9,7 @@
 | Environment | local (WSL2 Ubuntu, Node 24.21.0, pnpm 10.34.5) |
 | Command / procedure | pnpm --filter @moin/config test (vitest 5.0.2) — 3 files, 33 tests: 22 RuleTester cases for moin/no-tenant-conditional and moin/no-direct-db-access, plus bans.test.ts linting 10 on-disk fixtures, one per ban (@typescript-eslint/no-explicit-any, no-restricted-syntax x4 = default export / dangerouslySetInnerHTML / SQL template / SQL concat / session-level SET, no-console, @typescript-eslint/no-floating-promises, moin/no-tenant-conditional, moin/no-direct-db-access). Mutation check: setting no-console to off made exactly `console-log.ts is reported by no-console` fail (1 failed \| 32 passed); restoring it returned 33 passed. Boundary rules: pnpm exec depcruise packages scripts --config .dependency-cruiser.cjs -> exit 0, no violations, 35 modules cruised. |
 | Result | PASS (33/33 tests; mutation-proven non-vacuous). PARTIAL SCOPE: the dependency-cruiser boundary rules are validated as configuration only — their negative fixtures need apps/server/src/modules, which P02.03 creates; those fixtures are verified there. |
-| CI run / artifact | pending |
+| CI run / artifact | exact-commit CI, back-filled 2026-10-16 (M0): pr-title failure https://github.com/AyhamJo7/moin/actions/runs/36379477690 |
 | Reviewer | pending |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).

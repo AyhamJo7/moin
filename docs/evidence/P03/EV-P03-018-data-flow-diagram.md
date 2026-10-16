@@ -9,7 +9,7 @@
 | Environment | local |
 | Command / procedure | docs/architecture/data-flow.md draws five trust boundaries (public internet, provider, our perimeter, application, data) and twelve numbered flows, each with the personal data it carries, its inventory category and the guard at the crossing. Three crossings are discussed rather than tabulated: F3, utterance text to a model provider, which is the flow a data-protection review will look at hardest and is bounded by sending no identifiers with it, an EU project with no-training headers, and not persisting what comes back beyond template-defined facts, so the corpus that would make it worrying never accumulates on our side; F2, audio in transit, never written, stated as a DESIGN property — there is no configuration that turns recording on (INV-07); and F10, notifications, which carry a template id and an identifier rather than the caller request, because the tempting design would put personal data through Apple, Google and an SMS carrier onto a device that may not be the owner. |
 | Result | PASS |
-| CI run / artifact | pending |
+| CI run / artifact | exact-commit CI, back-filled 2026-10-16 (M0): container-scan success https://github.com/AyhamJo7/moin/actions/runs/36497664919; pr-title success https://github.com/AyhamJo7/moin/actions/runs/36497664916; security-scan success https://github.com/AyhamJo7/moin/actions/runs/36497664979; verify success https://github.com/AyhamJo7/moin/actions/runs/36497664890 |
 | Reviewer | pending |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).

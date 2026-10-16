@@ -9,7 +9,7 @@
 | Environment | local |
 | Command / procedure | node scripts/check-dfd-coverage.ts -> exit 0, "12 flows, each with an inventory category and a guard". The check parses the flow table, and fails on a flow with no category, a flow with no guard, or a category the inventory does not define. 4 unit tests. |
 | Result | PASS — and it found three real gaps in the diagram first draft, which is the argument for having it rather than reading the table: two flows were classified as "all", which is not a classification (a flow touching everything must say what everything is, or the subprocessor register cannot be derived from it); one named a category the inventory does not define; and one carried a credential with no classification at all, now stated as "not personal data", which is a classification too as long as it says so. |
-| CI run / artifact | pending |
+| CI run / artifact | exact-commit CI, back-filled 2026-10-16 (M0): container-scan success https://github.com/AyhamJo7/moin/actions/runs/36497664919; pr-title success https://github.com/AyhamJo7/moin/actions/runs/36497664916; security-scan success https://github.com/AyhamJo7/moin/actions/runs/36497664979; verify success https://github.com/AyhamJo7/moin/actions/runs/36497664890 |
 | Reviewer | pending |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).

@@ -9,7 +9,7 @@
 | Environment | local (vitest 5.0.2, Node 24.21.0) |
 | Command / procedure | vitest.config.ts declares two projects via test.projects (vitest.workspace.ts is removed in Vitest 5). `unit` includes {apps,packages,scripts}/**/*.test.ts and excludes *.integration.test.ts and e2e; `integration` includes only *.integration.test.ts, runs with fileParallelism, a 30 s test timeout, a 60 s hook timeout and the globalSetup that builds the template database. They are separate projects rather than a naming convention because their requirements genuinely differ: one project for both would either slow every unit test to integration settings or run integration tests under settings that make them flaky, and a flaky integration test gets quarantined and then deleted. pnpm test -> vitest run --project unit (no Docker needed); pnpm test:integration -> vitest run --project integration. |
 | Result | PASS — unit: 13 files, 108 tests. integration: 1 file, 5 tests. Both selectable independently. |
-| CI run / artifact | pending |
+| CI run / artifact | exact-commit CI, back-filled 2026-10-16 (M0): pr-title success https://github.com/AyhamJo7/moin/actions/runs/36427057145 |
 | Reviewer | pending |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).

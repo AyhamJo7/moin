@@ -9,7 +9,7 @@
 | Environment | PostgreSQL 17, local stack |
 | Command / procedure | packages/db/migrations/0003_roles_and_privileges.sql applied; docker/postgres/init/00-roles.sql provisions the roles |
 | Result | applied; PLAN says 'migration creating' — a migration cannot create roles because moin_migrator has no CREATEROLE, which is the point of the split. It asserts instead, and the deviation is stated in the migration header |
-| CI run / artifact | pending |
+| CI run / artifact | exact-commit CI, back-filled 2026-10-16 (M0): container-scan cancelled https://github.com/AyhamJo7/moin/actions/runs/36613380358; pr-title success https://github.com/AyhamJo7/moin/actions/runs/36613380002; security-scan failure https://github.com/AyhamJo7/moin/actions/runs/36613380318; verify success https://github.com/AyhamJo7/moin/actions/runs/36613380290 |
 | Reviewer | pending |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).

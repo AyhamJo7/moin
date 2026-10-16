@@ -9,7 +9,7 @@
 | Environment | local |
 | Command / procedure | ADR-0001 (modular monolith and process roles), 0003 (tenant isolation), 0004 (data access and migrations), 0005 (identity, sessions and RBAC), 0006 (API contract and error model), 0007 (events, outbox/inbox, ordering), 0008 (jobs, queues and timers), 0009 (realtime), 0015 (business action model), 0020 (integration credential storage). Each states the failure it prevents rather than the pattern it follows, and each records the alternatives with the reason they were rejected — including the ones that are genuinely reasonable, such as KMS envelope encryption in Postgres for ADR-0020, which is kept with an explicit revisit trigger (roughly 2,000 secrets) instead of being dismissed. |
 | Result | PASS — 10 accepted. PLAN L2180 also lists ADR-0036 for P03, but the ADR register assigns ADR-0036 to time, locale and calendars in P07. Proceeding on the register, which is the more specific statement; recorded as open question Q1 in the phase plan rather than resolved silently. |
-| CI run / artifact | pending |
+| CI run / artifact | exact-commit CI, back-filled 2026-10-16 (M0): container-scan success https://github.com/AyhamJo7/moin/actions/runs/36457405770; pr-title success https://github.com/AyhamJo7/moin/actions/runs/36574586847; security-scan success https://github.com/AyhamJo7/moin/actions/runs/36457405878; verify success https://github.com/AyhamJo7/moin/actions/runs/36457405843 |
 | Reviewer | pending |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).

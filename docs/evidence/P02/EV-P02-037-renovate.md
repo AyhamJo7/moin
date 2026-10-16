@@ -9,7 +9,7 @@
 | Environment | local |
 | Command / procedure | renovate.json: weekly schedule before 6am Monday in Europe/Berlin with non-major updates grouped into one pull request; vulnerabilityAlerts and osvVulnerabilityAlerts enabled with schedule "at any time" and raised priority, so a security fix does not wait for the batch; monthly lockfile maintenance; major updates and the ADR-0002 toolchain baseline (node, pnpm, typescript, typescript-eslint, eslint) require dashboard approval, because a bump there is an ADR amendment rather than a routine update; github-actions, dockerfile and docker-compose managers keep digests pinned (P02.06.06); minimumReleaseAge of 3 days on non-major updates, because a release published an hour ago has had no time to be found compromised or broken. Renovate opens pull requests and never merges: merging to main is a founder action. |
 | Result | PASS as configuration. NOT YET EXERCISED: Renovate only runs once the GitHub App is installed on the repository, which is a founder action. Its first real pull request is the verification, and it is recorded as a founder item rather than claimed here. |
-| CI run / artifact | pending |
+| CI run / artifact | exact-commit CI, back-filled 2026-10-16 (M0): pr-title success https://github.com/AyhamJo7/moin/actions/runs/36452556424 |
 | Reviewer | pending |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).

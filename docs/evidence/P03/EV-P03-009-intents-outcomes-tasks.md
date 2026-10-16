@@ -9,7 +9,7 @@
 | Environment | local |
 | Command / procedure | 16 intents, 11 outcome codes, 10 task types, each closed and each an enum in packages/contracts so adding one changes a reviewed schema. Two design points are recorded with their reasons: unknown is a first-class intent rather than a failure, because a caller whose intent did not classify is still a customer and the correct behaviour is to take a message; and failed_technical ALWAYS produces a task, because a technical failure must never look to the owner like nothing happened (INV-19). The document also fixes the ordering that keeps a model from deciding a booking occurred: the model produces only the intent, the dialogue manager decides the outcome from what actually happened including whether a tool succeeded, and the task follows from the outcome (INV-05). |
 | Result | PASS |
-| CI run / artifact | pending |
+| CI run / artifact | exact-commit CI, back-filled 2026-10-16 (M0): container-scan success https://github.com/AyhamJo7/moin/actions/runs/36457622050; pr-title success https://github.com/AyhamJo7/moin/actions/runs/36457621863; security-scan success https://github.com/AyhamJo7/moin/actions/runs/36457621910; verify success https://github.com/AyhamJo7/moin/actions/runs/36457621861 |
 | Reviewer | pending |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).

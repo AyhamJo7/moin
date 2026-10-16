@@ -367,3 +367,21 @@ authoritative for the actual IDs; this table is the mapping.
 | EV-P32-001 | P32.01 | 2026-10-15 | `1a4db6a1cd6c` | matrixComplete 3x30x1x0SEV1 + launchChecklist 5 items + checklistPasses every-evidence; live tenants ride founder; unit 2/2 3x + mutation KILLED + gates full 14/14. | [EV-P32-001-matrix-complete-checklist-passes.md](P32/EV-P32-001-matrix-complete-checklist-passes.md) |
 | EV-P32-002 | P32.01 | 2026-10-15 | `a9854337072f` | REWORK per BLOCK: GoLiveSignoff signer + ISO date + signoffValid wired into launchReady gate with valid/invalid tests; unit 3/3 3x + mutation KILLED + gates full 14/14. | [EV-P32-002-rework-signoff-wired.md](P32/EV-P32-002-rework-signoff-wired.md) |
 | EV-P33-001 | P33.01 | 2026-10-15 | `c5f9f926008d` | sellGate 20 phases + 4 categories + posture + S1-30d + 6 EXT + signoff discrete; sellGaps names each failing item; live ledger audits NOT_READY; unit 2/2 3x + mutation KILLED + gates full 14/14. | [EV-P33-001-gate-aggregates-all-met.md](P33/EV-P33-001-gate-aggregates-all-met.md) |
+
+## M0 corrections (2026-10-16)
+
+Appended by the M0 truth reconciliation; rows above are unchanged. Detail:
+`docs/audits/2026-10-16-m0-reconciliation.md`.
+
+- EV-P06-054: the `Commit` field carried a full hash that is not a commit in this repository; it now
+  names `0748a8691eef70197a154993e1d7aa599273571c`, the unique commit behind the recorded prefix
+  `0748a86` (same message, same time). The record says so.
+- CI field back-filled in 85 records, only where GitHub Actions ran on the record's exact commit;
+  conclusions copied as reported, including failures (EV-P02-001…011, EV-P02-021, EV-P02-041/042,
+  EV-P06-001…010, EV-P06-082). The remaining 175 records with `pending` were taken on commits that
+  never ran CI in that form and stay `pending`.
+- Filed under a PLAN item the evidence does not implement (records unchanged; the Status Ledger and
+  PROGRESS do not count them for that item): EV-P12-001 (P12.01), EV-P12-002 (P12.02), EV-P27-001
+  (P27.01), EV-P30-001 (P30.01), EV-P31-001 and EV-P31-002 (P31.01), EV-P32-001 and EV-P32-002
+  (P32.01), EV-P33-001 (P33.01).
+- Reviewer fields were not changed: no review was performed by this reconciliation.

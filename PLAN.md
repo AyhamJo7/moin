@@ -14,16 +14,17 @@
 | Created | 2026-09-27 |
 | Plan status | `READY_FOR_REVIEW` (founder adoption is checklist item P00.05) |
 | Authority | This file is the **authoritative execution plan**. Product intent lives in `BLUEPRINT.md`; where this plan deviates, the deviation is listed in [Blueprint tensions and resolutions](#blueprint-tensions-and-resolutions). |
-| Overall product status | **NOT SELL-READY** — greenfield repository; no application code exists. |
-| Current phase | P00 (planning) → next executable: P01–P05 in parallel from 2026-09-28 |
-| Implementation started | **NO** |
-| Scope of this document | Planning and verification design only. Every `[ ]` below is open. |
+| Overall product status | **NOT SELL-READY** — application code exists for parts of P02–P16 (plus SELL/TEN helpers), largely unwired; no staging or production environment exists. See the [Status Ledger](#status-ledger). |
+| Current phase | See the [Status Ledger](#status-ledger) (reconciled 2026-10-16, `docs/audits/2026-10-16-m0-reconciliation.md`) |
+| Implementation started | **YES** (P02 onward; 7 items founder-VERIFIED, all in P06) |
+| Scope of this document | Execution plan and verification design. `[x]` marks an item with an EV record at READY_FOR_REVIEW or above; everything else is open. |
 
 ### Change log
 
 | Version | Date | Change | Approved by |
 |---|---|---|---|
 | 1.0.0 | 2026-09-27 | Initial master plan from BLUEPRINT.md + repository audit + independent architecture review | pending (P00.05) |
+| 1.0.0 (status only) | 2026-10-16 | M0 truth reconciliation: Status Ledger, phase headers and EXT statuses reconciled with the code on `main` (993ea23) and the evidence registry; P07 ledger row column shift fixed; P09.10.01/.02 indentation restored (the items were invisible to `plan_section.py`). No scope, gate, threshold or invariant changed. Detail: `docs/audits/2026-10-16-m0-reconciliation.md` | pending (founder review of PR #227) |
 
 ---
 
@@ -136,39 +137,39 @@ Single source of status. Tier columns show the status of that phase's items for 
 | Phase | Title | PILOT | MTLIVE | LAUNCH | SELL | TEN | Blocker / external wait | Next action |
 |---|---|---|---|---|---|---|---|---|
 | P00 | Planning baseline | READY_FOR_REVIEW | — | — | — | — | Founder review | Founder reads and adopts plan (P00.05) |
-| P01 | Discovery & Gurlitt observation | NOT_STARTED | NOT_STARTED | — | — | — | EXT-16 Gurlitt | Meet Gurlitt owner 2026-09-28 09:00 |
-| P02 | Engineering foundation | READY_FOR_REVIEW | — | — | — | — | — | EXT-24 satisfied; every P02 item implemented and verified |
+| P01 | Discovery & Gurlitt observation | NOT_STARTED | NOT_STARTED | — | — | — | EXT-16 Gurlitt; the planned 2026-09-28 kickoff has no recorded outcome (M0, 2026-10-16) | Founder confirms the Gurlitt cooperation and schedules the kickoff (P01.02.01) |
+| P02 | Engineering foundation | READY_FOR_REVIEW | — | — | — | — | — | P02 foundation implementation and evidence partially established: demo-tenant seeding (P02.04.02) incomplete, the seed applies 0 rows (EV-P02-025); the 15-minute fresh-clone stack with seed data (P02.04.06) unverified, measured warm with 0 rows seeded (EV-P02-022), realistic cold first run estimated at 45–90 min (EV-P02-046); direct-push rejection follows from the ruleset configuration, not an empirical test (EV-P02-048). EXT-24 READY_FOR_REVIEW: ruleset configuration evidenced (EV-P02-047), founder acceptance pending. None founder-VERIFIED; the item and evidence records are authoritative (M0) |
 | P03 | Architecture decisions & threat model | IN_PROGRESS | — | — | — | — | EXT-02 counsel not engaged | P03.05 review findings; founder sends the legal pack |
 | P04 | Feasibility proof & long-lead track | IN_PROGRESS | — | — | NOT_STARTED | — | EXT-01/07/10/11/12 | Adapter, gateway port and measurement harness built; every measurement waits on EXT-10/11/12 |
-| P05 | Cloud foundation & walking skeleton | NOT_STARTED | — | — | — | — | EXT-09 AWS | Terraform bootstrap |
+| P05 | Cloud foundation & walking skeleton | IN_PROGRESS | — | — | — | — | EXT-09 AWS IN_PROGRESS: organisation and five accounts, Identity Center, root MFA and budget alerts exist (founder, 2026-10-14, `docs/operations/aws-organization-baseline.md`); SCPs, SES and quotas open. P05.03/.07/.09 "shape" helpers (#207–#209) implement no P05 item: the repository holds 0 Terraform files (M0) | Terraform bootstrap and modules (engineering, plan-ready); founder applies |
 | P06 | Tenancy, identity, authorization, audit | IN_PROGRESS | — | NOT_STARTED | — | — | Engineering built and at READY_FOR_REVIEW (none VERIFIED) only for the ticked items: .03.02, .06.04–.07 (EV-P06-049…052; .06.05 provider-triggered reset call is P05/EXT-09), .07.01–.05 (EV-P06-053; .07.05 real-route matrix EV-P06-061/062), .08.04 (EV-P06-054), .11.02 (EV-P06-057), .13.01/.02/.05 (EV-P06-059). PARTIAL, not complete, with remaining work: .03.07 request half proven (EV-P06-060), job half BLOCKED on .03.03 (no job envelope until P08); .08.01 tokens and template built, email send P14/EXT-09; .08.02 no HTTP accept route (founder decision); .08.03 task return-to-unassigned built (EV-P06-063: tasks 0025 + unassign trigger); .09.01/.02 recovery hook and partial containment built (EV-P06-055), Cognito reset P05/EXT-09, no deny-new-access or operator identity; .09.04 founder-run tabletop open; .10.03 application-service paths adopted (EV-P06-056), tool guard (P10), operator and security-event paths do not exist; .11.03/.11.05 NOT proven and .11.04 incomplete: the four support read functions have NO runtime EXECUTE grant until a trusted operator identity exists (reads disabled); .12.01 application throttles built, Cognito lockout docs half done (EV-P06-064), WAF rate rules WAITING_FOR_EXTERNAL P05/EXT-09; .12.02 security-event recording built, owner email P14; .12.03 only the throttling-engages half proven, the notification half is open until .12.02 (EV-P06-058); .13.03 DB-layer half wired, job half BLOCKED on .03.03; .13.04 negative registry only; .13.05 wired at 1e2224a (PR #50, run 37795794912 success). Not started or external: .03.04 resolver built, voice/webhook integration pending (EV-P06-065, unchecked), .05.01–.03/.05, .01.03/.01.04 and .11.01 (P05/EXT-09); .01.06 local role built (EV-P06-047), Terraform provisioning P05, .10.05 (EXT-09). QG-09 IN_PROGRESS §§1–7 recorded (none VERIFIED): §§1–3 (EV-P06-066/067/068: §1 OK TO MERGE, §2 BLOCK MERGE/HIGH reproduced, §3 OK TO MERGE), §§4–7 BLOCKED all four (EV-P06-069 s4 lifecycle H1 warm-cache vs FS-16; EV-P06-070 s5 RBAC concurrent-RR + trigger/cascade races; EV-P06-071 s6 invite step-up/accept gaps; EV-P06-072 s7 cross-tenant disable + §2-overlap deadlock); founder verdict PENDING all §§1–13; §8 reviewed OK TO MERGE (EV-P06-073: M1/M2 + L1/L2, gemini static, gateway-503 BLOCKER resolved via fallback); §9 reviewed BLOCK MERGE (EV-P06-074: H1/H2 + M1/M2 + L1/L2, gemini static); §10 reviewed OK (EV-P06-075: M1 ALB-shared-bucket, M2 sweep contention, L1/L2); §11 reviewed OK (EV-P06-076: M1 inventory-vs-probes, L1/L2); §12 reviewed OK (EV-P06-077: L1/L2); §13 reviewed OK (EV-P06-078: L1/L2) — QG-09 §§1–13 verdicts complete (none VERIFIED); founder-verdict recommendations recorded EV-P06-084 (docs-only, 12 ACCEPT incl §7 conditional on slice 3, nothing VERIFIED) | Founder: verdict on §§1–13 (QG-09 evidence complete in form); engineering resumes with P06.03.04 voice/webhook integration (resolver built) once P11 lands |
-| P07 | Core business action model | IN_PROGRESS | — | NOT_STARTED | NOT_STARTED | P07.01 value objects + P07.02 contacts + P07.03 resolution + P07.04 merge/unmerge (EV-P07-013…016) + P07.05 conversations + P07.06 tasks + P07.07 leads + P07.08 requests + P07.09 notes/facts + P07.10 governance + P07.11 finaliser/reconciler (EV-P07-010; schedule+alarm deferred P08/P15, contract delivered) + P07.12 search (EV-P07-017/018) + P07.13 concurrency (EV-P07-011) + P07.14 time/locale (EV-P07-012; yearly job + Betriebsferien deferred P09.03) built (EV-P07-001…018), none VERIFIED | .01.01 PhoneNumber + .01.02 Email/PLZ/Name/Money + .01.03 fast-check properties built (EV-P07-001); PLZ existence directory deferred to P07.02 and closed there (founder decision — format-only ships, no directory table; cross-ref P07.01.02 decision record); .02.01 contacts/contact_methods tables + RLS + composite FKs + verification/is_tenant_owned + .02.02 services (create/update/version/add/remove/list/search) + .02.03 audit + dictionary comments + .02.04 tests (verified-uniqueness/RLS/409) built (EV-P07-002); .03.01 exact-match rules (verified E.164/email/external_id, tenant-owned/suspicious/withheld excluded) + .03.02 no-match signal + multi-match candidate + review task + .03.03 German rule labels + .03.04 FS-26/CLIR tests built (EV-P07-003); no AI in resolution (INV-09); .04.01 signals + .04.02 merge (UUID-order locks, delete+recreate links, ledger) + .04.03 30-day unmerge (fresh id, serialised) + .04.04 tests (concurrent/link/task/candidate/audit/version) built (EV-P07-013…016); .06.01 types/priorities/machine + due UTC + .06.02 services (idempotent create/assign/status/snooze/complete/reopen, optimistic locking) + .06.03 partial unique per interaction+type + .06.04 transition/409/idempotency tests built (EV-P07-005) | Founder: tier verdicts PILOT/LAUNCH/SELL (evidence complete in form, none VERIFIED) |
-| P08 | Async, events, scheduling, realtime | NOT_STARTED | — | — | — | — | — | after P06.03 |
-| P09 | Knowledge system | NOT_STARTED | — | NOT_STARTED | NOT_STARTED | — | — | after P07 |
-| P10 | AI orchestration, policy, templates, evals | NOT_STARTED | — | NOT_STARTED | — | — | EXT-12 | after P04 DG-01 |
-| P11 | Telephony platform | NOT_STARTED | — | NOT_STARTED | — | — | EXT-10/11 | after P04, P08 |
-| P12 | Reception conversation flows & voice eval | NOT_STARTED | — | — | — | — | EXT-20 | after P09–P11 |
-| P13 | Owner web app | NOT_STARTED | — | NOT_STARTED | — | — | — | after P06, P07 |
-| P14 | Notifications & escalation | NOT_STARTED | — | NOT_STARTED | — | — | EXT-09 SES | after P08 |
-| P15 | Operations baseline | NOT_STARTED | — | NOT_STARTED | — | — | — | continuous from P05 |
-| P16 | Privacy, DSAR, AI-Act controls | NOT_STARTED | — | NOT_STARTED | — | — | EXT-02/04 | after P07 |
-| P17 | Production, security & DR baseline | NOT_STARTED | NOT_STARTED | NOT_STARTED | — | — | EXT-09 | after P05 |
-| P18 | Pilot readiness & Gurlitt onboarding | NOT_STARTED | — | — | — | — | EXT-02/06/16 | after all PILOT items |
+| P07 | Core business action model | IN_PROGRESS | — | IN_PROGRESS | IN_PROGRESS | — | No external wait. Built at the DB layer and exposed through no API or UI route (M0, 2026-10-16); LAUNCH = P07.12 search, SELL = P07.04 merge/unmerge. P07.01 value objects + P07.02 contacts + P07.03 resolution + P07.04 merge/unmerge (EV-P07-013…016) + P07.05 conversations + P07.06 tasks + P07.07 leads + P07.08 requests + P07.09 notes/facts + P07.10 governance + P07.11 finaliser/reconciler (EV-P07-010; schedule+alarm deferred P08/P15, contract delivered) + P07.12 search (EV-P07-017/018) + P07.13 concurrency (EV-P07-011) + P07.14 time/locale (EV-P07-012; yearly job + Betriebsferien deferred P09.03) built (EV-P07-001…018), none VERIFIED. Detail: .01.01 PhoneNumber + .01.02 Email/PLZ/Name/Money + .01.03 fast-check properties built (EV-P07-001); PLZ existence directory deferred to P07.02 and closed there (founder decision — format-only ships, no directory table; cross-ref P07.01.02 decision record); .02.01 contacts/contact_methods tables + RLS + composite FKs + verification/is_tenant_owned + .02.02 services (create/update/version/add/remove/list/search) + .02.03 audit + dictionary comments + .02.04 tests (verified-uniqueness/RLS/409) built (EV-P07-002); .03.01 exact-match rules (verified E.164/email/external_id, tenant-owned/suspicious/withheld excluded) + .03.02 no-match signal + multi-match candidate + review task + .03.03 German rule labels + .03.04 FS-26/CLIR tests built (EV-P07-003); no AI in resolution (INV-09); .04.01 signals + .04.02 merge (UUID-order locks, delete+recreate links, ledger) + .04.03 30-day unmerge (fresh id, serialised) + .04.04 tests (concurrent/link/task/candidate/audit/version) built (EV-P07-013…016); .06.01 types/priorities/machine + due UTC + .06.02 services (idempotent create/assign/status/snooze/complete/reopen, optimistic locking) + .06.03 partial unique per interaction+type + .06.04 transition/409/idempotency tests built (EV-P07-005) | Founder: tier verdicts PILOT/LAUNCH/SELL (evidence complete in form, none VERIFIED) |
+| P08 | Async, events, scheduling, realtime | IN_PROGRESS | — | — | — | — | No external wait. DB layer built (job ledger, outbox, provider inbox, idempotency keys, job history, timers, SSE replay store, flags; migrations 0062–0070, real-Postgres tests) plus a pure worker loop and rate limiter. Not built: SQS/Valkey transports, dispatcher/worker processes (the worker role serves health only), `GET /api/v1/events`, Idempotency-Key middleware, scheduler, metric emission. PROGRESS READY_FOR_REVIEW claims for P08.01–.11 corrected item by item (M0, 2026-10-16) | Wire the async runtime (transports, dispatcher, sweeps, SSE, middleware) |
+| P09 | Knowledge system | IN_PROGRESS | — | IN_PROGRESS | IN_PROGRESS | — | No external wait. DB layer built for P09.01–.11 (migrations 0052–0061, SSRF-safe website import, approved-retrieval view, channel scoping, eval set). LAUNCH: PDF import stage gate only (#210). SELL: passage rows (0074); vectors/HNSW and the embedding provider not built. No owner UI (P13.06) (M0) | Founder review of P09 PILOT evidence; embeddings arrive with the P10 provider |
+| P10 | AI orchestration, policy, templates, evals | IN_PROGRESS | — | IN_PROGRESS | — | — | EXT-12 / DG-14 (no EU model access); DG-01 not taken. Libraries built and unit-tested but imported by no runtime: gateway port + OpenAI EU adapter, structured outputs, resilience, redaction, version sets, policy engine, tool guard, template loader, rules, life-safety lexicon, injection guard, eval scorer, cost micros (LAUNCH: alternative-provider contract, rollout flags). `templates/` and `evals/` are empty; no metric is emitted; no QG-07 CI job (M0) | Wire the gateway, policy engine and tool guard into the call path; build the eval datasets |
+| P11 | Telephony platform | IN_PROGRESS | — | IN_PROGRESS | — | — | EXT-10 NOT_STARTED (an unverified 2026-10-15 note reports a suspended Twilio account) / EXT-11; DG-01 not taken. Wired: signed inbound webhook → number-to-tenant resolution → disclosure TwiML → WSS session that runs the P04 measurement script; tokens and CallSid dedup in memory. Not wired: call machine, finaliser, fallback layers, degraded capture, caps, metering, reconciliation, drain, absence alarm (unit-tested helpers; LAUNCH: transfer validation) (M0) | Vertical slice: call machine + finaliser + capture on the relay path |
+| P12 | Reception conversation flows & voice eval | IN_PROGRESS | — | — | — | — | EXT-20, EXT-12, EXT-10. Turn helpers (greeting, intent routing, FAQ answer, callback/lead/appointment capture, escalation, silence/barge-in, outcome writer, summary draft) unit-tested and imported by no runtime; PROGRESS claims for P12.01/P12.02 cited the wrong PLAN items and P12.07.04/P12.13.05 do not exist — corrected (M0) | Vertical slice: deterministic capture end to end on the simulator |
+| P13 | Owner web app | IN_PROGRESS | — | NOT_STARTED | — | — | DG-10 open. The owner app is one placeholder page (German nav, PWA manifest, a service-worker file that nothing registers); 13 pure helpers in `apps/web/lib` imported by nothing; no API route serves owner data (M0) | Today view on a minimal owner API (vertical slice), then the remaining PILOT views |
+| P14 | Notifications & escalation | IN_PROGRESS | — | NOT_STARTED | — | — | EXT-09 SES (needs the DG-00 domain), DG-12. Tables and services for notifications, escalation and deliveries (0071–0073, real-Postgres tests); no sender (email/SMS/push), no timer wiring; the canary is a pure evaluator (M0) | Senders behind ports (SMTP locally, SES/SMS late-bound) |
+| P15 | Operations baseline | IN_PROGRESS | — | NOT_STARTED | — | — | EXT-09. Runbooks (`docs/runbooks/`) and pure helpers (PII log scanner, metric names, alarm/canary/incident/KPI/cost shapes); no telemetry pipeline, no metric emission, no deployed alarm, dashboard or canary (M0) | Instrumentation in code; alarms and dashboards in Terraform |
+| P16 | Privacy, DSAR, AI-Act controls | IN_PROGRESS | — | IN_PROGRESS | — | — | EXT-02/04, DG-13. Pure decision/state helpers (retention, overrides, rectification, erasure, deletion ledger, subprocessor register, disclosure records, scope guard, turn-log policy; LAUNCH: self-service export, termination state machine); no engine, job, persistence wiring or E2E (M0) | Retention engine and export/erasure end to end on real tables |
+| P17 | Production, security & DR baseline | NOT_STARTED | NOT_STARTED | NOT_STARTED | — | — | EXT-09. Shape helpers #193–#202 (constant WAF/backup/drill/access/DR/readiness shapes) implement no P17 item; no infrastructure exists (M0) | After Terraform: WAF, backups, restore drill #1, scanning, access policy |
+| P18 | Pilot readiness & Gurlitt onboarding | NOT_STARTED | — | — | — | — | EXT-02/06/16. Shape helpers #203–#206 (provisioning key, kill-switch shape, monitoring and PG-3 aggregators) implement no P18 item; P18 needs every PILOT item VERIFIED (M0) | after all PILOT items |
 | P19 | Gurlitt controlled pilot | NOT_STARTED | — | NOT_STARTED | — | — | EXT-16/21 | after PG-3 |
-| P20 | Booking core & first transactional tool | — | — | — | NOT_STARTED | — | EXT-14/15/17 | after MT-LIVE (if Handwerk tenant) |
-| P21 | Vertical templates, Handwerk, non-restaurant pilots | — | NOT_STARTED | NOT_STARTED | NOT_STARTED | — | EXT-05/18 | after P17.13 |
-| P22 | Team workflows | — | — | NOT_STARTED | NOT_STARTED | — | — | after P13 |
+| P20 | Booking core & first transactional tool | — | — | — | IN_PROGRESS | — | EXT-14/15/17, DG-02. Slot holds and confirmation at the DB level (0075/0076 EXCLUDE constraint, integration tests); no calendar adapter, no voice flow (M0) | after MT-LIVE (if Handwerk tenant) |
+| P21 | Vertical templates, Handwerk, non-restaurant pilots | — | IN_PROGRESS | NOT_STARTED | NOT_STARTED | — | EXT-05/18. P21.02 Handwerk intents/slots exist as a data module validated through the P10.09 loader; no `templates/` package, no pilots (M0) | after P17.13 |
+| P22 | Team workflows | — | — | NOT_STARTED | IN_PROGRESS | — | No external wait. P22.02 assignment-routing helpers only, unwired (M0) | after P13 |
 | P23 | Billing, metering, entitlements | — | — | NOT_STARTED | — | — | EXT-01/08/13 | after P11.13 |
 | P24 | Customer onboarding system | — | — | NOT_STARTED | NOT_STARTED | — | EXT-26 | after P18 |
 | P25 | Commercial enablement | — | — | NOT_STARTED | NOT_STARTED | — | EXT-02/07/23/25 | after DG-00 |
 | P26 | Reception Early Access launch gate | — | — | NOT_STARTED | — | — | EXT-02/13/19 | after all LAUNCH items |
-| P27 | Email inbox | — | — | — | NOT_STARTED | NOT_STARTED | EXT-14/15 | after DG-04 |
-| P28 | Timeline, identity, reply drafting | — | — | — | NOT_STARTED | — | — | after P27 |
-| P29 | Integration extensibility | — | — | — | — | NOT_STARTED | — | after P28 |
-| P30 | Security hardening & pentest | — | — | — | NOT_STARTED | — | EXT-19 | after P28 |
-| P31 | Reliability, scale, DR & cost hardening | — | — | — | NOT_STARTED | — | — | after P28 |
-| P32 | Multi-customer validation & Front Office launch | — | — | — | NOT_STARTED | — | EXT-18/22 | after P26, P28 |
-| P33 | Sell-Ready Production Gate | — | — | — | NOT_STARTED | — | all SELL EXT | after P30–P32 |
+| P27 | Email inbox | — | — | — | IN_PROGRESS | NOT_STARTED | EXT-14/15, DG-04. Thread-grouping and draft-reply helpers only; EV-P27-001 is filed under P27.01 (DG-04 decision), which that code does not implement (M0) | after DG-04 |
+| P28 | Timeline, identity, reply drafting | — | — | — | IN_PROGRESS | — | No external wait. Timeline-merge and draft-composer helpers only, unwired (M0) | after P27 |
+| P29 | Integration extensibility | — | — | — | — | IN_PROGRESS | No external wait. Webhook signing/subscription helpers (HMAC) only; no dispatcher (M0) | after P28 |
+| P30 | Security hardening & pentest | — | — | — | NOT_STARTED | — | EXT-19. Shape helper #223 (finding intake/triage states) implements no P30 item; EV-P30-001 is filed under P30.01 (threat-model refresh), which was not done (M0) | after P28 |
+| P31 | Reliability, scale, DR & cost hardening | — | — | — | NOT_STARTED | — | Shape helper #224 (SLO/load-shed predicates); no load test, soak or game day has run; EV-P31-001/002 are filed under P31.01 (load tests) (M0) | after P28 |
+| P32 | Multi-customer validation & Front Office launch | — | — | — | NOT_STARTED | — | EXT-18/22. Shape helper #225 (validation matrix) implements no P32 item; EV-P32-001/002 are filed under P32.01 (M0) | after P26, P28 |
+| P33 | Sell-Ready Production Gate | — | — | — | NOT_STARTED | — | all SELL EXT. The `sellGate()` aggregator (#226) is not a P33 deliverable; EV-P33-001 is filed under P33.01 (evidence compilation), which has not happened (M0) | after P30–P32 |
 
 **Product readiness states** (see [Definition of FULL SELL-READY](#definition-of-full-sell-ready)):
 
@@ -2409,7 +2410,7 @@ Feasibility report (EV-P04-001), real-call validation recording notes (EV-P04-00
 <a id="p05--cloud-foundation-and-walking-skeleton"></a>
 ## P05 — Cloud Foundation and Walking Skeleton
 
-**Status:** PILOT NOT_STARTED · **Target:** 2026-10-01 → 2026-10-09 · **Effort:** 5 engineering-days
+**Status:** PILOT IN_PROGRESS · **Target:** 2026-10-01 → 2026-10-09 · **Effort:** 5 engineering-days
 
 ### Objective
 Stand up reproducible AWS environments and a delivery pipeline so every later phase deploys continuously to staging from its first commit.
@@ -2689,7 +2690,7 @@ Catalog check output (EV-P06-001), route-coverage report (EV-P06-002), session r
 <a id="p07--core-business-action-model"></a>
 ## P07 — Core Business Action Model
 
-**Status:** PILOT NOT_STARTED · LAUNCH NOT_STARTED · SELL NOT_STARTED · **Target:** 2026-10-08 → 2026-10-16 · **Effort:** 5 engineering-days
+**Status:** PILOT IN_PROGRESS · LAUNCH IN_PROGRESS · SELL IN_PROGRESS · **Target:** 2026-10-08 → 2026-10-16 · **Effort:** 5 engineering-days
 
 ### Objective
 Implement the business objects at the centre of the product (contacts, conversations, calls, outcomes, tasks, leads, appointment requests) with deterministic identity resolution and the no-lost-interaction invariant.
@@ -2808,7 +2809,7 @@ Concurrency suite run (EV-P07-011), reconciler kill test (EV-P07-010), identity-
 <a id="p08--asynchronous-processing-events-scheduling-and-realtime"></a>
 ## P08 — Asynchronous Processing, Events, Scheduling and Realtime
 
-**Status:** PILOT NOT_STARTED · **Target:** 2026-10-08 → 2026-10-16 · **Effort:** 4 engineering-days
+**Status:** PILOT IN_PROGRESS · **Target:** 2026-10-08 → 2026-10-16 · **Effort:** 4 engineering-days
 
 ### Objective
 Provide reliable, observable, replayable background processing and live UI updates, assuming every provider and queue delivers at least once, sometimes late, sometimes twice.
@@ -2915,7 +2916,7 @@ Failure-injection report (EV-P08-001), kill-switch drill (EV-P08-002), SSE isola
 <a id="p09--knowledge-system"></a>
 ## P09 — Knowledge System
 
-**Status:** PILOT NOT_STARTED · LAUNCH NOT_STARTED · SELL NOT_STARTED · **Target:** 2026-10-12 → 2026-10-20 · **Effort:** 4 engineering-days
+**Status:** PILOT IN_PROGRESS · LAUNCH IN_PROGRESS · SELL IN_PROGRESS · **Target:** 2026-10-12 → 2026-10-20 · **Effort:** 4 engineering-days
 
 ### Objective
 Give every channel one governed source of approved business truth: structured facts, owner-approved FAQ cards and (later) approved passages, with lifecycle, validity, staleness and conflict controls.
@@ -2979,8 +2980,8 @@ Knowledge model + versions + approvals · business profile & structured facts ·
   - [ ] P09.09.04 pgvector HNSW for approved passages with embedding model versioning and a re-embed job (SELL tier)
   - [ ] P09.09.05 Tests: drafts, retired, expired, suspended and disallowed-channel items never retrievable; RLS
 - [ ] **P09.10 Channel and sensitivity scoping** `[G:PILOT]`
-- [ ] P09.10.01 `allowed_channels` (voice, email, web) enforced in the view — ready for reconfirmation; scanner false positive resolved; EV-P09-012
-- [ ] P09.10.02 Tests per channel — 14/14 gates and 7/7 assertion mutation kills recorded; reconfirmation pending; EV-P09-012
+  - [ ] P09.10.01 `allowed_channels` (voice, email, web) enforced in the view — ready for reconfirmation; scanner false positive resolved; EV-P09-012
+  - [ ] P09.10.02 Tests per channel — 14/14 gates and 7/7 assertion mutation kills recorded; reconfirmation pending; EV-P09-012
 - [ ] **P09.11 Knowledge eval set** `[G:PILOT]`
   - [ ] P09.11.01 Restaurant knowledge set (synthetic Musterrestaurant + Gurlitt-shaped fictional variant) with question variants, off-catalogue questions and near-miss questions
   - [ ] P09.11.02 Metrics: correct card selection, correct abstention (feeds LG-V06/LG-V07)
@@ -3023,7 +3024,7 @@ Retrieval exclusion test report (EV-P09-001), SSRF suite report (EV-P09-002), op
 <a id="p10--ai-orchestration-policy-engine-template-system-and-evaluation-harness"></a>
 ## P10 — AI Orchestration, Policy Engine, Template System and Evaluation Harness
 
-**Status:** PILOT NOT_STARTED · LAUNCH NOT_STARTED · **Target:** 2026-10-12 → 2026-10-22 · **Effort:** 6 engineering-days
+**Status:** PILOT IN_PROGRESS · LAUNCH IN_PROGRESS · **Target:** 2026-10-12 → 2026-10-22 · **Effort:** 6 engineering-days
 
 ### Objective
 Build the controlled AI layer: model gateway, strict structured outputs, redaction, the deterministic policy engine, the tool registry and guard, the vertical template system, owner rules, life-safety guardrails, injection defences, and the evaluation harness with statistics.
@@ -3160,7 +3161,7 @@ Eval report v1 (EV-P10-001), adversarial report (EV-P10-002), emergency report (
 <a id="p11--telephony-platform"></a>
 ## P11 — Telephony Platform
 
-**Status:** PILOT NOT_STARTED · LAUNCH NOT_STARTED · **Target:** 2026-10-14 → 2026-10-26 · **Effort:** 7 engineering-days
+**Status:** PILOT IN_PROGRESS · LAUNCH IN_PROGRESS · **Target:** 2026-10-14 → 2026-10-26 · **Effort:** 7 engineering-days
 
 ### Objective
 Turn the P04 adapter into a production telephony platform with robust behaviour for every call path:
@@ -3324,7 +3325,7 @@ Fallback suite report (EV-P11-001), permutation test report (EV-P11-002), draini
 <a id="p12--reception-conversation-flows-and-voice-evaluation"></a>
 ## P12 — Reception Conversation Flows and Voice Evaluation
 
-**Status:** PILOT NOT_STARTED · **Target:** 2026-10-19 → 2026-10-30 · **Effort:** 7 engineering-days
+**Status:** PILOT IN_PROGRESS · **Target:** 2026-10-19 → 2026-10-30 · **Effort:** 7 engineering-days
 
 ### Objective
 Implement the Reception conversation for the restaurant template v1 and prove it against the voice launch gates on the real phone network. Scope:
@@ -3464,7 +3465,7 @@ Voice gate report (EV-P12-001), harness timing report (EV-P12-002), normaliser c
 <a id="p13--owner-web-application"></a>
 ## P13 — Owner Web Application
 
-**Status:** PILOT NOT_STARTED · LAUNCH NOT_STARTED · **Target:** 2026-10-15 → 2026-10-30 · **Effort:** 7 engineering-days
+**Status:** PILOT IN_PROGRESS · LAUNCH NOT_STARTED · **Target:** 2026-10-15 → 2026-10-30 · **Effort:** 7 engineering-days
 
 ### Objective
 Build the small, German-first, mobile-first owner application:
@@ -3589,7 +3590,7 @@ Playwright report (EV-P13-001), axe report (EV-P13-002), usability session notes
 <a id="p14--notifications-and-escalation"></a>
 ## P14 — Notifications and Escalation
 
-**Status:** PILOT NOT_STARTED · LAUNCH NOT_STARTED · **Target:** 2026-10-22 → 2026-10-30 · **Effort:** 3 engineering-days
+**Status:** PILOT IN_PROGRESS · LAUNCH NOT_STARTED · **Target:** 2026-10-22 → 2026-10-30 · **Effort:** 3 engineering-days
 
 ### Objective
 Make sure urgent actions reach the right person quickly, reliably and without leaking data or spamming, with escalation when nobody reacts.
@@ -3677,7 +3678,7 @@ Canary report (EV-P14-001), escalation test run (EV-P14-002).
 <a id="p15--operations-baseline"></a>
 ## P15 — Operations Baseline
 
-**Status:** PILOT NOT_STARTED · LAUNCH NOT_STARTED · **Target:** PILOT slice by 2026-10-30; LAUNCH by 2026-11-27 · **Effort:** 4 + 3 engineering-days
+**Status:** PILOT IN_PROGRESS · LAUNCH NOT_STARTED · **Target:** PILOT slice by 2026-10-30; LAUNCH by 2026-11-27 · **Effort:** 4 + 3 engineering-days
 
 ### Objective
 Make the system observable and supportable by one person:
@@ -3807,7 +3808,7 @@ Fire-drill log (EV-P15-001), canary 7-day report (EV-P15-002), timeline drill (E
 <a id="p16--privacy-data-subject-rights-and-ai-act-product-controls"></a>
 ## P16 — Privacy, Data-Subject Rights and AI-Act Product Controls
 
-**Status:** PILOT NOT_STARTED · LAUNCH NOT_STARTED · **Target:** PILOT slice by 2026-10-30; LAUNCH by 2026-11-27 · **Effort:** 4 + 4 engineering-days
+**Status:** PILOT IN_PROGRESS · LAUNCH IN_PROGRESS · **Target:** PILOT slice by 2026-10-30; LAUNCH by 2026-11-27 · **Effort:** 4 + 4 engineering-days
 
 ### Objective
 Build GDPR processor obligations and AI-Act transparency into the product (BR-099), instead of treating them as PDFs. This covers:
@@ -4268,7 +4269,7 @@ Weekly reports (EV-P19-001…), final report (EV-P19-010), PG-4 record (EV-P19-0
 <a id="p20--booking-core-and-first-transactional-tool"></a>
 ## P20 — Booking Core and First Transactional Tool
 
-**Status:** SELL NOT_STARTED · **Target:** 2026-11-02 → 2026-11-20 · **Effort:** 7 engineering-days
+**Status:** SELL IN_PROGRESS · **Target:** 2026-11-02 → 2026-11-20 · **Effort:** 7 engineering-days
 
 ### Objective
 Let an inbound conversation invoke booking correctly (L356) without becoming a scheduling product. Source-of-truth availability stays in the customer's calendar or booking system (BR-093). Required guarantees:
@@ -4381,7 +4382,7 @@ Concurrency report (EV-P20-001), fault-injection report (EV-P20-002), PG-5 recor
 <a id="p21--vertical-template-system-handwerk-template-and-non-restaurant-pilots"></a>
 ## P21 — Vertical Template System, Handwerk Template and Non-Restaurant Pilots
 
-**Status:** MTLIVE NOT_STARTED · LAUNCH NOT_STARTED · SELL NOT_STARTED · **Target:** 2026-11-09 → 2026-11-27 · **Effort:** 6 engineering-days
+**Status:** MTLIVE IN_PROGRESS · LAUNCH NOT_STARTED · SELL NOT_STARTED · **Target:** 2026-11-09 → 2026-11-27 · **Effort:** 6 engineering-days
 
 ### Objective
 Prove the platform generalises. Author the SHK/electrical Handwerk template (and a Kfz variant if a pilot needs it), then onboard two non-restaurant pilots **without any code change** (roadmap gate L1906).
@@ -4477,7 +4478,7 @@ MT-LIVE record reference (EV-P21-001), Handwerk eval report (EV-P21-002), onboar
 <a id="p22--team-workflows"></a>
 ## P22 — Team Workflows
 
-**Status:** LAUNCH NOT_STARTED · SELL NOT_STARTED · **Target:** 2026-11-09 → 2026-11-20 · **Effort:** 4 engineering-days
+**Status:** LAUNCH NOT_STARTED · SELL IN_PROGRESS · **Target:** 2026-11-09 → 2026-11-20 · **Effort:** 4 engineering-days
 
 ### Objective
 Support small teams: multiple users with roles, assignment of work, reminders and follow-ups, per-user notifications. These are the "very soon" items BR-034, BR-036 and BR-037.
@@ -4974,7 +4975,7 @@ Sweep report (EV-P26-001), external test report reference + retest (EV-P26-002),
 <a id="p27--email-inbox-gmail-and-microsoft-365"></a>
 ## P27 — Email Inbox (Gmail and Microsoft 365)
 
-**Status:** SELL NOT_STARTED · TEN NOT_STARTED · **Target:** 2026-11-23 → 2026-12-18 · **Effort:** 8 engineering-days
+**Status:** SELL IN_PROGRESS · TEN NOT_STARTED · **Target:** 2026-11-23 → 2026-12-18 · **Effort:** 8 engineering-days
 
 ### Objective
 Add email as the second channel into the same action model:
@@ -5090,7 +5091,7 @@ Reconciliation injection report (EV-P27-001), inbox eval report (EV-P27-002), at
 <a id="p28--unified-customer-timeline-cross-channel-identity-and-reply-drafting"></a>
 ## P28 — Unified Customer Timeline, Cross-Channel Identity and Reply Drafting
 
-**Status:** SELL NOT_STARTED · **Target:** 2026-12-07 → 2026-12-23 · **Effort:** 5 engineering-days
+**Status:** SELL IN_PROGRESS · **Target:** 2026-12-07 → 2026-12-23 · **Effort:** 5 engineering-days
 
 ### Objective
 Deliver the company thesis: communication becomes work, and the work does not get lost between channels (L1787). Scope:
@@ -5174,7 +5175,7 @@ Demo E2E runs (EV-P28-001), draft eval report (EV-P28-002), merge/unmerge test r
 <a id="p29--integration-extensibility"></a>
 ## P29 — Integration Extensibility
 
-**Status:** TEN NOT_STARTED · **Target:** 2026-12 → 2027-01 · **Effort:** 4 engineering-days
+**Status:** TEN IN_PROGRESS · **Target:** 2026-12 → 2027-01 · **Effort:** 4 engineering-days
 
 ### Objective
 Provide the generic webhook/REST action (L1932) and one evidence-selected vertical integration needed before ten customers (L1933). The "one-demanded-integration" rule applies (R-15).
@@ -5670,10 +5671,10 @@ Each external gate lists what "satisfied" means. Engineering status and external
 | EXT-06 | Insurance (cyber, IT professional/financial-loss liability) | Insurer/broker | Policies in force covering SaaS + AI output risks | PILOT | Delay pilot | NOT_STARTED |
 | EXT-07 | Trademark search/clearance + domain | Counsel, registrar | Search result acceptable; domain registered (DG-00) | PILOT (domain), LAUNCH (brand) | Neutral domain for the pilot; rebrand via config | NOT_STARTED |
 | EXT-08 | Tax advice (VAT, §14 UStG content, e-invoice issuance/receipt, GoBD retention, Kleinunternehmer) | Steuerberater | Written checklist confirmed | PILOT (invoice), LAUNCH | Pilot invoice after confirmation | NOT_STARTED |
-| EXT-09 | AWS organisation, SES production access, quotas | AWS | Accounts active; SES out of sandbox | PILOT | SMS/in-app notifications only | NOT_STARTED |
-| EXT-10 | Twilio account verification, IE1, DPA, ConversationRelay access, geo permissions | Twilio | Account upgraded, DPA signed, IE1 functional | PILOT | DG-01 alternative | NOT_STARTED |
+| EXT-09 | AWS organisation, SES production access, quotas | AWS | Accounts active; SES out of sandbox | PILOT | SMS/in-app notifications only | IN_PROGRESS — organisation, five accounts, Identity Center, root MFA and budget alerts exist (founder, 2026-10-14; `docs/operations/aws-organization-baseline.md`, partly confirmed by a read-only CLI report); SCPs, SES production access and quotas open; SES waits on the sending-domain decision (DG-00) |
+| EXT-10 | Twilio account verification, IE1, DPA, ConversationRelay access, geo permissions | Twilio | Account upgraded, DPA signed, IE1 functional | PILOT | DG-01 alternative | NOT_STARTED — an unverified session note (2026-10-15, archived, not committed) reports an account that Twilio suspended pending a use-case/identity reply; not re-verified, so the status is unchanged (M0) |
 | EXT-11 | Twilio German number regulatory bundles | Twilio | Bundle approved; numbers active | PILOT | Customer-held bundle | NOT_STARTED |
-| EXT-12 | OpenAI EU-residency project (modified abuse monitoring/ZDR approval), DPA; alternative EU provider contract (DG-14) | OpenAI; alternative provider | EU project active with `store:false`; alternative contracted | PILOT | Alternative provider primary | NOT_STARTED |
+| EXT-12 | OpenAI EU-residency project (modified abuse monitoring/ZDR approval), DPA; alternative EU provider contract (DG-14) | OpenAI; alternative provider | EU project active with `store:false`; alternative contracted | PILOT | Alternative provider primary | NOT_STARTED — an unverified session note (2026-10-15, archived, not committed) reports a Build-plan account whose project creation showed no data-residency option; not re-verified, so the status is unchanged; DG-14 alternative undecided (M0) |
 | EXT-13 | Stripe live activation for the operating entity | Stripe | Live mode enabled, bank connected, tax settings | LAUNCH | Manual compliant invoices | NOT_STARTED |
 | EXT-14 | Google OAuth verification (Calendar sensitive scopes; Gmail restricted + CASA) | Google, CASA assessor | Verification approved; CASA letter (if Gmail) | SELL (Gmail GA); calendar pilots via test users | M365 or forwarding intake (DG-04) | NOT_STARTED |
 | EXT-15 | Microsoft publisher verification; customer admin consent | Microsoft; customer IT | Verified publisher; consent granted per customer | SELL (if M365) | Gmail or forwarding intake | NOT_STARTED |
@@ -5685,7 +5686,7 @@ Each external gate lists what "satisfied" means. Engineering status and external
 | EXT-21 | Real pilot traffic (30 days, ≥ 50 AI-handled calls) | Gurlitt callers | PG-4 data | PILOT → SELL | Extend pilot / second design partner | NOT_STARTED |
 | EXT-22 | First paying recurring customer + settled bank payment | Customer, bank | Payment settled and reconciled | COMMERCIALLY VALIDATED | — | NOT_STARTED |
 | EXT-23 | Referenceable customer / case-study consent | Customer | Written consent | SELL (case study) | Anonymised case study | NOT_STARTED |
-| EXT-24 | GitHub plan features (private-repo rulesets; optional code scanning) | GitHub | Rulesets enforceable | PILOT (MT-LIVE at the latest) | Pre-push hooks + discipline (accepted risk) | NOT_STARTED |
+| EXT-24 | GitHub plan features (private-repo rulesets; optional code scanning) | GitHub | Rulesets enforceable | PILOT (MT-LIVE at the latest) | Pre-push hooks + discipline (accepted risk) | READY_FOR_REVIEW — technical criterion met: ruleset `main-protection` active (deletion, non-fast-forward, pull request, required status checks, linear history; no bypass actors; GitHub API, 2026-10-16); EV-P02-047. Founder acceptance pending: no attributable founder approval is recorded (M0) |
 | EXT-25 | PostHog EU account + DPA | PostHog | DPA signed | SELL | No product analytics | NOT_STARTED |
 | EXT-26 | Customer-side forwarding configuration and carrier cost check | Each customer / carrier | Verification call passes; cost acceptable | per customer | Disqualify or alternative routing | NOT_STARTED |
 | EXT-27 | Subprocessor DPAs and transfer assessments (AWS, Twilio + STT/TTS vendors, LLM providers, Stripe, PostHog) | Providers, counsel | All DPAs on file; register complete | PILOT | Do not use the provider | NOT_STARTED |

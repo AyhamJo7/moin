@@ -9,7 +9,7 @@
 | Environment | CI |
 | Command / procedure | vitest recovery plus catalog plus CI integration |
 | Result | GREEN CI 16 of 16 |
-| CI run / artifact | pending |
+| CI run / artifact | exact-commit CI, back-filled 2026-10-16 (M0): container-scan success https://github.com/AyhamJo7/moin/actions/runs/38007549990; pr-title success https://github.com/AyhamJo7/moin/actions/runs/38007550021; security-scan success https://github.com/AyhamJo7/moin/actions/runs/38007550030; verify success https://github.com/AyhamJo7/moin/actions/runs/38007549956 |
 | Reviewer | gemini-3.8-flash invariant security architecture OK |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).

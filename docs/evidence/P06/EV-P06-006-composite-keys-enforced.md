@@ -9,7 +9,7 @@
 | Environment | PostgreSQL 17, per-file test database |
 | Command / procedure | scripts/check-rls-catalog.ts rules no-composite-unique and foreign-key-not-composite |
 | Result | both proven by fixtures; a foreign key whose target is organisations is exempt because the parent is the tenant |
-| CI run / artifact | pending |
+| CI run / artifact | exact-commit CI, back-filled 2026-10-16 (M0): container-scan cancelled https://github.com/AyhamJo7/moin/actions/runs/36613380358; pr-title success https://github.com/AyhamJo7/moin/actions/runs/36613380002; security-scan failure https://github.com/AyhamJo7/moin/actions/runs/36613380318; verify success https://github.com/AyhamJo7/moin/actions/runs/36613380290 |
 | Reviewer | pending |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).
