@@ -74,3 +74,5 @@ export {
   encryptionAtRest,
 } from './data-services.ts';
 export type { RdsShape, ValkeyShape, QueueShape, BucketShape, SesShape } from './data-services.ts';
+export { buildValid, stagingFlow, prodFlow, manifestValid, rollbackValid } from './pipeline.ts';
+export type { BuildShape, DeployStage, ReleaseManifest, Rollback } from './pipeline.ts';
