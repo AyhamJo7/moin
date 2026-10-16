@@ -2,3 +2,5 @@
 // Declared in P02.03 so the workspace graph and the module-boundary rules are complete;
 // filled in P20.
 export const PACKAGE_NAME = '@moin/integrations';
+export { normalizeSubject, threadGroups, draftReply } from './email.ts';
+export type { EmailMessage, ReplyDraft } from './email.ts';
