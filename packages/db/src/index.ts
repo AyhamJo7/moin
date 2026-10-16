@@ -108,8 +108,8 @@ export {
   snoozeTask,
 } from './tasks.ts';
 export type { NewTask, Task, TaskPriority, TaskStatus, TaskType, TodayTaskRow } from './tasks.ts';
-export { captureCallbackRequest } from './callback-intake.ts';
-export type { CallbackRequest, CapturedCallback } from './callback-intake.ts';
+export { CallbackConflictError, captureCallbackRequest } from './callback-intake.ts';
+export type { CallbackConflict, CallbackRequest, CapturedCallback } from './callback-intake.ts';
 export { createLead, getLead, listLeads, setLeadStatus } from './leads.ts';
 export type { Lead, LeadStatus, LostReason } from './leads.ts';
 export {

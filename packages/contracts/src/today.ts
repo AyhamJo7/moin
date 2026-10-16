@@ -78,8 +78,9 @@ export const simulatedCallSchema = z.strictObject({
 export type SimulatedCall = z.infer<typeof simulatedCallSchema>;
 
 export const simulatedCallResultSchema = z.strictObject({
-  taskId: z.uuid(),
-  /** True when this CallSid was already recorded: nothing new was written. */
+  /** The task carrying the request; null only when it was erased after acceptance. */
+  taskId: z.uuid().nullable(),
+  /** True when this call's request was already accepted: nothing was written. */
   replayed: z.boolean(),
 });
 

@@ -75,7 +75,7 @@ of two customers is worse than two duplicates.
 
 ### `conversations`
 
-`conversations` · `calls` · `call_events` · `messages` · `interaction_outcomes`
+`conversations` · `calls` · `call_events` · `messages` · `interaction_outcomes` · `callback_acceptances`
 
 Channel-agnostic by design: a call and an email thread are the same kind of object with different
 child rows. `call_events` is the ordered record of what happened during a call — routing,
