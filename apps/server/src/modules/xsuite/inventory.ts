@@ -15,7 +15,8 @@
  * - `tenant-list`: lists the caller's own rows; expect A's rows only, B's absent.
  * - `public`: no tenant scope (login, callback, health); cross-tenant N/A — but the test
  *   still calls it to prove it answers without leaking (no tenant data in body).
- * - `signature`: Twilio-signed webhook; expect 401/403 on a forged signature.
+ * - `signature`: provider-authenticated entry (Twilio signature, or the development-only
+ *   simulator token); expect 401/403 on a forged credential, before any tenancy.
  */
 
 export type RouteClass = 'tenant-id' | 'tenant-list' | 'tenant-create' | 'public' | 'signature';
@@ -32,7 +33,8 @@ export interface InventoriedRoute {
 
 /**
  * The full inventory, one row per route on the API surface today. Controllers mounted:
- * auth (4), members (5), recovery (3), support (3), health (2), voice (2). The coverage
+ * auth (4), members (5), recovery (3), support (3), health (2), voice (2), work (1),
+ * call simulator (1). The coverage
  * test pins this list against Nest metadata (`INVENTORY.length` vs reflected routes), so
  * a new route without a row fails loudly.
  */
@@ -118,13 +120,17 @@ export const INVENTORY: readonly InventoriedRoute[] = [
     foreignId: 'grant',
   },
   { method: 'GET', path: '/api/support/grants', class: 'tenant-list' },
+  // work — the owner's Today read; the session's own tenant only (M1).
+  { method: 'GET', path: '/api/today', class: 'tenant-list' },
   // health — unauthenticated, thin bodies, no tenant data by construction.
   { method: 'GET', path: '/healthz', class: 'public' },
   { method: 'GET', path: '/readyz', class: 'public' },
   // voice — Twilio-signed; forged signature must 401/403, never reach tenancy.
   { method: 'POST', path: '/voice/inbound', class: 'signature' },
   { method: 'POST', path: '/voice/session-end', class: 'signature' },
+  // call simulator — development/test only; the bearer token gates it before any tenancy (M1).
+  { method: 'POST', path: '/api/dev/simulated-calls', class: 'signature' },
 ];
 
 /** `INVENTORY.length` today: the coverage test pins this so a silent shrink fails. */
-export const EXPECTED_ROUTE_COUNT = 19;
+export const EXPECTED_ROUTE_COUNT = 21;

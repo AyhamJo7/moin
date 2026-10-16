@@ -290,6 +290,43 @@ describe('configuration loader (P02.03.03)', () => {
   });
 });
 
+describe('the simulated-call token (M1 vertical slice)', () => {
+  const TOKEN = 'm1-simulator-token-not-a-secret-0123456789';
+
+  it('is accepted for the api role in development and test', () => {
+    for (const NODE_ENV of ['development', 'test']) {
+      expect(
+        loadConfig({ ...VALID, NODE_ENV, CALL_SIMULATOR_TOKEN: TOKEN }).CALL_SIMULATOR_TOKEN,
+      ).toBe(TOKEN);
+    }
+  });
+
+  it('is refused in deployed environments and for other roles, without echoing it', () => {
+    const refusals = [
+      { ...VALID, NODE_ENV: 'staging', CALL_SIMULATOR_TOKEN: TOKEN },
+      { ...VALID, NODE_ENV: 'production', CALL_SIMULATOR_TOKEN: TOKEN },
+      { ...VALID, NODE_ENV: 'development', SERVER_ROLE: 'worker', CALL_SIMULATOR_TOKEN: TOKEN },
+    ];
+    for (const source of refusals) {
+      let message = '';
+      try {
+        loadConfig(source);
+      } catch (error) {
+        expect(error).toBeInstanceOf(ConfigurationError);
+        message = String(error);
+      }
+      expect(message).toContain('CALL_SIMULATOR_TOKEN');
+      expect(message).not.toContain(TOKEN);
+    }
+  });
+
+  it('must be long enough to be a token', () => {
+    expect(() => loadConfig({ ...VALID, CALL_SIMULATOR_TOKEN: 'short' })).toThrow(
+      ConfigurationError,
+    );
+  });
+});
+
 describe('the identity database credential (P06.06, ADR-0003)', () => {
   const IDENTITY = 'postgres://moin_identity:s3cr3t-identity@localhost:5432/moin';
 

@@ -199,6 +199,21 @@ const baseSchema = z.object({
    * set it.
    */
   VOICE_MEASUREMENT_SINK: z.string().min(1).optional(),
+
+  /**
+   * Development and test only: the bearer the simulated-call entry point demands
+   * (`POST /api/dev/simulated-calls`, M1 vertical slice). Unset, the route answers 404 as if it
+   * did not exist. The refinement below refuses it outside development and test, and for every
+   * role but the api, so a deployed environment cannot expose a way to create tasks without a
+   * real, signed call.
+   */
+  CALL_SIMULATOR_TOKEN: secret(
+    'CALL_SIMULATOR_TOKEN',
+    z
+      .string()
+      .regex(/^[A-Za-z0-9._~-]{32,128}$/, 'must be 32–128 URL-safe characters')
+      .optional(),
+  ),
   REDIS_URL: secret('REDIS_URL', z.url({ protocol: /^rediss?$/ }).optional()),
 
   SHUTDOWN_GRACE_MS: z.coerce.number().int().min(0).max(120_000).default(15_000),
@@ -359,6 +374,19 @@ const schema = baseSchema.superRefine((value, ctx) => {
       message:
         'writes caller utterances to a file and is development-only: it exists for the P04 ' +
         'feasibility calls under volunteer consent, and must never be set where real callers reach',
+    });
+  }
+
+  if (
+    value.CALL_SIMULATOR_TOKEN !== undefined &&
+    ((value.NODE_ENV !== 'development' && value.NODE_ENV !== 'test') || value.SERVER_ROLE !== 'api')
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['CALL_SIMULATOR_TOKEN'],
+      message:
+        'enables the simulated-call entry point, which creates tasks without a real call: ' +
+        'development and test only, and only for the api role',
     });
   }
 

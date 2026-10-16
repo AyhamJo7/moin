@@ -1,12 +1,12 @@
 ---
-mission: M0 truth reconciliation (status records reconciled with main 993ea23)
+mission: M1 vertical slice (simulated callback call → tenant callback task → owner's Heute)
 status: active
 mode: interactive
-phase: M0 (cross-phase status reconciliation)
+phase: M1 (cross-phase slice: P07, P12, P13)
 tier: PILOT
-plan: docs/audits/2026-10-16-m0-reconciliation.md
-next: independent review of the M0 draft PR, then the founder's decision; M1 not started
-updated: 2026-10-16
+plan: docs/development/m1-vertical-slice.md
+next: independent review of the M1 draft PR, then the founder's decision; M2 not started
+updated: 2026-10-17
 ---
 
 # PROGRESS — moin
@@ -1468,3 +1468,35 @@ Corrections after the independent review of PR #227 (same day):
   now state exactly what is and is not shown.
 - Storage-incident wording now separates observation, measured hazard, inference and unverified
   cause.
+
+## M1 vertical slice (2026-10-17)
+
+The first workflow through the real stack, with only the call synthetic. A simulated caller asks
+the restaurant for a callback. The API resolves the tenant from the dialled number's route and
+writes the call, outcome and callback task in one tenant transaction (idempotent by CallSid).
+The signed-in owner then sees the task on Heute, read from `GET /api/today` under the session's
+tenant. Path, demonstration and gaps: `docs/development/m1-vertical-slice.md`. Evidence:
+EV-P13-014. Nothing here is VERIFIED; this slice does not establish pilot, production or sell
+readiness.
+
+| Item      | Status           | Commit           | Evidence   | Note                                                                                                                                                                     |
+| --------- | ---------------- | ---------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| P13.02.03 | READY_FOR_REVIEW | c6dc83f, 1511c0a | EV-P13-014 | Every empty Heute section reads "Alles erledigt."; when the list is truncated, "In dieser Auswahl keine." Shown in the local browser test and the page source            |
+| P13.02.01 | IN_PROGRESS      | c6dc83f          | EV-P13-014 | The five sections render in owner order; tasks map by priority and type. Leads, requests and questions are not read yet                                                  |
+| P13.02.04 | IN_PROGRESS      | c6dc83f, 1511c0a | EV-P13-014 | Local browser test: the task appears in Rückrufe within 60 s, after a reload. It uses the development entry point, not the protocol simulator (P11.16), and is not in CI |
+| P12.09.01 | IN_PROGRESS      | c6dc83f          | EV-P13-014 | Callback task with a deterministic summary ("Rückruf: <topic>") on the simulator path only; no voice turn, no read-back of the number                                    |
+| P12.12.01 | IN_PROGRESS      | c6dc83f, 1511c0a | EV-P13-014 | Call, outcome, task and audit written on end in one transaction. No contact resolution (P07.03) and no SSE event                                                         |
+| P12.12.03 | IN_PROGRESS      | c6dc83f, 1511c0a | EV-P13-014 | Duplicate and concurrent end events are idempotent for the callback intent (integration tests). Other intents are not built                                              |
+
+Review: QG-09 security, architecture and invariant reviews, and one advisory review, ran on the
+diff. Fixed with tests:
+
+- a closed finaliser fallback absorbing a new callback (advisory HIGH);
+- urgent work hidden behind the 100-task limit;
+- the replay and fallback race;
+- title-length units;
+- the per-account throttle, origin checks, correlation ids, and the inert route's 404.
+
+Open, none HIGH, listed in the slice doc: the guards crossing into the identity module
+(architecture M1), one CallSid sent to two tenants (LOW), the always-mounted simulator module,
+and the call handling living in the controller.

@@ -17,6 +17,9 @@ importers:
       '@eslint/js':
         specifier: 10.0.1
         version: 10.0.1(eslint@10.11.0(jiti@2.7.0))
+      '@moin/contracts':
+        specifier: workspace:*
+        version: link:packages/contracts
       '@moin/db':
         specifier: workspace:*
         version: link:packages/db
@@ -129,6 +132,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@moin/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       next:
         specifier: 16.3.8
         version: 16.3.8(@playwright/test@1.63.0)(@types/node@24.19.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -196,6 +202,10 @@ importers:
         version: 5.0.2(@types/node@24.19.0)(vite@8.3.1(@types/node@24.19.0)(jiti@2.7.0))
 
   packages/contracts:
+    dependencies:
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
     devDependencies:
       '@types/node':
         specifier: 24.19.0

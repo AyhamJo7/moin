@@ -25,10 +25,10 @@ export interface TodaySummary {
 export const TODAY_EMPTY = 'Alles erledigt.' as const;
 
 /** Group rows by section, sections in owner-priority order. */
-export function groupToday(
-  items: readonly TodayItem[],
-): Readonly<Record<TodaySection, readonly TodayItem[]>> {
-  const grouped: Record<TodaySection, TodayItem[]> = {
+export function groupToday<T extends Pick<TodayItem, 'section'>>(
+  items: readonly T[],
+): Readonly<Record<TodaySection, readonly T[]>> {
+  const grouped: Record<TodaySection, T[]> = {
     urgent: [],
     callbacks: [],
     requests: [],
