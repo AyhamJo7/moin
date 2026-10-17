@@ -1,11 +1,11 @@
 ---
-mission: J2 historical callback carrier (pre-0077 replay task identity)
+mission: J3 task and audit lock order (J2 merged as #231)
 status: active
 mode: interactive
 phase: M1 (cross-phase slice: P07, P12, P13)
 tier: PILOT
 plan: docs/development/m1-vertical-slice.md
-next: independent review of the J2 draft PR; J3 (task and audit lock order) follows; M2 not started
+next: independent review of the J3 draft PR (approved at a7c2704 before main was merged in); M2 not started
 updated: 2026-10-17
 ---
 
@@ -1543,3 +1543,15 @@ EV-P12-012 (standard mutation-check KILLED, QG-09 reviews, full gates). Nothing 
 | Item      | Status      | Commit  | Evidence   | Note                                                                                                    |
 | --------- | ----------- | ------- | ---------- | ------------------------------------------------------------------------------------------------------- |
 | P12.12.03 | IN_PROGRESS | e5d69e5 | EV-P12-012 | Corrects the J2 follow-up: pre-0077 replays name the keyed carrier; a cancelled fallback is never an id |
+
+## J3: task and audit lock order (2026-10-17)
+
+The callback capture and the orphan sweep waited for task rows and conversation locks while holding
+the tenant's audit head; an owner task write takes them the other way round, so PostgreSQL could
+roll one side back (40P01). Both now take their locks first, in one order. Reproduced with forced
+interleavings, fixed with no retry and no migration. Evidence: EV-P12-013 (standard mutation-check
+KILLED for both fixes, QG-09 reviews, full gates). Nothing is VERIFIED.
+
+| Item      | Status      | Commit  | Evidence   | Note                                                                                                      |
+| --------- | ----------- | ------- | ---------- | --------------------------------------------------------------------------------------------------------- |
+| P12.12.03 | IN_PROGRESS | 8c65d87 | EV-P12-013 | Lock order for task rows and the audit head in the capture and the sweep; two-task transactions uncovered |

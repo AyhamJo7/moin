@@ -206,6 +206,35 @@ async function existingCallbackWork(
 }
 
 /**
+ * Locks, in id order, every task `existingCallbackWork` may lock, before the capture's first audit
+ * append.
+ *
+ * The audit head (`audit_heads`, one row per tenant) is locked by every audit append and held to
+ * COMMIT. A task write by anyone else locks the task row first and appends audit after, so this
+ * transaction must order them the same way: task rows, then the head. Taking the task row only at
+ * `existingCallbackWork`, after status, outcome and caller-number audits, made a cycle with an
+ * owner's status change on the adopted fallback (this one held the head and waited for the row;
+ * the owner held the row and waited for the head; PostgreSQL rolled one back, 40P01).
+ *
+ * The set is a superset of what `existingCallbackWork` selects, ordered by id so that two
+ * transactions that lock several rows queue in the same order. Under the CallSid and conversation
+ * locks no finaliser or other capture of this conversation is running; the rows are contended only
+ * by owner writes. It is FOR UPDATE, the strongest level the statements below take, so none of them
+ * waits again for a row after the head is held (a weaker lock here could be upgraded later, behind
+ * a holder that waits for the head). The ordering assumes an owner write locks one task per
+ * transaction; a transaction that writes two tasks with an audit append between them is not
+ * ordered by this and is not covered.
+ */
+async function lockCallbackCandidates(client: TenantClient, conversationId: string): Promise<void> {
+  await client.query(
+    `select id from tasks
+     where conversation_id = $1 and (type = 'callback' or idempotency_key like 'finaliser-fallback:%')
+     order by id for update`,
+    [conversationId],
+  );
+}
+
+/**
  * The replay check, before anything is written. A first delivery has neither an acceptance nor a
  * callback outcome: the finaliser never writes outcomes, and every capture writes its outcome in
  * the transaction that writes its acceptance. So an acceptance means "applied"; and a
@@ -275,6 +304,9 @@ export async function captureCallbackRequest(
   // its fallback task first, and is found below, or waits until this capture has committed.
   await client.query(`select pg_advisory_xact_lock(hashtext($1))`, [conversationId]);
 
+  // Lock order, whole capture: CallSid, conversation, task rows (by id), then the call row and the
+  // audit head with the writes below. An owner's task write takes the task row, then the head.
+  if (!created) await lockCallbackCandidates(client, conversationId);
   if (!created) await settleCallerNumber(client, call.id, input.fromNumber);
   await advanceCallStatus(client, call.id, 'completed');
   await recordCallbackOutcome(client, conversationId);

@@ -286,6 +286,35 @@ export async function orphanConversations(
 }
 
 /**
+ * Takes, before the sweep's first audit append, every lock the finalisations below will take: the
+ * conversations' advisory locks (the ones `finaliseInteraction` and the callback capture share),
+ * then the fallback task rows by id.
+ *
+ * The audit head (one row per tenant) is locked by every audit append and held to COMMIT, and the
+ * sweep finalises many conversations in one transaction. Without this, finalising the second
+ * conversation waited for its advisory lock or task row while holding the head from the first: a
+ * callback capture holding that conversation's lock and wanting the head (or an owner holding the
+ * task row and wanting the head) formed a cycle PostgreSQL resolves by rolling the whole tenant
+ * sweep back (40P01). Ordering is the same everywhere: advisory locks, task rows, then the head.
+ * `finaliseInteraction` re-takes the advisory locks and the row without waiting.
+ */
+async function lockOrphans(
+  client: TenantClient,
+  conversationIds: readonly string[],
+): Promise<void> {
+  if (conversationIds.length === 0) return;
+  for (const conversationId of [...conversationIds].sort()) {
+    await client.query(`select pg_advisory_xact_lock(hashtext($1))`, [conversationId]);
+  }
+  await client.query(
+    `select id from tasks
+     where conversation_id = any($1::uuid[]) and idempotency_key like 'finaliser-fallback:%'
+     order by id for update`,
+    [conversationIds],
+  );
+}
+
+/**
  * Sweep orphaned interactions across tenants.
  *
  * Population comes from the reviewed `app.claim_audit_chains` register (global, no RLS) —
@@ -337,7 +366,9 @@ export async function reconcileOrphans(
           async (client): Promise<{ orphans: OrphanFinalised[]; finalised: number }[]> => {
             const local: OrphanFinalised[] = [];
             let created = 0;
-            for (const conversationId of await orphanConversations(client, olderThan)) {
+            const orphanIds = await orphanConversations(client, olderThan);
+            await lockOrphans(client, orphanIds);
+            for (const conversationId of orphanIds) {
               const done = await finaliseInteraction(client, conversationId);
               if (done.verdict === 'fallback-created') created += 1;
               local.push({ organisationId, conversationId, verdict: done.verdict });

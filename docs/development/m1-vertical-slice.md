@@ -206,8 +206,18 @@ here:
   CallSid with another summary or caller number is answered as a replay (nothing is written)
   instead of `409`. Found by the J2 invariant review; not changed here. A pre-0077 call whose
   conversation was erased replays as a first delivery (the existing tombstone limit above).
-- **Task and audit lock order (open, J3, not reproduced).** The independent review found that
-  capture may hold the audit-head lock before it waits for the task row, while an owner task write
-  may hold the task row before it waits for the audit head. PostgreSQL would roll one back
-  (40P01). Needs one lock order or a bounded retry, with a targeted concurrency test, before
-  owner task-write endpoints are exposed.
+- **Task and audit lock order (J3, corrected for these paths).** Every audit append locks the
+  tenant's `audit_heads` row and holds it to COMMIT. An owner task write (`setTaskStatus`,
+  `assignTask`, `snoozeTask`, `retitleSystemTask`) locks the task row, then appends audit. The
+  callback capture used to append audit and then lock the finaliser fallback it adopts, and the
+  orphan sweep waited for later conversations' locks while holding the head from earlier ones;
+  against an owner write on the same task PostgreSQL rolled one side back (40P01), reproduced
+  with forced interleavings. Both now take their locks first, in a fixed order: CallSid and
+  conversation advisory locks, task rows by id, then the call row and the audit head. The row locks
+  are per conversation, under row-level security. Not covered, and documented as such: a transaction that
+  writes two tasks with an audit append between them; the unmerge helper's task branch
+  (`merge.ts`), which the code states is never used; other tables' row-then-audit orders (for
+  example `staleness.ts`), which were not traced; and 32-bit `hashtext` advisory keys with no
+  tenant namespace, where a collision can serialise unrelated work across tenants and can form a
+  residual cross-key deadlock. The fix removes the task-row/audit-head cycles under these
+  assumptions, not deadlocks in general.
