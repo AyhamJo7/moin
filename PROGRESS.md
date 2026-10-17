@@ -1,11 +1,11 @@
 ---
-mission: J3 task and audit lock order (J2 merged as #231)
+mission: M2A owner completes a callback (J2 #231 and J3 #232 merged)
 status: active
 mode: interactive
 phase: M1 (cross-phase slice: P07, P12, P13)
 tier: PILOT
 plan: docs/development/m1-vertical-slice.md
-next: independent review of the J3 draft PR (approved at a7c2704 before main was merged in); M2 not started
+next: independent review of the M2A draft PR; P13.03.02 remaining card actions not started
 updated: 2026-10-17
 ---
 
@@ -1555,3 +1555,16 @@ KILLED for both fixes, QG-09 reviews, full gates). Nothing is VERIFIED.
 | Item      | Status      | Commit  | Evidence   | Note                                                                                                      |
 | --------- | ----------- | ------- | ---------- | --------------------------------------------------------------------------------------------------------- |
 | P12.12.03 | IN_PROGRESS | 8c65d87 | EV-P12-013 | Lock order for task rows and the audit head in the capture and the sweep; two-task transactions uncovered |
+
+## M2A: owner completes a callback (2026-10-17)
+
+A callback card on Heute has an Erledigt button that completes the task through the existing
+versioned, audited task machine as the signed-in member. The completion stays across reload, API
+restart, concurrent actions and a replay of the original call. Evidence: EV-P13-015 (real
+PostgreSQL and Chromium acceptance, standard mutation checks, QG-09 reviews, full gates). Only the
+Erledigt part of P13.03.02 exists. Nothing is VERIFIED.
+
+| Item      | Status      | Commit  | Evidence   | Note                                                                                                               |
+| --------- | ----------- | ------- | ---------- | ------------------------------------------------------------------------------------------------------------------ |
+| P13.03.02 | IN_PROGRESS | 5bda9f3 | EV-P13-015 | Erledigt only; Zuweisen, Später, Notiz, optimistic UI and idempotency keys open; 409 has no current representation |
+| P13.03.05 | IN_PROGRESS | 5bda9f3 | EV-P13-015 | Browser test covers Erledigt and its 409 only; no feedback control                                                 |
