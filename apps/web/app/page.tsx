@@ -7,13 +7,17 @@
  * (P13.11.01): signed out (with the sign-in link), error (with reload), and the sections, each
  * with its reassuring empty line (P13.02.03) — unless the API truncated the list, when an empty
  * section only means none is shown; loading is `loading.tsx`. A callback card carries the one
- * client island, "Erledigt" (P13.03.02): it acts through the API and re-reads this page.
+ * client island, "Erledigt" (P13.03.02): it acts through the API and re-reads this page. `LiveToday`
+ * (P13.02.04) polls the same API read while the tab is visible and re-renders this page when the
+ * list changed, so a callback committed after the page opened appears without a reload.
  */
 
 import { cookies } from 'next/headers';
 import { SESSION_COOKIE_NAME, type TodayTask } from '@moin/contracts';
 import { t } from '../lib/i18n.ts';
 import { ActionNotice, CompleteAction } from './complete-action.tsx';
+import { LiveToday } from './live-today.tsx';
+import { fingerprintOf } from '../lib/live-today.ts';
 import { emptyLine, groupToday } from '../lib/today.ts';
 import {
   LOGIN_PATH,
@@ -83,6 +87,11 @@ export default async function TodayPage() {
           <a href="/">{t('today.reload')}</a>
         </>
       ) : null}
+      {load.state === 'signed-out' ? null : (
+        <LiveToday
+          fingerprint={load.state === 'ready' ? fingerprintOf(load.tasks, load.truncated) : null}
+        />
+      )}
       {grouped === null ? null : (
         <>
           <a href="/">{t('today.refresh')}</a>

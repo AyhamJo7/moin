@@ -100,6 +100,30 @@ nothing. The same stale request repeated is a 409 by design; the card re-reads t
 outcome that may have changed something. Who may complete follows the PLAN matrix: owners and admins any task, staff only tasks assigned to themselves or unassigned (403 otherwise, nothing written), judged on the row-locked task. A lost or unreadable answer is read back through `GET /api/tasks/:id`; only a task that reads done is reported done, anything else is "not confirmed" and the page is re-read. The Today `version` field is required by a strict schema on both sides, so the API and the owner app must change together (no rolling deployment in either order). Evidence: EV-P13-015. Only Erledigt is delivered;
 Zuweisen, Später, Notiz, optimistic UI, idempotency keys and a completed-tasks view are open.
 
+## M2B: an open Heute updates by itself (2026-10-17)
+
+A visible Heute tab polls the same authenticated read the page renders from (`GET /api/today`,
+session cookie, tenant from the session, per-account throttle) every 15 s (±10 %), and asks the
+server to render the page again (`router.refresh`) only when the list differs from what is on
+screen. Polling, not SSE: the API has no event stream (`apps/web/lib/realtime.ts` is unwired pure
+helpers for P13.10), and a poll adds no channel that could be subscribed to without authorisation.
+Code: `apps/web/lib/live-today.ts`, `apps/web/app/live-today.tsx`.
+
+- **Guarantee.** Healthy connection, visible tab: a committed task or completion is on screen
+  within about one interval plus a request and a render (measured 15.4 s, limit 60 s).
+- **Not promised.** A hidden or suspended tab does not poll; it polls at once when shown again (or
+  when the browser reports the network is back). Nothing is promised while disconnected.
+- **Idle.** Every guarded read slides the session's idle expiry, so a tab with no input (pointer,
+  key, touch, scroll) for 30 min stops polling and resumes on the next input; an unattended screen
+  goes stale rather than keeping a session alive (the stale indicator is P13.10).
+- **Failures.** A failed poll keeps the list on screen and backs off (15 s doubling to 120 s); polls
+  never overlap; a 401 hands over to the server render (signed-out page, no task data; the loop ends when that page unmounts it);
+  the page's error state is left by the next good poll.
+- **Budget.** About 4 reads a minute per visible tab against the account's 50 a minute.
+- **Open.** The poller has no gate yet for P13.10 (SSE plus polling only as fallback) and exposes no
+  last-success signal for the stale indicator (P13.10.02). SSE with `Last-Event-ID`, the stale-data indicator and the polling-fallback E2E
+  (P13.10), summary counts (P13.02.02). The browser test is local-only (needs Keycloak), not in CI.
+
 ## Run it locally
 
 Needs the local stack and the `TEST_*` values from `.env.example`. Nothing here reads or writes
@@ -116,7 +140,7 @@ pnpm exec vitest run --project integration apps/server/src/modules/work
 pnpm --filter @moin/server build
 OWNER_API_PROXY_ORIGIN=http://127.0.0.1:3101 pnpm --filter @moin/web build
 pnpm exec playwright install chromium         # once
-pnpm exec playwright test -c playwright.slice.config.ts   # 3 tests, incl. Erledigt
+pnpm exec playwright test -c playwright.slice.config.ts   # 10 tests, incl. Erledigt and live updates (about 3 min)
 ```
 
 The browser test creates a database from the migrated template and stages two tenants, the
