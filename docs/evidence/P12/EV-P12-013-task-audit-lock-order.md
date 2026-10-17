@@ -29,7 +29,7 @@ COMMIT, so every audit append serialises its tenant. Lock orders found in the co
 | Callback capture before this change | CallSid and conversation advisory locks, call row, **head** (call status, outcome and caller-number audits), then **task rows** (`existingCallbackWork`, `FOR UPDATE`) | proven by reading; **reproduced**: 40P01 on every forced run |
 | Orphan sweep (`reconcileOrphans`) before this change | one tenant transaction over many conversations: after the first finalisation's audit append (head held), the next conversation's advisory lock and fallback row | proven by reading; **reproduced** against an owner holding the row and against a capture holding the lock |
 | `finaliseInteraction` alone, repair path | advisory lock, then the row, with no audit before it | no head-before-row edge |
-| `createTask` | inserts a new row, or reads on conflict | no edge |
+| `createTask` | inserts a new row, or reads on conflict | no edge in the call contexts inspected (not a guarantee about every insert, unique or foreign-key wait) |
 | `resolution.ts` `delete from tasks` | deletes the row the same transaction just created | no contention possible |
 | `merge.ts` unmerge `update tasks` | the code comment says the branch is never used | not traced, not exercised |
 
@@ -45,7 +45,7 @@ append in both affected paths:
   their fallback rows by id, before the sweep's first finalisation.
 
 No bounded retry: the order removes the cycle, and a retry would need a whole-transaction harness.
-No migration, no new endpoint, no global lock: the locks are per conversation and per tenant.
+No migration, no new endpoint. The new row locks are per conversation (and tenant-scoped by row-level security); the advisory-key caveat in the limits applies.
 
 ## Regression tests (real PostgreSQL 17 as `moin_app`)
 
@@ -54,20 +54,29 @@ the other transaction holds the row or lock, the waiter is observed in `pg_locks
 exact backend (`pg_blocking_pids`), and only then does the real write run (`setTaskStatus`,
 `completeTask`, `reopenTask`, or the capture/sweep). No sleeps decide the order.
 
-- the owner moves the adopted fallback while the capture waits: both commit, the task is
-  `in_progress` and retitled (version 3), audit operations `task.create, task.status, task.retitle`
-  once each, one `callback.accept`, one acceptance row, audit chain valid;
-- the owner completes or cancels it: the fallback stays closed and a new untyped task carries the
-  request, one acceptance, chain valid;
-- an owner reopening the second orphan's fallback while the sweep waits: the sweep reports
-  `failed: 0`, the first orphan gets a fallback, the second is `task-existed`;
-- a callback capture of the second orphan holding its conversation lock while the sweep waits: both
-  commit, the second is `outcome-existed`, one acceptance, chain valid;
-- guards that pass on the old code too: the finaliser repair path against an owner (no head before
-  its row lock), and another tenant writing and capturing while this tenant waits (the head is per
-  tenant, bounded under 5 s).
+What each test asserts, beyond that its outer transactions succeed and none was rejected (every
+race test checks the rejections' SQLSTATEs; for the sweep tests the sweep's own tenant-transaction
+failure is counted in `failed`, see the note below). `chain valid` means `verifyAuditChain` returns
+valid: it shows the chain is intact, not that no business row was duplicated. No test counts
+outcome rows or the total number of tasks of a conversation.
 
-Each race test also asserts that no transaction was rejected, by SQLSTATE.
+| Test | Asserted |
+| --- | --- |
+| capture vs owner moving the fallback to `in_progress` | the capture adopts the same task; status `in_progress`, retitled, version 3; the task's audit operations are exactly `task.create, task.status, task.retitle`; one acceptance row; one `callback.accept` event; chain valid |
+| capture vs owner completing / cancelling the fallback (2 tests) | the original task stays closed; a distinct open untyped task carries the summary; one acceptance row; chain valid |
+| finaliser repair vs owner reopening (guard, passes on the old code) | verdict `task-existed`; the task is open; chain valid |
+| another tenant while this one waits (see the note below) | tenant B's owner write and capture complete within 5 s while tenant A's capture is still blocked by A's owner; after A is released both A transactions commit; both chains valid |
+| sweep vs owner reopening the second orphan's fallback | `failed: 0`; first orphan `fallback-created`; second `task-existed`; the fallback is open; chain valid |
+| sweep vs a capture holding the second orphan's conversation lock | capture is a first delivery (`replayed: false`); `failed: 0`; first orphan `fallback-created`; second `outcome-existed`; one acceptance row; chain valid |
+
+Note on the tenant test: its tenant-B progress assertions are a guard, but the test also contains
+tenant A's capture-vs-owner race, so on the old order it fails (`40P01` on A's transactions, see the
+mutation table). Only the finaliser-repair test passes on the old code as a whole test.
+
+Note on the sweep tests: `reconcileOrphans` catches a failed tenant transaction and returns a normal
+report with `failed` incremented, so these tests assert no outer rejection and `failed: 0`. Without
+the fix the retained mutation logs show `failed: 1`; that the cause is PostgreSQL's deadlock
+rollback (`40P01`) is inferred from the forced lock graph, not captured as an error code.
 
 ## Standard mutation-check
 
@@ -96,9 +105,14 @@ fix `c66a147a8ec470451da4e56c8340b172af5dec67b225cf285639ecc1830513a4`, with fix
 only changes how a test helper reads an error code.
 
 **Repeated runs.** The repository's `gates.py stress` runs the unit project only and cannot select
-this file (it ran no tests); the result is not meaningful and is not counted. Instead the file was
-run 20 times in a row under the integration project: 20 of 20 passed. This is a repeat run, not
-proof that deadlocks are impossible.
+this file (it ran no tests and exited 1 twenty times; that record, `20261017T051956Z-stress.json`,
+is not counted). Instead the file was run 20 times in a row under the integration project by a
+small script, retained locally as `.git/claude-evidence/repeat-20261017T054220Z.json` (SHA-256
+`e18c9b0839790f1d4ad7c711edb940ed2e48ba18e16c554f4771d9ac8929e777`): command
+`vitest run --project integration packages/db/src/task-audit-lock-order.integration.test.ts`,
+head `a38ac33f75f2348392e696bc3eec6adda0a51ca4`, clean worktree, 20 iterations each exit 0 with
+`7 passed (7)`. An earlier 20-run loop with the same result did not keep a record and is not
+counted. This is a repeat run, not proof that deadlocks are impossible.
 
 ## Reviews (QG-09, on the fix commit)
 
@@ -118,11 +132,19 @@ proof that deadlocks are impossible.
 - A transaction that writes two tasks with an audit append between them is not ordered by this.
 - Other tables' row-then-audit orders (for example `staleness.ts`) were not traced.
 - The unmerge helper's `update tasks` branch was not exercised; its comment says it is unused.
-- `hashtext` advisory keys are 32 bits and shared across tenants, SIDs and conversations: a
-  collision only adds waiting, but can in principle form a cross-key cycle.
+- `hashtext` advisory keys are 32 bits with no tenant, SID or conversation namespace. A collision
+  can serialise unrelated work, including across tenants, and can in principle form a residual
+  cross-key deadlock before any audit append (for example capture A holding the key of its SID and
+  wanting the key of its conversation, while capture B holds the colliding keys the other way
+  round). This is structural and not reproduced; the fix removes the task-row/audit-head cycles
+  under the assumptions above, not general deadlock freedom. A key namespace would be a migration
+  and is out of scope.
 - No owner task-write endpoint exists yet; the owner side is simulated with a held row lock and the
   real `setTaskStatus`, `completeTask` and `reopenTask`.
 - Run on one machine; 20 repeats are not a proof of absence.
-- This record shares the P12.12.03 item with EV-P12-012 (PR #231). Both PRs append to
-  `docs/evidence/INDEX.md` and `PROGRESS.md`; the second to merge will have a trailing-line
-  conflict to resolve by keeping both. `callback-intake.ts` is touched by both; check the merge.
+- This record shares the P12.12.03 item with EV-P12-012 (PR #231). A read-only `git merge-tree`
+  of the two branches merges the code cleanly (`callback-intake.ts`, `finaliser.ts`) and conflicts
+  in `PROGRESS.md` (front matter `mission` and `next`, and the appended sections),
+  `docs/evidence/INDEX.md` and `docs/development/m1-vertical-slice.md`. The second PR to merge
+  needs those resolved by hand: one coherent front matter, both ledger sections, both evidence
+  rows, both open-findings entries.

@@ -202,9 +202,11 @@ here:
   orphan sweep waited for later conversations' locks while holding the head from earlier ones;
   against an owner write on the same task PostgreSQL rolled one side back (40P01), reproduced
   with forced interleavings. Both now take their locks first, in a fixed order: CallSid and
-  conversation advisory locks, task rows by id, then the call row and the audit head. The locks
-  are per conversation and per tenant. Not covered, and documented as such: a transaction that
+  conversation advisory locks, task rows by id, then the call row and the audit head. The row locks
+  are per conversation, under row-level security. Not covered, and documented as such: a transaction that
   writes two tasks with an audit append between them; the unmerge helper's task branch
   (`merge.ts`), which the code states is never used; other tables' row-then-audit orders (for
-  example `staleness.ts`), which were not traced; and 32-bit `hashtext` advisory keys shared
-  across tenants, where a collision only adds waiting.
+  example `staleness.ts`), which were not traced; and 32-bit `hashtext` advisory keys with no
+  tenant namespace, where a collision can serialise unrelated work across tenants and can form a
+  residual cross-key deadlock. The fix removes the task-row/audit-head cycles under these
+  assumptions, not deadlocks in general.
