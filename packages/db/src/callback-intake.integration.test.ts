@@ -299,8 +299,19 @@ async function stageReplacedFallback(org: string, input: CallbackRequest) {
 }
 
 /** Every task of the conversation as stored: identity, state, version and timestamps. */
-async function taskStates(conversationId: string) {
-  const rows = await admin.query(
+interface StoredTask {
+  id: string;
+  status: string;
+  type: string | null;
+  title: string;
+  version: number;
+  created_at: Date;
+  updated_at: Date;
+  idempotency_key: string | null;
+}
+
+async function taskStates(conversationId: string): Promise<StoredTask[]> {
+  const rows = await admin.query<StoredTask>(
     `select id, status, type, title, version, created_at, updated_at, idempotency_key
      from tasks where conversation_id = $1 order by created_at, id`,
     [conversationId],
