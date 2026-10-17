@@ -118,7 +118,12 @@ export function completeMessage(result: CompleteResult): string {
   return t(MESSAGES[result.kind]);
 }
 
-/** Whether the server's view must be re-read: the action succeeded or the view was stale. */
+/**
+ * Whether the server's view must be re-read: the action succeeded, the view was stale, or the
+ * outcome is unknown. An unknown outcome (a lost response) may still have committed, and a retry
+ * from the old card would then be refused as stale; re-reading shows the truth and hands the next
+ * click the current version. Signed-out and forbidden change nothing, so the card stays as it is.
+ */
 export function needsRefresh(result: CompleteResult): boolean {
-  return result.kind === 'completed' || result.kind === 'conflict' || result.kind === 'missing';
+  return result.kind !== 'signed-out' && result.kind !== 'forbidden';
 }

@@ -120,11 +120,12 @@ describe('outcome wording and reconciliation', () => {
     }
   });
 
-  it('re-reads the page after a completion or a stale or vanished task, not after other failures', () => {
+  it('re-reads the page unless nothing could have changed (signed out, forbidden)', () => {
     expect(kinds.filter((kind) => needsRefresh({ kind }))).toStrictEqual([
       'completed',
       'conflict',
       'missing',
+      'failed',
     ]);
   });
 });

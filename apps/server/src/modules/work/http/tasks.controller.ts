@@ -5,7 +5,9 @@
  * session cookie (INV-02), every query runs through `withTenant` under FORCE RLS (INV-01), and
  * the per-account throttle applies. The POST is a mutation, so the session gate also demands the
  * CSRF proof (origin + synchronizer token) before this handler runs. Any active member may act
- * on the team's tasks; no capability beyond membership exists for them yet.
+ * on the team's tasks; no capability beyond membership exists for them yet. The route completes
+ * any task of the tenant, whatever its type: Heute offers the button on callback cards only
+ * (M2A), and a per-type or per-role limit waits for the task capability in the P06.07 matrix.
  *
  * `complete` takes the version the owner saw. It walks the one task state machine (`completeTask`,
  * P07.06) inside one transaction, so a lost race, a stale version or an illegal move is a 409 and

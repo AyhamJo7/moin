@@ -18,6 +18,7 @@ import { verifyAuditChain, withTenant } from '@moin/db';
 import {
   SIMULATED_CALL_PATH,
   TODAY_PATH,
+  CSRF_COOKIE_NAME,
   CSRF_HEADER_NAME,
   taskCompletePath,
   taskPath,
@@ -34,6 +35,8 @@ import {
   startFakeOidcProvider,
   type FakeOidcProvider,
 } from '../identity-access/__fixtures__/fake-oidc-provider.ts';
+import { CSRF_COOKIE as API_CSRF_COOKIE } from '../identity-access/domain/session-policy.ts';
+import { CSRF_HEADER as API_CSRF_HEADER } from '../identity-access/http/csrf.ts';
 import { CallSimulatorModule } from '../call-simulator/call-simulator.module.ts';
 import { WorkModule } from './work.module.ts';
 
@@ -515,6 +518,41 @@ describe('owner completes a callback task (M2A)', () => {
   );
 
   evidenceTest(
+    'a failure on the last rung rolls the whole walk back: no moved status, no audit rows',
+    async () => {
+      const { taskId } = await newCallback();
+      const auditBefore = await auditCount(restaurant);
+      await admin.query(`
+        create function public.m2a_refuse_done() returns trigger language plpgsql as $$
+        begin
+          if new.status = 'done' then raise exception 'injected failure on the last rung'; end if;
+          return new;
+        end $$`);
+      await admin.query(`
+        create trigger m2a_refuse_done before update on tasks
+        for each row execute function public.m2a_refuse_done()`);
+      try {
+        const failed = await complete(taskId, 1);
+        expect(failed.statusCode).toBe(500);
+        expect(failed.body).not.toContain('injected');
+        // Rungs one and two ran inside the same transaction and were undone with the third.
+        expect(await taskRow(taskId)).toMatchObject({ status: 'open', version: 1 });
+        expect(await statusEvents(taskId)).toHaveLength(0);
+        expect(await auditCount(restaurant)).toBe(auditBefore);
+        expect(await todayIds()).toContain(taskId);
+      } finally {
+        await admin.query('drop trigger m2a_refuse_done on tasks');
+        await admin.query('drop function public.m2a_refuse_done()');
+      }
+      // With the fault gone the same request, at the same version, completes.
+      expect((await complete(taskId, 1)).statusCode).toBe(200);
+      expect(await taskRow(taskId)).toMatchObject({ status: 'done', version: 4 });
+      const chain = await withTenant(database.pool(), restaurant, (c) => verifyAuditChain(c));
+      expect(chain.valid).toBe(true);
+    },
+  );
+
+  evidenceTest(
     'completions race with replays and fresh calls without a deadlock or a server error',
     async () => {
       const calls = await Promise.all(Array.from({ length: 6 }, () => newCallback()));
@@ -606,6 +644,11 @@ describe('who may complete a task (M2A)', () => {
       expect(await statusEvents(taskId)).toHaveLength(0);
     },
   );
+
+  evidenceTest('the browser contract names the same CSRF cookie and header the API checks', () => {
+    expect(CSRF_COOKIE_NAME).toBe(API_CSRF_COOKIE);
+    expect(CSRF_HEADER_NAME).toBe(API_CSRF_HEADER);
+  });
 
   evidenceTest('Today reports the version the next action must present', async () => {
     const { taskId } = await newCallback();
