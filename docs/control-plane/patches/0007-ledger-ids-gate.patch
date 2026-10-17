@@ -1,0 +1,29 @@
+From bd1df7d7b78c2d2f3f83a86315c9f74503db5299 Mon Sep 17 00:00:00 2001
+From: AyhamJo7 <mhd.ayham.joumran@studium.uni-hamburg.de>
+Date: Sat, 17 Oct 2026 19:06:27 +0200
+Subject: [PATCH] chore(control-plane): run the evidence ledger ID check in the
+ docs-consistency gate
+
+The same check runs in CI's documentation-consistency step. Without it locally, gates full could
+pass on a tree whose registry carries a duplicate or dangling evidence ID, and the claim hook
+would accept the result.
+---
+ .claude/gates.json | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/.claude/gates.json b/.claude/gates.json
+index a9ca5a9..b83ca22 100644
+--- a/.claude/gates.json
++++ b/.claude/gates.json
+@@ -22,7 +22,7 @@
+     },
+     {
+       "name": "docs-consistency",
+-      "run": "node scripts/check-adr-coverage.ts && node scripts/check-domain-coverage.ts && node scripts/check-dfd-coverage.ts && node scripts/check-threat-model-refs.ts && node scripts/check-data-classification.ts && node scripts/check-subprocessors.ts && node scripts/check-brand-strings.ts",
++      "run": "node scripts/check-adr-coverage.ts && node scripts/check-domain-coverage.ts && node scripts/check-dfd-coverage.ts && node scripts/check-threat-model-refs.ts && node scripts/check-data-classification.ts && node scripts/check-subprocessors.ts && node scripts/check-brand-strings.ts && node scripts/check-ledger-ids.ts",
+       "requires": ["node"],
+       "timeout": 300
+     },
+-- 
+2.43.0
+
