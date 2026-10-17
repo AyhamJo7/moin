@@ -50,7 +50,7 @@ const OPEN_TASK_STATUSES: ReadonlySet<string> = new Set(['open', 'in_progress', 
 /** Task rungs the repair can reopen (done only — cancelled stays terminal). */
 const REOPENABLE_STATUSES: ReadonlySet<string> = new Set(['done']);
 
-function fallbackKey(conversationId: string): string {
+export function fallbackKey(conversationId: string): string {
   return `finaliser-fallback:${conversationId}`;
 }
 
