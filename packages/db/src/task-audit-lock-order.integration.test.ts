@@ -163,11 +163,15 @@ async function raceCaptureAgainstOwner(
 
 /** SQLSTATEs of the rejected transactions: `40P01` is PostgreSQL rolling one back on a deadlock. */
 function rejectionCodes(...results: readonly PromiseSettledResult<unknown>[]): string[] {
-  return results.flatMap((result) =>
-    result.status === 'rejected'
-      ? [String((result.reason as { code?: unknown }).code ?? 'none')]
-      : [],
-  );
+  return results.flatMap((result) => {
+    if (result.status !== 'rejected') return [];
+    const reason: unknown = result.reason;
+    const code =
+      typeof reason === 'object' && reason !== null
+        ? (reason as { code?: unknown }).code
+        : undefined;
+    return [typeof code === 'string' ? code : 'unknown'];
+  });
 }
 
 async function operationsOn(targetId: string): Promise<string[]> {
