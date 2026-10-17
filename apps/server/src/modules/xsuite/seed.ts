@@ -34,10 +34,11 @@ export interface SeededTenant {
   readonly slug: string;
   readonly owner: SeededPerson;
   readonly admin: SeededPerson;
-  /** A membership id, invitation id, grant id, location id owned by THIS tenant. */
+  /** A membership id, invitation id, grant id, task id, location id owned by THIS tenant. */
   readonly locationId: string;
   readonly invitationId: string;
   readonly grantId: string;
+  readonly taskId: string;
   readonly ownerMembershipId: string;
   readonly auditEventId: string;
 }
@@ -137,6 +138,11 @@ export async function seedTwoTenants(
         owner.id,
       ],
     );
+    const taskId = randomUUID();
+    await admin.query(
+      `insert into tasks (organisation_id, id, title, type) values ($1, $2, $3, 'callback')`,
+      [organisationId, taskId, `Rückruf: ${slug}`],
+    );
     // Setup + owner-invitation-request rows: one per tenant (UNIQUE organisation_id).
     // Audit heads/events arrive through the writers under test, not the seed.
     await admin.query(
@@ -170,6 +176,7 @@ export async function seedTwoTenants(
       locationId,
       invitationId,
       grantId,
+      taskId,
       ownerMembershipId,
       auditEventId,
     };

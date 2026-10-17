@@ -25,6 +25,7 @@ const TASK: TodayTask = {
   status: 'open',
   priority: 'normal',
   createdAt: '2026-10-16T22:12:02.149Z',
+  version: 1,
   callerNumber: '+4915112345678',
 };
 

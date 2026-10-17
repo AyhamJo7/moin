@@ -6,12 +6,14 @@
  * session on the API side, never from anything the browser sends (INV-02). Four visible states
  * (P13.11.01): signed out (with the sign-in link), error (with reload), and the sections, each
  * with its reassuring empty line (P13.02.03) — unless the API truncated the list, when an empty
- * section only means none is shown; loading is `loading.tsx`.
+ * section only means none is shown; loading is `loading.tsx`. A callback card carries the one
+ * client island, "Erledigt" (P13.03.02): it acts through the API and re-reads this page.
  */
 
 import { cookies } from 'next/headers';
 import { SESSION_COOKIE_NAME, type TodayTask } from '@moin/contracts';
 import { t } from '../lib/i18n.ts';
+import { ActionNotice, CompleteAction } from './complete-action.tsx';
 import { emptyLine, groupToday } from '../lib/today.ts';
 import {
   LOGIN_PATH,
@@ -46,6 +48,9 @@ function TaskCard({ task }: { task: TodayTask }) {
           <dt>{t('today.status')}</dt>
           <dd>{statusLabel(task.status)}</dd>
         </dl>
+        {task.type === 'callback' ? (
+          <CompleteAction taskId={task.id} title={task.title} version={task.version} />
+        ) : null}
       </article>
     </li>
   );
@@ -81,6 +86,7 @@ export default async function TodayPage() {
       {grouped === null ? null : (
         <>
           <a href="/">{t('today.refresh')}</a>
+          <ActionNotice />
           {load.state === 'ready' && load.truncated ? (
             <p role="note">{t('today.truncated')}</p>
           ) : null}

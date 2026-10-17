@@ -46,7 +46,11 @@ a:focus-visible { outline: 3px solid #000; outline-offset: 2px; }
 .task { border: 1px solid #555; border-radius: 6px; padding: 8px 12px; margin-block: 8px; }
 .task h3 { margin-block: 4px; font-size: 1.05rem; }
 .task dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0; }
-.task dd { margin: 0; }`}</style>
+.task dd { margin: 0; }
+.action { min-height: 44px; min-width: 44px; margin-block: 8px; padding: 8px 16px; font: inherit; border: 2px solid #000; border-radius: 6px; background: #fff; color: #000; cursor: pointer; }
+.action[aria-disabled="true"] { cursor: progress; opacity: 0.7; }
+.action:focus-visible { outline: 3px solid #000; outline-offset: 2px; }
+.notice:empty { display: none; }`}</style>
       </body>
     </html>
   );

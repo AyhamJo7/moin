@@ -7,22 +7,46 @@
  * comes from a server-side resolution, never from the request:
  *
  * - `today()` enters the guard-resolved session's organisation;
+ * - `task()` and `complete()` enter the same session organisation, and `complete()` records the
+ *   session's user as the audit actor;
  * - `captureCallback()` enters the organisation the dialled number's route resolved to.
  */
 
 import { Inject, Injectable } from '@nestjs/common';
 import {
+  TaskVersionConflictError,
   captureCallbackRequest,
+  completeTask,
+  getTask,
   listTodayTasks,
+  lockTask,
   withTenant,
   type CallbackRequest,
   type CapturedCallback,
+  type Task,
   type TodayTaskRow,
 } from '@moin/db';
 import type { Pool } from '@moin/db/pool';
+import { requireCapability } from '../identity-access/application/authorization.ts';
 import { auditCorrelationId } from './member-queries.ts';
 import { TENANT_POOL } from './tenant-pool.module.ts';
 import { currentTenantScope } from './tenant-scope.ts';
+
+/** Whether the role holds the capability to act on any task of the tenant. */
+function holds(role: string, permissions: readonly string[]): boolean {
+  try {
+    requireCapability(role, permissions, 'tasks:act-on-any');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export type CompleteOutcome =
+  | { readonly kind: 'completed'; readonly task: Task }
+  | { readonly kind: 'conflict' }
+  | { readonly kind: 'forbidden' }
+  | { readonly kind: 'missing' };
 
 @Injectable()
 export class WorkQueries {
@@ -42,6 +66,63 @@ export class WorkQueries {
     return withTenant(this.tenantPool(), scope.organisationId, (client) =>
       listTodayTasks(client, limit),
     );
+  }
+
+  /** One task of the session's organisation in any status; null when none is visible to it. */
+  task(taskId: string): Promise<Task | null> {
+    const scope = this.scope();
+    return withTenant(this.tenantPool(), scope.organisationId, (client) => getTask(client, taskId));
+  }
+
+  /**
+   * Complete a task for the signed-in member (P13.03.02). One transaction: the task row is locked
+   * first, who may act on it is judged on that locked row, then every rung of the state machine
+   * and its audit events commit together or not at all. Owners and admins act on any task of the
+   * tenant; staff only on a task assigned to themselves or unassigned (PLAN Authorisation); any
+   * other role fails closed. A refused member writes nothing, not even an audit row. A version or
+   * lifecycle conflict throws out of `withTenant`, which rolls the whole walk back, and is
+   * reported here as `conflict`; a task row the tenant cannot see is `missing`, whoever owns it.
+   */
+  async complete(taskId: string, version: number): Promise<CompleteOutcome> {
+    const scope = this.scope();
+    try {
+      return await withTenant(
+        this.tenantPool(),
+        scope.organisationId,
+        async (client): Promise<CompleteOutcome> => {
+          const task = await lockTask(client, taskId);
+          if (task === null) return { kind: 'missing' };
+          // The member's standing is read again after the task is locked: disabling a member
+          // unassigns their tasks (trigger), so a request that passed the session guard just
+          // before would otherwise find the task unassigned and act on it. The role judged is
+          // the committed one, not the one the guard resolved earlier.
+          const standing = await client.query<{ role: string }>(
+            "select role from memberships where user_id = $1 and status = 'active'",
+            [scope.actorId],
+          );
+          const role = standing.rows[0]?.role;
+          if (role === undefined) return { kind: 'forbidden' };
+          const anyTask = holds(role, scope.permissions);
+          const ownOrUnassigned =
+            role === 'staff' &&
+            (task.assigneeUserId === null || task.assigneeUserId === scope.actorId);
+          if (!anyTask && !ownOrUnassigned) return { kind: 'forbidden' };
+          return { kind: 'completed', task: await completeTask(client, taskId, version) };
+        },
+        { actorId: scope.actorId, correlationId: auditCorrelationId() },
+      );
+    } catch (error) {
+      if (error instanceof TaskVersionConflictError) return { kind: 'conflict' };
+      throw error;
+    }
+  }
+
+  private scope() {
+    const scope = currentTenantScope();
+    if (scope === undefined) {
+      throw new Error('no tenant scope: the route is not guarded by SessionMembershipGuard');
+    }
+    return scope;
   }
 
   /** Record a completed callback call in the organisation its dialled number routes to. */
