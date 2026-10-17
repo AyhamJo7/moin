@@ -1,7 +1,10 @@
 /**
- * M1 vertical slice in a real browser (P13.02.04 shape, M1): a simulated call becomes a callback
- * task that the signed-in restaurant owner sees on Heute, after a reload and after an API restart,
- * and the other tenant's task never appears.
+ * M1/M2A vertical slice in a real browser (P13.02.04 shape, P13.03.02 Erledigt): a simulated call
+ * becomes a callback task that the signed-in restaurant owner sees on Heute, after a reload and
+ * after an API restart, and the other tenant's task never appears. The owner then clicks
+ * "Erledigt": the click reaches PostgreSQL through the session, CSRF and tenant guards, the card
+ * leaves the live list, and the completion survives a reload, an API restart and a replay of the
+ * original call. A stale view gets a truthful conflict message and a double click sends one request.
  *
  * Everything runs for real except the call itself: a fresh PostgreSQL test database (migrated
  * template, application role NOBYPASSRLS), the API started as its production entry point
@@ -13,11 +16,11 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdirSync, openSync, readFileSync } from 'node:fs';
+import { cpSync, mkdirSync, openSync, readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { AxeBuilder } from '@axe-core/playwright';
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { SIMULATED_CALL_PATH } from '@moin/contracts';
 import { createTestDatabase, type TestDatabase } from '@moin/testing';
 // The integration suite's template builder (migrations applied once); not a package export.
@@ -180,18 +183,22 @@ async function startApi(): Promise<void> {
   await waitFor(`${API_ORIGIN}/healthz`);
 }
 
-async function simulateCall(to: string, utterance: string): Promise<string> {
+async function simulateCall(
+  to: string,
+  utterance: string,
+  callSid = `SIM${randomUUID().replaceAll('-', '')}`,
+): Promise<string> {
   const response = await fetch(`${API_ORIGIN}${SIMULATED_CALL_PATH}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${SIMULATOR_TOKEN}` },
     body: JSON.stringify({
-      callSid: `SIM${randomUUID().replaceAll('-', '')}`,
+      callSid,
       from: CALLER,
       to,
       utterance,
     }),
   });
-  expect(response.status).toBe(201);
+  expect([200, 201]).toContain(response.status);
   return ((await response.json()) as { taskId: string }).taskId;
 }
 
@@ -217,6 +224,39 @@ async function stageTenant(slug: string, number: string): Promise<{ id: string }
   return { id };
 }
 
+/** Keycloak's own login form, then back through /api/auth/callback to Heute. */
+async function completeKeycloakLogin(page: Page): Promise<void> {
+  await page.locator('#username').fill(OWNER_EMAIL);
+  await page.locator('#password').fill(fixturePassword(OWNER_EMAIL));
+  await page.locator('#kc-login').click();
+  await page.waitForURL(`http://localhost:${String(WEB_PORT)}/`);
+}
+
+async function signInOwner(page: Page): Promise<void> {
+  await page.goto('/');
+  await page.getByRole('link', { name: 'Anmelden' }).click();
+  await completeKeycloakLogin(page);
+}
+
+async function taskState(taskId: string) {
+  const row = await database
+    .fixturePool()
+    .query<{ status: string; version: number }>('select status, version from tasks where id = $1', [
+      taskId,
+    ]);
+  return row.rows[0];
+}
+
+async function statusAuditActors(taskId: string): Promise<(string | null)[]> {
+  const rows = await database
+    .fixturePool()
+    .query<{ actor_id: string | null }>(
+      "select actor_id from audit_events where target_id = $1 and operation = 'task.status' order by seq",
+      [taskId],
+    );
+  return rows.rows.map((row) => row.actor_id);
+}
+
 test.beforeAll(async () => {
   database = await createTestDatabase('e2e-slice').catch(async (error: unknown) => {
     // 3D000: the template database does not exist yet on this cluster.
@@ -239,6 +279,13 @@ test.beforeAll(async () => {
     [restaurant.id, randomUUID(), ownerId],
   );
   await startApi();
+  // Next's standalone output omits the static assets (the client island's scripts); the image
+  // recipe copies them next to the server, and so does this run. Build output, never committed.
+  cpSync(
+    resolve(ROOT, 'apps/web/.next/static'),
+    resolve(ROOT, 'apps/web/.next/standalone/apps/web/.next/static'),
+    { recursive: true },
+  );
   web = start([process.execPath, 'apps/web/.next/standalone/apps/web/server.js'], 'production', {
     PORT: String(WEB_PORT),
     HOSTNAME: 'localhost',
@@ -261,11 +308,7 @@ test('a simulated callback call reaches the owner on Heute and stays there', asy
   await expect(page.getByRole('heading', { level: 1, name: 'Heute' })).toBeVisible();
   await page.getByRole('link', { name: 'Anmelden' }).click();
 
-  // Keycloak's own login form, then back through /api/auth/callback to Heute.
-  await page.locator('#username').fill(OWNER_EMAIL);
-  await page.locator('#password').fill(fixturePassword(OWNER_EMAIL));
-  await page.locator('#kc-login').click();
-  await page.waitForURL(`http://localhost:${String(WEB_PORT)}/`);
+  await completeKeycloakLogin(page);
   const callbacks = page.getByRole('region', { name: 'Rückrufe' });
   await expect(callbacks).toContainText('Alles erledigt.');
 
@@ -301,4 +344,124 @@ test('a simulated callback call reaches the owner on Heute and stays there', asy
   await page.reload();
   await expect(card.getByRole('heading', { name: 'Rückruf: Tischreservierung' })).toBeVisible();
   await expect(page.getByText(OTHER_TITLE)).toHaveCount(0);
+});
+
+test('the owner completes a callback with Erledigt and it stays completed', async ({ page }) => {
+  // A blocked script (CSP, missing asset) would leave the button inert: any console error fails.
+  const consoleErrors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') consoleErrors.push(message.text());
+  });
+  await signInOwner(page);
+  const callbacks = page.getByRole('region', { name: 'Rückrufe' });
+  const callSid = `SIM${randomUUID().replaceAll('-', '')}`;
+  const utterance = 'Bitte rufen Sie mich zurück wegen einer Tischreservierung.';
+  const taskId = await simulateCall(RESTAURANT_NUMBER, utterance, callSid);
+  await simulateCall(OTHER_NUMBER, 'Bitte rufen Sie mich zurück wegen Lieferung Fremdbetrieb');
+  await page.reload();
+  const card = callbacks.locator(`[data-task-id="${taskId}"]`);
+  await expect(card).toContainText('Offen');
+  // Earlier tests leave their own open callbacks in this database: count, never expect empty.
+  const liveCards = callbacks.locator('[data-task-id]');
+  const liveBefore = await liveCards.count();
+  const action = card.getByRole('button', { name: /^Erledigt/u });
+  await expect(action).toBeVisible();
+  await expect(action).toHaveAccessibleName(/Rückruf: Tischreservierung/u);
+
+  const axe = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
+    .analyze();
+  expect(axe.violations.map((v) => `${v.id}: ${v.help}`)).toStrictEqual([]);
+  await page.screenshot({
+    path: test.info().outputPath('heute-erledigt-before.png'),
+    fullPage: true,
+  });
+
+  // A double click sends one request: the second click lands on a busy button and does nothing.
+  const posts: string[] = [];
+  await page.route('**/api/tasks/*/complete', async (route) => {
+    posts.push(route.request().method());
+    await new Promise((done) => setTimeout(done, 600));
+    await route.continue();
+  });
+  await action.dblclick();
+  await expect(page.getByTestId('action-notice')).toHaveText(
+    'Der Rückruf ist als erledigt markiert.',
+  );
+  expect(posts).toStrictEqual(['POST']);
+  await page.unroute('**/api/tasks/*/complete');
+
+  // The page re-read the server: the card has left the live list and the section is empty again.
+  await expect(card).toHaveCount(0);
+  await expect(liveCards).toHaveCount(liveBefore - 1);
+  await page.screenshot({
+    path: test.info().outputPath('heute-erledigt-after.png'),
+    fullPage: true,
+  });
+
+  // The database holds it, as the owner's own act, three audited moves of the one state machine.
+  expect(await taskState(taskId)).toStrictEqual({ status: 'done', version: 4 });
+  const actors = await statusAuditActors(taskId);
+  expect(actors).toHaveLength(3);
+  expect(new Set(actors).size).toBe(1);
+  expect(actors[0]).not.toBeNull();
+
+  // Reload, then an API restart: still completed, never back in the live list.
+  await page.reload();
+  await expect(card).toHaveCount(0);
+  await stop(api);
+  await startApi();
+  await page.reload();
+  await expect(card).toHaveCount(0);
+  await expect(liveCards).toHaveCount(liveBefore - 1);
+
+  // The original call arrives again: nothing is reopened, no second task appears.
+  expect(await simulateCall(RESTAURANT_NUMBER, utterance, callSid)).toBe(taskId);
+  await page.reload();
+  await expect(card).toHaveCount(0);
+  await expect(liveCards).toHaveCount(liveBefore - 1);
+  expect(await taskState(taskId)).toStrictEqual({ status: 'done', version: 4 });
+  expect(await statusAuditActors(taskId)).toHaveLength(3);
+  await expect(page.getByText(OTHER_TITLE)).toHaveCount(0);
+  expect(consoleErrors).toStrictEqual([]);
+});
+
+test('a stale view gets a truthful conflict message and the current state', async ({
+  browser,
+  page,
+}) => {
+  await signInOwner(page);
+  const callbacks = page.getByRole('region', { name: 'Rückrufe' });
+  const taskId = await simulateCall(
+    RESTAURANT_NUMBER,
+    'Bitte rufen Sie mich zurück wegen einer Tischreservierung.',
+  );
+  await page.reload();
+  const card = callbacks.locator(`[data-task-id="${taskId}"]`);
+  await expect(card).toBeVisible();
+
+  // Another window of the same owner completes the task first.
+  const second = await browser.newContext({ storageState: await page.context().storageState() });
+  const other = await second.newPage();
+  await other.goto('http://localhost:3000/');
+  await other
+    .locator(`[data-task-id="${taskId}"]`)
+    .getByRole('button', { name: /^Erledigt/u })
+    .click();
+  await expect(other.getByTestId('action-notice')).toHaveText(
+    'Der Rückruf ist als erledigt markiert.',
+  );
+  expect(await taskState(taskId)).toStrictEqual({ status: 'done', version: 4 });
+  await second.close();
+
+  // The first window still shows the old card. Its click is refused, nothing is written twice,
+  // the owner is told the task changed, and the view is re-read.
+  await card.getByRole('button', { name: /^Erledigt/u }).click();
+  await expect(page.getByTestId('action-notice')).toContainText(
+    'Diese Aufgabe wurde inzwischen geändert.',
+  );
+  await expect(page.getByTestId('action-notice')).not.toContainText('erledigt markiert');
+  await expect(card).toHaveCount(0);
+  expect(await taskState(taskId)).toStrictEqual({ status: 'done', version: 4 });
+  expect(await statusAuditActors(taskId)).toHaveLength(3);
 });
