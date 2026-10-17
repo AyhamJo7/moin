@@ -16,6 +16,7 @@
     }
   },
   "scripts": {
+    "prepare": "lefthook install",
     "build": "turbo run build",
     "check:audit-arguments": "node scripts/check-audit-arguments.ts",
     "check:conventions": "node scripts/check-conventional-commit.ts --self-test && node scripts/check-no-ai-mentions.ts --self-test",
@@ -53,6 +54,7 @@
     "eslint-config-prettier": "10.1.8",
     "globals": "17.12.0",
     "jiti": "2.7.0",
+    "lefthook": "2.2.2",
     "prettier": "3.9.9",
     "turbo": "2.11.5",
     "typescript": "6.0.3",
