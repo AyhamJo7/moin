@@ -39,6 +39,7 @@
   "today.complete.conflict": "Diese Aufgabe wurde inzwischen geändert. Die Ansicht wurde aktualisiert, bitte prüfen Sie den aktuellen Stand.",
   "today.complete.missing": "Diese Aufgabe gibt es nicht mehr. Die Ansicht wurde aktualisiert.",
   "today.complete.signedOut": "Ihre Anmeldung ist abgelaufen. Bitte melden Sie sich erneut an.",
-  "today.complete.forbidden": "Dafür fehlt Ihnen die Berechtigung.",
-  "today.complete.failed": "Das hat gerade nicht geklappt. Bitte versuchen Sie es gleich noch einmal."
+  "today.complete.forbidden": "Diese Aufgabe ist einer anderen Person zugewiesen. Dafür fehlt Ihnen die Berechtigung.",
+  "today.complete.rejected": "Diese Änderung konnte nicht übernommen werden. Bitte laden Sie die Ansicht neu.",
+  "today.complete.unknown": "Der aktuelle Stand konnte nicht bestätigt werden. Bitte prüfen Sie die aktualisierte Ansicht."
 }

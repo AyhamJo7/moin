@@ -465,3 +465,97 @@ test('a stale view gets a truthful conflict message and the current state', asyn
   expect(await taskState(taskId)).toStrictEqual({ status: 'done', version: 4 });
   expect(await statusAuditActors(taskId)).toHaveLength(3);
 });
+
+/** A fresh callback for the restaurant and its card on a reloaded Heute. */
+async function freshCallback(page: Page) {
+  const taskId = await simulateCall(
+    RESTAURANT_NUMBER,
+    'Bitte rufen Sie mich zurück wegen einer Tischreservierung.',
+  );
+  await page.reload();
+  const card = page.getByRole('region', { name: 'Rückrufe' }).locator(`[data-task-id="${taskId}"]`);
+  await expect(card).toBeVisible();
+  return { taskId, card };
+}
+
+const COMMITTED_MESSAGE = 'Der Rückruf ist als erledigt markiert.';
+const UNKNOWN_MESSAGE =
+  'Der aktuelle Stand konnte nicht bestätigt werden. Bitte prüfen Sie die aktualisierte Ansicht.';
+
+test('a response lost after the commit is reconciled by reading the task, not reported as a failure', async ({
+  page,
+}) => {
+  await signInOwner(page);
+  const { taskId, card } = await freshCallback(page);
+  // The request reaches the server and commits; the browser never sees the answer.
+  let reachedServer = 0;
+  await page.route('**/api/tasks/*/complete', async (route) => {
+    await route.fetch();
+    reachedServer += 1;
+    await route.abort('failed');
+  });
+  await card.getByRole('button', { name: /^Erledigt/u }).click();
+  await expect(page.getByTestId('action-notice')).toHaveText(COMMITTED_MESSAGE);
+  await expect(page.getByTestId('action-notice')).not.toContainText('nicht geklappt');
+  await expect(card).toHaveCount(0);
+  expect(reachedServer).toBe(1);
+  // The database, not the page, is the authority: one completion, three audited moves.
+  expect(await taskState(taskId)).toStrictEqual({ status: 'done', version: 4 });
+  expect(await statusAuditActors(taskId)).toHaveLength(3);
+});
+
+test('a lost response that cannot be read back is unknown, and the refreshed view shows the truth', async ({
+  page,
+}) => {
+  await signInOwner(page);
+  const { taskId, card } = await freshCallback(page);
+  await page.route('**/api/tasks/*/complete', async (route) => {
+    await route.fetch();
+    await route.abort('failed');
+  });
+  // The read-back fails too: nothing can be confirmed from the browser.
+  await page.route(`**/api/tasks/${taskId}`, (route) => route.abort('failed'));
+  await card.getByRole('button', { name: /^Erledigt/u }).click();
+  await expect(page.getByTestId('action-notice')).toHaveText(UNKNOWN_MESSAGE);
+  await expect(page.getByTestId('action-notice')).not.toContainText('erledigt markiert');
+  await expect(page.getByTestId('action-notice')).not.toContainText('nicht geklappt');
+  // The authoritative refresh shows what the database holds: the commit happened.
+  await expect(card).toHaveCount(0);
+  expect(await taskState(taskId)).toStrictEqual({ status: 'done', version: 4 });
+});
+
+test('a request that never reached the server is unknown to the browser; the retry completes once, by keyboard', async ({
+  page,
+}) => {
+  await signInOwner(page);
+  const { taskId, card } = await freshCallback(page);
+  let attempts = 0;
+  await page.route('**/api/tasks/*/complete', async (route) => {
+    attempts += 1;
+    await route.abort('failed');
+  });
+  const action = card.getByRole('button', { name: /^Erledigt/u });
+  await action.click();
+  await expect(page.getByTestId('action-notice')).toHaveText(UNKNOWN_MESSAGE);
+  // Nothing was written, and the refreshed card is still there with the same version.
+  await expect(card).toBeVisible();
+  expect(await taskState(taskId)).toStrictEqual({ status: 'open', version: 1 });
+  expect(await statusAuditActors(taskId)).toHaveLength(0);
+  expect(attempts).toBe(1);
+
+  // The network is back: the owner repeats the action with the keyboard only.
+  await page.unroute('**/api/tasks/*/complete');
+  const retry = card.getByRole('button', { name: /^Erledigt/u });
+  await retry.focus();
+  await expect(retry).toBeFocused();
+  await page.keyboard.press('Enter');
+  const notice = page.getByTestId('action-notice');
+  await expect(notice).toHaveText(COMMITTED_MESSAGE);
+  await expect(notice).toHaveAttribute('role', 'status');
+  await expect(notice).toHaveAttribute('aria-live', 'polite');
+  // The card that held focus is gone; focus moved to the outcome instead of the page body.
+  await expect(notice).toBeFocused();
+  await expect(card).toHaveCount(0);
+  expect(await taskState(taskId)).toStrictEqual({ status: 'done', version: 4 });
+  expect(await statusAuditActors(taskId)).toHaveLength(3);
+});

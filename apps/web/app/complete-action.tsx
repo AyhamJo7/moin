@@ -22,10 +22,14 @@ const NOTICE_EVENT = 'action-notice';
 
 export function ActionNotice() {
   const [message, setMessage] = useState('');
+  const region = useRef<HTMLParagraphElement>(null);
   useEffect(() => {
     const show = (event: Event): void => {
       if (event instanceof CustomEvent && typeof event.detail === 'string') {
         setMessage(event.detail);
+        // The card that held keyboard focus may be gone after the re-read: focus lands here, on
+        // the outcome, not on the page body.
+        region.current?.focus();
       }
     };
     window.addEventListener(NOTICE_EVENT, show);
@@ -34,7 +38,14 @@ export function ActionNotice() {
     };
   }, []);
   return (
-    <p role="status" aria-live="polite" className="notice" data-testid="action-notice">
+    <p
+      ref={region}
+      tabIndex={-1}
+      role="status"
+      aria-live="polite"
+      className="notice"
+      data-testid="action-notice"
+    >
       {message}
     </p>
   );
