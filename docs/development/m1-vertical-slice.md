@@ -49,6 +49,13 @@ request. The row is tenant-scoped, append-only for the runtime role, and unique 
 - **Calls captured before migration 0077** have no acceptance row. Their `callback_requested`
   outcome stands in for one: the finaliser never writes outcomes, and every capture writes its
   outcome together with its acceptance.
+  The task a replay names is the one that capture used, found by key and not by type (the
+  finaliser's fallback is itself typed `callback`): the task keyed `callback:<conversation>` in any
+  status (the capture's own task, or the untyped replacement for a cancelled fallback); otherwise
+  the non-cancelled (open, in progress, waiting or done) fallback under its own key (an adopted
+  one); otherwise `taskId: null`. A cancelled
+  fallback with no keyed task is either a replaced fallback whose replacement was erased or an
+  adopted one the owner cancelled later; the data cannot tell them apart, so no id is named.
 - **The same call with a different request** (dialled number or summary), or from a different
   number than the call records, is `409 /problems/callback-conflict` and writes nothing. A new
   call is a new request, even from the same caller.
@@ -191,10 +198,14 @@ here:
   exists).
 - **Shared advisory-lock keyspace (LOW).** CallSid and conversation locks both use `hashtext`. A
   collision can deadlock, which PostgreSQL detects (40P01) and rolls back.
-- **Historical cancelled-fallback replay returns the older task (LOW, open, J2).** For a pre-0077
-  call with a cancelled finaliser fallback and a later callback-specific task, the replay
-  picks the oldest match (`order by created_at limit 1`) and can return the fallback's id. Nothing
-  is written. Fix: prefer `type = 'callback'`; needs a pre-0077 fixture. Detail in EV-P12-011.
+- **Historical cancelled-fallback replay returned the older task (J2, corrected).** A pre-0077
+  replay could name a cancelled fallback instead of the replacement the capture created. The
+  lookup now uses the key (see above). Remaining limit: an adopted fallback the owner cancelled
+  later replays with `taskId: null`, as does a replaced one whose replacement was erased.
+- **A pre-0077 replay does not compare the request (LOW).** It has no request hash, so the same
+  CallSid with another summary or caller number is answered as a replay (nothing is written)
+  instead of `409`. Found by the J2 invariant review; not changed here. A pre-0077 call whose
+  conversation was erased replays as a first delivery (the existing tombstone limit above).
 - **Task and audit lock order (J3, corrected for these paths).** Every audit append locks the
   tenant's `audit_heads` row and holds it to COMMIT. An owner task write (`setTaskStatus`,
   `assignTask`, `snoozeTask`, `retitleSystemTask`) locks the task row, then appends audit. The

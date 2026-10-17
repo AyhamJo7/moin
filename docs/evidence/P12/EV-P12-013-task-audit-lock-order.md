@@ -148,3 +148,8 @@ counted. This is a repeat run, not proof that deadlocks are impossible.
   `docs/evidence/INDEX.md` and `docs/development/m1-vertical-slice.md`. The second PR to merge
   needs those resolved by hand: one coherent front matter, both ledger sections, both evidence
   rows, both open-findings entries.
+- Update: PR #231 merged as `8da61e4` before this one. Main was merged into this branch to resolve
+  the conflicts above (one coherent `PROGRESS.md` front matter, both ledger sections, both evidence
+  rows, both open-findings entries; the stale "open J3" and "open J2" entries dropped). The code
+  merged without conflict. The Codex approval (J3-R2) was given for `a7c2704`, before that merge;
+  the merged head has not been reviewed again.
