@@ -27,10 +27,20 @@ import {
   type TodayTaskRow,
 } from '@moin/db';
 import type { Pool } from '@moin/db/pool';
-import { may } from '../identity-access/domain/roles.ts';
+import { requireCapability } from '../identity-access/application/authorization.ts';
 import { auditCorrelationId } from './member-queries.ts';
 import { TENANT_POOL } from './tenant-pool.module.ts';
 import { currentTenantScope } from './tenant-scope.ts';
+
+/** Whether the role holds the capability to act on any task of the tenant. */
+function holds(role: string, permissions: readonly string[]): boolean {
+  try {
+    requireCapability(role, permissions, 'tasks:act-on-any');
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export type CompleteOutcome =
   | { readonly kind: 'completed'; readonly task: Task }
@@ -92,7 +102,7 @@ export class WorkQueries {
           );
           const role = standing.rows[0]?.role;
           if (role === undefined) return { kind: 'forbidden' };
-          const anyTask = may(role, scope.permissions, 'tasks:act-on-any');
+          const anyTask = holds(role, scope.permissions);
           const ownOrUnassigned =
             role === 'staff' &&
             (task.assigneeUserId === null || task.assigneeUserId === scope.actorId);
