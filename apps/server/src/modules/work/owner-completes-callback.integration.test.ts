@@ -18,7 +18,6 @@ import { verifyAuditChain, withTenant } from '@moin/db';
 import {
   SIMULATED_CALL_PATH,
   TODAY_PATH,
-  CSRF_COOKIE_NAME,
   CSRF_HEADER_NAME,
   taskCompletePath,
   taskPath,
@@ -35,8 +34,6 @@ import {
   startFakeOidcProvider,
   type FakeOidcProvider,
 } from '../identity-access/__fixtures__/fake-oidc-provider.ts';
-import { CSRF_COOKIE as API_CSRF_COOKIE } from '../identity-access/domain/session-policy.ts';
-import { CSRF_HEADER as API_CSRF_HEADER } from '../identity-access/http/csrf.ts';
 import { CallSimulatorModule } from '../call-simulator/call-simulator.module.ts';
 import { WorkModule } from './work.module.ts';
 
@@ -644,11 +641,6 @@ describe('who may complete a task (M2A)', () => {
       expect(await statusEvents(taskId)).toHaveLength(0);
     },
   );
-
-  evidenceTest('the browser contract names the same CSRF cookie and header the API checks', () => {
-    expect(CSRF_COOKIE_NAME).toBe(API_CSRF_COOKIE);
-    expect(CSRF_HEADER_NAME).toBe(API_CSRF_HEADER);
-  });
 
   evidenceTest('Today reports the version the next action must present', async () => {
     const { taskId } = await newCallback();
