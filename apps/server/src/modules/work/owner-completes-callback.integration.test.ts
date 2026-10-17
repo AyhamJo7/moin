@@ -14,7 +14,7 @@ import { Test } from '@nestjs/testing';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { createTestDatabase, evidenceTest, type TestDatabase } from '@moin/testing';
 import { fixedClock } from '@moin/kernel';
-import { verifyAuditChain, withTenant } from '@moin/db';
+import { assignTask, verifyAuditChain, withTenant } from '@moin/db';
 import {
   SIMULATED_CALL_PATH,
   TODAY_PATH,
@@ -302,6 +302,62 @@ async function todayIds(who: Browser = owner): Promise<string[]> {
   const response = await today(who);
   expect(response.statusCode).toBe(200);
   return todayResponseSchema.parse(response.json()).tasks.map((task) => task.id);
+}
+
+/** A member of the restaurant with `role`, signed in as the browser would hold it. */
+async function member(
+  role: 'admin' | 'staff',
+): Promise<{ person: Person; browser: Browser; membershipId: string }> {
+  const who = await person(`m2a-${role}`);
+  const membershipId = randomUUID();
+  await admin.query(
+    'insert into memberships (organisation_id, id, user_id, role, status) values ($1, $2, $3, $4, $5)',
+    [restaurant, membershipId, who.id, role, 'active'],
+  );
+  return { person: who, browser: await signIn(who), membershipId };
+}
+
+/** Assigns through the task service (versioned, audited), as the owner would. */
+async function assign(taskId: string, to: string | null): Promise<void> {
+  await withTenant(
+    database.pool(),
+    restaurant,
+    async (client) => {
+      const row = await client.query<{ version: number }>(
+        'select version from tasks where id = $1',
+        [taskId],
+      );
+      await assignTask(client, taskId, to, row.rows[0]?.version ?? 0);
+    },
+    { actorId: restaurantOwner.id },
+  );
+}
+
+/** Everything a refused action must leave exactly as it was. */
+async function frozen(taskId: string) {
+  const row = await admin.query<Record<string, unknown>>(
+    'select status, version, assignee_user_id, updated_at, title from tasks where id = $1',
+    [taskId],
+  );
+  return {
+    row: row.rows[0],
+    audit: await auditCount(restaurant),
+    events: await statusEvents(taskId),
+  };
+}
+
+/** Polls until some backend is waiting on a lock another transaction holds. */
+async function waitUntilSomeoneIsBlocked(): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const blocked = await admin.query<{ n: number }>(
+      `select count(*)::int as n from pg_stat_activity
+       where datname = current_database() and cardinality(pg_blocking_pids(pid)) > 0`,
+    );
+    if ((blocked.rows[0]?.n ?? 0) > 0) return;
+    await new Promise((done) => setTimeout(done, 25));
+  }
+  throw new Error('no backend became blocked within 10 s');
 }
 
 beforeAll(async () => {
@@ -654,4 +710,189 @@ describe('who may complete a task (M2A)', () => {
       }).success,
     ).toBe(false);
   });
+});
+
+describe('who may act on a task: owners and admins any, staff own or unassigned (M2A remediation)', () => {
+  evidenceTest('an owner and an admin complete a task assigned to someone else', async () => {
+    const staff = await member('staff');
+    const adminMember = await member('admin');
+    const first = await newCallback();
+    await assign(first.taskId, staff.person.id);
+    expect((await complete(first.taskId, 2, owner)).statusCode).toBe(200);
+    const second = await newCallback();
+    await assign(second.taskId, staff.person.id);
+    const done = await complete(second.taskId, 2, adminMember.browser);
+    expect(done.statusCode).toBe(200);
+    expect(await taskRow(second.taskId)).toMatchObject({ status: 'done' });
+    const events = await statusEvents(second.taskId);
+    expect(events.map((e) => e.actor_id)).toStrictEqual(Array(3).fill(adminMember.person.id));
+  });
+
+  evidenceTest('staff complete their own task and an unassigned one, as themselves', async () => {
+    const staff = await member('staff');
+    const own = await newCallback();
+    await assign(own.taskId, staff.person.id);
+    const unassigned = await newCallback();
+    expect((await complete(own.taskId, 2, staff.browser)).statusCode).toBe(200);
+    expect((await complete(unassigned.taskId, 1, staff.browser)).statusCode).toBe(200);
+    for (const id of [own.taskId, unassigned.taskId]) {
+      expect(await taskRow(id)).toMatchObject({ status: 'done' });
+      expect((await statusEvents(id)).map((e) => e.actor_id)).toStrictEqual(
+        Array(3).fill(staff.person.id),
+      );
+    }
+  });
+
+  evidenceTest(
+    'staff cannot complete another member’s task: 403, and nothing changes, not even an audit row',
+    async () => {
+      const staff = await member('staff');
+      const colleague = await member('staff');
+      const { taskId } = await newCallback();
+      await assign(taskId, colleague.person.id);
+      const before = await frozen(taskId);
+      for (const version of [2, 1, 99]) {
+        const refused = await complete(taskId, version, staff.browser);
+        expect(refused.statusCode).toBe(403);
+        expect(refused.headers['content-type']).toContain('application/problem+json');
+        expect(refused.json()).toStrictEqual({
+          type: '/problems/forbidden',
+          title: 'Forbidden',
+          status: 403,
+        });
+      }
+      expect(await frozen(taskId)).toStrictEqual(before);
+      expect(before.row).toMatchObject({ status: 'open', version: 2 });
+      // The assignee herself still can.
+      expect((await complete(taskId, 2, colleague.browser)).statusCode).toBe(200);
+    },
+  );
+
+  evidenceTest(
+    'a task reassigned after the staff member saw it is refused, with the old and the new version',
+    async () => {
+      const staff = await member('staff');
+      const colleague = await member('staff');
+      const { taskId } = await newCallback();
+      const seen = todayResponseSchema
+        .parse((await today(staff.browser)).json())
+        .tasks.find((t) => t.id === taskId);
+      expect(seen?.version).toBe(1);
+      await assign(taskId, colleague.person.id);
+      const before = await frozen(taskId);
+      expect((await complete(taskId, 1, staff.browser)).statusCode).toBe(403);
+      expect((await complete(taskId, 2, staff.browser)).statusCode).toBe(403);
+      expect(await frozen(taskId)).toStrictEqual(before);
+    },
+  );
+
+  evidenceTest(
+    'a reassignment racing the completion cannot be bypassed: the check waits for it and sees it',
+    async () => {
+      const staff = await member('staff');
+      const colleague = await member('staff');
+      const { taskId } = await newCallback();
+      await assign(taskId, staff.person.id);
+      const before = await frozen(taskId);
+
+      // The owner reassigns the task away from the staff member and holds that transaction open.
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((done) => {
+        release = done;
+      });
+      let reassigned: () => void = () => undefined;
+      const reassignedSignal = new Promise<void>((done) => {
+        reassigned = done;
+      });
+      const held = withTenant(
+        database.pool(),
+        restaurant,
+        async (client) => {
+          await assignTask(client, taskId, colleague.person.id, 2);
+          reassigned();
+          await gate;
+        },
+        { actorId: restaurantOwner.id },
+      );
+      await reassignedSignal;
+
+      // The staff member, still permitted by every committed fact she has seen, completes now.
+      const attempt = complete(taskId, 2, staff.browser);
+      await waitUntilSomeoneIsBlocked();
+      release();
+      await held;
+      const response = await attempt;
+
+      // She waited for the row, then saw the committed reassignment: refused, not conflicted.
+      expect(response.statusCode).toBe(403);
+      const after = await frozen(taskId);
+      expect(after.row).toMatchObject({
+        status: 'open',
+        version: 3,
+        assignee_user_id: colleague.person.id,
+      });
+      expect(after.events).toStrictEqual(before.events);
+      expect(after.events).toHaveLength(0);
+    },
+  );
+
+  evidenceTest(
+    'staff acting on their own task with a stale version get the 409, not the 403',
+    async () => {
+      const staff = await member('staff');
+      const { taskId } = await newCallback();
+      const stale = await complete(taskId, 5, staff.browser);
+      expect(stale.statusCode).toBe(409);
+      expect(await taskRow(taskId)).toMatchObject({ status: 'open', version: 1 });
+    },
+  );
+
+  evidenceTest(
+    'a disabled member and a demoted admin are signed out (sessions revoked): 401 and nothing changes',
+    async () => {
+      const gone = await member('staff');
+      const demoted = await member('admin');
+      const colleague = await member('staff');
+      const first = await newCallback();
+      const second = await newCallback();
+      await assign(first.taskId, colleague.person.id);
+      await assign(second.taskId, colleague.person.id);
+      await admin.query(
+        "update memberships set status = 'disabled', version = version + 1 where user_id = $1",
+        [gone.person.id],
+      );
+      await admin.query(
+        // eslint-disable-next-line no-restricted-syntax -- fixture write on the migration role; the SET-session rule matches UPDATE ... SET verb text.
+        "update memberships set role = 'staff', version = version + 1 where user_id = $1",
+        [demoted.person.id],
+      );
+      const beforeFirst = await frozen(first.taskId);
+      const beforeSecond = await frozen(second.taskId);
+      const disabled = await complete(first.taskId, 2, gone.browser);
+      expect(disabled.statusCode).toBe(401);
+      const afterDemotion = await complete(second.taskId, 2, demoted.browser);
+      expect(afterDemotion.statusCode).toBe(401);
+      expect(await frozen(first.taskId)).toStrictEqual(beforeFirst);
+      expect(await frozen(second.taskId)).toStrictEqual(beforeSecond);
+    },
+  );
+
+  evidenceTest(
+    'another tenant’s staff member still gets the same 404 as for a missing task',
+    async () => {
+      const { taskId } = await newCallback();
+      const otherStaffPerson = await person('m2a-other-staff');
+      await admin.query(
+        'insert into memberships (organisation_id, id, user_id, role, status) values ($1, $2, $3, $4, $5)',
+        [other, randomUUID(), otherStaffPerson.id, 'staff', 'active'],
+      );
+      const otherStaff = await signIn(otherStaffPerson);
+      const before = await frozen(taskId);
+      const foreign = await complete(taskId, 1, otherStaff);
+      const missing = await complete(randomUUID(), 1, otherStaff);
+      expect(foreign.statusCode).toBe(404);
+      expect(foreign.json()).toStrictEqual(missing.json());
+      expect(await frozen(taskId)).toStrictEqual(before);
+    },
+  );
 });

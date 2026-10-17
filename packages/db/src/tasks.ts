@@ -438,6 +438,23 @@ export async function getTask(client: TenantClient, taskId: string): Promise<Tas
   return row === undefined ? null : toTask(row);
 }
 
+/**
+ * One task of the current tenant, row-locked for the rest of the transaction (`FOR UPDATE`), or
+ * null when none is visible. A caller that judges who may act on the task reads it here, so the
+ * decision is made on the committed assignment and nothing can reassign the task until it
+ * commits; a concurrent reassignment either lands first (and is seen) or waits. The task row is
+ * locked before any audit append, the order the J3 fix established.
+ */
+export async function lockTask(client: TenantClient, taskId: string): Promise<Task | null> {
+  const result = await client.query<TaskRow>(
+    `select id, title, status, type, priority, assignee_user_id, due_at,
+  snoozed_until, conversation_id, version::text from tasks where id = $1 for update`,
+    [taskId],
+  );
+  const row = result.rows[0];
+  return row === undefined ? null : toTask(row);
+}
+
 export async function listOpenTasks(client: TenantClient, limit = 50): Promise<Task[]> {
   const capped = Math.min(Math.max(limit, 1), 100);
   const result = await client.query<TaskRow>(

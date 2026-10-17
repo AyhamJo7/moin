@@ -105,6 +105,7 @@ export {
   getTask,
   listOpenTasks,
   listTodayTasks,
+  lockTask,
   reopenTask,
   setTaskStatus,
   snoozeTask,

@@ -4,10 +4,11 @@
  * Guarded like `GET /api/today`: the session + membership gate resolves the organisation from the
  * session cookie (INV-02), every query runs through `withTenant` under FORCE RLS (INV-01), and
  * the per-account throttle applies. The POST is a mutation, so the session gate also demands the
- * CSRF proof (origin + synchronizer token) before this handler runs. Any active member may act
- * on the team's tasks; no capability beyond membership exists for them yet. The route completes
- * any task of the tenant, whatever its type: Heute offers the button on callback cards only
- * (M2A), and a per-type or per-role limit waits for the task capability in the P06.07 matrix.
+ * CSRF proof (origin + synchronizer token) before this handler runs. Who may complete is the
+ * PLAN matrix row "Act on tasks": owners and admins any task of the tenant, staff only tasks
+ * assigned to themselves or unassigned, judged on the row-locked task (`WorkQueries.complete`),
+ * never on the button the page shows. The route completes any task type: Heute offers the button
+ * on callback cards only (M2A).
  *
  * `complete` takes the version the owner saw. It walks the one task state machine (`completeTask`,
  * P07.06) inside one transaction, so a lost race, a stale version or an illegal move is a 409 and
@@ -87,6 +88,12 @@ export class TasksController {
     }
     const outcome = await this.work.complete(id, parsed.data.version);
     if (outcome.kind === 'missing') return fail(reply, 404, '/problems/not-found', 'Not found');
+    if (outcome.kind === 'forbidden') {
+      // In-tenant, authenticated, not allowed: 403 like the role guard (P06.07.03). The task is
+      // visible to every member on Heute, so this names nothing the caller cannot already see.
+      this.logger.warn({ outcome: 'task_complete_forbidden' }, 'refused a task completion');
+      return fail(reply, 403, '/problems/forbidden', 'Forbidden');
+    }
     if (outcome.kind === 'conflict') {
       this.logger.info({ outcome: 'task_complete_conflict' }, 'refused a stale task completion');
       return fail(reply, 409, '/problems/version-conflict', 'The task has changed');

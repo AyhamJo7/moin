@@ -19,6 +19,7 @@ import {
   completeTask,
   getTask,
   listTodayTasks,
+  lockTask,
   withTenant,
   type CallbackRequest,
   type CapturedCallback,
@@ -26,6 +27,7 @@ import {
   type TodayTaskRow,
 } from '@moin/db';
 import type { Pool } from '@moin/db/pool';
+import { may } from '../identity-access/domain/roles.ts';
 import { auditCorrelationId } from './member-queries.ts';
 import { TENANT_POOL } from './tenant-pool.module.ts';
 import { currentTenantScope } from './tenant-scope.ts';
@@ -33,6 +35,7 @@ import { currentTenantScope } from './tenant-scope.ts';
 export type CompleteOutcome =
   | { readonly kind: 'completed'; readonly task: Task }
   | { readonly kind: 'conflict' }
+  | { readonly kind: 'forbidden' }
   | { readonly kind: 'missing' };
 
 @Injectable()
@@ -62,22 +65,32 @@ export class WorkQueries {
   }
 
   /**
-   * Complete a task for the signed-in member (P13.03.02). One transaction: the existence check,
-   * every rung of the state machine and its audit events commit together or not at all. A version
-   * or lifecycle conflict throws out of `withTenant`, which rolls the whole walk back, and is
+   * Complete a task for the signed-in member (P13.03.02). One transaction: the task row is locked
+   * first, who may act on it is judged on that locked row, then every rung of the state machine
+   * and its audit events commit together or not at all. Owners and admins act on any task of the
+   * tenant; staff only on a task assigned to themselves or unassigned (PLAN Authorisation); any
+   * other role fails closed. A refused member writes nothing, not even an audit row. A version or
+   * lifecycle conflict throws out of `withTenant`, which rolls the whole walk back, and is
    * reported here as `conflict`; a task row the tenant cannot see is `missing`, whoever owns it.
    */
   async complete(taskId: string, version: number): Promise<CompleteOutcome> {
     const scope = this.scope();
     try {
-      const task = await withTenant(
+      return await withTenant(
         this.tenantPool(),
         scope.organisationId,
-        async (client) =>
-          (await getTask(client, taskId)) === null ? null : completeTask(client, taskId, version),
+        async (client): Promise<CompleteOutcome> => {
+          const task = await lockTask(client, taskId);
+          if (task === null) return { kind: 'missing' };
+          const anyTask = may(scope.role, scope.permissions, 'tasks:act-on-any');
+          const ownOrUnassigned =
+            scope.role === 'staff' &&
+            (task.assigneeUserId === null || task.assigneeUserId === scope.actorId);
+          if (!anyTask && !ownOrUnassigned) return { kind: 'forbidden' };
+          return { kind: 'completed', task: await completeTask(client, taskId, version) };
+        },
         { actorId: scope.actorId, correlationId: auditCorrelationId() },
       );
-      return task === null ? { kind: 'missing' } : { kind: 'completed', task };
     } catch (error) {
       if (error instanceof TaskVersionConflictError) return { kind: 'conflict' };
       throw error;
