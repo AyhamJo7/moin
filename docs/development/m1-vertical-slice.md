@@ -191,3 +191,12 @@ here:
   exists).
 - **Shared advisory-lock keyspace (LOW).** CallSid and conversation locks both use `hashtext`. A
   collision can deadlock, which PostgreSQL detects (40P01) and rolls back.
+- **Historical cancelled-fallback replay returns the older task (LOW, open, J2).** For a pre-0077
+  call with a cancelled finaliser fallback and a later callback-specific task, the replay
+  picks the oldest match (`order by created_at limit 1`) and can return the fallback's id. Nothing
+  is written. Fix: prefer `type = 'callback'`; needs a pre-0077 fixture. Detail in EV-P12-011.
+- **Task and audit lock order (open, J3, not reproduced).** The independent review found that
+  capture may hold the audit-head lock before it waits for the task row, while an owner task write
+  may hold the task row before it waits for the audit head. PostgreSQL would roll one back
+  (40P01). Needs one lock order or a bounded retry, with a targeted concurrency test, before
+  owner task-write endpoints are exposed.

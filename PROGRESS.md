@@ -1520,3 +1520,16 @@ VERIFIED.
 | P12.12.03 | IN_PROGRESS | 4b8c5b7 | EV-P12-011 | Corrects the M1 row: duplicate end events were idempotent only when the capture created its own task. Now replay is decided by the acceptance and changes nothing; only the callback intent exists |
 | P12.12.01 | IN_PROGRESS | 4b8c5b7 | EV-P12-011 | Corrects the M1 row: on an existing call the caller number is now persisted (write-once, 409 on conflict) and the request summary lands on the carrying task. Still no contact resolution or SSE   |
 | P12.09.01 | IN_PROGRESS | 4b8c5b7 | EV-P12-011 | The summary is no longer lost when a finaliser fallback is adopted. Still simulator path only                                                                                                      |
+
+## M1 hotfix: mutation-check evidence (2026-10-17)
+
+The independent review of the hotfix (J1) found the standard mutation-check record missing and
+the custom mutation evidence overstated. `mutation_check.py` now reports KILLED for the F1 and F2
+regression selectors (fix commit `4b8c5b7`, fix paths restored byte-identical). EV-P12-011 is
+corrected: the earlier 11-mutant list is kept as supplementary, with two mislabelled mutants
+named. Two non-blocking review findings stay open: J2 (historical cancelled-fallback replay may
+return the older task id) and J3 (task and audit lock order, not reproduced). Nothing is VERIFIED.
+
+| Item      | Status      | Commit | Evidence   | Note                                                                                                |
+| --------- | ----------- | ------ | ---------- | --------------------------------------------------------------------------------------------------- |
+| P12.12.03 | IN_PROGRESS | see PR | EV-P12-011 | Standard mutation-check KILLED for F1 and F2; J2 and J3 recorded as open follow-ups, not fixed here |
