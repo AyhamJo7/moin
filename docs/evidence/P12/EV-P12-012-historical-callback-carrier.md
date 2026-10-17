@@ -71,6 +71,7 @@ above with `-t "a pre-0077 replay names the task that capture used"` and keeps t
 | Run (UTC) | Tests in selector | Without the fix | With the fix | Verdict |
 | --- | --- | --- | --- | --- |
 | 2026-10-17T04:36:08Z (head `b159913`, final tests) | 10 | exit 1: 7 failed, 3 passed | exit 0: 10 passed | **KILLED** |
+| 2026-10-17T04:50:37Z (head `6ee34ea`, after review round 1) | 10 | exit 1: 7 failed, 3 passed | exit 0: 10 passed | **KILLED** |
 | 2026-10-17T04:34:12Z (head `e5d69e5`, first 6 tests) | 6 | exit 1: 5 failed, 1 passed | exit 0: 6 passed | **KILLED** |
 
 Fix files restored byte-identical; `tree_changed_by_tests: false`. The later commit `0025f49` only
@@ -80,6 +81,11 @@ Failures without the fix are assertion failures in the test bodies (no import, c
 errors): the replay `taskId` was the cancelled fallback's id, or an id where `null` was expected.
 The three tests that pass without the fix are guards, not detectors: the live adopted fallback, the
 completed adopted fallback, and the other tenant's CallSid.
+
+Round-1 rerun (`20261017T045037Z`, covers the comment-only change to `callback-intake.ts`) logs
+(SHA-256): without fix `d3303b7714ef48881db5393bfbfc5c30dbe40a604f4bb491be2ed0faa68ea938`, with fix
+`269dbe3d2328732850ebb9527006eafedbd35185c52b018a991675b23bb9d71d`. Local gates: `gates.py full`
+PASS 14/14 on `6ee34ea` (`20261017T045044Z-full.json`).
 
 Retained locally: `.git/claude-evidence/mutation/20261017T043608Z.json` and `.patch`
 (`20261017T043412Z` for the first run). Verbose logs (SHA-256): without fix
