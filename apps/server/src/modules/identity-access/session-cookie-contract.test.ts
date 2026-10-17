@@ -4,11 +4,17 @@
  * silently signed-out owner app.
  */
 import { describe, expect, it } from 'vitest';
-import { SESSION_COOKIE_NAME } from '@moin/contracts';
-import { SESSION_COOKIE } from './domain/session-policy.ts';
+import { CSRF_COOKIE_NAME, CSRF_HEADER_NAME, SESSION_COOKIE_NAME } from '@moin/contracts';
+import { CSRF_COOKIE, SESSION_COOKIE } from './domain/session-policy.ts';
+import { CSRF_HEADER } from './http/csrf.ts';
 
 describe('session cookie contract', () => {
   it('names the cookie the session policy sets', () => {
     expect(SESSION_COOKIE_NAME).toBe(SESSION_COOKIE);
+  });
+
+  it('names the CSRF cookie and header the owner app echoes on every mutation (M2A)', () => {
+    expect(CSRF_COOKIE_NAME).toBe(CSRF_COOKIE);
+    expect(CSRF_HEADER_NAME).toBe(CSRF_HEADER);
   });
 });

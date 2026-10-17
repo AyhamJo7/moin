@@ -98,11 +98,14 @@ export type {
   OutcomeResult,
 } from './conversations.ts';
 export {
+  VersionConflictError as TaskVersionConflictError,
   assignTask,
   completeTask,
   createTask,
+  getTask,
   listOpenTasks,
   listTodayTasks,
+  lockTask,
   reopenTask,
   setTaskStatus,
   snoozeTask,

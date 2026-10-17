@@ -17,6 +17,11 @@ Decision: ADR-0005 · Enforcement: guards → services → RLS · Review: QG-09
 | `data:export-erase`       | yes   | yes   | no    | —                 | —             |
 | `tenant:terminate`        | yes   | no    | no    | —                 | —             |
 | `support:grant`           | yes   | yes   | no    | —                 | —             |
+| `tasks:act-on-any`        | yes   | yes   | no    | —                 | —             |
+
+`tasks:act-on-any` is the "Act on tasks" row beyond a member's own work: staff hold no capability
+for it and may act only on tasks assigned to themselves or unassigned, which the task service
+judges on the row-locked task (a service check, not a route `@Require`).
 
 The table is code (`domain/roles.ts`, pinned by `roles.test.ts`). Sensitive rows additionally
 require fresh MFA via the step-up guard (P06.06.04); this table answers "may this role" and never
