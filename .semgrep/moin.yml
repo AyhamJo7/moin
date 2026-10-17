@@ -1,0 +1,100 @@
+# Repository-specific Semgrep rules. They encode defect classes reviews kept finding late, which the
+# registry packs (p/typescript, p/security-audit) cannot know about because they are about *this*
+# codebase's tenant model. Each rule is self-tested: `semgrep --test .semgrep` runs the annotated
+# cases in .semgrep/moin.ts (`ruleid:` must match, `ok:` must not) before the scan runs in CI.
+#
+# Already enforced elsewhere, so deliberately not repeated here:
+#   - string-built SQL and session-level `SET app.*`: ESLint no-restricted-syntax (packages/config)
+#   - pool access outside @moin/db: ESLint no-direct-db-access
+#   - SECURITY DEFINER allowlist + pinned search_path: scripts/check-rls-catalog.ts (live catalog)
+rules:
+  - id: moin-tenant-id-from-request-input
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      The organisation id reaches withTenant/withSystemWork from client-controlled request input
+      (body, query string or headers). INV-02: tenant context is derived server-side only, from the
+      session, the route scope or the job envelope. Resolve it from the authenticated scope instead.
+    metadata:
+      invariant: INV-02
+      category: security
+      cwe: 'CWE-639: Authorization Bypass Through User-Controlled Key'
+    mode: taint
+    pattern-sources:
+      # A Fastify request's client-controlled parts. `$REQ.query` alone would also match
+      # `pool.query(...)`, the pg method, and taint every database result.
+      - patterns:
+          - pattern-either:
+              - pattern: $REQ.body
+              - pattern: $REQ.query
+              - pattern: $REQ.headers
+          - pattern-not: $REQ.query(...)
+          - metavariable-regex:
+              metavariable: $REQ
+              regex: ^(req|request)$
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: withTenant($POOL, $ORG, ...)
+              - pattern: withSystemWork($POOL, $ORG, ...)
+          - focus-metavariable: $ORG
+
+  - id: moin-session-level-set-config
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      set_config with is_local = false (or a non-literal is_local) writes a session-level setting
+      that survives the transaction and rides the pooled connection into the next request: one
+      caller's tenant applied to another caller's query. Use set_config(name, value, true) inside
+      the transaction (INV-01, INV-02).
+    metadata:
+      invariant: INV-01
+      category: security
+    patterns:
+      - pattern-either:
+          - pattern: '"..."'
+          - pattern: '`...`'
+      - pattern-regex: (?i)set_config\s*\([^)]*,\s*(false|\$\d+|\$\{[^}]*\})\s*\)
+
+  - id: moin-tenant-setting-outside-wrapper
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      Only packages/db/src/tenant.ts may write app.organisation_id. Setting it anywhere else
+      bypasses the UUID check, the nesting check and the transaction-local guarantee of
+      withTenant (INV-01, INV-02).
+    metadata:
+      invariant: INV-02
+      category: security
+    paths:
+      exclude:
+        - packages/db/src/tenant.ts
+        # Integration tests set it on a raw connection on purpose, e.g. to hold a row lock the
+        # way a concurrent transaction would.
+        - '*.test.ts'
+    patterns:
+      - pattern-either:
+          - pattern: '"..."'
+          - pattern: '`...`'
+      - pattern-regex: (?i)set_config\s*\(\s*'app\.organisation_id'
+
+  - id: moin-error-detail-to-client
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      A caught error, its message or its stack is sent to the client. Internal error details leak
+      schema names, SQL and stack traces. Log it with the request id and reply with a stable error
+      code instead.
+    metadata:
+      category: security
+      cwe: 'CWE-209: Generation of Error Message Containing Sensitive Information'
+    patterns:
+      - pattern-inside: |
+          try { ... } catch ($ERR) { ... }
+      - pattern-either:
+          - pattern: $REPLY.send($ERR)
+          - pattern: $REPLY.send($ERR.message)
+          - pattern: $REPLY.send($ERR.stack)
+          - pattern: '$REPLY.send({..., $K: $ERR.message, ...})'
+          - pattern: '$REPLY.send({..., $K: $ERR.stack, ...})'
+          - pattern: '$REPLY.send({..., $K: $ERR, ...})'
