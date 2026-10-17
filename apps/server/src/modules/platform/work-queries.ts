@@ -82,9 +82,19 @@ export class WorkQueries {
         async (client): Promise<CompleteOutcome> => {
           const task = await lockTask(client, taskId);
           if (task === null) return { kind: 'missing' };
-          const anyTask = may(scope.role, scope.permissions, 'tasks:act-on-any');
+          // The member's standing is read again after the task is locked: disabling a member
+          // unassigns their tasks (trigger), so a request that passed the session guard just
+          // before would otherwise find the task unassigned and act on it. The role judged is
+          // the committed one, not the one the guard resolved earlier.
+          const standing = await client.query<{ role: string }>(
+            "select role from memberships where user_id = $1 and status = 'active'",
+            [scope.actorId],
+          );
+          const role = standing.rows[0]?.role;
+          if (role === undefined) return { kind: 'forbidden' };
+          const anyTask = may(role, scope.permissions, 'tasks:act-on-any');
           const ownOrUnassigned =
-            scope.role === 'staff' &&
+            role === 'staff' &&
             (task.assigneeUserId === null || task.assigneeUserId === scope.actorId);
           if (!anyTask && !ownOrUnassigned) return { kind: 'forbidden' };
           return { kind: 'completed', task: await completeTask(client, taskId, version) };

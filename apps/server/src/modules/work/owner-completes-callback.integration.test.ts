@@ -28,6 +28,8 @@ import { ConfigModule } from '../../config/config.module.ts';
 import { loadConfig } from '../../config/env.ts';
 import { LoggerModule } from '../../observability/logger.module.ts';
 import { TenantPoolModule } from '../platform/tenant-pool.module.ts';
+import { runInTenantScope } from '../platform/tenant-scope.ts';
+import { WorkQueries } from '../platform/work-queries.ts';
 import { IdentityAccessModule } from '../identity-access/identity-access.module.ts';
 import { CONTEXT_CLOCK, IDENTITY_CLOCK } from '../identity-access/identity-access.tokens.ts';
 import {
@@ -874,6 +876,54 @@ describe('who may act on a task: owners and admins any, staff own or unassigned 
       expect(afterDemotion.statusCode).toBe(401);
       expect(await frozen(first.taskId)).toStrictEqual(beforeFirst);
       expect(await frozen(second.taskId)).toStrictEqual(beforeSecond);
+    },
+  );
+
+  evidenceTest(
+    'a scope the guard resolved earlier does not outlive the member: disabled or demoted since, they are refused',
+    async () => {
+      const queries = app.get(WorkQueries);
+      const staff = await member('staff');
+      const demoted = await member('admin');
+      const colleague = await member('staff');
+      const mine = await newCallback();
+      const theirs = await newCallback();
+      await assign(mine.taskId, staff.person.id);
+      await assign(theirs.taskId, colleague.person.id);
+      const asGuardSawThem = (who: Person, role: string) => ({
+        organisationId: restaurant,
+        actorId: who.id,
+        role,
+        permissions: [],
+      });
+      // Committed after the guard resolved their scope: the staff member is disabled (the
+      // membership trigger unassigns their task), the admin is demoted to staff.
+      await admin.query(
+        // eslint-disable-next-line no-restricted-syntax -- fixture write on the migration role; the SET-session rule matches UPDATE ... SET verb text.
+        "update memberships set status = 'disabled', version = version + 1 where user_id = $1",
+        [staff.person.id],
+      );
+      await admin.query(
+        // eslint-disable-next-line no-restricted-syntax -- fixture write on the migration role; the SET-session rule matches UPDATE ... SET verb text.
+        "update memberships set role = 'staff', version = version + 1 where user_id = $1",
+        [demoted.person.id],
+      );
+      expect(await taskRow(mine.taskId)).toMatchObject({ status: 'open' });
+      const before = await frozen(mine.taskId);
+      const beforeTheirs = await frozen(theirs.taskId);
+
+      // The disabled member's task is now unassigned, which a stale "staff" scope would allow.
+      const gone = await runInTenantScope(asGuardSawThem(staff.person, 'staff'), () =>
+        queries.complete(mine.taskId, 3),
+      );
+      // The demoted admin's stale "admin" scope would allow a colleague's task.
+      const stale = await runInTenantScope(asGuardSawThem(demoted.person, 'admin'), () =>
+        queries.complete(theirs.taskId, 2),
+      );
+      expect(gone).toStrictEqual({ kind: 'forbidden' });
+      expect(stale).toStrictEqual({ kind: 'forbidden' });
+      expect(await frozen(mine.taskId)).toStrictEqual(before);
+      expect(await frozen(theirs.taskId)).toStrictEqual(beforeTheirs);
     },
   );
 
