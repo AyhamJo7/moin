@@ -9,30 +9,43 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef } from 'react';
-import { startLivePoll } from '../lib/live-today.ts';
+import { isAttended, startLivePoll } from '../lib/live-today.ts';
+
+const INPUT_EVENTS = ['pointerdown', 'keydown', 'touchstart', 'scroll'] as const;
 
 /** `fingerprint`: what the server rendered (`null` while it shows the error state). */
 export function LiveToday({ fingerprint }: { fingerprint: string | null }) {
   const router = useRouter();
   // Read at poll time, so a new render is compared against without restarting the loop.
   const rendered = useRef(fingerprint);
-  rendered.current = fingerprint;
+  useEffect(() => {
+    rendered.current = fingerprint;
+  }, [fingerprint]);
 
   useEffect(() => {
+    let lastInput = Date.now();
     const poller = startLivePoll({
       rendered: () => rendered.current,
       onChange: () => {
         router.refresh();
       },
-      isVisible: () => document.visibilityState === 'visible',
+      isVisible: () => document.visibilityState === 'visible' && isAttended(lastInput, Date.now()),
     });
     const wake = (): void => {
       poller.wake();
     };
+    // Input marks the owner as present; the first input after a pause polls at once.
+    const input = (): void => {
+      const paused = !isAttended(lastInput, Date.now());
+      lastInput = Date.now();
+      if (paused) poller.wake();
+    };
     document.addEventListener('visibilitychange', wake);
+    for (const type of INPUT_EVENTS) window.addEventListener(type, input, { passive: true });
     window.addEventListener('online', wake);
     return () => {
       document.removeEventListener('visibilitychange', wake);
+      for (const type of INPUT_EVENTS) window.removeEventListener(type, input);
       window.removeEventListener('online', wake);
       poller.stop();
     };

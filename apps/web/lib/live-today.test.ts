@@ -7,6 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TODAY_PATH, type TodayTask } from '@moin/contracts';
 import {
   LIVE_BACKOFF_MAX_MS,
+  LIVE_IDLE_MS,
+  isAttended,
   LIVE_POLL_MS,
   fingerprintOf,
   nextDelayMs,
@@ -194,12 +196,29 @@ describe('startLivePoll', () => {
     h.loop.stop();
   });
 
-  it('hands over to the server render on 401 and stops polling', async () => {
-    const h = harness([{ kind: 'signed-out' }, { kind: 'ok', fingerprint: 'B' }]);
+  it('hands over to the server render on 401 and retries with backoff if the page stays', async () => {
+    const h = harness([{ kind: 'signed-out' }, { kind: 'ok', fingerprint: 'A' }]);
     await vi.advanceTimersByTimeAsync(LIVE_POLL_MS);
     expect(h.onChange).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(LIVE_POLL_MS * 5);
-    expect(h.poll).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(LIVE_POLL_MS * 2);
+    expect(h.poll).toHaveBeenCalledTimes(2);
+    h.loop.stop();
+  });
+
+  it('counts a poll that throws as a failure and keeps going', async () => {
+    const poll = vi.fn<() => Promise<PollResult>>().mockRejectedValueOnce(new Error('boom'));
+    poll.mockResolvedValue({ kind: 'ok', fingerprint: 'A' });
+    const loop = startLivePoll({
+      rendered: () => 'A',
+      onChange: vi.fn(),
+      isVisible: () => true,
+      poll,
+      random: () => 0.5,
+    });
+    await vi.advanceTimersByTimeAsync(LIVE_POLL_MS);
+    await vi.advanceTimersByTimeAsync(LIVE_POLL_MS * 2);
+    expect(poll).toHaveBeenCalledTimes(2);
+    loop.stop();
   });
 
   it('stop ends the loop and ignores an answer that arrives afterwards', async () => {
@@ -228,5 +247,12 @@ describe('startLivePoll', () => {
     await vi.advanceTimersByTimeAsync(LIVE_POLL_MS);
     expect(h.onChange).not.toHaveBeenCalled();
     h.loop.stop();
+  });
+});
+
+describe('isAttended', () => {
+  it('stops counting a tab as attended after the idle window without input', () => {
+    expect(isAttended(0, LIVE_IDLE_MS - 1)).toBe(true);
+    expect(isAttended(0, LIVE_IDLE_MS)).toBe(false);
   });
 });

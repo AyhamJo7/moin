@@ -1,11 +1,11 @@
 ---
-mission: M2A owner completes a callback (J2 #231 and J3 #232 merged)
+mission: M2B open Heute updates by itself (M2A #233 merged at 7caad73)
 status: active
 mode: interactive
 phase: M1 (cross-phase slice: P07, P12, P13)
 tier: PILOT
 plan: docs/development/m1-vertical-slice.md
-next: independent review of the M2A draft PR; P13.03.02 remaining card actions not started
+next: independent review of the M2B draft PR; P13.03.02 remaining card actions not started
 updated: 2026-10-17
 ---
 
@@ -1577,3 +1577,8 @@ lost answer is read back and reported as confirmed or "not confirmed", never as 
 "deploy the API first" claim is withdrawn; the strict Today schema needs both sides together.
 Evidence: EV-P13-015 (remediation section). P13.03.02 and P13.03.05 stay IN_PROGRESS; nothing is
 VERIFIED.
+
+M2B (2026-10-17, branch `feat/p13-02-heute-live-updates` from 7caad73): an open Heute polls
+`GET /api/today` every 15 s while visible and re-renders on change; no SSE exists server-side. Arrival
+measured 15.4 s in a local browser test (not in CI). P13.02.04 and P13.10 stay open; nothing is
+VERIFIED. Evidence: EV-P13-016.

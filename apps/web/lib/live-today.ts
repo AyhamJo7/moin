@@ -29,6 +29,18 @@ export const LIVE_BACKOFF_MAX_MS = 120_000;
 /** One poll gives up after this long (a stuck request must not stall the loop). */
 export const LIVE_REQUEST_TIMEOUT_MS = 8_000;
 
+/**
+ * A tab with no user input for this long stops polling. Every guarded read slides the session's
+ * idle expiry, so polling without a person there would keep an abandoned screen signed in for the
+ * session's whole absolute lifetime; the idle timeout must keep meaning "nobody is here".
+ */
+export const LIVE_IDLE_MS = 30 * 60_000;
+
+/** Whether the last user input is recent enough for the tab to keep polling. */
+export function isAttended(lastInputMs: number, nowMs: number): boolean {
+  return nowMs - lastInputMs < LIVE_IDLE_MS;
+}
+
 /** +/- share of the delay randomised, so tabs opened together do not poll together. */
 const JITTER_SHARE = 0.1;
 
@@ -129,17 +141,18 @@ export function startLivePoll(deps: LivePollDeps): { stop: () => void; wake: () 
     let result: PollResult;
     try {
       result = await poll();
+    } catch {
+      result = { kind: 'failed' };
     } finally {
       state.running = false;
     }
     if (isStopped()) return;
     if (result.kind === 'signed-out') {
-      // The server render shows the signed-out state; nothing is left to poll for.
-      state.stopped = true;
+      // The server render decides what a 401 means (the signed-out page unmounts this loop); a
+      // 401 the render does not confirm is retried like any failure, not trusted forever.
       deps.onChange();
-      return;
-    }
-    if (result.kind === 'failed') {
+      failures += 1;
+    } else if (result.kind === 'failed') {
       failures += 1;
     } else {
       failures = 0;
