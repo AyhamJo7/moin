@@ -32,5 +32,14 @@
   "today.status.done": "Erledigt",
   "today.status.cancelled": "Abgebrochen",
   "today.truncated": "Es gibt mehr offene Aufgaben, als hier Platz haben. Angezeigt werden zuerst die dringenden, dann die neuesten.",
-  "today.noneShown": "In dieser Auswahl keine."
+  "today.noneShown": "In dieser Auswahl keine.",
+  "today.complete.label": "Erledigt",
+  "today.complete.pending": "Wird gespeichert …",
+  "today.complete.done": "Der Rückruf ist als erledigt markiert.",
+  "today.complete.conflict": "Diese Aufgabe wurde inzwischen geändert. Die Ansicht wurde aktualisiert, bitte prüfen Sie den aktuellen Stand.",
+  "today.complete.missing": "Diese Aufgabe gibt es nicht mehr. Die Ansicht wurde aktualisiert.",
+  "today.complete.signedOut": "Ihre Anmeldung ist abgelaufen. Bitte melden Sie sich erneut an.",
+  "today.complete.forbidden": "Diese Aufgabe ist einer anderen Person zugewiesen. Dafür fehlt Ihnen die Berechtigung.",
+  "today.complete.rejected": "Diese Änderung konnte nicht übernommen werden. Bitte laden Sie die Ansicht neu.",
+  "today.complete.unknown": "Der aktuelle Stand konnte nicht bestätigt werden. Bitte prüfen Sie die aktualisierte Ansicht."
 }

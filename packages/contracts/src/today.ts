@@ -47,6 +47,8 @@ export const todayTaskSchema = z.strictObject({
   status: taskStatusSchema,
   priority: taskPrioritySchema,
   createdAt: z.iso.datetime(),
+  /** The optimistic-lock version the next action on this task must present (P07.13). */
+  version: z.number().int().positive(),
   /** The number the call came from, when the task came from a call; null otherwise. */
   callerNumber: z.string().regex(E164).nullable(),
 });
@@ -57,6 +59,29 @@ export const todayResponseSchema = z.strictObject({
   /** More live tasks exist than were returned: no section may be called empty. */
   truncated: z.boolean(),
 });
+
+/** Owner actions on one task (P13.03.02). The tenant is the session's own; routes take an id only. */
+export const taskPath = (taskId: string): string => `/api/tasks/${taskId}`;
+export const taskCompletePath = (taskId: string): string => `${taskPath(taskId)}/complete`;
+
+/** The synchronizer-token header and cookie the owner app echoes on every mutation. */
+export const CSRF_HEADER_NAME = 'x-csrf-token';
+export const CSRF_COOKIE_NAME = '__Host-moin_csrf';
+
+/** `POST /api/tasks/:id/complete`: the version the owner saw, never a status or a tenant. */
+export const completeTaskRequestSchema = z.strictObject({
+  version: z.number().int().positive(),
+});
+
+/** One task as the owner's app reads it after an action or on a direct look-up. */
+export const taskStateSchema = z.strictObject({
+  id: z.uuid(),
+  status: taskStatusSchema,
+  version: z.number().int().positive(),
+});
+
+export type CompleteTaskRequest = z.infer<typeof completeTaskRequestSchema>;
+export type TaskState = z.infer<typeof taskStateSchema>;
 
 export type TodayTask = z.infer<typeof todayTaskSchema>;
 export type TodayResponse = z.infer<typeof todayResponseSchema>;

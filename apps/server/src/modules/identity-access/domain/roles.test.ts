@@ -32,6 +32,7 @@ describe('the RBAC decision table (P06.07.01)', () => {
       'knowledge:approve',
       'data:export-erase',
       'support:grant',
+      'tasks:act-on-any',
     ] as const) {
       expect(may('admin', [], capability), capability).toBe(true);
     }

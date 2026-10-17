@@ -46,6 +46,14 @@ no "generated with" footers. The product domain is unaffected — `feat(ai): add
 "play the AI disclosure (INV-03)" are correct and expected. The rules live in
 `.claude/policy/no-ai-mentions.json` and are enforced by `scripts/check-no-ai-mentions.ts` in CI.
 
+### Local git hooks
+
+`pnpm install` installs [Lefthook](https://github.com/evilmartians/lefthook) hooks from
+`lefthook.yml`: the commit message is checked against both rules above, staged files against
+prettier and gitleaks, and a push runs prettier on the pushed files, lint, typecheck, the unit
+tests and the evidence ledger ID check. They catch locally what CI would reject later. CI remains
+the authority. Don't bypass them with `--no-verify` or `LEFTHOOK=0`.
+
 ## Pull requests
 
 Opened as **drafts**. Marking ready, merging and applying rulesets are the founder's actions.

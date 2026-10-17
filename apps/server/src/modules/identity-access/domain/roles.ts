@@ -33,6 +33,7 @@ export const CAPABILITIES = [
   'data:export-erase',
   'tenant:terminate',
   'support:grant',
+  'tasks:act-on-any',
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
@@ -58,6 +59,10 @@ const MATRIX: Readonly<Record<Capability, Grant>> = {
   'data:export-erase': { roles: ['owner', 'admin'] },
   'tenant:terminate': { roles: ['owner'] },
   'support:grant': { roles: ['owner', 'admin'] },
+  // "Act on tasks" (PLAN Authorisation): owners and admins act on any task of the tenant; staff
+  // hold no such capability and act only on tasks assigned to themselves or unassigned, which
+  // the task service judges against the locked row.
+  'tasks:act-on-any': { roles: ['owner', 'admin'] },
 };
 
 export function isRole(value: unknown): value is Role {

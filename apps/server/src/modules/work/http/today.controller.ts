@@ -44,6 +44,7 @@ export class TodayController {
         status: row.status,
         priority: row.priority,
         createdAt: row.createdAt.toISOString(),
+        version: row.version,
         callerNumber: row.callerNumber,
       })),
     });

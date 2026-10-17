@@ -25,15 +25,15 @@ export interface InventoriedRoute {
   readonly method: 'GET' | 'POST';
   readonly path: string;
   readonly class: RouteClass;
-  /** For `tenant-id`: which seeded id of tenant B to present (`invitation` | `grant` | `user`). */
-  readonly foreignId?: 'invitation' | 'grant' | 'user' | undefined;
+  /** For `tenant-id`: which seeded id of tenant B to present (`invitation` | `grant` | `user` | `task`). */
+  readonly foreignId?: 'invitation' | 'grant' | 'user' | 'task' | undefined;
   /** Minimal valid body; the foreign id is merged into it by the probe. */
   readonly body?: Record<string, unknown> | undefined;
 }
 
 /**
  * The full inventory, one row per route on the API surface today. Controllers mounted:
- * auth (4), members (5), recovery (3), support (3), health (2), voice (2), work (1),
+ * auth (4), members (5), recovery (3), support (3), health (2), voice (2), work (3),
  * call simulator (1). The coverage
  * test pins this list against Nest metadata (`INVENTORY.length` vs reflected routes), so
  * a new route without a row fails loudly.
@@ -122,6 +122,15 @@ export const INVENTORY: readonly InventoriedRoute[] = [
   { method: 'GET', path: '/api/support/grants', class: 'tenant-list' },
   // work — the owner's Today read; the session's own tenant only (M1).
   { method: 'GET', path: '/api/today', class: 'tenant-list' },
+  // work — one task by id and the owner's Erledigt; tenant B's task id must 404 on both (M2A).
+  { method: 'GET', path: '/api/tasks/:id', class: 'tenant-id', foreignId: 'task' },
+  {
+    method: 'POST',
+    path: '/api/tasks/:id/complete',
+    class: 'tenant-id',
+    foreignId: 'task',
+    body: { version: 1 },
+  },
   // health — unauthenticated, thin bodies, no tenant data by construction.
   { method: 'GET', path: '/healthz', class: 'public' },
   { method: 'GET', path: '/readyz', class: 'public' },
@@ -133,4 +142,4 @@ export const INVENTORY: readonly InventoriedRoute[] = [
 ];
 
 /** `INVENTORY.length` today: the coverage test pins this so a silent shrink fails. */
-export const EXPECTED_ROUTE_COUNT = 21;
+export const EXPECTED_ROUTE_COUNT = 23;

@@ -236,7 +236,9 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
           ? world.b.invitationId
           : route.foreignId === 'grant'
             ? world.b.grantId
-            : world.b.owner.id;
+            : route.foreignId === 'task'
+              ? world.b.taskId
+              : world.b.owner.id;
       const url =
         route.path.includes(':id') && route.foreignId !== 'user'
           ? route.path.replace(':id', foreign)
@@ -244,7 +246,9 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
       const body =
         route.foreignId === 'user'
           ? { ...(route.body ?? {}), userId: foreign }
-          : (route.body ?? { reason: 'cross-tenant probe' });
+          : route.method === 'GET'
+            ? undefined
+            : (route.body ?? { reason: 'cross-tenant probe' });
       const response = await authed(session, route.method, url, body);
       // Exact 404: P06.07.03 — cross-tenant and not-permitted both read as not-found, so
       // existence never leaks. A 403 here would be a regression (it confirms the id
@@ -256,6 +260,7 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
       // Never B's data: the body names no foreign id, no foreign address, no B row.
       expect(response.body).not.toContain(world.b.invitationId);
       expect(response.body).not.toContain(world.b.grantId);
+      expect(response.body).not.toContain(world.b.taskId);
       expect(response.body).not.toContain(world.b.owner.id);
       expect(response.body).not.toContain('xsuite-beta');
     }
