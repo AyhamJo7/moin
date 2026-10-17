@@ -26,7 +26,8 @@
  *   owner's work nor the summary is lost.
  *
  * Calls captured before migration 0077 have no acceptance row; their `callback_requested`
- * outcome stands in for it, so their replays also write nothing.
+ * outcome stands in for it, so their replays also write nothing. The task a replay names is
+ * the one that capture actually used (see `legacyCarrier`), never an older cancelled fallback.
  *
  * The caller number is write-once on the call (see `settleCallerNumber`).
  *
@@ -37,7 +38,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { appendAuditEvent } from './audit.ts';
 import { advanceCallStatus, getOutcome, ingestCall, recordOutcome } from './conversations.ts';
-import { FALLBACK_TITLE, REPAIR_TITLE } from './finaliser.ts';
+import { FALLBACK_TITLE, REPAIR_TITLE, fallbackKey } from './finaliser.ts';
 import { createTask, retitleSystemTask } from './tasks.ts';
 import type { TenantClient } from './tenant.ts';
 
@@ -81,6 +82,35 @@ const SYSTEM_TITLES: readonly string[] = [FALLBACK_TITLE, REPAIR_TITLE];
 /** The carrying task's key. Not `callback:<conversation>`, which the pre-0077 capture used. */
 function carrierKey(conversationId: string): string {
   return `callback-request:${conversationId}`;
+}
+
+/** The key the pre-0077 capture gave the task it created: also its cancelled-fallback replacement. */
+function legacyCarrierKey(conversationId: string): string {
+  return `callback:${conversationId}`;
+}
+
+/**
+ * The task a pre-0077 capture used for this conversation, or null when none can be told apart.
+ * Reads only. Three shapes existed, and only the key tells them apart: the type cannot, because
+ * the finaliser's fallback is itself typed `callback`.
+ * - The capture created its task, or replaced a cancelled fallback with one (that replacement
+ *   has no type): the task keyed `callback:<conversation>`, whatever its status now.
+ * - The capture adopted a live fallback (reopened if done): no such task exists, and the
+ *   carrier is the fallback under its own key, unless it is cancelled. A cancelled fallback with
+ *   no keyed task is either a replaced one whose replacement was erased, or an adopted one the
+ *   owner cancelled later; nothing in the data tells these apart, so no id is named.
+ */
+async function legacyCarrier(client: TenantClient, conversationId: string): Promise<string | null> {
+  const keyed = await client.query<{ id: string }>(
+    'select id from tasks where idempotency_key = $1',
+    [legacyCarrierKey(conversationId)],
+  );
+  if (keyed.rows[0] !== undefined) return keyed.rows[0].id;
+  const adopted = await client.query<{ id: string }>(
+    `select id from tasks where idempotency_key = $1 and status <> 'cancelled'`,
+    [fallbackKey(conversationId)],
+  );
+  return adopted.rows[0]?.id ?? null;
 }
 
 /**
@@ -212,14 +242,8 @@ async function priorAcceptance(
   if (call === undefined) return null;
   const outcome = await getOutcome(client, call.conversation_id);
   if (outcome?.resultCode !== 'callback_requested') return null;
-  const carrier = await client.query<{ id: string }>(
-    `select id from tasks where conversation_id = $1
-       and (type = 'callback' or idempotency_key like 'finaliser-fallback:%')
-     order by created_at limit 1`,
-    [call.conversation_id],
-  );
   return {
-    taskId: carrier.rows[0]?.id ?? null,
+    taskId: await legacyCarrier(client, call.conversation_id),
     conversationId: call.conversation_id,
     replayed: true,
   };

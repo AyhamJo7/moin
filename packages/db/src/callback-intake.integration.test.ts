@@ -270,6 +270,190 @@ describe('a replay writes nothing, before or after erasure and migration (M1 hot
   });
 });
 
+/**
+ * What the merged slice (85ad367) wrote when a capture found the finaliser's fallback cancelled:
+ * the fallback stays (cancelled, typed `callback`), the call is completed with a
+ * `callback_requested` outcome, and a replacement without a type, keyed `callback:<conversation>`,
+ * carries the request. No acceptance row existed then.
+ */
+async function stageReplacedFallback(org: string, input: CallbackRequest) {
+  return withTenant(app, org, async (client) => {
+    const ingested = await ingestCall(client, { providerCallSid: input.providerCallSid });
+    const conversationId = ingested.call.conversationId;
+    const fallback = await finaliseInteraction(client, conversationId);
+    if (fallback.taskId === null) throw new Error('no fallback');
+    await client.query(`update tasks set status = 'cancelled' where id = $1`, [fallback.taskId]);
+    await advanceCallStatus(client, ingested.call.id, 'completed');
+    await recordOutcome(client, conversationId, {
+      resultCode: 'callback_requested',
+      handledAutomatically: true,
+    });
+    const replacement = await createTask(client, {
+      title: input.title,
+      priority: 'normal',
+      conversationId,
+      idempotencyKey: `callback:${conversationId}`,
+    });
+    return { conversationId, fallbackId: fallback.taskId, replacementId: replacement.id };
+  });
+}
+
+/** Every task of the conversation as stored: identity, state, version and timestamps. */
+async function taskStates(conversationId: string) {
+  const rows = await admin.query(
+    `select id, status, type, title, version, created_at, updated_at, idempotency_key
+     from tasks where conversation_id = $1 order by created_at, id`,
+    [conversationId],
+  );
+  return rows.rows;
+}
+
+describe('a pre-0077 replay names the task that capture used (J2)', () => {
+  evidenceTest(
+    'a cancelled typed fallback is not the carrier: the keyed replacement is, and nothing is written',
+    async () => {
+      const input = request();
+      const staged = await stageReplacedFallback(ORG_A, input);
+      // The trap: the fallback is older, cancelled and itself typed `callback`.
+      const fallback = (await taskStates(staged.conversationId)).find(
+        (t) => t.id === staged.fallbackId,
+      );
+      expect(fallback).toMatchObject({ status: 'cancelled', type: 'callback' });
+      const tasksBefore = await taskStates(staged.conversationId);
+      const before = await footprint(input.providerCallSid);
+
+      const replay = await withTenant(app, ORG_A, (client) =>
+        captureCallbackRequest(client, input),
+      );
+
+      expect(replay).toStrictEqual({
+        taskId: staged.replacementId,
+        conversationId: staged.conversationId,
+        replayed: true,
+      });
+      expect(await taskStates(staged.conversationId)).toStrictEqual(tasksBefore);
+      expect(await footprint(input.providerCallSid)).toStrictEqual(before);
+    },
+  );
+
+  evidenceTest('a replacement the owner completed or cancelled is still named', async () => {
+    for (const closed of ['done', 'cancelled'] as const) {
+      const input = request();
+      const staged = await stageReplacedFallback(ORG_A, input);
+      await admin.query(`update tasks set status = $2 where id = $1`, [
+        staged.replacementId,
+        closed,
+      ]);
+      const tasksBefore = await taskStates(staged.conversationId);
+      const replay = await withTenant(app, ORG_A, (client) =>
+        captureCallbackRequest(client, input),
+      );
+      expect(replay).toMatchObject({ taskId: staged.replacementId, replayed: true });
+      expect(await taskStates(staged.conversationId)).toStrictEqual(tasksBefore);
+    }
+  });
+
+  evidenceTest(
+    'an erased replacement leaves no task to name: no id, no write, the fallback stays cancelled',
+    async () => {
+      const input = request();
+      const staged = await stageReplacedFallback(ORG_A, input);
+      await admin.query('delete from tasks where id = $1', [staged.replacementId]);
+      const tasksBefore = await taskStates(staged.conversationId);
+      const before = await footprint(input.providerCallSid);
+
+      const replay = await withTenant(app, ORG_A, (client) =>
+        captureCallbackRequest(client, input),
+      );
+
+      expect(replay).toStrictEqual({
+        taskId: null,
+        conversationId: staged.conversationId,
+        replayed: true,
+      });
+      expect(await taskStates(staged.conversationId)).toStrictEqual(tasksBefore);
+      expect(tasksBefore.map((t) => t.status)).toStrictEqual(['cancelled']);
+      expect(await footprint(input.providerCallSid)).toStrictEqual(before);
+    },
+  );
+
+  evidenceTest('a live adopted fallback is named under its own key', async () => {
+    const input = request();
+    // Adopted while open: the capture wrote only the status and the outcome.
+    const adopted = await withTenant(app, ORG_A, async (client) => {
+      const ingested = await ingestCall(client, { providerCallSid: input.providerCallSid });
+      const conversationId = ingested.call.conversationId;
+      const fallback = await finaliseInteraction(client, conversationId);
+      await advanceCallStatus(client, ingested.call.id, 'completed');
+      await recordOutcome(client, conversationId, {
+        resultCode: 'callback_requested',
+        handledAutomatically: true,
+      });
+      return { conversationId, taskId: fallback.taskId };
+    });
+    const tasksBefore = await taskStates(adopted.conversationId);
+    const replay = await withTenant(app, ORG_A, (client) => captureCallbackRequest(client, input));
+    expect(replay).toMatchObject({ taskId: adopted.taskId, replayed: true });
+    expect(await taskStates(adopted.conversationId)).toStrictEqual(tasksBefore);
+  });
+
+  evidenceTest(
+    'an adopted fallback the owner later cancelled is not told apart from a replaced one: no id',
+    async () => {
+      const input = request();
+      const adopted = await withTenant(app, ORG_A, async (client) => {
+        const ingested = await ingestCall(client, { providerCallSid: input.providerCallSid });
+        const conversationId = ingested.call.conversationId;
+        const fallback = await finaliseInteraction(client, conversationId);
+        await advanceCallStatus(client, ingested.call.id, 'completed');
+        await recordOutcome(client, conversationId, {
+          resultCode: 'callback_requested',
+          handledAutomatically: true,
+        });
+        return { conversationId, taskId: fallback.taskId };
+      });
+      await admin.query(`update tasks set status = 'cancelled' where id = $1`, [adopted.taskId]);
+      const tasksBefore = await taskStates(adopted.conversationId);
+      const replay = await withTenant(app, ORG_A, (client) =>
+        captureCallbackRequest(client, input),
+      );
+      // The same stored state as a replaced fallback whose replacement was erased (above).
+      expect(replay).toStrictEqual({
+        taskId: null,
+        conversationId: adopted.conversationId,
+        replayed: true,
+      });
+      expect(await taskStates(adopted.conversationId)).toStrictEqual(tasksBefore);
+    },
+  );
+
+  evidenceTest('each tenant is told its own replacement and sees none of the other', async () => {
+    const inputA = request();
+    const inputB = request();
+    const stagedA = await stageReplacedFallback(ORG_A, inputA);
+    const stagedB = await stageReplacedFallback(ORG_B, inputB);
+    const replayA = await withTenant(app, ORG_A, (client) =>
+      captureCallbackRequest(client, inputA),
+    );
+    const replayB = await withTenant(app, ORG_B, (client) =>
+      captureCallbackRequest(client, inputB),
+    );
+    expect(replayA.taskId).toBe(stagedA.replacementId);
+    expect(replayB.taskId).toBe(stagedB.replacementId);
+    // Tenant A cannot read tenant B's replacement, by key or by id.
+    const seen = await withTenant(app, ORG_A, async (client) => {
+      const byKey = await client.query('select id from tasks where idempotency_key = $1', [
+        `callback:${stagedB.conversationId}`,
+      ]);
+      const byId = await client.query('select id from tasks where id = $1', [
+        stagedB.replacementId,
+      ]);
+      return byKey.rows.length + byId.rows.length;
+    });
+    expect(seen).toBe(0);
+  });
+});
+
 describe('callback_acceptances is a tenant table the runtime role only appends to', () => {
   evidenceTest('another tenant sees none of the rows and cannot write into this one', async () => {
     const input = request();
