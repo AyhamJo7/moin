@@ -52,7 +52,8 @@ request. The row is tenant-scoped, append-only for the runtime role, and unique 
   The task a replay names is the one that capture used, found by key and not by type (the
   finaliser's fallback is itself typed `callback`): the task keyed `callback:<conversation>` in any
   status (the capture's own task, or the untyped replacement for a cancelled fallback); otherwise
-  the live fallback under its own key (an adopted one); otherwise `taskId: null`. A cancelled
+  the non-cancelled (open, in progress, waiting or done) fallback under its own key (an adopted
+  one); otherwise `taskId: null`. A cancelled
   fallback with no keyed task is either a replaced fallback whose replacement was erased or an
   adopted one the owner cancelled later; the data cannot tell them apart, so no id is named.
 - **The same call with a different request** (dialled number or summary), or from a different

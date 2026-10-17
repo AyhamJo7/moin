@@ -39,17 +39,27 @@ type cannot tell the two apart:
 
 `packages/db/src/callback-intake.integration.test.ts`, describe "a pre-0077 replay names the task
 that capture used (J2)", 10 tests. The old capture's writes are staged by hand from `85ad367`
-(the old code cannot be run). Every replay case compares full task rows (status, version,
-timestamps) and the call footprint before and after:
+(the old code cannot be run). What each test asserts (`taskStates` reads eight task columns: id,
+status, type, title, version, created_at, updated_at, idempotency_key; `footprint` reads counts of
+calls, outcomes, acceptances and tasks, the caller number, task titles and versions, and the
+tenant's audit total; neither reads whole call or outcome rows or `call_events`):
 
-- cancelled typed fallback plus keyed replacement: the replacement is named;
-- the replacement completed or cancelled by the owner: still named;
-- the replacement erased: `taskId: null`, the fallback stays cancelled;
-- a live adopted fallback, and an adopted fallback the owner completed: named;
-- an adopted fallback the owner cancelled later: `taskId: null` (see limits);
-- the keyed replacement wins over a fallback that is live again;
-- an open finaliser repair task next to the replacement is not named;
-- another tenant's CallSid is not answered with this tenant's task; each tenant is told its own.
+| Test | Returned identity | Task snapshot unchanged | Footprint unchanged |
+| --- | --- | --- | --- |
+| cancelled typed fallback plus keyed replacement: the replacement is named | yes | yes | yes |
+| the replacement completed or cancelled by the owner: still named (both statuses) | yes | yes | no |
+| the replacement erased: `taskId: null`, the fallback stays cancelled | yes | yes | yes |
+| a live adopted fallback is named | yes | yes | no |
+| an adopted fallback the owner cancelled later: `taskId: null` (see limits) | yes | yes | no |
+| the keyed replacement wins over a fallback that is live again | yes | no | no |
+| an open finaliser repair task next to the replacement is not named | yes | yes | no |
+| an adopted fallback the owner completed is still named | yes | no | no |
+| another tenant's CallSid is not answered with this tenant's task | yes (not the other tenant's ids) | the other tenant's tasks only | no |
+| each tenant is told its own replacement; neither sees the other's rows | yes | no | no |
+
+The replay path's absence of writes rests on the code (the replay returns before any write; both
+lookups are `select`s) and on these snapshot and footprint comparisons, not on a comparison in
+every test.
 
 ## Standard mutation-check
 
@@ -96,3 +106,13 @@ Retained locally: `.git/claude-evidence/mutation/20261017T043608Z.json` and `.pa
   cancelled fallback is never named.
 - Pre-0077 data is staged by hand from the old code's writes, not produced by the old code.
 - Run locally only; the gate and mutation runs used one machine.
+
+## Independent review rounds
+
+- **J2-R1** (Codex, head `7f4a55f`): REQUEST_CHANGES. No runtime defect found. Blocking: this record
+  and the PR said every replay case compared full task rows and the call footprint; the table above
+  states what is actually asserted. The KILLED result itself was confirmed. Non-blocking: the
+  `CapturedCallback.taskId` comment said null only meant erased, and the slice document said "live
+  fallback" where the code accepts any non-cancelled fallback; both corrected (comment and
+  wording only). The comment change alters `callback-intake.ts` after the fix commit; behaviour is
+  unchanged and the mutation check was rerun (below).

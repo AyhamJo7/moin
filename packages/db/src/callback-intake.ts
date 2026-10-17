@@ -52,7 +52,10 @@ export interface CallbackRequest {
 }
 
 export interface CapturedCallback {
-  /** The task carrying the request; null only if it was erased after acceptance. */
+  /**
+   * The task carrying the request. Null when it was erased after acceptance, or, for a replay of a
+   * call captured before migration 0077, when the carrier cannot be told apart (see `legacyCarrier`).
+   */
   readonly taskId: string | null;
   readonly conversationId: string | null;
   /** True when this call's request had already been accepted: nothing was written. */
