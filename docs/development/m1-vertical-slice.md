@@ -97,7 +97,7 @@ machine (`completeTask`) in one tenant transaction as the signed-in member and a
 the tenant cannot see. `GET /api/tasks/:id` reads a task in any status. A completed task is no
 longer in `GET /api/today`; a replay of the original call returns the same task id and writes
 nothing. The same stale request repeated is a 409 by design; the card re-reads the page after any
-outcome that may have changed something. Evidence: EV-P13-015. Only Erledigt is delivered;
+outcome that may have changed something. Who may complete follows the PLAN matrix: owners and admins any task, staff only tasks assigned to themselves or unassigned (403 otherwise, nothing written), judged on the row-locked task. A lost or unreadable answer is read back through `GET /api/tasks/:id`; only a task that reads done is reported done, anything else is "not confirmed" and the page is re-read. The Today `version` field is required by a strict schema on both sides, so the API and the owner app must change together (no rolling deployment in either order). Evidence: EV-P13-015. Only Erledigt is delivered;
 Zuweisen, Später, Notiz, optimistic UI, idempotency keys and a completed-tasks view are open.
 
 ## Run it locally

@@ -1568,3 +1568,12 @@ Erledigt part of P13.03.02 exists. Nothing is VERIFIED.
 | --------- | ----------- | ------- | ---------- | ------------------------------------------------------------------------------------------------------------------ |
 | P13.03.02 | IN_PROGRESS | 5bda9f3 | EV-P13-015 | Erledigt only; Zuweisen, Später, Notiz, optimistic UI and idempotency keys open; 409 has no current representation |
 | P13.03.05 | IN_PROGRESS | 5bda9f3 | EV-P13-015 | Browser test covers Erledigt and its 409 only; no feedback control                                                 |
+
+### M2A remediation after the independent review of PR #233 (2026-10-17)
+
+F1: completion now enforces the PLAN row "Act on tasks" on the row-locked task and the member's
+committed standing (owner/admin any, staff own or unassigned, 403 and no write otherwise). F2: a
+lost answer is read back and reported as confirmed or "not confirmed", never as a failure. F3: the
+"deploy the API first" claim is withdrawn; the strict Today schema needs both sides together.
+Evidence: EV-P13-015 (remediation section). P13.03.02 and P13.03.05 stay IN_PROGRESS; nothing is
+VERIFIED.

@@ -899,7 +899,6 @@ describe('who may act on a task: owners and admins any, staff own or unassigned 
       // Committed after the guard resolved their scope: the staff member is disabled (the
       // membership trigger unassigns their task), the admin is demoted to staff.
       await admin.query(
-        // eslint-disable-next-line no-restricted-syntax -- fixture write on the migration role; the SET-session rule matches UPDATE ... SET verb text.
         "update memberships set status = 'disabled', version = version + 1 where user_id = $1",
         [staff.person.id],
       );
