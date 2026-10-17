@@ -18,7 +18,7 @@ import { useEffect, useRef, useState } from 'react';
 import { t } from '../lib/i18n.ts';
 import { completeMessage, completeTask, needsRefresh } from '../lib/complete-task.ts';
 
-const NOTICE_EVENT = 'moin:action-notice';
+const NOTICE_EVENT = 'action-notice';
 
 export function ActionNotice() {
   const [message, setMessage] = useState('');
