@@ -1,11 +1,11 @@
 ---
-mission: M1 corrective hotfix (callback replay and fallback data integrity)
+mission: J3 task and audit lock order (callback capture and orphan sweep)
 status: active
 mode: interactive
 phase: M1 (cross-phase slice: P07, P12, P13)
 tier: PILOT
 plan: docs/development/m1-vertical-slice.md
-next: independent review of the M1 hotfix draft PR, then the founder's decision; M2 not started
+next: independent review of the J3 draft PR; M2 not started
 updated: 2026-10-17
 ---
 
@@ -1533,3 +1533,15 @@ return the older task id) and J3 (task and audit lock order, not reproduced). No
 | Item      | Status      | Commit | Evidence   | Note                                                                                                |
 | --------- | ----------- | ------ | ---------- | --------------------------------------------------------------------------------------------------- |
 | P12.12.03 | IN_PROGRESS | see PR | EV-P12-011 | Standard mutation-check KILLED for F1 and F2; J2 and J3 recorded as open follow-ups, not fixed here |
+
+## J3: task and audit lock order (2026-10-17)
+
+The callback capture and the orphan sweep waited for task rows and conversation locks while holding
+the tenant's audit head; an owner task write takes them the other way round, so PostgreSQL could
+roll one side back (40P01). Both now take their locks first, in one order. Reproduced with forced
+interleavings, fixed with no retry and no migration. Evidence: EV-P12-013 (standard mutation-check
+KILLED for both fixes, QG-09 reviews, full gates). Nothing is VERIFIED.
+
+| Item      | Status      | Commit  | Evidence   | Note                                                                                                      |
+| --------- | ----------- | ------- | ---------- | --------------------------------------------------------------------------------------------------------- |
+| P12.12.03 | IN_PROGRESS | 8c65d87 | EV-P12-013 | Lock order for task rows and the audit head in the capture and the sweep; two-task transactions uncovered |
