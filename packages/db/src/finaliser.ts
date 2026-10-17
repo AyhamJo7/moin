@@ -39,10 +39,10 @@ const VERDICT_MARKER: Record<FinaliseVerdict, number> = {
   'fallback-created': 2,
 };
 
-const FALLBACK_TITLE = 'Rückruf – Anruf ohne Ergebnis';
+export const FALLBACK_TITLE = 'Rückruf – Anruf ohne Ergebnis';
 
 /** Title for the repair task when the deterministic fallback row is cancelled (terminal). */
-const REPAIR_TITLE = 'Erneuter Rückruf – vorherige Aufgabe geschlossen';
+export const REPAIR_TITLE = 'Erneuter Rückruf – vorherige Aufgabe geschlossen';
 
 /** Task rungs that cover an interaction (mirrors the open-task claim predicate). */
 const OPEN_TASK_STATUSES: ReadonlySet<string> = new Set(['open', 'in_progress', 'waiting']);

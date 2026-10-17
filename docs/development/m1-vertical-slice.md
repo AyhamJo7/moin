@@ -36,12 +36,46 @@ apps/web  /  (Heute, server-rendered)
   groupToday / sectionOf               Dringend · Rückrufe · Neue Anfragen · Termine · Kundenfragen
 ```
 
-A repeated CallSid answers `200 {"replayed": true}` with the first delivery's task and writes
-nothing, even if the owner has closed that task since. A call first recorded by another path
-gets its task on capture. If the finaliser's fallback task already covers it, that task carries
-the request and is made live again: a done task is reopened, and a cancelled one gets a
-replacement. The capture takes the finaliser's conversation lock, so the two never race. Logs
-carry outcome codes only: no numbers, CallSid or utterance (INV-12).
+Replay is decided by a durable acceptance record, not by the task (corrected 2026-10-17, see
+below). The capture writes one `callback_acceptances` row in the transaction that applies the
+request. The row is tenant-scoped, append-only for the runtime role, and unique per call.
+
+- **Replay check first.** It runs under the CallSid lock before anything is written. A replay
+  therefore writes nothing, even if the call or conversation has since been erased.
+- **The same call and request again** answers `200 {"replayed": true}` with the task that
+  carries the request. The task's status, version and title, the call, the outcome and the audit
+  trail stay as they are, whatever the owner has done with the task since. If the task was
+  erased, the answer is still a replay, with `taskId: null`.
+- **Calls captured before migration 0077** have no acceptance row. Their `callback_requested`
+  outcome stands in for one: the finaliser never writes outcomes, and every capture writes its
+  outcome together with its acceptance.
+- **The same call with a different request** (dialled number or summary), or from a different
+  number than the call records, is `409 /problems/callback-conflict` and writes nothing. A new
+  call is a new request, even from the same caller.
+- **A call first recorded by another path:**
+  - the calling number is write-once: filled if the call has none, kept if it is the same, and
+    `409` with nothing written if it differs, since guessing would hand the owner a wrong number;
+  - the finaliser's live fallback or repair task (recognised by its key, still bearing its fixed
+    title) carries the request, keeps its identity and status, and is retitled to the summary;
+  - a callback task that someone closed or retitled stays exactly as it is, and a new task
+    carries the summary, so neither the owner's work nor the request is lost. It has no row type
+    (the one-callback-task-per-interaction index), and Heute shows it as a callback because it
+    carries an accepted request.
+- **Locks.** The capture takes the CallSid lock, then the finaliser's conversation lock, then the
+  task row, so captures of one call and a concurrent finalise are serialised.
+- **The request hash** covers the dialled number and the summary, not the caller number: a hash
+  of a phone number is a reversible copy of it.
+
+Logs carry outcome codes only: no numbers, CallSid or utterance (INV-12).
+
+### Correction (2026-10-17)
+
+The merged slice (#229) decided replay by the task's own idempotency key. When it adopted a
+finaliser fallback, the fallback kept its key and no marker was written. A replay after the owner
+completed the task then reopened it, and reported a new delivery. Adopting an existing call also
+kept a missing caller number and the fallback's generic title. Both are corrected by the
+acceptance record, the write-once number and the adoption rule above. The regression tests for
+these cases fail against the merged code (EV-P12-011).
 
 Heute lists at most 100 live tasks, urgent first and then newest first. When more exist, the
 response says `truncated`, the page says so, and an empty section reads "In dieser Auswahl
@@ -140,3 +174,29 @@ here:
   numbers are not read: `number_routes` is readable through the DEFINER lookup only.
 - **No log line for the owner app's error state (LOW).** The owner app has no structured logger
   yet.
+- **Derived callback type on Heute only (MEDIUM, hotfix review).** A replacement carrier has no
+  row type. Heute shows it as a callback, but other task reads return `type: null`. The proper
+  fix is to limit `tasks_system_interaction_unique_idx` to live tasks, which loosens a constraint
+  and needs an ADR and founder approval.
+- **A retitled live task gets a second task beside it (policy, hotfix review).** One reviewer
+  preferred adopting the task and dropping the summary. The hotfix keeps both, so no callback
+  information is discarded. Only a direct database edit can retitle a task today.
+- **Acceptance rows outlive erasure (LOW, P16).** The SID, hash and time stay as a replay
+  tombstone, so an erased call cannot be resurrected by a retry. P16 must define their purge.
+- **The hash covers the derived summary (LOW).** If `interpretCall` changes between a delivery
+  and its retry, the retry gets a 409 instead of a replay.
+- **Pre-0077 calls have no tombstone (LOW).** A call captured before migration 0077 is
+  recognised by its call and outcome rows. If those are erased, a retry is a first delivery
+  again. Erasure (P16) is not built, and no deployed environment holds pre-0077 data (none
+  exists).
+- **Shared advisory-lock keyspace (LOW).** CallSid and conversation locks both use `hashtext`. A
+  collision can deadlock, which PostgreSQL detects (40P01) and rolls back.
+- **Historical cancelled-fallback replay returns the older task (LOW, open, J2).** For a pre-0077
+  call with a cancelled finaliser fallback and a later callback-specific task, the replay
+  picks the oldest match (`order by created_at limit 1`) and can return the fallback's id. Nothing
+  is written. Fix: prefer `type = 'callback'`; needs a pre-0077 fixture. Detail in EV-P12-011.
+- **Task and audit lock order (open, J3, not reproduced).** The independent review found that
+  capture may hold the audit-head lock before it waits for the task row, while an owner task write
+  may hold the task row before it waits for the audit head. PostgreSQL would roll one back
+  (40P01). Needs one lock order or a bounded retry, with a targeted concurrency test, before
+  owner task-write endpoints are exposed.

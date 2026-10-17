@@ -140,6 +140,11 @@ and **whether it is defensible at all is an open EXT-02 question**.
 | `interaction_outcomes.facts_schema_version`  | Contact  | no alone (schema version tag)                                 | same                                      | hard delete | —            |
 | `interaction_outcomes.facts`                 | Contact  | **yes, free JSONB** (validated payload about the interaction) | same                                      | hard delete | —            |
 | `interaction_outcomes.handled_automatically` | Contact  | no alone (boolean flag)                                       | same                                      | hard delete | —            |
+| `callback_acceptances.provider_call_sid`     | Contact  | yes in combination (which provider call reached whom)         | kept as replay tombstone; P16 to define   | hard delete | —            |
+| `callback_acceptances.conversation_id`       | Contact  | yes (references)                                              | same                                      | hard delete | —            |
+| `callback_acceptances.task_id`               | Contact  | yes (references)                                              | same                                      | hard delete | —            |
+| `callback_acceptances.request_hash`          | Contact  | yes (SHA-256 of dialled number + summary)                     | same                                      | hard delete | —            |
+| `callback_acceptances.accepted_at`           | Contact  | no alone (timestamp)                                          | same                                      | hard delete | —            |
 | `contact_merges.*`                           | Contact  | yes (references)                                              | 24 months after the merge                 | hard delete | —            |
 
 Anonymise rather than delete for the contact root: deleting it would orphan the tasks and leads that

@@ -14,7 +14,7 @@ import { Test } from '@nestjs/testing';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { createTestDatabase, evidenceTest, type TestDatabase } from '@moin/testing';
 import { fixedClock } from '@moin/kernel';
-import { finaliseInteraction, ingestCall, withTenant } from '@moin/db';
+import { completeTask, finaliseInteraction, ingestCall, setTaskStatus, withTenant } from '@moin/db';
 import { SIMULATED_CALL_PATH, TODAY_PATH, todayResponseSchema } from '@moin/contracts';
 import { afterAll, beforeAll, describe, expect } from 'vitest';
 import { ConfigModule } from '../../config/config.module.ts';
@@ -201,6 +201,75 @@ async function today(cookie: string | null, on: NestFastifyApplication = app) {
   });
 }
 
+/** A call recorded by another path first (no number unless given) and its finaliser fallback. */
+async function callWithFallback(
+  callSid: string,
+  fromNumber?: string,
+): Promise<{ conversationId: string; fallback: string }> {
+  return withTenant(database.pool(), restaurant, async (client) => {
+    const ingested = await ingestCall(client, {
+      providerCallSid: callSid,
+      ...(fromNumber === undefined ? {} : { fromNumber }),
+    });
+    const finalised = await finaliseInteraction(client, ingested.call.conversationId);
+    if (finalised.taskId === null) throw new Error('finaliser created no fallback');
+    return { conversationId: ingested.call.conversationId, fallback: finalised.taskId };
+  });
+}
+
+/** The owner closes a task through the task service (audited, versioned), as the app will. */
+async function closeTask(taskId: string, to: 'done' | 'cancelled'): Promise<void> {
+  await withTenant(database.pool(), restaurant, async (client) => {
+    const row = await client.query<{ version: number }>('select version from tasks where id = $1', [
+      taskId,
+    ]);
+    const version = row.rows[0]?.version ?? 0;
+    if (to === 'done') await completeTask(client, taskId, version);
+    else await setTaskStatus(client, taskId, 'cancelled', version);
+  });
+}
+
+async function taskRow(taskId: string) {
+  const row = await admin.query<{
+    id: string;
+    title: string;
+    type: string | null;
+    status: string;
+    version: number;
+    updated_at: Date;
+    conversation_id: string;
+  }>(
+    'select id, title, type, status, version, updated_at, conversation_id from tasks where id = $1',
+    [taskId],
+  );
+  const found = row.rows[0];
+  if (found === undefined) throw new Error('no such task');
+  return found;
+}
+
+/** Everything a replay must leave alone: the task, its call, outcome, acceptance and audit rows. */
+async function snapshot(taskId: string) {
+  const task = await taskRow(taskId);
+  const rest = await admin.query<Record<string, unknown>>(
+    `select c.from_number, c.status as call_status, c.version as call_version,
+            c.updated_at as call_updated_at,
+            (select count(*)::int from call_events e where e.call_id = c.id) as call_events,
+            (select count(*)::int from interaction_outcomes o
+               where o.conversation_id = c.conversation_id) as outcomes,
+            (select count(*)::int from callback_acceptances a
+               where a.conversation_id = c.conversation_id) as acceptances,
+            (select count(*)::int from tasks t
+               where t.conversation_id = c.conversation_id) as tasks
+     from calls c where c.conversation_id = $1`,
+    [task.conversation_id],
+  );
+  const audit = await admin.query<{ n: number }>(
+    'select count(*)::int as n from audit_events where organisation_id = $1',
+    [restaurant],
+  );
+  return { task, call: rest.rows[0], audit: audit.rows[0]?.n };
+}
+
 async function taskCount(): Promise<number> {
   const result = await admin.query<{ n: number }>('select count(*)::int as n from tasks');
   return result.rows[0]?.n ?? -1;
@@ -229,7 +298,8 @@ afterAll(async () => {
 
 describe('simulated callback call → persisted task (M1)', () => {
   evidenceTest('creates one tenant-owned callback task with its call and outcome', async () => {
-    const response = await simulate(call());
+    const body = call();
+    const response = await simulate(body);
     expect(response.statusCode).toBe(201);
     expect(response.headers['cache-control']).toBe('no-store');
     const { taskId, replayed } = response.json<{ taskId: string; replayed: boolean }>();
@@ -253,7 +323,7 @@ describe('simulated callback call → persisted task (M1)', () => {
     expect(row?.['created_at']).toBeInstanceOf(Date);
     expect(row?.['updated_at']).toBeInstanceOf(Date);
     const conversationId = String(row?.['conversation_id']);
-    expect(row?.['idempotency_key']).toBe(`callback:${conversationId}`);
+    expect(row?.['idempotency_key']).toBe(`callback-request:${conversationId}`);
 
     const linked = await admin.query<Record<string, unknown>>(
       `select c.organisation_id, c.status, c.from_number, c.to_number, o.result_code,
@@ -513,7 +583,7 @@ describe('calls recorded by another path first (M1)', () => {
       `select id, idempotency_key as key from tasks where conversation_id = $1`,
       [conversationId],
     );
-    expect(rows.rows).toStrictEqual([{ id: taskId, key: `callback:${conversationId}` }]);
+    expect(rows.rows).toStrictEqual([{ id: taskId, key: `callback-request:${conversationId}` }]);
     // And the next delivery is a replay of exactly that task.
     expect((await simulate(body)).json()).toStrictEqual({ taskId, replayed: true });
   });
@@ -542,41 +612,212 @@ describe('calls recorded by another path first (M1)', () => {
   });
 });
 
-describe('a closed fallback never absorbs a callback (M1)', () => {
+describe('a closed fallback never absorbs a callback (M1 hotfix)', () => {
   for (const closed of ['done', 'cancelled'] as const) {
-    evidenceTest(`a ${closed} finaliser fallback leaves the request visible on Today`, async () => {
+    evidenceTest(
+      `a ${closed} fallback stays ${closed}; a new task carries the request`,
+      async () => {
+        const body = call();
+        const { conversationId, fallback } = await callWithFallback(String(body['callSid']));
+        await closeTask(fallback, closed);
+        const before = await snapshot(fallback);
+
+        const response = await simulate(body);
+        expect(response.statusCode).toBe(201);
+        const { taskId } = response.json<{ taskId: string }>();
+        expect(taskId).not.toBe(fallback);
+        // The owner's closed task is exactly as they left it (the call gains its outcome).
+        expect((await snapshot(fallback)).task).toStrictEqual(before.task);
+        const carrier = await taskRow(taskId);
+        expect(carrier).toMatchObject({ status: 'open', title: 'Rückruf: Tischreservierung' });
+        const view = todayResponseSchema.parse((await today(await signIn(restaurantOwner))).json());
+        expect(view.tasks.find((t) => t.id === taskId)).toMatchObject({
+          type: 'callback',
+          callerNumber: CALLER,
+        });
+        expect((await simulate(body)).json()).toStrictEqual({ taskId, replayed: true });
+        const outcomes = await admin.query<{ n: number }>(
+          'select count(*)::int as n from interaction_outcomes where conversation_id = $1',
+          [conversationId],
+        );
+        expect(outcomes.rows[0]?.n).toBe(1);
+      },
+    );
+  }
+});
+
+describe('F1: replaying an accepted callback never changes business state (M1 hotfix)', () => {
+  for (const ownerAction of ['done', 'cancelled'] as const) {
+    evidenceTest(
+      `adopted fallback, owner sets ${ownerAction}, identical replay leaves it ${ownerAction}`,
+      async () => {
+        const body = call();
+        const { fallback } = await callWithFallback(String(body['callSid']));
+        const first = await simulate(body);
+        expect(first.statusCode).toBe(201);
+        expect(first.json()).toStrictEqual({ taskId: fallback, replayed: false });
+        await closeTask(fallback, ownerAction);
+        const before = await snapshot(fallback);
+
+        const replay = await simulate(body);
+        expect(replay.statusCode).toBe(200);
+        expect(replay.json()).toStrictEqual({ taskId: fallback, replayed: true });
+        // Identity, status, version, timestamps, call, outcome, acceptance and audit: unchanged.
+        expect(await snapshot(fallback)).toStrictEqual(before);
+        expect(before.task.status).toBe(ownerAction);
+      },
+    );
+  }
+
+  evidenceTest(
+    'a task created by the capture and completed stays completed on replay',
+    async () => {
       const body = call();
-      const { conversationId, fallback } = await withTenant(
-        database.pool(),
-        restaurant,
-        async (client) => {
-          const ingested = await ingestCall(client, { providerCallSid: String(body['callSid']) });
-          const finalised = await finaliseInteraction(client, ingested.call.conversationId);
-          return { conversationId: ingested.call.conversationId, fallback: finalised.taskId };
-        },
+      const { taskId } = (await simulate(body)).json<{ taskId: string }>();
+      await closeTask(taskId, 'done');
+      const before = await snapshot(taskId);
+      expect((await simulate(body)).json()).toStrictEqual({ taskId, replayed: true });
+      expect(await snapshot(taskId)).toStrictEqual(before);
+    },
+  );
+
+  evidenceTest(
+    'six concurrent deliveries on an existing call converge on one acceptance',
+    async () => {
+      const body = call();
+      const { conversationId, fallback } = await callWithFallback(String(body['callSid']));
+      const responses = await Promise.all(Array.from({ length: 6 }, () => simulate(body)));
+      expect(responses.map((r) => r.statusCode).sort()).toStrictEqual([
+        200, 200, 200, 200, 200, 201,
+      ]);
+      for (const r of responses) expect(r.json<{ taskId: string }>().taskId).toBe(fallback);
+      const counts = await admin.query<{ acceptances: number; tasks: number; retitles: number }>(
+        `select (select count(*)::int from callback_acceptances where conversation_id = $1) as acceptances,
+              (select count(*)::int from tasks where conversation_id = $1) as tasks,
+              (select count(*)::int from audit_events
+                 where target_id = $2 and operation = 'task.retitle') as retitles`,
+        [conversationId, fallback],
       );
-      await admin.query('update tasks set status = $2 where id = $1', [fallback, closed]);
+      expect(counts.rows[0]).toStrictEqual({ acceptances: 1, tasks: 1, retitles: 1 });
+    },
+  );
+
+  evidenceTest(
+    'the finaliser after acceptance changes nothing, and replay still holds',
+    async () => {
+      const body = call();
+      const { taskId } = (await simulate(body)).json<{ taskId: string }>();
+      const conversationId = (await taskRow(taskId)).conversation_id;
+      const before = await snapshot(taskId);
+      const verdict = await withTenant(database.pool(), restaurant, (client) =>
+        finaliseInteraction(client, conversationId),
+      );
+      expect(verdict.verdict).toBe('outcome-existed');
+      const tasks = await admin.query<{ n: number }>(
+        'select count(*)::int as n from tasks where conversation_id = $1',
+        [conversationId],
+      );
+      expect(tasks.rows[0]?.n).toBe(1);
+      expect((await simulate(body)).json()).toStrictEqual({ taskId, replayed: true });
+      const after = await snapshot(taskId);
+      // Only the finaliser's own audit row is new; the task, call and acceptance are unchanged.
+      expect({ ...after, audit: before.audit }).toStrictEqual(before);
+    },
+  );
+
+  evidenceTest(
+    'a distinct later request is not suppressed; a changed request is a conflict',
+    async () => {
+      const first = call();
+      const { taskId } = (await simulate(first)).json<{ taskId: string }>();
+      await closeTask(taskId, 'done');
+      // A new call from the same caller is a new request: a new open task, the old one untouched.
+      const later = await simulate(call({ utterance: 'Bitte um Rückruf wegen der Rechnung' }));
+      expect(later.statusCode).toBe(201);
+      const laterId = later.json<{ taskId: string }>().taskId;
+      expect(laterId).not.toBe(taskId);
+      expect((await taskRow(laterId)).status).toBe('open');
+      expect((await taskRow(taskId)).status).toBe('done');
+      // The same call with a different request is refused and writes nothing.
+      const before = await snapshot(taskId);
+      const changed = await simulate({ ...first, utterance: 'Rückruf wegen einer Beschwerde' });
+      expect(changed.statusCode).toBe(409);
+      expect(changed.json()).toMatchObject({ type: '/problems/callback-conflict' });
+      expect(await snapshot(taskId)).toStrictEqual(before);
+    },
+  );
+});
+
+describe('F2: an accepted callback keeps what the owner needs to call back (M1 hotfix)', () => {
+  evidenceTest(
+    'existing call without a number: number stored, fallback retitled, Today shows both',
+    async () => {
+      // A number no other test uses, so "the other tenant never sees it" is a real assertion.
+      const caller = '+4915133334444';
+      const body = call({ from: caller });
+      const { conversationId, fallback } = await callWithFallback(String(body['callSid']));
+      const response = await simulate(body);
+      expect(response.json()).toStrictEqual({ taskId: fallback, replayed: false });
+      const callRow = await admin.query<{ from_number: string | null }>(
+        'select from_number from calls where conversation_id = $1',
+        [conversationId],
+      );
+      expect(callRow.rows[0]?.from_number).toBe(caller);
+      expect(await taskRow(fallback)).toMatchObject({
+        title: 'Rückruf: Tischreservierung',
+        type: 'callback',
+        status: 'open',
+      });
+      const view = todayResponseSchema.parse((await today(await signIn(restaurantOwner))).json());
+      expect(view.tasks.find((t) => t.id === fallback)).toMatchObject({
+        title: 'Rückruf: Tischreservierung',
+        callerNumber: caller,
+        type: 'callback',
+      });
+      const other = todayResponseSchema.parse((await today(await signIn(otherOwner))).json());
+      expect(other.tasks.map((t) => t.id)).not.toContain(fallback);
+      expect(JSON.stringify(other)).not.toContain(caller);
+    },
+  );
+
+  evidenceTest('a different recorded number is a conflict: 409, nothing written', async () => {
+    const body = call();
+    const recorded = '+4917700000001';
+    const { conversationId, fallback } = await callWithFallback(String(body['callSid']), recorded);
+    const before = await snapshot(fallback);
+    const response = await simulate(body);
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({ type: '/problems/callback-conflict' });
+    expect(await snapshot(fallback)).toStrictEqual(before);
+    const callRow = await admin.query<{ from_number: string }>(
+      'select from_number from calls where conversation_id = $1',
+      [conversationId],
+    );
+    expect(callRow.rows[0]?.from_number).toBe(recorded);
+  });
+
+  evidenceTest(
+    'the same recorded number is accepted; a retitled task is kept and the summary still lands',
+    async () => {
+      const body = call();
+      const { fallback } = await callWithFallback(String(body['callSid']), CALLER);
+      await admin.query(`update tasks set title = 'Frau Weber zurückrufen' where id = $1`, [
+        fallback,
+      ]);
+      const before = (await snapshot(fallback)).task;
       const response = await simulate(body);
       expect(response.statusCode).toBe(201);
       const { taskId } = response.json<{ taskId: string }>();
-      if (closed === 'done') expect(taskId).toBe(fallback);
-      else expect(taskId).not.toBe(fallback);
-      const live = await admin.query<{ status: string }>('select status from tasks where id = $1', [
-        taskId,
-      ]);
-      expect(live.rows[0]?.status).toBe('open');
-      const view = todayResponseSchema.parse((await today(await signIn(restaurantOwner))).json());
-      expect(view.tasks.map((t) => t.id)).toContain(taskId);
-      // A second delivery is a replay of the task that carries the request.
-      const again = await simulate(body);
-      if (closed === 'cancelled') expect(again.json()).toStrictEqual({ taskId, replayed: true });
-      const outcomes = await admin.query<{ n: number }>(
-        'select count(*)::int as n from interaction_outcomes where conversation_id = $1',
-        [conversationId],
-      );
-      expect(outcomes.rows[0]?.n).toBe(1);
-    });
-  }
+      // The chosen title is never overwritten, and the request's summary is not discarded:
+      // a second task carries it.
+      expect(taskId).not.toBe(fallback);
+      expect((await snapshot(fallback)).task).toStrictEqual(before);
+      expect(await taskRow(taskId)).toMatchObject({
+        title: 'Rückruf: Tischreservierung',
+        status: 'open',
+      });
+    },
+  );
 });
 
 describe('Today never hides urgent work behind a long list (M1)', () => {

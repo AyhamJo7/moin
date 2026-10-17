@@ -12,8 +12,11 @@
  *      ambiguous numbers create nothing in any tenant (fail closed, P11.01);
  *   4. the calling number must be a usable callback number (`classifyCallerId` = present),
  *      else 422: withheld, the business's own and suspicious numbers need the read-back flow;
- *   5. the request must be a callback request, else 422.
- * A repeated CallSid answers 200 with the first delivery's task and writes nothing (INV-11).
+ *   5. the request must be a callback request, else 422;
+ *   6. inside the capture transaction: the same call with a different request, or from a
+ *      different calling number than the call records, is 409 and is rolled back.
+ * A repeated delivery of an accepted request answers 200 with its task and writes nothing,
+ * whatever has happened to the task since (INV-11; `callback_acceptances`).
  *
  * INV-12: logs carry outcome codes only — never the numbers, the CallSid or the utterance.
  */
@@ -25,6 +28,7 @@ import {
   simulatedCallSchema,
   type SimulatedCallResult,
 } from '@moin/contracts';
+import { CallbackConflictError, type CapturedCallback } from '@moin/db';
 import type { Logger } from '@moin/observability';
 import { LOGGER } from '../../../observability/logger.module.ts';
 import type { RouteResolver } from '../../platform/route-resolver.ts';
@@ -85,12 +89,25 @@ export class CallSimulatorController {
     if (interpretation.kind === 'unsupported') {
       return fail(reply, 422, '/problems/unsupported-request', 'Request is not supported');
     }
-    const captured = await this.work.captureCallback(route.organisationId, {
-      providerCallSid: call.callSid,
-      fromNumber: call.from.trim(),
-      toNumber: call.to,
-      title: interpretation.title,
-    });
+    let captured: CapturedCallback;
+    try {
+      captured = await this.work.captureCallback(route.organisationId, {
+        providerCallSid: call.callSid,
+        fromNumber: call.from.trim(),
+        toNumber: call.to,
+        title: interpretation.title,
+      });
+    } catch (error) {
+      // The request cannot be applied without discarding what is recorded; nothing was written.
+      if (error instanceof CallbackConflictError) {
+        this.logger.info(
+          { route: '/api/dev/simulated-calls', outcome: `conflict-${error.reason}` },
+          'refused a simulated call that conflicts with the recorded call',
+        );
+        return fail(reply, 409, '/problems/callback-conflict', 'Conflicts with the recorded call');
+      }
+      throw error;
+    }
     if (captured.replayed) void reply.code(200);
     this.logger.info(
       {

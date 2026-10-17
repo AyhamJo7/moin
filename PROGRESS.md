@@ -1,11 +1,11 @@
 ---
-mission: M1 vertical slice (simulated callback call → tenant callback task → owner's Heute)
+mission: M1 corrective hotfix (callback replay and fallback data integrity)
 status: active
 mode: interactive
 phase: M1 (cross-phase slice: P07, P12, P13)
 tier: PILOT
 plan: docs/development/m1-vertical-slice.md
-next: independent review of the M1 draft PR, then the founder's decision; M2 not started
+next: independent review of the M1 hotfix draft PR, then the founder's decision; M2 not started
 updated: 2026-10-17
 ---
 
@@ -1500,3 +1500,36 @@ diff. Fixed with tests:
 Open, none HIGH, listed in the slice doc: the guards crossing into the identity module
 (architecture M1), one CallSid sent to two tenants (LOW), the always-mounted simulator module,
 and the call handling living in the controller.
+
+## M1 corrective hotfix (2026-10-17)
+
+An independent review of the merged slice (#229, `85ad367`) found two defects:
+
+- replaying a callback whose task adopted a finaliser fallback reopened the owner's completed
+  work;
+- adopting an existing call dropped the caller number and kept the fallback's generic title,
+  while reporting success.
+
+Migration 0077 adds `callback_acceptances`, the durable, tenant-scoped replay marker written with
+the business changes. The capture's replay check now runs before any write. The rows below
+correct the M1 rows above where they say more than was true. Evidence: EV-P12-011. Nothing is
+VERIFIED.
+
+| Item      | Status      | Commit  | Evidence   | Note                                                                                                                                                                                               |
+| --------- | ----------- | ------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P12.12.03 | IN_PROGRESS | 4b8c5b7 | EV-P12-011 | Corrects the M1 row: duplicate end events were idempotent only when the capture created its own task. Now replay is decided by the acceptance and changes nothing; only the callback intent exists |
+| P12.12.01 | IN_PROGRESS | 4b8c5b7 | EV-P12-011 | Corrects the M1 row: on an existing call the caller number is now persisted (write-once, 409 on conflict) and the request summary lands on the carrying task. Still no contact resolution or SSE   |
+| P12.09.01 | IN_PROGRESS | 4b8c5b7 | EV-P12-011 | The summary is no longer lost when a finaliser fallback is adopted. Still simulator path only                                                                                                      |
+
+## M1 hotfix: mutation-check evidence (2026-10-17)
+
+The independent review of the hotfix (J1) found the standard mutation-check record missing and
+the custom mutation evidence overstated. `mutation_check.py` now reports KILLED for the F1 and F2
+regression selectors (fix commit `4b8c5b7`, fix paths restored byte-identical). EV-P12-011 is
+corrected: the earlier 11-mutant list is kept as supplementary, with two mislabelled mutants
+named. Two non-blocking review findings stay open: J2 (historical cancelled-fallback replay may
+return the older task id) and J3 (task and audit lock order, not reproduced). Nothing is VERIFIED.
+
+| Item      | Status      | Commit | Evidence   | Note                                                                                                |
+| --------- | ----------- | ------ | ---------- | --------------------------------------------------------------------------------------------------- |
+| P12.12.03 | IN_PROGRESS | see PR | EV-P12-011 | Standard mutation-check KILLED for F1 and F2; J2 and J3 recorded as open follow-ups, not fixed here |

@@ -238,6 +238,36 @@ export async function setTaskStatus(
   return toTask(row);
 }
 
+/**
+ * Replace a system-written title (a finaliser fallback's fixed copy) with a specific one. Guarded
+ * on the exact old title and the version, so a title anyone has changed since is never
+ * overwritten: returns false and changes nothing. Status, assignee and identity are untouched.
+ */
+export async function retitleSystemTask(
+  client: TenantClient,
+  taskId: string,
+  systemTitle: string,
+  title: string,
+  version: number,
+): Promise<boolean> {
+  const next = checkTitle(title);
+  const moved = await client.query<{ id: string }>(
+    `update tasks set title = $3, updated_at = clock_timestamp(), version = version + 1
+     where id = $1 and title = $2 and version = $4
+     returning id`,
+    [taskId, systemTitle, next, version],
+  );
+  if (moved.rows[0] === undefined) return false;
+  await appendAuditEvent(client, {
+    source: 'api',
+    operation: 'task.retitle',
+    targetKind: 'task',
+    targetId: taskId,
+    result: 'succeeded',
+  });
+  return true;
+}
+
 /** Reopen a done task: done → open, the only backward move the machine allows. */
 export async function reopenTask(
   client: TenantClient,
@@ -362,7 +392,12 @@ export async function listTodayTasks(
     created_at: Date;
     caller_number: string | null;
   }>(
-    `select t.id, t.title, t.status, t.type, t.priority, t.created_at,
+    // A task that carries an accepted callback request is a callback, whatever its row type: the
+    // replacement for an owner-closed callback task has none (see callback-intake.ts).
+    `select t.id, t.title, t.status,
+       coalesce(t.type, case when exists (
+         select 1 from callback_acceptances a where a.task_id = t.id) then 'callback' end) as type,
+       t.priority, t.created_at,
        (select case when c.from_number ~ '^\\+[1-9][0-9]{6,14}$' then c.from_number end
           from calls c where c.conversation_id = t.conversation_id
           order by c.created_at limit 1) as caller_number
