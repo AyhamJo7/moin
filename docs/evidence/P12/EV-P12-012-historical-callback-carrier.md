@@ -55,7 +55,7 @@ tenant's audit total; neither reads whole call or outcome rows or `call_events`)
 | an open finaliser repair task next to the replacement is not named | yes | yes | no |
 | an adopted fallback the owner completed is still named | yes | no | no |
 | another tenant's CallSid is not answered with this tenant's task | yes (not the other tenant's ids) | the other tenant's tasks only | no |
-| each tenant is told its own replacement; neither sees the other's rows | yes | no | no |
+| each tenant is told its own replacement; tenant A cannot read tenant B's replacement by key or id (one direction only) | yes | no | no |
 
 The replay path's absence of writes rests on the code (the replay returns before any write; both
 lookups are `select`s) and on these snapshot and footprint comparisons, not on a comparison in
@@ -122,3 +122,8 @@ Retained locally: `.git/claude-evidence/mutation/20261017T043608Z.json` and `.pa
   fallback" where the code accepts any non-cancelled fallback; both corrected (comment and
   wording only). The comment change alters `callback-intake.ts` after the fix commit; behaviour is
   unchanged and the mutation check was rerun (below).
+- **J2-R2** (Codex, head `ae550dc`): REQUEST_CHANGES. No runtime defect; the round-1 findings were
+  confirmed resolved apart from two wording points: the last table row said "neither sees the
+  other's rows" although the test queries only as tenant A, and the PR summary counted seven
+  replay snapshot comparisons where six are around a replay and the seventh is a first delivery
+  that checks the other tenant's tasks. Both narrowed; no code or test change.
