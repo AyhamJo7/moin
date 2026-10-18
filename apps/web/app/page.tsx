@@ -16,8 +16,6 @@ import { cookies } from 'next/headers';
 import { SESSION_COOKIE_NAME, type TodayTask } from '@moin/contracts';
 import { t } from '../lib/i18n.ts';
 import { ActionNotice, CompleteAction } from './complete-action.tsx';
-import { LiveToday } from './live-today.tsx';
-import { fingerprintOf } from '../lib/live-today.ts';
 import { emptyLine, groupToday } from '../lib/today.ts';
 import {
   LOGIN_PATH,
@@ -87,11 +85,6 @@ export default async function TodayPage() {
           <a href="/">{t('today.reload')}</a>
         </>
       ) : null}
-      {load.state === 'signed-out' ? null : (
-        <LiveToday
-          fingerprint={load.state === 'ready' ? fingerprintOf(load.tasks, load.truncated) : null}
-        />
-      )}
       {grouped === null ? null : (
         <>
           <a href="/">{t('today.refresh')}</a>
