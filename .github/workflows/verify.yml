@@ -228,7 +228,7 @@ jobs:
   e2e-slice:
     name: full-stack browser acceptance (postgres, keycloak)
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 20
     services:
       # Real PostgreSQL, matching the local stack. An embedded substitute runs as superuser and
       # silently bypasses row-level security, so isolation tests against one would pass while
@@ -312,6 +312,8 @@ jobs:
       # every required test ran and passed.
       - name: Check the acceptance report
         if: always()
+        # `bash` with pipefail: the checker's exit code must survive the pipe into `tee`.
+        shell: bash
         run: |
           touch test-results/live-today-timings.jsonl
           node scripts/check-slice-report.ts test-results/slice-report.json test-results/live-today-timings.jsonl | tee -a "$GITHUB_STEP_SUMMARY"

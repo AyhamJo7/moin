@@ -13,8 +13,15 @@
 
 import { readFileSync } from 'node:fs';
 
-/** Each entry is a phrase one required acceptance test's title contains. */
+/**
+ * Each entry is a phrase one required acceptance test's title contains: every test of the suite.
+ * Adding a test to the suite means adding its phrase here, so none can vanish unnoticed.
+ */
 export const REQUIRED_TITLES: readonly string[] = [
+  'a stale view gets a truthful conflict message',
+  'a response lost after the commit is reconciled',
+  'a lost response that cannot be read back',
+  'a request that never reached the server',
   'reaches the owner on Heute and stays there',
   'completes a callback with Erledigt and it stays completed',
   'appears by itself, once, without a reload',

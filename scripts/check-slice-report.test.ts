@@ -26,7 +26,7 @@ describe('the vertical-slice report check', () => {
   });
 
   it('rejects a missing required test even when everything that ran passed', () => {
-    const found = problems(report(ALL.slice(1), { expected: 10 }));
+    const found = problems(report(ALL.slice(1), { expected: ALL.length - 1 }));
     expect(found).toContain(`required test missing: "${REQUIRED_TITLES[0] ?? ''}"`);
   });
 
