@@ -63,14 +63,16 @@ the owner. Cross-tenant API behaviour stays in the integration suite.
 Job `full-stack browser acceptance (postgres, keycloak)`: success, 4 m 58 s. Playwright: `10 passed
 (3.3m)`, project `chromium`, file `e2e/vertical-slice/today-callback.spec.ts`, tests 1–10 listed in
 the log. Report check: `10 passed, 0 failed, 0 skipped`. Artifact `e2e-slice` (117 KB, 14 days)
-holds the JSON report, timings and process log. Commit-to-render (task row `created_at` to visible
-card, one shared runner clock):
+holds the JSON report, timings and process log. The three latencies have different origins and
+are not interchangeable:
 
-| Scenario | CI | Local (M2B) |
-| --- | --- | --- |
-| New callback on an already-open Heute | 15.93 s | 14.97 s |
-| Completion reaching another session | 15.86 s | 15.36 s |
-| Network returns | 0.09 s | 0.09 s |
+| Scenario | CI | Local (M2B) | Measured from, to |
+| --- | --- | --- | --- |
+| Callback arrival on an already-open Heute | 15.93 s | 14.97 s | the task row's `created_at` to the card visible. `created_at` is stamped at transaction start, so this is a conservative approximation of commit-to-render. This is the P13.02.04 healthy-tab arrival measurement. |
+| Completion propagation | 15.86 s | 15.36 s | the first session's UI confirmation of Erledigt to the second session's updated list. Not a database commit time. |
+| Network recovery | 0.09 s | 0.09 s | connectivity restored in the browser to the updated card visible. Not a database commit time. |
+
+Single runs on one shared clock; the P13.02.04 claim rests only on the first row.
 
 The same job is green on `8b99976` (run 39091402625) after the revert described next.
 
@@ -105,3 +107,54 @@ WebKit or phone viewports. Deployment compatibility stays a separate gate; the M
 (the strict Today schema needs the API and the owner app deployed together). One unit-test gate
 failed once during this mission and did not reproduce in two further full-gate runs and a
 standalone run; its cause is UNVERIFIED.
+
+## Independent review of PR #238 and remediation
+
+**Finding F1 (blocking, independent Codex review of `c90f163`).** The report check accepted a
+required test that actually failed. Playwright counts a `test.fail()` test that fails as
+`expected`, marks its spec `ok: true` and exits 0, and the first checker read exactly those
+indicators. Root cause: it trusted Playwright's classification (`stats.expected`, `spec.ok`)
+instead of what each test did. It also accepted a report whose `stats` was replaced by an empty
+object, because it read missing counters as zero.
+
+**Reproduced.** Against a genuine Playwright report of a ten-test suite with the acceptance
+suite's file, project and titles in which one test calls `test.fail()`
+(`scripts/__fixtures__/slice-report/control-test-fail.json`), the old checker printed
+"10 passed, 0 failed, 0 skipped" and exited 0; the fixed checker exits 1.
+
+**Fix.** `scripts/check-slice-report.ts` now validates the untrusted JSON before reading it and
+accepts a run only if: `stats` holds four non-negative integers, `errors` is an empty array, the
+only project is `chromium`; each of the ten exact titles occurs exactly once, in `chromium` and in
+`today-callback.spec.ts`, and nothing else occurs; every test has `expectedStatus` "passed", outcome
+"expected", `spec.ok` true, none of the `fail`, `skip` or `fixme` annotations, exactly one result
+that is `passed` on retry 0 with no errors; and the reported totals equal the totals counted from
+the records. Any failure to read or parse the report is a rejection (exit 1, "REJECTED" in the job
+summary, never "10 passed"). The workflow is unchanged: the step already runs under
+`shell: bash` (pipefail), and `verify` still needs `e2e-slice`.
+
+**Tests.** `scripts/check-slice-report.test.ts`, 29 tests, using the real CI report and five
+genuine Playwright control reports (provenance in the fixtures README). Matrix: accept the real CI
+report and a genuine all-pass report; reject genuine `test.fail()`, skip, flaky-after-retry and
+timeout reports; reject unexpected failure, interrupted, statistics-claim-success-but-record-failed,
+empty/missing/nonnumeric/fractional/negative statistics, statistics disagreeing with records,
+missing, replaced, duplicated, extra, wrong-project and wrong-file tests, missing or invalid result
+records, a passed result that recorded errors, a retry hiding an earlier failure, global errors,
+and missing or malformed structure; and run the command itself: exit 0 for the real report, exit 1
+with REJECTED for the `test.fail()` report and for an empty, malformed or missing file, and exit 1
+through `| tee` under `bash -e -o pipefail` (exit 0 without pipefail, the reason the step sets it).
+Targeted mutants of the checker that each remove one guard (expected status, result status, the
+annotation list, the single-attempt rule, the statistics cross-check, the project check, global
+errors, per-result errors) are each killed by the suite (manual mutants; the repository's
+mutation-check tool needs a committed fix and the rewritten module would have failed on missing
+exports alone, which would not show sensitivity). One guard that no mutant could reach (a total
+count already implied by the identity and outcome checks) was deleted instead of kept untested.
+
+**Finding F3 (nonblocking, fixed).** The latency table now states each measurement's origin, above.
+
+**Finding F2 (nonblocking, inherited, NOT fixed here).** The independent review reports that
+`packages/telephony/src/signature/validate.test.ts` ("rejects a tampered signature") replaces the
+first signature character with `A`, so a signature that already begins with `A` is unchanged and
+the test expects a failure that cannot happen (about 1 in 64 for a random Base64 signature).
+The test code does replace the first character with `A` (line 80); I did not reproduce the
+failure rate. Unrelated to this checker. Follow-up: a separate narrow PR should replace the first
+character with a value guaranteed to differ. Not changed in this PR.

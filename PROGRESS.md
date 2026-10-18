@@ -1587,3 +1587,9 @@ M2C (2026-10-18, branch `ci/p02-05-fullstack-browser-acceptance` from cbef5f5): 
 `e2e-slice` runs the vertical-slice browser suite on real PostgreSQL and Keycloak (10 of 10, 15.9 s
 arrival, run 39090443360); removing the live wiring fails it (run 39090964507). P13.02.04 ticked
 with EV-P13-017; P13.10 stays open; nothing is VERIFIED. Evidence: EV-P13-017.
+
+M2C review remediation (2026-10-18): independent review of PR #238 found the report check accepted
+a `test.fail()` test that failed (blocking). Fixed by validating per-test records; 29 tests with
+genuine Playwright control reports; latency wording corrected. Follow-up, not done: the telephony
+signature tamper test can pass an unchanged signature (`packages/telephony/src/signature/validate.test.ts`,
+needs its own narrow PR). Evidence: EV-P13-017 (review section).
