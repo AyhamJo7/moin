@@ -1597,3 +1597,13 @@ needs its own narrow PR). Evidence: EV-P13-017 (review section).
 M2C P2 (2026-10-18): official `mutation_check.py` KILLED for F1 (fix-ref 9de05d5, CLI regression
 `scripts/check-slice-report.cli.test.ts`, tested at 79d4e57). F2 (telephony tamper test) still open.
 Evidence: EV-P13-017 (official mutation section).
+
+F2 follow-up (2026-10-18, branch `test/p11-telephony-signature-tamper` from 569368a): the tamper
+test in `packages/telephony/src/signature/validate.test.ts` replaced the first signature character
+with `A`, a no-op for about 1 signature in 64 because the auth token is random per run. It now
+replaces it with a character that differs from the original, and fixed tokens cover every possible
+first character (including `A`) each run. Test-only; no production change. Deterministic checks: with
+the old fixed-`A` replacement put back, 2 of 24 tests fail; with the fix, 24 pass. The official
+`mutation_check.py` reports SURVIVED for this change, by construction: the fix is the test file
+itself, so reversing it restores the old test, which passes in 63 of 64 runs. No official KILLED
+result exists for it (UNVERIFIED by that harness); the evidence is the deterministic manual mutant.
