@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/home/adam/projects/business/moin",
+  "head": "ccc7d1d1537b1eaa08a7189d98479a70edd7c786",
+  "mode": "committed",
+  "fix_ref": "ccc7d1d1537b1eaa08a7189d98479a70edd7c786",
+  "fix_paths": [
+    "deploy/demo/demo.sh"
+  ],
+  "untracked_fix_files": [],
+  "test": "bash deploy/demo/tests/lifecycle.test.sh",
+  "started": "2026-10-18T08:02:34+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-10-18T08:02:35+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 0.62,
+    "tail": "  | compose compose -p moin-demo -f /home/adam/projects/business/moin/deploy/demo/docker-compose.yml build --quiet migrate\n  | docker compose -p moin-demo -f /home/adam/projects/business/moin/deploy/demo/docker-compose.yml up -d --wait --wait-timeout 300\n  | compose compose -p moin-demo -f /home/adam/projects/business/moin/deploy/demo/docker-compose.yml up -d --wait --wait-timeout 300\n  | UP token_sha=fe2d4378998b84bc\n  | docker compose -p moin-demo -f /home/adam/projects/business/moin/deploy/demo/docker-compose.yml exec -T postgres psql -q -U moin_owner -d moin -v owner_sub=fake-keycloak-subject -f -\n  | compose compose -p moin-demo -f /home/adam/projects/business/moin/deploy/demo/docker-compose.yml exec -T postgres psql -q -U moin_owner -d moin -v owner_sub=fake-keycloak-subject -f -\nFAIL: 13 and starts nothing\n  --- status=0 stdout:\n  | demo: synthetic tenant and owner are in place\n  | \n  | KlarDesk demo is up (local, synthetic data, simulated telephony only).\n  |   Open       http://localhost:3000\n  |   Sign in    inhaber@musterrestaurant.example  (password: the fake in docker/keycloak/realm-moin-local.json)\n  |   Callback   deploy/demo/demo.sh call\n  --- stderr:\n  --- calls:\n  | docker info\n  | docker ps --filter label=com.docker.compose.service=edge -q --filter label=com.docker.compose.project=moin-demo\n  | docker ps -a --filter label=com.docker.compose.service=api -q --filter label=com.docker.compose.project=moin-demo\n  | docker inspect --format {{range .Config.Env}}{{println .}}{{end}} id-api\n  | docker compose -p moin-demo -f /home/adam/projects/business/moin/deploy/demo/docker-compose.yml build --quiet migrate\n  | compose compose -p moin-demo -f /home/adam/projects/business/moin/deploy/demo/docker-compose.yml build --quiet migrate\n  | docker compose -p moin-demo -f /home/adam/projects/business/moin/deploy/demo/docker-compose.yml up -d --wait --wait-timeout 300\n  | compose compose -p moin-demo -f /home/adam/projects/business/moin/deploy/demo/docker-compose.yml up -d --wait --wait-timeout 300\n  | UP token_sha=fe2d4378998b84bc\n  | docker compose -p moin-demo -f /home/adam/projects/business/moin/deploy/demo/docker-compose.yml exec -T postgres psql -q -U moin_owner -d moin -v owner_sub=fake-keycloak-subject -f -\n  | compose compose -p moin-demo -f /home/adam/projects/business/moin/deploy/demo/docker-compose.yml exec -T postgres psql -q -U moin_owner -d moin -v owner_sub=fake-keycloak-subject -f -\nFAIL: 13 compose pull without a real token is refused\n  --- status=0 stdout:\n  --- stderr:\n  --- calls:\n  | docker compose -p moin-demo -f /home/adam/projects/business/moin/deploy/demo/docker-compose.yml pull api\n  | compose compose -p moin-demo -f /home/adam/projects/business/moin/deploy/demo/docker-compose.yml pull api\nFAIL: 13 compose pull without a real token reaches no container\n  --- status=0 stdout:\n  --- stderr:\n  --- calls:\n  | docker compose -p moin-demo -f /home/adam/projects/business/moin/deploy/demo/docker-compose.yml pull api\n  | compose compose -p moin-demo -f /home/adam/projects/business/moin/deploy/demo/docker-compose.yml pull api\ndemo lifecycle: 65 of 69 checks passed"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 0.57,
+    "tail": "demo lifecycle: 69 of 69 checks passed"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/home/adam/projects/business/moin/.git/claude-evidence/mutation/20261018T080234Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}
