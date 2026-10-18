@@ -151,9 +151,10 @@ developer build, this one tests the packages.
   commit, but its default binfmt image is the mutable tag `latest`.
 - The lifecycle test uses a fake `docker`; a repeated real `up` against a running demo is a manual
   check (`deploy/demo/demo.sh up` twice; the second must report no port conflict and keep the sign-in).
-- The task title on Heute is a deterministic summary of the simulated call, never its words. It names a
-  reservation, table reservation or birthday celebration, a guest count and one weekday or month when the
-  caller stated them clearly and unambiguously for the booking (for example "Rückruf: Reservierung für 6
-  Personen am Freitag"), and otherwise says "Rückruf erbeten". Anything else the caller said is not kept: not
-  in the title, not in the database. A clear refusal ("bitte nicht zurückrufen") creates no task and the
+- The task title on Heute is a deterministic summary of the simulated call, never its words. It is one of
+  four constants: "Rückruf: Reservierung", "Rückruf: Geburtstagsfeier", "Rückruf: Reservierung für
+  Geburtstagsfeier" when the caller plainly asks about a new reservation or a birthday celebration, and
+  otherwise "Rückruf erbeten". Guest counts, weekdays and months are deliberately not extracted (founder scope
+  decision, PRODUCT-01). A demo built before that decision still shows the earlier, detailed titles until it
+  is rebuilt. Anything else the caller said is not kept: not in the title, not in the database. A clear refusal ("bitte nicht zurückrufen") creates no task and the
   simulator answers 422. The utterance itself is never stored.

@@ -329,7 +329,7 @@ test('a simulated callback call reaches the owner on Heute and stays there', asy
 
   await page.reload();
   const card = callbacks.locator(`[data-task-id="${taskId}"]`);
-  await expect(card.getByRole('heading', { name: 'Rückruf: Tischreservierung' })).toBeVisible();
+  await expect(card.getByRole('heading', { name: 'Rückruf: Reservierung' })).toBeVisible();
   await expect(card.getByRole('link', { name: CALLER })).toHaveAttribute('href', `tel:${CALLER}`);
   await expect(card).toContainText('Offen');
   await expect(card.locator('time')).toHaveAttribute('datetime', /^\d{4}-\d{2}-\d{2}T/u);
@@ -349,7 +349,7 @@ test('a simulated callback call reaches the owner on Heute and stays there', asy
   await stop(api);
   await startApi();
   await page.reload();
-  await expect(card.getByRole('heading', { name: 'Rückruf: Tischreservierung' })).toBeVisible();
+  await expect(card.getByRole('heading', { name: 'Rückruf: Reservierung' })).toBeVisible();
   await expect(page.getByText(OTHER_TITLE)).toHaveCount(0);
 });
 
@@ -373,7 +373,7 @@ test('the owner completes a callback with Erledigt and it stays completed', asyn
   const liveBefore = await liveCards.count();
   const action = card.getByRole('button', { name: /^Erledigt/u });
   await expect(action).toBeVisible();
-  await expect(action).toHaveAccessibleName(/Rückruf: Tischreservierung/u);
+  await expect(action).toHaveAccessibleName(/Rückruf: Reservierung/u);
 
   const axe = await new AxeBuilder({ page })
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
@@ -628,7 +628,7 @@ test('a callback committed while Heute is open appears by itself, once, without 
   );
   await simulateCall(OTHER_NUMBER, 'Bitte rufen Sie mich zurück wegen Lieferung Fremdbetrieb');
   const card = callbacks.locator(`[data-task-id="${taskId}"]`);
-  await expect(card.getByRole('heading', { name: 'Rückruf: Tischreservierung' })).toBeVisible({
+  await expect(card.getByRole('heading', { name: 'Rückruf: Reservierung' })).toBeVisible({
     timeout: ARRIVAL_LIMIT_MS,
   });
   const arrivedAt = Date.now();
@@ -742,5 +742,5 @@ test('a revoked session shows the signed-out page and no task data', async ({ pa
   });
   await expect(page.getByRole('link', { name: 'Anmelden' })).toBeVisible();
   await expect(page.locator('[data-task-id]')).toHaveCount(0);
-  await expect(page.getByText('Rückruf: Tischreservierung')).toHaveCount(0);
+  await expect(page.getByText('Rückruf: Reservierung')).toHaveCount(0);
 });

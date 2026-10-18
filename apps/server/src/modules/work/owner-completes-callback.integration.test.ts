@@ -413,7 +413,7 @@ describe('owner completes a callback task (M2A)', () => {
       // The database holds it: status, version, and the same tenant, title and type as before.
       expect(await taskRow(taskId)).toMatchObject({
         organisation_id: restaurant,
-        title: 'Rückruf: Tischreservierung',
+        title: 'Rückruf: Reservierung',
         type: 'callback',
         status: 'done',
         version: 1 + COMPLETION_MOVES,

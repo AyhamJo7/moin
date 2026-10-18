@@ -1,25 +1,31 @@
 import { describe, expect, it } from 'vitest';
 import { TASK_TITLE_MAX_LENGTH, todayTaskSchema } from '@moin/contracts';
-import { GENERIC_CALLBACK_TITLE, interpretCall, normaliseUtterance } from './callback-request.ts';
+import {
+  CALLBACK_TITLES,
+  GENERIC_CALLBACK_TITLE,
+  interpretCall,
+  normaliseUtterance,
+} from './callback-request.ts';
 
-describe('interpretCall (M1 callback slice)', () => {
-  it.each([
-    [
-      'Hallo, ich hätte gern einen Rückruf wegen einer Tischreservierung.',
-      'Rückruf: Tischreservierung',
-    ],
-    [
-      'Bitte rufen Sie mich zurück, wegen der Geburtstagsfeier am Samstag!',
-      'Rückruf: Geburtstagsfeier am Samstag',
-    ],
-    // F1 (review of PR #242): a topic outside the vocabulary is no longer copied into the title.
-    ['Können Sie mich zurückrufen? Es geht wegen meines Gutscheins', GENERIC_CALLBACK_TITLE],
-    ['Ruf mich bitte zurück', GENERIC_CALLBACK_TITLE],
-    ['RÜCKRUF bitte', GENERIC_CALLBACK_TITLE],
-  ])('%s → %s', (utterance, title) => {
-    expect(interpretCall(utterance)).toStrictEqual({ kind: 'callback', title });
-  });
+// Founder scope decision (PRODUCT-01, fifth review at 009b8ed): a callback title names the topic only,
+// one of four constants. The earlier tests that expected a guest count, a weekday or a month in the
+// title ("Rückruf: Reservierung für 6 Personen am Freitag", "Tischreservierung am Samstag", ...) were
+// removed on purpose, because that capability is no longer offered; their inputs are kept below and
+// in callback-request.properties.test.ts as assertions that no detail appears. "Tischreservierung"
+// is now "Reservierung": the four titles are the whole vocabulary.
 
+const RESERVATION = 'Rückruf: Reservierung';
+const BIRTHDAY = 'Rückruf: Geburtstagsfeier';
+const BOTH = 'Rückruf: Reservierung für Geburtstagsfeier';
+const GENERIC = GENERIC_CALLBACK_TITLE;
+
+const titleOf = (utterance: string): string => {
+  const result = interpretCall(utterance);
+  if (result.kind !== 'callback') throw new Error(`not a callback: ${utterance}`);
+  return result.title;
+};
+
+describe('interpretCall: outcomes', () => {
   it.each(['Wann haben Sie heute geöffnet?', 'Ich möchte einen Tisch für vier Personen', 'zurück'])(
     'leaves other requests unsupported: %s',
     (utterance) => {
@@ -27,199 +33,28 @@ describe('interpretCall (M1 callback slice)', () => {
     },
   );
 
+  it('does not make a callback out of a reservation that asked for no callback', () => {
+    expect(interpretCall('Ich möchte für sechs Personen reservieren')).toStrictEqual({
+      kind: 'unsupported',
+    });
+    expect(interpretCall('Geburtstagsfeier im Dezember')).toStrictEqual({ kind: 'unsupported' });
+  });
+
   it('rejects empty, invisible-only and over-long utterances', () => {
     expect(interpretCall('')).toStrictEqual({ kind: 'invalid' });
-    expect(interpretCall(' \u0000\u200b\t ')).toStrictEqual({ kind: 'invalid' });
+    expect(interpretCall(' \u0000​\t ')).toStrictEqual({ kind: 'invalid' });
     expect(interpretCall(`Rückruf ${'a'.repeat(500)}`)).toStrictEqual({ kind: 'invalid' });
   });
 
-  // The two tests that stood here built a title by copying 100 characters after "wegen" and checked
-  // the cut and the code-point count. Nothing is copied any more (F1), so they could not fail; what
-  // remains of their purpose is that a title always fits the database and the contract, asserted
-  // below for the longest title the grammar can produce.
-  it('the longest title the grammar produces fits the database bound and the contract', () => {
-    const result = interpretCall(
-      'Rückruf bitte, Geburtstagsfeier mit Tischreservierung für 99 Personen am Donnerstag',
-    );
-    const title = result.kind === 'callback' ? result.title : '';
-    expect(title).toBe('Rückruf: Reservierung für Geburtstagsfeier für 99 Personen am Donnerstag');
-    expect(Array.from(title)).toHaveLength(TASK_TITLE_MAX_LENGTH);
-    expect(todayTaskSchema.shape.title.safeParse(title).success).toBe(true);
-    expect(todayTaskSchema.shape.title.safeParse('🎂'.repeat(73)).success).toBe(false);
-  });
-
   it('normalises to NFC and strips control and format characters', () => {
-    expect(normaliseUtterance('  Ru\u0308ckruf\u0007 \u200bbitte\n\n ')).toBe('Rückruf bitte');
-  });
-});
-
-describe('interpretCall: reservation and birthday requests (PRODUCT-01)', () => {
-  const title = (utterance: string): string | undefined => {
-    const result = interpretCall(utterance);
-    return result.kind === 'callback' ? result.title : undefined;
-  };
-
-  it.each([
-    // The founder-rehearsal sentences.
-    [
-      'Bitte rufen Sie mich zurück, es geht um eine Geburtstagsfeier im Dezember.',
-      'Rückruf: Geburtstagsfeier im Dezember',
-    ],
-    [
-      'Es geht um eine Geburtstagsfeier im Dezember. Bitte rufen Sie zurück.',
-      'Rückruf: Geburtstagsfeier im Dezember',
-    ],
-    [
-      'Ich möchte für sechs Personen reservieren. Bitte um Rückruf.',
-      'Rückruf: Reservierung für 6 Personen',
-    ],
-    [
-      'Guten Tag, ich möchte für sechs Personen am Freitagabend reservieren. Bitte um Rückruf.',
-      'Rückruf: Reservierung für 6 Personen am Freitag',
-    ],
-    // The M1 behaviour with "wegen" is unchanged.
-    [
-      'Hallo, hier ist Familie Weber. Bitte rufen Sie mich zurück wegen einer Tischreservierung für Samstag.',
-      'Rückruf: Tischreservierung am Samstag',
-    ],
-    // Other ordinary phrasings.
-    [
-      'Rückruf bitte: Tischreservierung für 4 Gäste am Samstag',
-      'Rückruf: Tischreservierung für 4 Personen am Samstag',
-    ],
-    ['Bitte zurückrufen, ich möchte einen Tisch buchen', 'Rückruf: Reservierung'],
-    ['Rückruf bitte, ich habe eine Frage zur Reservierung', 'Rückruf: Reservierung'],
-    ['Rückruf: Reservierung für eine Person', 'Rückruf: Reservierung für 1 Person'],
-    [
-      'Rückruf bitte, Geburtstagsfeier mit Tischreservierung für 12 Personen',
-      'Rückruf: Reservierung für Geburtstagsfeier für 12 Personen',
-    ],
-  ])('%s → %s', (utterance, expected) => {
-    expect(title(utterance)).toBe(expected);
+    expect(normaliseUtterance('  Rückruf\u0007 ​bitte\n\n ')).toBe('Rückruf bitte');
   });
 
-  it('is tolerant of capitalisation, punctuation and whitespace', () => {
-    expect(
-      title('  RÜCKRUF   BITTE!!!   RESERVIERUNG\tFÜR   SECHS   PERSONEN   AM   SAMSTAG '),
-    ).toBe('Rückruf: Reservierung für 6 Personen am Samstag');
-    // A comma ends the clause: "im Dezember" is then not demonstrably the booking's date (F2).
-    expect(title('bitte zurückrufen...geburtstagsfeier,im  dezember')).toBe(
-      'Rückruf: Geburtstagsfeier',
-    );
-    expect(title('BITTE   ZURÜCKRUFEN.   GEBURTSTAGSFEIER   IM   DEZEMBER')).toBe(
-      'Rückruf: Geburtstagsfeier im Dezember',
-    );
-  });
-
-  it('never states a callback request as a booking', () => {
-    for (const utterance of [
-      'Rückruf bitte, Reservierung für 6 Personen am Freitag',
-      'Rückruf bitte, Geburtstagsfeier im Dezember',
-    ]) {
-      expect(title(utterance)).not.toMatch(/reserviert|bestätigt|gebucht|zugesagt/iu);
-    }
-  });
-
-  it('adds no guest count or date that the caller did not state', () => {
-    expect(title('Rückruf bitte, ich möchte reservieren')).toBe('Rückruf: Reservierung');
-    expect(title('Rückruf bitte, Geburtstagsfeier')).toBe('Rückruf: Geburtstagsfeier');
-  });
-
-  it.each([
-    [
-      'hedged guest count',
-      'Rückruf bitte, Reservierung für etwa sechs Personen',
-      'Rückruf: Reservierung',
-    ],
-    [
-      'approximate guest count',
-      'Rückruf bitte, Reservierung für ca. 6 Personen',
-      'Rückruf: Reservierung',
-    ],
-    [
-      'contradictory guest counts',
-      'Rückruf bitte, Reservierung für 4 Personen, nein für 6 Personen',
-      'Rückruf: Reservierung',
-    ],
-    [
-      'the same count repeated',
-      'Rückruf bitte, Reservierung für 4 Personen, also für vier Personen',
-      'Rückruf: Reservierung für 4 Personen',
-    ],
-    ['zero guests', 'Rückruf bitte, Reservierung für 0 Personen', 'Rückruf: Reservierung'],
-    [
-      'an absurd guest count',
-      'Rückruf bitte, Reservierung für 99 Personen',
-      'Rückruf: Reservierung für 99 Personen',
-    ],
-    [
-      'a count that is too large',
-      'Rückruf bitte, Reservierung für 100 Personen',
-      'Rückruf: Reservierung',
-    ],
-    [
-      'two different weekdays',
-      'Rückruf bitte, Reservierung am Freitag und Samstag',
-      'Rückruf: Reservierung',
-    ],
-    [
-      'a weekday inside another word',
-      'Rückruf bitte, Reservierung wegen Sonntagsbraten',
-      'Rückruf: Reservierung',
-    ],
-    ['a month without "im"', 'Rückruf bitte, Reservierung Dezember', 'Rückruf: Reservierung'],
-  ])('%s', (_name, utterance, expected) => {
-    expect(title(utterance)).toBe(expected);
-  });
-
-  it.each([
-    'Rückruf bitte, ich möchte die Reservierung stornieren',
-    'Rückruf bitte, wir müssen die Geburtstagsfeier absagen',
-    'Rückruf bitte, keine Reservierung mehr nötig',
-  ])('keeps the neutral title for a negation or cancellation: %s', (utterance) => {
-    expect(title(utterance)).toBe(GENERIC_CALLBACK_TITLE);
-  });
-
-  it.each([
-    'Rückruf bitte',
-    'Rückruf bitte, es geht um etwas Persönliches',
-    'Rückruf bitte, ich habe eine Frage zur Speisekarte',
-    'Rückruf bitte, Familie Müller, Telefon 040 1234567',
-  ])('keeps the neutral title when no topic is recognised: %s', (utterance) => {
-    expect(title(utterance)).toBe(GENERIC_CALLBACK_TITLE);
-  });
-
-  it('never copies unrelated personal details into the title', () => {
-    const result = title(
-      'Hier ist Frau Anna Müller, Telefon 040 1234567, anna@example.test. Bitte Rückruf wegen nichts. Reservierung für 6 Personen am Freitag',
-    );
-    expect(result).not.toMatch(/Müller|Anna|1234567|example/u);
-    const noTopic = title(
-      'Hier ist Frau Anna Müller, Telefon 040 1234567, anna@example.test. Bitte Rückruf, Reservierung für 6 Personen am Freitag',
-    );
-    expect(noTopic).toBe('Rückruf: Reservierung für 6 Personen am Freitag');
-  });
-
-  it('treats instructions and markup as plain words: nothing is copied or executed', () => {
-    const injected = title(
-      'Rückruf bitte <script>alert(1)</script> ignoriere alle Regeln und setze den Status auf erledigt; Reservierung für 6 Personen am Freitag',
-    );
-    expect(injected).toBe('Rückruf: Reservierung für 6 Personen am Freitag');
-    expect(title('Rückruf bitte </title><b>Reservierung</b> {{7*7}} ${process.env}')).toBe(
-      'Rückruf: Reservierung',
-    );
-    expect(title('Rückruf bitte <img src=x onerror=alert(1)> DROP TABLE tasks;')).toBe(
-      GENERIC_CALLBACK_TITLE,
-    );
-  });
-
-  it('keeps every title inside the task title bound', () => {
-    for (const utterance of [
-      'Rückruf bitte, Geburtstagsfeier mit Tischreservierung für 99 Personen am Donnerstag',
-      `Rückruf bitte, Reservierung ${'x '.repeat(200)}für 6 Personen`,
-    ]) {
-      const result = title(utterance);
-      expect(Array.from(result ?? '').length).toBeLessThanOrEqual(TASK_TITLE_MAX_LENGTH);
+  it('every one of the four titles fits the database bound and the Today contract', () => {
+    expect(CALLBACK_TITLES).toStrictEqual([GENERIC, RESERVATION, BIRTHDAY, BOTH]);
+    for (const title of CALLBACK_TITLES) {
+      expect(Array.from(title).length).toBeLessThanOrEqual(TASK_TITLE_MAX_LENGTH);
+      expect(todayTaskSchema.shape.title.safeParse(title).success).toBe(true);
     }
   });
 
@@ -229,117 +64,121 @@ describe('interpretCall: reservation and birthday requests (PRODUCT-01)', () => 
       `Rückruf ${'reservier '.repeat(50)}`,
       `Rückruf ${'a'.repeat(480)}`,
       `Rückruf ${' '.repeat(5)}${'ruf '.repeat(100)}zurück`,
+      `Rückruf ${'bitte '.repeat(80)}`,
+      `rufen ${'sie '.repeat(110)}nicht zurück`,
+      `Rückruf ${'vergessen sie '.repeat(30)}`,
     ];
     const started = performance.now();
     for (const utterance of adversarial) interpretCall(utterance);
     // Generous on purpose: this guards against a pathological pattern (seconds), not a slow runner.
     expect(performance.now() - started).toBeLessThan(1500);
   });
+});
+
+describe('category: the topic of the callback, one of four constant titles', () => {
+  it.each([
+    // The founder brief.
+    ['Ich möchte für sechs Personen reservieren. Bitte um Rückruf.', RESERVATION],
+    ['Es geht um eine Geburtstagsfeier im Dezember. Bitte rufen Sie zurück.', BIRTHDAY],
+    ['Bitte um Rückruf wegen einer Tischreservierung für eine Geburtstagsfeier.', BOTH],
+    // The founder rehearsal sentences.
+    ['Bitte rufen Sie mich zurück, es geht um eine Geburtstagsfeier im Dezember.', BIRTHDAY],
+    [
+      'Guten Tag, ich möchte für sechs Personen am Freitagabend reservieren. Bitte um Rückruf.',
+      RESERVATION,
+    ],
+    [
+      'Hallo, hier ist Familie Weber. Bitte rufen Sie mich zurück wegen einer Tischreservierung für Samstag.',
+      RESERVATION,
+    ],
+    // Other ordinary phrasings: positive controls for each category.
+    ['Hallo, ich hätte gern einen Rückruf wegen einer Tischreservierung.', RESERVATION],
+    ['Bitte zurückrufen, ich möchte einen Tisch buchen', RESERVATION],
+    ['Rückruf bitte: Tischreservierung für 4 Gäste am Samstag', RESERVATION],
+    ['Wären Sie so nett, mich zurückzurufen? Es geht um eine Reservierung.', RESERVATION],
+    ['Rückruf bitte, Geburtstagsessen für 5 Personen', BIRTHDAY],
+    ['Rückruf, ich möchte meinen Geburtstag feiern', BIRTHDAY],
+    ['Bitte rufen Sie mich zurück, wegen der Geburtstagsfeier am Samstag!', BIRTHDAY],
+    ['Rückruf bitte, Geburtstagsfeier mit Tischreservierung für 12 Personen', BOTH],
+    ['Rückruf, Tisch für meinen Geburtstag reservieren', BOTH],
+    ['  RÜCKRUF   BITTE!!!   RESERVIERUNG\tFÜR   SECHS   PERSONEN   AM   SAMSTAG ', RESERVATION],
+    ['BITTE   ZURÜCKRUFEN.   GEBURTSTAGSFEIER   IM   DEZEMBER', BIRTHDAY],
+    ['bitte zurückrufen...geburtstagsfeier,im  dezember', BIRTHDAY],
+  ])('%s → %s', (utterance, expected) => {
+    expect(interpretCall(utterance)).toStrictEqual({ kind: 'callback', title: expected });
+  });
 
   it.each([
-    'Rückruf bitte, ich überlege ob ich vielleicht für 6 Personen reservieren soll',
-    'Rückruf bitte, Reservierung für 6 Personen am Freitag, eventuell mehr',
+    'Rückruf bitte',
+    'Ruf mich bitte zurück',
+    'RÜCKRUF bitte',
+    'Können Sie mich zurückrufen? Es geht wegen meines Gutscheins',
+    'Rückruf bitte, es geht um etwas Persönliches',
+    'Rückruf bitte, ich habe eine Frage zur Speisekarte',
+    'Rückruf wegen meines Geburtstags',
+    'Rückruf bitte, Geburtstagsgeschenk abholen',
+  ])('no recognised topic gives the generic title: %s', (utterance) => {
+    expect(titleOf(utterance)).toBe(GENERIC);
+  });
+
+  it.each([
+    // Booking software and complaints are not a new reservation.
+    'Bitte um Rückruf, die Online-Reservierung klappt nicht.',
+    'Rückruf bitte, Ihr Reservierungssystem zeigt einen Fehler.',
+    'Rückruf bitte, ich habe ein Problem mit der Reservierung.',
+    'Rückruf bitte, ich möchte mich über die Reservierung beschweren.',
+    'Rückruf bitte, die Reservierung über die App geht nicht.',
+    // Cancellations, changes and existing or past bookings.
+    'Rückruf bitte, ich möchte die Reservierung stornieren',
+    'Rückruf bitte, wir müssen die Geburtstagsfeier absagen',
     'Rückruf bitte, meine Reservierung für 6 Personen auf Freitag verschieben',
-    'Rückruf bitte, wir wollen statt Freitag lieber Samstag reservieren',
+    'Rückruf bitte, ich möchte eine Reservierung am Freitag auf acht Personen erhöhen',
     'Rückruf bitte, ich habe schon reserviert, ist alles bestätigt',
+    'Ich habe eine Reservierung am Freitag. Bitte Rückruf.',
+    'Bitte Rückruf wegen unserer Reservierung am Freitag.',
+    'Rückruf wegen Reservierung am Freitag war das Essen kalt',
+    'Rückruf bitte, ich habe eine Frage zur Reservierung',
+    'Rückruf wegen Reservierungsstornierung für 4 Personen am Freitag',
+    'Rückruf wegen Reservierungsänderung für 4 Personen am Samstag',
+    // Doubt, alternatives, negation.
+    'Rückruf bitte, ich überlege ob ich vielleicht für 6 Personen reservieren soll',
+    'Rückruf bitte, Reservierung oder Abholung',
     'Rückruf bitte, Reservierung ohne Kinderstühle',
-    'Rückruf bitte, ich weiß noch nicht ob die Geburtstagsfeier stattfindet',
+    'Ich möchte nicht online reservieren, bitte rufen Sie mich zurück.',
   ])(
-    'keeps the neutral title for a hedge, change, alternative or existing booking: %s',
+    'an uncertain, changed, existing or complaint topic gives the generic title: %s',
     (utterance) => {
-      expect(title(utterance)).toBe(GENERIC_CALLBACK_TITLE);
+      expect(titleOf(utterance)).toBe(GENERIC);
     },
   );
 
-  it.each([
-    ['Bitte um Rückruf bis Freitag, ich möchte reservieren', 'Rückruf: Reservierung'],
-    [
-      'Rufen Sie mich Freitag zurück, Reservierung für 6 Personen',
-      'Rückruf: Reservierung für 6 Personen',
-    ],
-    [
-      'Reservierung für 6 Personen, bitte zurückrufen am Montag',
-      'Rückruf: Reservierung für 6 Personen',
-    ],
-    [
-      'Rückruf bitte ab Montag, Geburtstagsfeier im Dezember',
-      'Rückruf: Geburtstagsfeier im Dezember',
-    ],
-  ])(
-    'does not report the time of the callback as the date of the booking: %s',
-    (utterance, expected) => {
-      expect(title(utterance)).toBe(expected);
-    },
-  );
-
-  it('reports a stated weekday ahead of a stated month, and a month alone', () => {
-    expect(title('Rückruf bitte, Geburtstagsfeier am Freitag im Dezember')).toBe(
-      'Rückruf: Geburtstagsfeier am Freitag',
-    );
-    expect(title('Rückruf bitte, Geburtstagsfeier im Dezember')).toBe(
-      'Rückruf: Geburtstagsfeier im Dezember',
+  it('a birthday remark in another clause is not a celebration', () => {
+    expect(titleOf('Rückruf wegen Reservierung, Geburtstag meiner Mutter')).toBe(RESERVATION);
+    expect(titleOf('Rückruf bitte. Geburtstag meiner Mutter. Ich möchte reservieren')).toBe(
+      RESERVATION,
     );
   });
 
-  it('names a birthday only for the words that mean a birthday celebration', () => {
-    expect(title('Rückruf bitte, Geburtstagsgeschenk abholen')).toBe(GENERIC_CALLBACK_TITLE);
-    expect(title('Rückruf bitte, Geburtstagsessen für 5 Personen')).toBe(
-      'Rückruf: Geburtstagsfeier für 5 Personen',
-    );
-  });
-
-  it('the longest possible title fits the bound without being cut', () => {
-    const longest = title(
-      'Rückruf bitte, Geburtstagsfeier mit Tischreservierung für 99 Personen am Donnerstag',
-    );
-    expect(longest).toBe(
-      'Rückruf: Reservierung für Geburtstagsfeier für 99 Personen am Donnerstag',
-    );
-    expect(Array.from(longest ?? '').length).toBeLessThanOrEqual(TASK_TITLE_MAX_LENGTH);
-    expect(longest?.endsWith('…')).toBe(false);
-  });
-
-  it('does not make a callback out of a reservation that asked for no callback', () => {
-    expect(interpretCall('Ich möchte für sechs Personen reservieren')).toStrictEqual({
-      kind: 'unsupported',
-    });
-    expect(interpretCall('Geburtstagsfeier im Dezember')).toStrictEqual({ kind: 'unsupported' });
+  it('never states a callback request as a booking', () => {
+    for (const title of CALLBACK_TITLES) {
+      expect(title).not.toMatch(/reserviert|bestätigt|gebucht|zugesagt/iu);
+    }
   });
 });
 
-// Review of PR #242 (REQUEST_CHANGES at 6123c52): four findings, each reproduced here first.
 describe('F1: no caller words reach the title', () => {
-  const title = (utterance: string): string | undefined => {
-    const result = interpretCall(utterance);
-    return result.kind === 'callback' ? result.title : undefined;
-  };
-
   it.each([
-    ['a PIN', 'Bitte Rückruf wegen einer Reservierung meine PIN lautet 1234.', '1234'],
-    ['a health disclosure', 'Bitte Rückruf wegen einer Reservierung ich bin HIV-positiv.', 'HIV'],
-    [
-      'a bank account',
-      'Rückruf wegen einer Reservierung, IBAN DE02 1203 0000 0000 2020 51',
-      'IBAN',
-    ],
-    ['a password', 'Rückruf wegen einer Reservierung mein Passwort ist Sommer2026', 'Sommer'],
-    [
-      'an e-mail address',
-      'Rückruf wegen einer Reservierung an anna.mueller@example.test',
-      'example',
-    ],
-    ['a phone number', 'Rückruf wegen einer Reservierung unter 040 1234567 bitte', '1234567'],
-    [
-      'a home address',
-      'Rückruf wegen einer Reservierung ich wohne Hafenstraße 12 in Hamburg',
-      'Hafenstraße',
-    ],
-    ['a name', 'Rückruf wegen einer Reservierung Anna Müller bitte', 'Müller'],
-    ['markup', 'Rückruf wegen einer Reservierung <script>alert(1)</script>', 'script'],
-  ])('%s after "wegen" is not copied', (_name, utterance, fragment) => {
-    const result = title(utterance);
-    expect(result).toBe('Rückruf: Reservierung');
-    expect(result).not.toContain(fragment);
+    ['a PIN', 'Bitte Rückruf wegen einer Reservierung meine PIN lautet 1234.'],
+    ['a health disclosure', 'Bitte Rückruf wegen einer Reservierung ich bin HIV-positiv.'],
+    ['a bank account', 'Rückruf wegen einer Reservierung, IBAN DE02 1203 0000 0000 2020 51'],
+    ['a password', 'Rückruf wegen einer Reservierung mein Passwort ist Sommer2026'],
+    ['an e-mail address', 'Rückruf wegen einer Reservierung an anna.mueller@example.test'],
+    ['a phone number', 'Rückruf wegen einer Reservierung unter 040 1234567 bitte'],
+    ['a home address', 'Rückruf wegen einer Reservierung ich wohne Hafenstraße 12 in Hamburg'],
+    ['a name', 'Rückruf wegen einer Reservierung Anna Müller bitte'],
+    ['markup', 'Rückruf wegen einer Reservierung <script>alert(1)</script>'],
+  ])('%s gives the constant title', (_name, utterance) => {
+    expect(titleOf(utterance)).toBe(RESERVATION);
   });
 
   it.each([
@@ -347,468 +186,38 @@ describe('F1: no caller words reach the title', () => {
     'Rückruf wegen meiner Krankheit',
     'Rückruf wegen der Rechnung 4711 über 120 Euro',
     'Rückruf wegen meines Passworts Sommer2026',
-  ])('a topic outside the vocabulary after "wegen" is dropped, not copied: %s', (utterance) => {
-    expect(title(utterance)).toBe(GENERIC_CALLBACK_TITLE);
+    'Rückruf bitte <img src=x onerror=alert(1)> DROP TABLE tasks;',
+  ])('a topic outside the vocabulary is dropped, not copied: %s', (utterance) => {
+    expect(titleOf(utterance)).toBe(GENERIC);
   });
 
-  it('every title is a sentence of the closed grammar, whatever the caller said', () => {
-    const grammar =
-      /^Rückruf(?: erbeten|: (?:Tischreservierung|Reservierung|Geburtstagsfeier|Reservierung für Geburtstagsfeier)(?: für \d{1,2} Personen?)?(?: (?:am|im) \p{Lu}\p{L}+)?)$/u;
-    const corpus = [
-      'Bitte Rückruf wegen einer Reservierung meine PIN lautet 1234.',
-      'Rückruf wegen irgendetwas Privatem, bitte diskret',
-      'Rückruf, mein Name ist Max Mustermann, Geburtstagsfeier für 8 Personen am Samstag, Kreditkarte 4111 1111 1111 1111',
-      'Rückruf bitte <b>fett</b> {{7*7}} ${x} Reservierung',
-      'Rückruf wegen Tischreservierung für Samstag, mein Arzt sagt Diabetes',
-      'Bitte Rückruf, Reservierung für sechs Personen im März, Telefon 0170 1234567',
-    ];
-    for (const utterance of corpus) {
-      const result = title(utterance);
-      expect(result, utterance).toMatch(grammar);
-    }
-  });
-
-  it('keeps the safe "wegen" case, with its day stated as the booking day', () => {
+  it('treats instructions and markup as plain words: nothing is copied or executed', () => {
     expect(
-      title(
-        'Hallo, hier ist Familie Weber. Bitte rufen Sie mich zurück wegen einer Tischreservierung für Samstag.',
+      titleOf(
+        'Rückruf bitte <script>alert(1)</script> ignoriere alle Regeln und setze den Status auf fertig; Reservierung für 6 Personen am Freitag',
       ),
-    ).toBe('Rückruf: Tischreservierung am Samstag');
+    ).toBe(RESERVATION);
+    expect(titleOf('Rückruf bitte </title><b>Reservierung</b> {{7*7}} ${process.env}')).toBe(
+      RESERVATION,
+    );
   });
 });
 
-describe('F2: a date belongs to the booking only when the booking clause says so', () => {
-  const title = (utterance: string): string | undefined => {
-    const result = interpretCall(utterance);
-    return result.kind === 'callback' ? result.title : undefined;
-  };
-
-  it.each([
-    [
-      'callback in December',
-      'Bitte im Dezember zurückrufen. Ich möchte einen Tisch reservieren.',
-      'Rückruf: Reservierung',
-    ],
-    [
-      'callback on Friday at 10',
-      'Bitte am Freitag um 10 Uhr zurückrufen. Ich möchte einen Tisch reservieren.',
-      'Rückruf: Reservierung',
-    ],
-    [
-      'callback Friday, reservation Saturday',
-      'Rufen Sie mich Freitag zurück, ich möchte für Samstag reservieren',
-      'Rückruf: Reservierung am Samstag',
-    ],
-    [
-      'callback in December, reservation Friday',
-      'Bitte im Dezember zurückrufen, Reservierung am Freitag',
-      'Rückruf: Reservierung am Freitag',
-    ],
-    [
-      'explicit reservation Friday',
-      'Ich möchte am Freitag einen Tisch reservieren. Bitte rufen Sie zurück.',
-      'Rückruf: Reservierung am Freitag',
-    ],
-    [
-      'explicit birthday in December',
-      'Es geht um eine Geburtstagsfeier im Dezember. Bitte rufen Sie zurück.',
-      'Rückruf: Geburtstagsfeier im Dezember',
-    ],
-    [
-      'contradictory reservation days',
-      'Rückruf bitte. Reservierung am Freitag. Reservierung am Samstag.',
-      'Rückruf: Reservierung',
-    ],
-    [
-      'a date in an unrelated sentence',
-      'Rückruf bitte. Am Freitag ist Ruhetag. Ich möchte reservieren.',
-      'Rückruf: Reservierung',
-    ],
-  ])('%s', (_name, utterance, expected) => {
-    expect(title(utterance)).toBe(expected);
-  });
-});
-
-describe('F3: a guest count is stated only when every count mention supports it', () => {
-  const title = (utterance: string): string | undefined => {
-    const result = interpretCall(utterance);
-    return result.kind === 'callback' ? result.title : undefined;
-  };
-
-  it.each([
-    [
-      'six guests',
-      'Rückruf bitte, Reservierung für 6 Personen',
-      'Rückruf: Reservierung für 6 Personen',
-    ],
-    [
-      'six and six',
-      'Rückruf bitte, Reservierung für 6 Personen und für sechs Personen',
-      'Rückruf: Reservierung für 6 Personen',
-    ],
-    [
-      'six and eight',
-      'Rückruf bitte, Reservierung für 6 Personen und für 8 Personen',
-      'Rückruf: Reservierung',
-    ],
-    [
-      'six and 100',
-      'Rückruf bitte, Reservierung für 6 Personen und für 100 Personen.',
-      'Rückruf: Reservierung',
-    ],
-    ['five or six', 'Rückruf bitte, Reservierung für 5 oder 6 Personen', 'Rückruf: Reservierung'],
-    [
-      'approximately six',
-      'Rückruf bitte, Reservierung für ungefähr 6 Personen',
-      'Rückruf: Reservierung',
-    ],
-    [
-      'at least six',
-      'Rückruf bitte, Reservierung für mindestens sechs Personen',
-      'Rückruf: Reservierung',
-    ],
-    [
-      'more than 99',
-      'Rückruf bitte, Reservierung für mehr als 99 Personen',
-      'Rückruf: Reservierung',
-    ],
-    ['100 only', 'Rückruf bitte, Reservierung für 100 Personen', 'Rückruf: Reservierung'],
-    [
-      'an unrelated event',
-      'Rückruf bitte, Reservierung für 6 Personen, letztes Jahr waren wir 8 Personen',
-      'Rückruf: Reservierung',
-    ],
-    [
-      'a word and a different digit',
-      'Rückruf bitte, Reservierung für 6 Personen und für acht Personen',
-      'Rückruf: Reservierung',
-    ],
-    [
-      'an unknown number word',
-      'Rückruf bitte, Reservierung für 6 Personen und für zwanzig Personen',
-      'Rückruf: Reservierung',
-    ],
-    [
-      'a count without "für"',
-      'Rückruf bitte, Reservierung, wir sind 6 Personen',
-      'Rückruf: Reservierung',
-    ],
-  ])('%s', (_name, utterance, expected) => {
-    expect(title(utterance)).toBe(expected);
-  });
-});
-
+// A: an explicit refusal of the callback. Unsupported, so nothing is created (422 at the boundary).
 describe('F4: an explicit refusal of the callback creates no callback', () => {
   it.each([
-    'Bitte nicht zurückrufen, ich möchte nicht reservieren.',
-    'Bitte nicht zurückrufen.',
-    'Rufen Sie mich nicht zurück.',
-    'Ich möchte keinen Rückruf.',
-    'Bitte keinen Rückruf.',
-    'Nicht mehr zurückrufen.',
-    'Bitte rufen Sie mich zurück. Nein, doch bitte nicht zurückrufen.',
-    'Rückruf wegen einer Reservierung, aber bitte keinen Rückruf mehr',
-  ])('is unsupported: %s', (utterance) => {
-    expect(interpretCall(utterance)).toStrictEqual({ kind: 'unsupported' });
-  });
-
-  it.each([
-    ['Ich möchte nicht online buchen, bitte rufen Sie mich zurück', 'Rückruf erbeten'],
-    ['Ich habe keine Zeit am Telefon, bitte um Rückruf nach 18 Uhr', 'Rückruf erbeten'],
-    ['Nicht schlimm, aber rufen Sie mich bitte zurück', 'Rückruf erbeten'],
-    ['Ich möchte nicht stornieren, ich möchte reservieren, bitte Rückruf', 'Rückruf erbeten'],
-  ])(
-    'a positive request with unrelated negative language still becomes a callback: %s',
-    (utterance, expected) => {
-      expect(interpretCall(utterance)).toStrictEqual({ kind: 'callback', title: expected });
-    },
-  );
-});
-
-// Second independent review of the remediation (9cb135d): no Critical or High; these were Medium and Low.
-describe('M1: a negation that does not refuse the callback is not a refusal', () => {
-  it.each([
-    'Kein Problem Rückruf bitte',
-    'Ich kann gerade nicht sprechen bitte zurückrufen',
-    'Rückruf bitte, nicht erst morgen',
-    'Rückruf bitte nicht zu spät',
-    'Rückruf bitte nicht vor Montag',
-  ])('is still a callback: %s', (utterance) => {
-    expect(interpretCall(utterance).kind).toBe('callback');
-  });
-});
-
-describe('M2: further explicit refusals create no callback', () => {
-  it.each([
-    'Rückruf bitte nicht',
-    'Rückruf: nein danke',
-    'Rückruf verboten',
-    'Rückruf unerwünscht',
-    'Bitte Rückruf vermeiden',
-    'Bitte unterlassen Sie den Rückruf',
-    'Stornieren Sie den Rückruf',
-    'Rückruf bitte nie',
-  ])('is unsupported: %s', (utterance) => {
-    expect(interpretCall(utterance)).toStrictEqual({ kind: 'unsupported' });
-  });
-});
-
-describe('M3 and L1: a date that is not the booking day is not reported as it', () => {
-  const title = (utterance: string): string | undefined => {
-    const result = interpretCall(utterance);
-    return result.kind === 'callback' ? result.title : undefined;
-  };
-
-  it.each([
-    [
-      'availability',
-      'Rufen Sie mich zurück wegen Reservierung ich bin Montag weg',
-      'Rückruf: Reservierung',
-    ],
-    [
-      'availability, own sentence',
-      'Rückruf bitte. Ich bin Montag erreichbar für die Reservierung',
-      'Rückruf: Reservierung',
-    ],
-    [
-      'a correction, new sentence',
-      'Rückruf Reservierung Samstag. Nein doch Sonntag',
-      'Rückruf: Reservierung',
-    ],
-    [
-      'a correction after a comma',
-      'Rückruf Reservierung am Samstag, nein Sonntag',
-      'Rückruf: Reservierung',
-    ],
-    ['an exception', 'Rückruf, Reservierung außer Samstag', 'Rückruf: Reservierung'],
-    ['a past day', 'Rückruf, Reservierung wie letzten Samstag', 'Rückruf: Reservierung'],
-    ['a recurring day', 'Rückruf, Reservierung jeden Samstag', 'Rückruf: Reservierung'],
-    ['a range', 'Rückruf, Reservierung zwischen Freitag und Sonntag', 'Rückruf: Reservierung'],
-    ['a range with bis', 'Rückruf, Reservierung vom Freitag bis Sonntag', 'Rückruf: Reservierung'],
-    [
-      'a birthday of someone else',
-      'Rückruf wegen Reservierung. Am Freitag ist Geburtstag meiner Mutter',
-      'Rückruf: Reservierung',
-    ],
-  ])('%s', (_name, utterance, expected) => {
-    expect(title(utterance)).toBe(expected);
-  });
-
-  it('still reports the booking day beside the callback day', () => {
-    expect(title('Rufen Sie mich Freitag zurück, ich möchte für Samstag reservieren')).toBe(
-      'Rückruf: Reservierung am Samstag',
-    );
-    expect(title('Rufen Sie mich zurück wegen einer Tischreservierung für Samstag')).toBe(
-      'Rückruf: Tischreservierung am Samstag',
-    );
-  });
-});
-
-describe('L2: a guest count belongs to the booking', () => {
-  const title = (utterance: string): string | undefined => {
-    const result = interpretCall(utterance);
-    return result.kind === 'callback' ? result.title : undefined;
-  };
-
-  it.each([
-    [
-      'catering for another event',
-      'Ich habe für 80 Personen Catering gebucht, bitte Rückruf wegen Reservierung',
-      'Rückruf: Reservierung',
-    ],
-    [
-      'adults and persons',
-      'Rückruf Reservierung für 2 Erwachsene und mit 2 Personen',
-      'Rückruf: Reservierung',
-    ],
-    [
-      'children as well',
-      'Rückruf Reservierung für 2 Personen mit 3 Kindern',
-      'Rückruf: Reservierung',
-    ],
-    ['a table for three', 'Rückruf Reservierung für 2 Personen zu dritt', 'Rückruf: Reservierung'],
-    [
-      'a prototype key as a number',
-      'Rückruf Reservierung für constructor Personen',
-      'Rückruf: Reservierung',
-    ],
-    [
-      'another prototype key',
-      'Rückruf Reservierung für __proto__ Personen',
-      'Rückruf: Reservierung',
-    ],
-  ])('%s', (_name, utterance, expected) => {
-    expect(title(utterance)).toBe(expected);
-  });
-});
-
-describe('birthday wording', () => {
-  it('says celebration only for a celebration or a reservation in the same clause', () => {
-    // A remark about someone's birthday in another clause is not a party (the earlier version said so).
-    expect(interpretCall('Rückruf wegen Reservierung, Geburtstag meiner Mutter')).toStrictEqual({
-      kind: 'callback',
-      title: 'Rückruf: Reservierung',
-    });
-    expect(
-      interpretCall('Rückruf bitte. Geburtstag meiner Mutter. Ich möchte reservieren'),
-    ).toStrictEqual({
-      kind: 'callback',
-      title: 'Rückruf: Reservierung',
-    });
-    expect(interpretCall('Rückruf wegen meines Geburtstags')).toStrictEqual({
-      kind: 'callback',
-      title: GENERIC_CALLBACK_TITLE,
-    });
-    expect(interpretCall('Rückruf, ich möchte meinen Geburtstag feiern')).toStrictEqual({
-      kind: 'callback',
-      title: 'Rückruf: Geburtstagsfeier',
-    });
-    expect(interpretCall('Rückruf, Tisch für meinen Geburtstag reservieren')).toStrictEqual({
-      kind: 'callback',
-      title: 'Rückruf: Reservierung für Geburtstagsfeier',
-    });
-  });
-});
-
-// Third independent review (ce3479e): F2, F3 and F4 stayed open. Each case below is a reviewer
-// counterexample or a control for the construction that replaces the earlier clause heuristics.
-describe('final review F2: a date counts only where the booking itself carries it', () => {
-  const title = (utterance: string): string | undefined => {
-    const result = interpretCall(utterance);
-    return result.kind === 'callback' ? result.title : undefined;
-  };
-
-  it.each([
-    [
-      'reviewer A: telephone contact on Friday',
-      'Ich möchte reservieren und bitte am Freitag telefonieren. Rückruf bitte.',
-      'Rückruf: Reservierung',
-    ],
-    [
-      'reviewer B: the callback is on Friday',
-      'Bitte wegen einer Reservierung am Freitag zurückrufen, dann bin ich erreichbar.',
-      'Rückruf: Reservierung',
-    ],
-    [
-      'availability in December',
-      'Ich möchte einen Tisch reservieren, im Dezember bin ich erreichbar. Bitte Rückruf.',
-      'Rückruf: Reservierung',
-    ],
-    [
-      'callback Friday and reservation Saturday in one sentence',
-      'Rufen Sie am Freitag zurück wegen einer Reservierung für Samstag.',
-      'Rückruf: Reservierung am Samstag',
-    ],
-    [
-      'a second, unattached day beside the booking day',
-      'Ich möchte für Samstag reservieren und am Freitag etwas abholen. Bitte Rückruf.',
-      'Rückruf: Reservierung',
-    ],
-  ])('omits the date unless it is the booking day: %s', (_name, utterance, expected) => {
-    expect(title(utterance)).toBe(expected);
-  });
-
-  it.each([
-    [
-      'a table for Saturday',
-      'Ich möchte für Samstag einen Tisch reservieren. Bitte rufen Sie zurück.',
-      'Rückruf: Reservierung am Samstag',
-    ],
-    [
-      'a table for Saturday, verb last',
-      'Tisch für Samstag reservieren, bitte Rückruf.',
-      'Rückruf: Reservierung am Samstag',
-    ],
-    [
-      'a birthday in December',
-      'Es geht um eine Geburtstagsfeier im Dezember. Bitte rufen Sie zurück.',
-      'Rückruf: Geburtstagsfeier im Dezember',
-    ],
-    [
-      'callback Friday, reservation Saturday',
-      'Bitte am Freitag zurückrufen. Ich möchte einen Tisch für Samstag reservieren.',
-      'Rückruf: Reservierung am Samstag',
-    ],
-    [
-      'the founder sentence for Saturday',
-      'Bitte um Rückruf wegen einer Tischreservierung für Samstag.',
-      'Rückruf: Tischreservierung am Samstag',
-    ],
-  ])('keeps the date: %s', (_name, utterance, expected) => {
-    expect(title(utterance)).toBe(expected);
-  });
-});
-
-describe('final review F3: a range or hedged count is never certified as an exact one', () => {
-  const title = (utterance: string): string | undefined => {
-    const result = interpretCall(utterance);
-    return result.kind === 'callback' ? result.title : undefined;
-  };
-
-  it.each([
-    [
-      'reviewer: eight, then six to eight',
-      'Bitte Rückruf. Reservierung für 8 Personen, es werden 6–8 Personen.',
-    ],
-    ['en dash', 'Rückruf bitte, Reservierung für 6–8 Personen.'],
-    ['hyphen', 'Rückruf bitte, Reservierung für 6-8 Personen.'],
-    ['spaced hyphen', 'Rückruf bitte, Reservierung für 6 - 8 Personen.'],
-    ['bis', 'Rückruf bitte, Reservierung für 6 bis 8 Personen.'],
-    ['written numbers', 'Rückruf bitte, Reservierung für sechs bis acht Personen.'],
-    ['zwischen', 'Rückruf bitte, Reservierung für zwischen 6 und 8 Personen.'],
-    ['oder', 'Rückruf bitte, Reservierung für 5 oder 6 Personen.'],
-    ['slash', 'Rückruf bitte, Reservierung für 6/8 Personen.'],
-    ['ungefähr', 'Rückruf bitte, Reservierung für ungefähr 8 Personen.'],
-    ['mindestens', 'Rückruf bitte, Reservierung für mindestens 8 Personen.'],
-    ['bis zu', 'Rückruf bitte, Reservierung für bis zu 8 Personen.'],
-    [
-      'exact then range',
-      'Rückruf bitte. Reservierung für 8 Personen. Auch 6 bis 8 Personen sind denkbar.',
-    ],
-    ['range then exact', 'Rückruf bitte. Es werden 6-8 Personen. Reservierung für 8 Personen.'],
-    ['six and a hundred', 'Rückruf bitte. Reservierung für 6 Personen und für 100 Personen.'],
-    ['plus', 'Rückruf bitte, Reservierung für 8 Personen plus Kinder.'],
-  ])('keeps the topic and omits the count: %s', (_name, utterance) => {
-    expect(title(utterance)).toBe('Rückruf: Reservierung');
-  });
-
-  it.each([
-    [
-      'exactly eight',
-      'Rückruf bitte, Reservierung für 8 Personen.',
-      'Rückruf: Reservierung für 8 Personen',
-    ],
-    [
-      'eight twice, consistently',
-      'Rückruf bitte, Reservierung für 8 Personen. Wir sind 8 Personen.',
-      'Rückruf: Reservierung für 8 Personen',
-    ],
-    [
-      'written number',
-      'Rückruf bitte, Reservierung für acht Personen.',
-      'Rückruf: Reservierung für 8 Personen',
-    ],
-    [
-      'a callback deadline beside an exact count',
-      'Bitte bis Freitag zurückrufen. Reservierung für 8 Personen.',
-      'Rückruf: Reservierung für 8 Personen',
-    ],
-  ])('keeps the count: %s', (_name, utterance, expected) => {
-    expect(title(utterance)).toBe(expected);
-  });
-
-  it('a count in a statement that is not about the booking is not the booking count', () => {
-    expect(
-      title('Rückruf bitte. Letztes Mal waren wir für 6 Personen da. Ich möchte reservieren.'),
-    ).toBe('Rückruf: Reservierung');
-  });
-});
-
-describe('final review F4: explicit refusals, however they are worded, create no callback', () => {
-  it.each([
+    // The founder brief.
     'Bitte nie zurückrufen.',
     'Bitte auf keinen Fall zurückrufen.',
     'Rückruf ist nicht erwünscht.',
+    'Bitte nicht zurückrufen.',
+    'Ich möchte keinen Rückruf.',
+    'Bitte nicht mehr zurückrufen.',
+    // Earlier review rounds.
+    'Bitte nicht zurückrufen, ich möchte nicht reservieren.',
+    'Rufen Sie mich nicht zurück.',
+    'Bitte keinen Rückruf.',
+    'Nicht mehr zurückrufen.',
     'Rückruf nicht erwünscht.',
     'Zurückrufen ist nicht erwünscht.',
     'Rufen Sie mich nie zurück.',
@@ -817,25 +226,247 @@ describe('final review F4: explicit refusals, however they are worded, create no
     'Zurückrufen bitte nicht.',
     'Rückruf auf keinen Fall.',
     'Rückruf lieber nicht.',
+    'Rückruf bitte nicht',
+    'Rückruf bitte nie',
+    'Rückruf: nein danke',
+    'Rückruf? Nein danke.',
+    'Zurückrufen? Bitte nicht.',
+    'Rückruf verboten',
+    'Rückruf unerwünscht',
     'Bitte nicht mehr anrufen. Rückruf erübrigt sich.',
+    'Der Rückruf hat sich erledigt.',
+    'Bitte Rückruf vermeiden',
+    'Bitte unterlassen Sie den Rückruf',
+    'Stornieren Sie den Rückruf',
+    'Vergessen Sie den Rückruf.',
+    'Ich möchte nicht, dass Sie mich zurückrufen.',
+    'Ein Rückruf wird nicht benötigt.',
+    'Rückruf brauche ich nicht.',
+    'Rückruf muss nicht sein.',
+    'Auf einen Rückruf kann ich gerne verzichten.',
+    'Ich verzichte auf einen Rückruf.',
+    'Weder Rückruf noch E-Mail bitte.',
+    'Ein Rückruf kommt für mich nicht in Frage.',
+    'Auf Rückrufe lege ich keinen Wert.',
+    'Lassen Sie den Rückruf bitte sein.',
+    'Ich rufe Sie später zurück wegen der Reservierung.',
+    // Further common word orders (fifth review).
+    'Ich möchte nicht zurückgerufen werden.',
+    'Bitte rufen Sie mich nicht mehr an.',
+    'Einen Rückruf möchte ich nicht.',
+    'Kein Rückruf bitte.',
+  ])('is unsupported: %s', (utterance) => {
+    expect(interpretCall(utterance)).toStrictEqual({ kind: 'unsupported' });
+  });
+});
+
+// C: a request that asks for the callback and also refuses or takes it back. Contact consent cannot
+// be established, so nothing is created.
+describe('F4: a contradictory callback instruction fails conservatively', () => {
+  it.each([
+    'Bitte rufen Sie mich zurück. Nein, doch bitte nicht zurückrufen.',
+    'Rückruf wegen einer Reservierung, aber bitte keinen Rückruf mehr',
     'Ich möchte reservieren. Bitte rufen Sie mich nicht an, auch kein Rückruf.',
     'Bitte rufen Sie mich zurück. Bitte nicht mehr anrufen.',
-    'Vergessen Sie den Rückruf.',
-    'Der Rückruf hat sich erledigt.',
     'Ich möchte für sechs Personen reservieren. Rückruf bitte, aber keinesfalls zurückrufen.',
+    'Bitte Rückruf. Lieber nicht.',
+    'Bitte nicht anrufen, sondern zurückrufen.',
+  ])('is unsupported: %s', (utterance) => {
+    expect(interpretCall(utterance)).toStrictEqual({ kind: 'unsupported' });
+  });
+});
+
+// B: a positive callback request with negative wording that does not target the callback.
+describe('F4: a negation that does not target the callback is not a refusal', () => {
+  it.each([
+    // The fifth review's counterexample and the founder brief.
+    'Ich möchte nicht online reservieren, bitte rufen Sie mich zurück.',
+    'Bitte zurückrufen, das Formular funktioniert nicht.',
+    'Kein Problem Rückruf bitte',
+    'Ich kann gerade nicht sprechen bitte zurückrufen',
+    // Further word orders of the same kind.
+    'Rückruf bitte, die Seite lädt nicht.',
+    'Rückruf bitte weil die Bestätigung nicht ankam',
+    'Bitte um Rückruf, ich komme online nicht weiter.',
+    'Bitte zurückrufen, ich kann nicht online buchen.',
+    'Rückruf bitte, das Formular geht doch nicht.',
+    'Vergessen Sie bitte nicht zurückzurufen.',
+    'Vergessen Sie nicht den Rückruf wegen einer Reservierung.',
+    // Earlier review rounds.
+    'Ich möchte nicht online buchen, bitte rufen Sie mich zurück',
+    'Nicht schlimm, aber rufen Sie mich bitte zurück',
+    'Ich möchte nicht stornieren, ich möchte reservieren, bitte Rückruf',
+    'Rückruf bitte nicht zu spät',
+    'Rückruf bitte nicht vor Montag',
+    'Ich möchte reservieren, nicht online. Bitte um Rückruf.',
+    'Bitte nicht vor 18 Uhr zurückrufen.',
+    'Keine Eile, bitte Rückruf.',
+    'Bitte rufen Sie zurück, aber nicht anrufen vor 10 Uhr.',
+    'Bitte kein Rückruf vor zehn Uhr, danach gerne.',
+    'Kein Rückruf morgen früh, danach gern.',
+    'Ich habe versucht Sie zu erreichen. Bitte rufen Sie mich zurück. Ich rufe Sie sonst morgen an.',
+  ])('stays a callback, with the generic title: %s', (utterance) => {
+    expect(interpretCall(utterance)).toStrictEqual({ kind: 'callback', title: GENERIC });
+  });
+
+  it('a positive control: unrelated negation elsewhere does not hide a plain topic', () => {
+    expect(titleOf('Bitte um Rückruf wegen einer Reservierung.')).toBe(RESERVATION);
+    expect(titleOf('Bitte um Rückruf denn die Onlinebuchung funktioniert.')).toBe(GENERIC);
+  });
+});
+
+// Fresh adversarial review of c603a61 (121 new utterances). The refusal grammar was a closed list of
+// phrases, so ordinary variants slipped past it. Negation is now scoped by clause: inside the clause
+// that names the contact, any refusal word withholds consent; a clause that takes the request back
+// refuses it. Each case below failed on c603a61.
+describe('adversarial review: refusal variants the phrase list missed create no callback', () => {
+  it.each([
+    'Ruf mich ja nicht zurück!',
+    'Wegen Rückruf: rufen Sie mich bloß nicht zurück.',
+    'Bitte zurückrufen oder lieber doch nicht',
+    'Rückruf bitte ach nee doch nicht',
+    'Ich habe gesagt ich möchte keinen Rückruf bekommen',
+    'Ich möchte nicht angerufen werden.',
   ])('is unsupported: %s', (utterance) => {
     expect(interpretCall(utterance)).toStrictEqual({ kind: 'unsupported' });
   });
 
   it.each([
-    ['Ich möchte nicht online reservieren. Bitte rufen Sie mich zurück.', 'Rückruf erbeten'],
-    ['Ich möchte reservieren, nicht online. Bitte um Rückruf.', 'Rückruf erbeten'],
-    ['Bitte nicht vor 18 Uhr zurückrufen.', 'Rückruf erbeten'],
-    ['Bitte auf keinen Fall später als Freitag, aber rufen Sie mich zurück.', 'Rückruf erbeten'],
-    ['Keine Eile, bitte Rückruf.', 'Rückruf erbeten'],
-    ['Bitte rufen Sie zurück, aber nicht anrufen vor 10 Uhr.', 'Rückruf erbeten'],
-    ['Vergessen Sie nicht den Rückruf wegen einer Reservierung.', 'Rückruf erbeten'],
-  ])('a positive request with unrelated negation stays a callback: %s', (utterance, expected) => {
-    expect(interpretCall(utterance)).toStrictEqual({ kind: 'callback', title: expected });
+    'Danke, dass Sie zurückgerufen haben, alles geklärt.',
+    'Ihre Rückrufnummer funktioniert nicht.',
+  ])('a mention that asks for nothing is not a callback request: %s', (utterance) => {
+    expect(interpretCall(utterance)).toStrictEqual({ kind: 'unsupported' });
+  });
+});
+
+describe('adversarial review: a wanted callback beside a negation is kept', () => {
+  it.each([
+    'Sie haben mich nicht zurückgerufen, bitte rufen Sie mich zurück.',
+    'Sie haben mich nie zurückgerufen. Bitte Rückruf.',
+    'Ihr Kollege hat nicht zurückgerufen, bitte Rückruf.',
+    'Bitte Rückruf nicht vergessen.',
+    'Kein Rückruf nach 20 Uhr bitte, vorher gern.',
+    'Rückruf bitte nicht am Wochenende.',
+    'Danke für den Rückruf, bitte rufen Sie noch einmal zurück.',
+  ])('stays a callback: %s', (utterance) => {
+    expect(interpretCall(utterance)).toStrictEqual({ kind: 'callback', title: GENERIC });
+  });
+});
+
+// The price of denying consent by default, accepted on purpose: a negation that is not one of the
+// recognised harmless constructions (technical fault, something the caller does not do, a real time
+// limit, a reminder, a report of a missing callback, a set phrase) cannot be told from a refusal, so the
+// request is unsupported and the caller asks again. Each of these was a callback before.
+describe('conservative: a negation not recognised as harmless withholds consent', () => {
+  it.each([
+    'Ich kann Sie leider nicht anrufen, bitte rufen Sie mich zurück.',
+    'Bitte heute nicht mehr zurückrufen, morgen gern',
+  ])('is unsupported: %s', (utterance) => {
+    expect(interpretCall(utterance)).toStrictEqual({ kind: 'unsupported' });
+  });
+});
+
+// Second adversarial round (103 new utterances against the clause-scoped design): a refusal in a clause
+// without a contact word, before the request, or hidden behind a time or report exemption still created
+// a callback. Consent is now denied by default; each case failed on the clause-scoped design.
+describe('second adversarial round: refusals however split or disguised create no callback', () => {
+  it.each([
+    'Rückruf? Ist nicht nötig.',
+    'Rückruf? Auf keinen Fall.',
+    'Rückruf? Keinesfalls.',
+    'Rückruf? Niemals.',
+    'Rückruf: nicht erwünscht.',
+    'Rückruf, nicht gewünscht',
+    'Ich möchte nicht, dass man mich anruft.',
+    'Ich möchte nicht, dass mich jemand kontaktiert. Rückruf nein.',
+    'Ich habe Ihre Nachricht erhalten kein Rückruf nötig',
+    'Ich bin schon zurückgerufen worden kein Rückruf mehr',
+    'Ihr Anruf kam ungelegen bitte nicht mehr zurückrufen',
+    'Danke, ich wurde bereits zurückgerufen.',
+    'Ihr Kollege hat mich schon zurückgerufen, alles gut.',
+    'Ich brauche wie bisher keinen Rückruf.',
+    'Bislang wollte ich keinen Rückruf und auch jetzt nicht.',
+  ])('is unsupported: %s', (utterance) => {
+    expect(interpretCall(utterance)).toStrictEqual({ kind: 'unsupported' });
+  });
+
+  it.each([
+    'Rückruf bitte, die Online-Reservierung klappt nicht.',
+    'Bitte Rückruf, die Bestätigung kam nicht an.',
+    'Bitte Rückruf. Nicht dringend.',
+    'Rückruf bitte nicht vor neun.',
+    'Bitte zurückrufen, ich bin morgen nicht erreichbar.',
+    'Rückruf bitte, ich möchte die Reservierung stornieren.',
+    'Gerne Rückruf, warum nicht.',
+  ])('a recognised harmless negation keeps the callback: %s', (utterance) => {
+    expect(interpretCall(utterance).kind).toBe('callback');
+  });
+});
+
+describe('adversarial review: a change, cancellation, lost item or second booking is not a new topic', () => {
+  it.each([
+    'Rückruf bitte, ich will die Reservierung canceln.',
+    'Rückruf bitte, die Reservierung rückgängig machen.',
+    'Rückruf bitte, bitte die Reservierung löschen.',
+    'Rückruf bitte, wir möchten die Reservierung verlegen.',
+    'Rückruf bitte, Reservierung annullieren.',
+    'Rückruf bitte, die Reservierung anpassen.',
+    'Rückruf bitte, die Reservierung meines Mannes.',
+    'Rückruf bitte, eine zweite Reservierung zusätzlich zur ersten.',
+    'Rückruf bitte, die Reservierung ging verloren.',
+    'Rückruf bitte, Doppelbuchung bei der Reservierung.',
+    'Rückruf bitte, die Geburtstagsfeier canceln.',
+    'Rückruf bitte, die Geburtstagsfeier fällt aus.',
+    'Rückruf bitte, unsere Geburtstagsfeier verlegen.',
+    'Rückruf bitte, die Reservierung umändern.',
+    'Rückruf bitte, die Reservierung kündigen.',
+    'Rückruf bitte, die Geburtstagsfeier ist ausgefallen.',
+    'Rückruf bitte, die Geburtstagsfeier wurde verschoben.',
+    'Rückruf bitte, gilt die Reservierung für Freitag noch?',
+    'Rückruf bitte, Geburtstagsfeier: Essen kalt, Service schlecht.',
+    'Rückruf bitte wegen der Reservierung, sehr enttäuscht.',
+    'Rückruf bitte, Reservierung, die Rechnung war zu hoch.',
+  ])('gives the generic title: %s', (utterance) => {
+    expect(titleOf(utterance)).toBe(GENERIC);
+  });
+
+  it.each([
+    ['Rückruf bitte, wir möchten Kindergeburtstag feiern.', BIRTHDAY],
+    ['Rückruf bitte, machen Sie Geburtstagsfeiern?', BIRTHDAY],
+    ['Rückruf bitte, ich möchte einen Tisch auf den Namen Müller reservieren.', RESERVATION],
+  ])('positive control: %s → %s', (utterance, expected) => {
+    expect(titleOf(utterance)).toBe(expected);
+  });
+});
+
+// Third adversarial round (78 new utterances against deny-by-default): harmless constructions that were
+// too broad ("nicht weiter", any noun before "stornieren", "vor 2027", every daypart excluded), reports
+// read as requests, and refusals with no negation at all. Each case failed before this change.
+describe('third adversarial round: disguised and negation-free refusals create no callback', () => {
+  it.each([
+    'Bisher kein Rückruf – und das ist auch gut so.',
+    'Es kam kein Rückruf, und das passt mir gut.',
+    'Rückruf ach vergiss es nicht nötig',
+  ])('is unsupported: %s', (utterance) => {
+    expect(interpretCall(utterance)).toStrictEqual({ kind: 'unsupported' });
+  });
+
+  it.each([
+    'Bitte um Rückruf, weil die Onlinebuchung nicht funktioniert.',
+    'Bitte zurückrufen, das Online-Formular funktioniert nicht richtig.',
+    'Rückruf bitte, ich komme online nicht weiter.',
+  ])('the founder positives and their variants stay callbacks: %s', (utterance) => {
+    expect(interpretCall(utterance)).toStrictEqual({ kind: 'callback', title: GENERIC });
+  });
+
+  it.each([
+    'Rückruf bitte, ich möchte die Reservierung zurücknehmen.',
+    'Rückruf bitte, die Reservierung umstellen.',
+    'Rückruf bitte, die Reservierung ist weg.',
+    'Rückruf bitte, Geburtstagsfeier: zu laut, Nachbarn sauer.',
+    'Rückruf bitte, Reservierung: Kellner frech.',
+  ])('a change, loss or complaint gives the generic title: %s', (utterance) => {
+    const result = interpretCall(utterance);
+    expect(result.kind === 'callback' ? result.title : GENERIC).toBe(GENERIC);
   });
 });
