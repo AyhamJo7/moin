@@ -1,11 +1,11 @@
 ---
-mission: M2B open Heute updates by itself (M2A #233 merged at 7caad73)
+mission: M2C full-stack browser acceptance in CI (M2B #237 merged at cbef5f5)
 status: active
 mode: interactive
 phase: M1 (cross-phase slice: P07, P12, P13)
 tier: PILOT
 plan: docs/development/m1-vertical-slice.md
-next: independent review of the M2B draft PR; P13.03.02 remaining card actions not started
+next: independent review of the M2C draft PR; P13.03.02 remaining card actions not started
 updated: 2026-10-17
 ---
 
@@ -1582,3 +1582,8 @@ M2B (2026-10-17, branch `feat/p13-02-heute-live-updates` from 7caad73): an open 
 `GET /api/today` every 15 s while visible and re-renders on change; no SSE exists server-side. Arrival
 measured 15.4 s in a local browser test (not in CI). P13.02.04 and P13.10 stay open; nothing is
 VERIFIED. Evidence: EV-P13-016.
+
+M2C (2026-10-18, branch `ci/p02-05-fullstack-browser-acceptance` from cbef5f5): mandatory CI job
+`e2e-slice` runs the vertical-slice browser suite on real PostgreSQL and Keycloak (10 of 10, 15.9 s
+arrival, run 39090443360); removing the live wiring fails it (run 39090964507). P13.02.04 ticked
+with EV-P13-017; P13.10 stays open; nothing is VERIFIED. Evidence: EV-P13-017.

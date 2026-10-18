@@ -122,7 +122,16 @@ Code: `apps/web/lib/live-today.ts`, `apps/web/app/live-today.tsx`.
 - **Budget.** About 4 reads a minute per visible tab against the account's 50 a minute.
 - **Open.** The poller has no gate yet for P13.10 (SSE plus polling only as fallback) and exposes no
   last-success signal for the stale indicator (P13.10.02). SSE with `Last-Event-ID`, the stale-data indicator and the polling-fallback E2E
-  (P13.10), summary counts (P13.02.02). The browser test is local-only (needs Keycloak), not in CI.
+  (P13.10), summary counts (P13.02.02). The browser suite also runs in CI (`e2e-slice` in `verify.yml`).
+
+## In CI
+
+The `e2e-slice` job in `.github/workflows/verify.yml` runs this suite on every pull request: a
+PostgreSQL service container with the application roles, Keycloak from the compose file, the
+compiled API, the standalone owner app (built with the loopback API proxy) and Chromium. It is in
+the `verify` check's `needs`. `scripts/check-slice-report.ts` fails the job unless all ten tests ran
+and passed, none skipped. Add a test to the suite and its title phrase to that script. The
+`e2e-slice` artifact holds the report, the commit-to-render timings and the process log. To run it locally, see below.
 
 ## Run it locally
 
