@@ -14,6 +14,17 @@ import {
 // a starting point. The secret scanner flagged all three of these, and it was right to.
 const AUTH_TOKEN = randomBytes(16).toString('hex');
 
+const BASE64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+/**
+ * The signature with its first character replaced by a different Base64 character, so the result
+ * is still a well-formed signature of the same length but never equal to the input.
+ */
+function tamperFirstCharacter(signature: string): string {
+  const replacement = signature.startsWith('A') ? 'B' : 'A';
+  return `${replacement}${signature.slice(1)}`;
+}
+
 describe('the published Twilio vector', () => {
   // Twilio documents this example with its expected signature. It is the only fixture here that
   // was not produced by this implementation, which makes it the only one that can catch the
@@ -77,10 +88,52 @@ describe('isValidSignature', () => {
   });
 
   it('rejects a tampered signature', () => {
-    const flipped = `A${signature.slice(1)}`;
+    const flipped = tamperFirstCharacter(signature);
+    expect(flipped).not.toBe(signature);
     expect(isValidSignature({ authToken: AUTH_TOKEN, url, signature: flipped, params })).toBe(
       false,
     );
+  });
+
+  // The signature depends on the auth token, which is random per run, so its first character is
+  // too. Replacing it with a fixed letter changed nothing about one signature in 64 (those that
+  // already start with it) and the test then asked for rejection of a valid signature. These
+  // tokens are fixed so that case is exercised every run, not once in a while.
+  it('rejects a tampered signature whatever its first character is', () => {
+    const firstCharacters = new Set<string>();
+    for (let index = 0; firstCharacters.size < BASE64_ALPHABET.length && index < 5000; index += 1) {
+      const token = `fixed-test-token-${String(index)}`;
+      const valid = computeSignature(token, url, params);
+      const first = valid.charAt(0);
+      if (firstCharacters.has(first)) continue;
+      firstCharacters.add(first);
+      const flipped = tamperFirstCharacter(valid);
+      expect(flipped).not.toBe(valid);
+      expect(flipped).toHaveLength(valid.length);
+      expect(isValidSignature({ authToken: token, url, signature: valid, params })).toBe(true);
+      expect(isValidSignature({ authToken: token, url, signature: flipped, params })).toBe(false);
+    }
+    expect(firstCharacters.size).toBe(BASE64_ALPHABET.length);
+    expect(firstCharacters.has('A')).toBe(true);
+  });
+
+  // Negative control for the test above: the replacement this suite used to apply (always `A`)
+  // leaves a signature that starts with `A` byte-for-byte unchanged, and an unchanged signature is
+  // valid. That is why the helper picks a letter that differs from the original.
+  it('shows why a fixed replacement letter was not a tamper', () => {
+    let token = '';
+    let valid = '';
+    for (let index = 0; !valid.startsWith('A') && index < 5000; index += 1) {
+      token = `fixed-test-token-${String(index)}`;
+      valid = computeSignature(token, url, params);
+    }
+    expect(valid.startsWith('A')).toBe(true);
+    const oldFlip = `A${valid.slice(1)}`;
+    expect(oldFlip).toBe(valid);
+    expect(isValidSignature({ authToken: token, url, signature: oldFlip, params })).toBe(true);
+    expect(
+      isValidSignature({ authToken: token, url, signature: tamperFirstCharacter(valid), params }),
+    ).toBe(false);
   });
 
   // The failure this catches in staging: the proxy says http, the configuration says https, and
