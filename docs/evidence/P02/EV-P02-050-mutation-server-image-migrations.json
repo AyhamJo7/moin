@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/home/adam/projects/business/moin",
+  "head": "d214477e434fc90f74ca5f532fc7216f9163ede7",
+  "mode": "committed",
+  "fix_ref": "d214477e434fc90f74ca5f532fc7216f9163ede7",
+  "fix_paths": [
+    "apps/server/Dockerfile"
+  ],
+  "untracked_fix_files": [],
+  "test": "docker build -q -f apps/server/Dockerfile -t moin-server:mutation-probe . && scripts/check-server-image.sh moin-server:mutation-probe",
+  "started": "2026-10-18T06:30:51+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-10-18T06:31:12+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 14.8,
+    "tail": "sha256:9eb49574e7c5c07c401f72304b60699f13fd6b8f71e72e7d84f36eb9f15f0efa\nno SQL migrations in moin-server:mutation-probe (packages/db/migrations)"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 6.74,
+    "tail": "sha256:a0ec12cd5581a4d8cf52c537acb176d569cfa18f1c0656a2cb134cb3e6104dd4\nSQL migrations present in moin-server:mutation-probe"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "2d2bc977b81e671c9ef338a9aa9e750a1e167492",
+  "patch_file": "/home/adam/projects/business/moin/.git/claude-evidence/mutation/20261018T063051Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}

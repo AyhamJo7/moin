@@ -266,3 +266,8 @@ here:
   tenant namespace, where a collision can serialise unrelated work across tenants and can form a
   residual cross-key deadlock. The fix removes the task-row/audit-head cycles under these
   assumptions, not deadlocks in general.
+
+## Packaged demo
+
+The same flow against the packaged images (API, owner app, PostgreSQL, Keycloak) is documented in
+[`demo-stack.md`](demo-stack.md) (`deploy/demo/demo.sh up`). This page covers the developer build.

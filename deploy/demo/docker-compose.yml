@@ -1,0 +1,191 @@
+# The packaged KlarDesk demo stack (M2D-2): the real API image, the real owner-app image, PostgreSQL
+# and Keycloak, started with `deploy/demo/demo.sh up`. Local only, over HTTP on loopback, with
+# synthetic data. It is NOT a production baseline: it runs the API with NODE_ENV=development
+# because only that environment may use the local Keycloak and the simulated-call entry point
+# (config/env.ts), every credential is a development-only fake, and nothing here is hardened for
+# a public host. Public hosting is a separate founder decision.
+#
+# Topology. `edge` (nginx) owns the container network namespace and publishes the only app port;
+# `api` and `web` join it with `network_mode: service:edge`, so inside it the API is
+# 127.0.0.1:3101 and the owner app 127.0.0.1:3001, like two containers of one ECS task. That is
+# what lets the owner app send the session cookie to the API over plain HTTP: its origin guard
+# accepts HTTPS or loopback only, and this keeps that guard unchanged. Restart api or web alone
+# freely; restarting edge recreates the namespace, so use `demo.sh restart` for that.
+#
+# Keycloak joins the same namespace, so the issuer is `http://localhost:8081/realms/moin-local` for
+# the browser (the published port) and for the API (loopback inside the namespace) alike. The API's
+# configuration accepts only a loopback issuer for the local provider; this keeps that rule as it is.
+name: moin-demo
+
+x-image-pins:
+  # Same digests as the development stack (docker-compose.yml at the repository root).
+  postgres: &postgres pgvector/pgvector@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
+  keycloak: &keycloak quay.io/keycloak/keycloak@sha256:82a77884f3af238beab1e7afd63b5f530e1b5c0590bd7aa60b40a40463e29b2c
+  nginx: &nginx nginxinc/nginx-unprivileged@sha256:7377697a821c131a924a7105fafbe7414db4e9fcc77a6f08f776f33f141ec3f8
+
+services:
+  postgres:
+    image: *postgres
+    environment:
+      POSTGRES_USER: moin_owner
+      POSTGRES_PASSWORD: local-development-only
+      POSTGRES_DB: moin
+      POSTGRES_INITDB_ARGS: '--encoding=UTF8 --locale=C'
+    # No published port: only the containers of this project reach the database.
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ../../docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'psql -U moin_owner -d moin -c "select 1" >/dev/null 2>&1']
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: 768m
+    cpus: 1.0
+    pids_limit: 200
+
+  oidc:
+    image: *keycloak
+    network_mode: 'service:edge'
+    command: ['start-dev', '--import-realm', '--http-port=8081']
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: local-development-only
+      KC_HEALTH_ENABLED: 'true'
+    volumes:
+      - ../../docker/keycloak/realm-moin-local.json:/opt/keycloak/data/import/realm-moin-local.json:ro
+      # Keeps the users (and so their subjects) across container re-creation.
+      - keycloak-data:/opt/keycloak/data
+    depends_on:
+      edge:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          "exec 3<>/dev/tcp/127.0.0.1/9000; echo -e 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&3; grep -q UP <&3",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 20s
+    mem_limit: 1g
+    cpus: 1.5
+    pids_limit: 400
+
+  # Applies the reviewed SQL migrations as the migration role, then exits. A failure exits non-zero
+  # and `api` (which waits for service_completed_successfully) never starts.
+  migrate:
+    image: moin-server:demo
+    build:
+      context: ../..
+      dockerfile: apps/server/Dockerfile
+    command: ['node', 'packages/db/src/cli.ts', 'migrate']
+    environment:
+      DATABASE_MIGRATION_URL: postgres://moin_migrator:local-development-only@postgres:5432/moin
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+    read_only: true
+    tmpfs: ['/tmp']
+    mem_limit: 256m
+    pids_limit: 100
+
+  edge:
+    image: *nginx
+    # The only published ports: the app and the sign-in page, both on loopback.
+    ports:
+      - '127.0.0.1:3000:3000'
+      - '127.0.0.1:8081:8081'
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    read_only: true
+    tmpfs: ['/tmp']
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:3000/__edge || exit 1']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    mem_limit: 128m
+    pids_limit: 100
+
+  api:
+    image: moin-server:demo
+    network_mode: 'service:edge'
+    command: ['node', 'apps/server/dist/main-api.js']
+    environment:
+      # development, not production: see the header.
+      NODE_ENV: development
+      SERVER_ROLE: api
+      PORT: '3101'
+      LOG_LEVEL: info
+      DATABASE_URL: postgres://moin_app:local-development-only@postgres:5432/moin
+      IDENTITY_DATABASE_URL: postgres://moin_identity:local-development-only@postgres:5432/moin
+      APP_ORIGIN: http://localhost:3000
+      OIDC_PROVIDER: keycloak
+      OIDC_ISSUER_URL: http://localhost:8081/realms/moin-local
+      OIDC_CLIENT_ID: moin-web
+      OIDC_CLIENT_SECRET: local-development-only
+      OIDC_REDIRECT_URI: http://localhost:3000/api/auth/callback
+      AUTH_LOCAL_TOKEN_KEY: 'local-v1:local-development-only'
+      # Generated per install by demo.sh and read back from this container; never written to a file.
+      CALL_SIMULATOR_TOKEN: ${DEMO_SIMULATOR_TOKEN:?run deploy/demo/demo.sh, not docker compose directly}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      oidc:
+        condition: service_healthy
+      edge:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3101/readyz').then((r) => process.exit(r.status === 200 ? 0 : 1), () => process.exit(1))",
+        ]
+      interval: 3s
+      timeout: 4s
+      retries: 20
+      start_period: 5s
+    read_only: true
+    tmpfs: ['/tmp']
+    mem_limit: 512m
+    pids_limit: 200
+
+  web:
+    image: moin-web:demo
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+    network_mode: 'service:edge'
+    environment:
+      PORT: '3001'
+      HOSTNAME: 127.0.0.1
+      OWNER_API_ORIGIN: http://127.0.0.1:3101
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3001/').then((r) => process.exit(r.status === 200 ? 0 : 1), () => process.exit(1))",
+        ]
+      interval: 3s
+      timeout: 4s
+      retries: 20
+      start_period: 5s
+    read_only: true
+    tmpfs: ['/tmp']
+    mem_limit: 384m
+    pids_limit: 200
+
+volumes:
+  postgres-data:
+  keycloak-data:
