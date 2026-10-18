@@ -236,12 +236,16 @@ jobs:
       postgres:
         image: pgvector/pgvector@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
         env:
-      TEST_DATABASE_ADMIN_URL: postgres://moin_owner:ci-only-not-a-secret@127.0.0.1:5432/postgres
-      TEST_DATABASE_MIGRATOR_URL: postgres://moin_migrator:ci-only-not-a-secret@127.0.0.1:5432/postgres
-      TEST_DATABASE_APP_URL: postgres://moin_app:ci-only-not-a-secret@127.0.0.1:5432/postgres
-      TEST_DATABASE_PROVISIONER_URL: postgres://moin_provisioner:ci-only-not-a-secret@127.0.0.1:5432/postgres
-      TEST_DATABASE_IDENTITY_URL: postgres://moin_identity:ci-only-not-a-secret@127.0.0.1:5432/postgres
-      TEST_OIDC_ISSUER_URL: http://127.0.0.1:8080/realms/moin-local
+          POSTGRES_USER: moin_owner
+          POSTGRES_PASSWORD: ci-only-not-a-secret
+          POSTGRES_DB: moin
+          POSTGRES_INITDB_ARGS: '--encoding=UTF8 --locale=C'
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U moin_owner -d moin"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
     env:
       TEST_DATABASE_ADMIN_URL: postgres://moin_owner:ci-only-not-a-secret@127.0.0.1:5432/postgres
       TEST_DATABASE_MIGRATOR_URL: postgres://moin_migrator:ci-only-not-a-secret@127.0.0.1:5432/postgres
