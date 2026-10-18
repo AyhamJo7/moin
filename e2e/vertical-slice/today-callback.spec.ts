@@ -6,6 +6,13 @@
  * leaves the live list, and the completion survives a reload, an API restart and a replay of the
  * original call. A stale view gets a truthful conflict message and a double click sends one request.
  *
+ * M2B (P13.02.04, live Heute): the page that is already open picks up a callback committed after
+ * it loaded, by itself and exactly once, within 60 s; a completion in one signed-in session reaches
+ * another independent session; an outage leaves the list as it is and the page reconciles when the
+ * network returns; a revoked session shows the signed-out page and no task data. The arrival
+ * latency is measured from the task row's commit time to the card being visible in the browser,
+ * and appended to `test-results/live-today-timings.jsonl`.
+ *
  * Everything runs for real except the call itself: a fresh PostgreSQL test database (migrated
  * template, application role NOBYPASSRLS), the API started as its production entry point
  * (`main-api.ts`), the owner app's standalone server, and sign-in through the local Keycloak's own
@@ -16,11 +23,11 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
-import { cpSync, mkdirSync, openSync, readFileSync } from 'node:fs';
+import { appendFileSync, cpSync, mkdirSync, openSync, readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { AxeBuilder } from '@axe-core/playwright';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from '@playwright/test';
 import { SIMULATED_CALL_PATH } from '@moin/contracts';
 import { createTestDatabase, type TestDatabase } from '@moin/testing';
 // The integration suite's template builder (migrations applied once); not a package export.
@@ -558,4 +565,182 @@ test('a request that never reached the server is unknown to the browser; the ret
   await expect(card).toHaveCount(0);
   expect(await taskState(taskId)).toStrictEqual({ status: 'done', version: 4 });
   expect(await statusAuditActors(taskId)).toHaveLength(3);
+});
+
+// ---- M2B: live Heute (P13.02.04) ----------------------------------------------------------------
+
+const ARRIVAL_LIMIT_MS = 60_000;
+/** Longer than one poll interval plus the request and render (lib/live-today.ts: 15 s). */
+const SETTLE_MS = 20_000;
+
+/** The milliseconds since the epoch at which Postgres stamped the task row. */
+async function committedAtMs(taskId: string): Promise<number> {
+  const row = await database
+    .fixturePool()
+    .query<{ ms: number }>(
+      'select (extract(epoch from created_at) * 1000)::float8 as ms from tasks where id = $1',
+      [taskId],
+    );
+  return row.rows[0]?.ms ?? Number.NaN;
+}
+
+function recordTiming(label: string, milliseconds: number): void {
+  expect(milliseconds).toBeLessThan(ARRIVAL_LIMIT_MS);
+  const directory = resolve(ROOT, 'test-results');
+  mkdirSync(directory, { recursive: true });
+  appendFileSync(
+    resolve(directory, 'live-today-timings.jsonl'),
+    `${JSON.stringify({ label, milliseconds: Math.round(milliseconds), at: new Date().toISOString() })}\n`,
+  );
+}
+
+async function signInOwnerInNewContext(browser: Browser): Promise<Page> {
+  const context = await browser.newContext({
+    baseURL: `http://localhost:${String(WEB_PORT)}`,
+    locale: 'de-DE',
+  });
+  const page = await context.newPage();
+  await signInOwner(page);
+  return page;
+}
+
+test('a callback committed while Heute is open appears by itself, once, without a reload', async ({
+  page,
+}) => {
+  const consoleErrors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') consoleErrors.push(message.text());
+  });
+  await signInOwner(page);
+  const callbacks = page.getByRole('region', { name: 'Rückrufe' });
+  await expect(callbacks).toBeVisible();
+  // Marks of "the page was not reloaded": a performance mark dies with the document, and focus on
+  // an element that survives the server re-render stays where the owner put it.
+  await page.evaluate(() => {
+    performance.mark('opened-before-the-call');
+  });
+  const refresh = page.getByRole('link', { name: 'Aktualisieren' });
+  await refresh.focus();
+
+  const taskId = await simulateCall(
+    RESTAURANT_NUMBER,
+    'Hallo, ich hätte gern einen Rückruf wegen einer Tischreservierung.',
+  );
+  await simulateCall(OTHER_NUMBER, 'Bitte rufen Sie mich zurück wegen Lieferung Fremdbetrieb');
+  const card = callbacks.locator(`[data-task-id="${taskId}"]`);
+  await expect(card.getByRole('heading', { name: 'Rückruf: Tischreservierung' })).toBeVisible({
+    timeout: ARRIVAL_LIMIT_MS,
+  });
+  const arrivedAt = Date.now();
+  recordTiming('callback-arrival-open-page', arrivedAt - (await committedAtMs(taskId)));
+
+  await expect(card).toHaveCount(1);
+  await expect(card).toContainText('Offen');
+  expect(
+    await page.evaluate(() => performance.getEntriesByName('opened-before-the-call').length),
+  ).toBe(1);
+  await expect(refresh).toBeFocused();
+  // Further polls neither duplicate the card nor bring in the other tenant's task.
+  await page.waitForTimeout(SETTLE_MS);
+  await expect(card).toHaveCount(1);
+  await expect(page.getByText(OTHER_TITLE)).toHaveCount(0);
+  expect(consoleErrors).toStrictEqual([]);
+});
+
+test('a completion reaches another open session, and a replay of the call does not reopen it', async ({
+  browser,
+  page,
+}) => {
+  await signInOwner(page);
+  const other = await signInOwnerInNewContext(browser);
+  const callSid = `SIM${randomUUID().replaceAll('-', '')}`;
+  const utterance = 'Bitte rufen Sie mich zurück wegen einer Tischreservierung.';
+  const taskId = await simulateCall(RESTAURANT_NUMBER, utterance, callSid);
+  const here = page.getByRole('region', { name: 'Rückrufe' }).locator(`[data-task-id="${taskId}"]`);
+  const there = other
+    .getByRole('region', { name: 'Rückrufe' })
+    .locator(`[data-task-id="${taskId}"]`);
+  await expect(here).toBeVisible({ timeout: ARRIVAL_LIMIT_MS });
+  await expect(there).toBeVisible({ timeout: ARRIVAL_LIMIT_MS });
+
+  await here.getByRole('button', { name: /^Erledigt/u }).click();
+  await expect(page.getByTestId('action-notice')).toHaveText(
+    'Der Rückruf ist als erledigt markiert.',
+  );
+  await expect(here).toHaveCount(0);
+  const completedAt = Date.now();
+  await expect(there).toHaveCount(0, { timeout: ARRIVAL_LIMIT_MS });
+  recordTiming('completion-reaches-other-session', Date.now() - completedAt);
+  expect(await taskState(taskId)).toStrictEqual({ status: 'done', version: 4 });
+
+  // The original call arrives again while both pages are open: the next polls leave both alone.
+  expect(await simulateCall(RESTAURANT_NUMBER, utterance, callSid)).toBe(taskId);
+  await page.waitForTimeout(SETTLE_MS);
+  await expect(here).toHaveCount(0);
+  await expect(there).toHaveCount(0);
+  expect(await taskState(taskId)).toStrictEqual({ status: 'done', version: 4 });
+  await other.context().close();
+});
+
+test('an outage leaves the list as it is, and the page reconciles when the network returns', async ({
+  context,
+  page,
+}) => {
+  await signInOwner(page);
+  const callbacks = page.getByRole('region', { name: 'Rückrufe' });
+  const first = await simulateCall(
+    RESTAURANT_NUMBER,
+    'Bitte rufen Sie mich zurück wegen einer Tischreservierung.',
+  );
+  const firstCard = callbacks.locator(`[data-task-id="${first}"]`);
+  await expect(firstCard).toBeVisible({ timeout: ARRIVAL_LIMIT_MS });
+
+  // The browser loses the network; the next poll fails, the owner still sees the same list and no
+  // error banner (the page makes no claim it cannot back).
+  const pollFailed = page.waitForEvent('requestfailed', {
+    predicate: (request) => new URL(request.url()).pathname === '/api/today',
+    timeout: ARRIVAL_LIMIT_MS,
+  });
+  await context.setOffline(true);
+  await pollFailed;
+  const second = await simulateCall(
+    RESTAURANT_NUMBER,
+    'Bitte rufen Sie mich zurück wegen einer Tischreservierung.',
+  );
+  const secondCard = callbacks.locator(`[data-task-id="${second}"]`);
+  await expect(firstCard).toBeVisible();
+  await expect(secondCard).toHaveCount(0);
+  await expect(page.locator('main').getByRole('alert')).toHaveCount(0);
+
+  // Back online: the page reads the authoritative state at once, not only what it missed.
+  const backAt = Date.now();
+  await context.setOffline(false);
+  await expect(secondCard).toBeVisible({ timeout: ARRIVAL_LIMIT_MS });
+  recordTiming('reconcile-after-network-return', Date.now() - backAt);
+  await expect(secondCard).toHaveCount(1);
+  await expect(firstCard).toHaveCount(1);
+});
+
+test('a revoked session shows the signed-out page and no task data', async ({ page }) => {
+  await signInOwner(page);
+  const taskId = await simulateCall(
+    RESTAURANT_NUMBER,
+    'Bitte rufen Sie mich zurück wegen einer Tischreservierung.',
+  );
+  const card = page.getByRole('region', { name: 'Rückrufe' }).locator(`[data-task-id="${taskId}"]`);
+  await expect(card).toBeVisible({ timeout: ARRIVAL_LIMIT_MS });
+
+  // The session ends on the server (sign-out elsewhere, administrator revocation).
+  await database.fixturePool().query(
+    `update sessions
+        set revoked_at = now(), revocation_reason = 'signed_out',
+            provider_tokens_sealed = null, provider_tokens_key_id = null
+      where revoked_at is null`,
+  );
+  await expect(page.getByText('Bitte melden Sie sich an')).toBeVisible({
+    timeout: ARRIVAL_LIMIT_MS,
+  });
+  await expect(page.getByRole('link', { name: 'Anmelden' })).toBeVisible();
+  await expect(page.locator('[data-task-id]')).toHaveCount(0);
+  await expect(page.getByText('Rückruf: Tischreservierung')).toHaveCount(0);
 });
