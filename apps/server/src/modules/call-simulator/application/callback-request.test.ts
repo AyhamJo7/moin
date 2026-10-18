@@ -42,7 +42,8 @@ describe('interpretCall (M1 callback slice)', () => {
       'Rückruf bitte, Geburtstagsfeier mit Tischreservierung für 99 Personen am Donnerstag',
     );
     const title = result.kind === 'callback' ? result.title : '';
-    expect(Array.from(title).length).toBeLessThanOrEqual(TASK_TITLE_MAX_LENGTH);
+    expect(title).toBe('Rückruf: Reservierung für Geburtstagsfeier für 99 Personen am Donnerstag');
+    expect(Array.from(title)).toHaveLength(TASK_TITLE_MAX_LENGTH);
     expect(todayTaskSchema.shape.title.safeParse(title).success).toBe(true);
     expect(todayTaskSchema.shape.title.safeParse('🎂'.repeat(73)).success).toBe(false);
   });
@@ -522,4 +523,138 @@ describe('F4: an explicit refusal of the callback creates no callback', () => {
       expect(interpretCall(utterance)).toStrictEqual({ kind: 'callback', title: expected });
     },
   );
+});
+
+// Second independent review of the remediation (9cb135d): no Critical or High; these were Medium and Low.
+describe('M1: a negation that does not refuse the callback is not a refusal', () => {
+  it.each([
+    'Kein Problem Rückruf bitte',
+    'Ich kann gerade nicht sprechen bitte zurückrufen',
+    'Rückruf bitte, nicht erst morgen',
+    'Rückruf bitte nicht zu spät',
+    'Rückruf bitte nicht vor Montag',
+  ])('is still a callback: %s', (utterance) => {
+    expect(interpretCall(utterance).kind).toBe('callback');
+  });
+});
+
+describe('M2: further explicit refusals create no callback', () => {
+  it.each([
+    'Rückruf bitte nicht',
+    'Rückruf: nein danke',
+    'Rückruf verboten',
+    'Rückruf unerwünscht',
+    'Bitte Rückruf vermeiden',
+    'Bitte unterlassen Sie den Rückruf',
+    'Stornieren Sie den Rückruf',
+    'Rückruf bitte nie',
+  ])('is unsupported: %s', (utterance) => {
+    expect(interpretCall(utterance)).toStrictEqual({ kind: 'unsupported' });
+  });
+});
+
+describe('M3 and L1: a date that is not the booking day is not reported as it', () => {
+  const title = (utterance: string): string | undefined => {
+    const result = interpretCall(utterance);
+    return result.kind === 'callback' ? result.title : undefined;
+  };
+
+  it.each([
+    [
+      'availability',
+      'Rufen Sie mich zurück wegen Reservierung ich bin Montag weg',
+      'Rückruf: Reservierung',
+    ],
+    [
+      'availability, own sentence',
+      'Rückruf bitte. Ich bin Montag erreichbar für die Reservierung',
+      'Rückruf: Reservierung',
+    ],
+    [
+      'a correction, new sentence',
+      'Rückruf Reservierung Samstag. Nein doch Sonntag',
+      'Rückruf: Reservierung',
+    ],
+    [
+      'a correction after a comma',
+      'Rückruf Reservierung am Samstag, nein Sonntag',
+      'Rückruf: Reservierung',
+    ],
+    ['an exception', 'Rückruf, Reservierung außer Samstag', 'Rückruf: Reservierung'],
+    ['a past day', 'Rückruf, Reservierung wie letzten Samstag', 'Rückruf: Reservierung'],
+    ['a recurring day', 'Rückruf, Reservierung jeden Samstag', 'Rückruf: Reservierung'],
+    ['a range', 'Rückruf, Reservierung zwischen Freitag und Sonntag', 'Rückruf: Reservierung'],
+    ['a range with bis', 'Rückruf, Reservierung vom Freitag bis Sonntag', 'Rückruf: Reservierung'],
+    [
+      'a birthday of someone else',
+      'Rückruf wegen Reservierung. Am Freitag ist Geburtstag meiner Mutter',
+      'Rückruf: Reservierung',
+    ],
+  ])('%s', (_name, utterance, expected) => {
+    expect(title(utterance)).toBe(expected);
+  });
+
+  it('still reports the booking day beside the callback day', () => {
+    expect(title('Rufen Sie mich Freitag zurück, ich möchte für Samstag reservieren')).toBe(
+      'Rückruf: Reservierung am Samstag',
+    );
+    expect(title('Rufen Sie mich zurück wegen einer Tischreservierung für Samstag')).toBe(
+      'Rückruf: Tischreservierung am Samstag',
+    );
+  });
+});
+
+describe('L2: a guest count belongs to the booking', () => {
+  const title = (utterance: string): string | undefined => {
+    const result = interpretCall(utterance);
+    return result.kind === 'callback' ? result.title : undefined;
+  };
+
+  it.each([
+    [
+      'catering for another event',
+      'Ich habe für 80 Personen Catering gebucht, bitte Rückruf wegen Reservierung',
+      'Rückruf: Reservierung',
+    ],
+    [
+      'adults and persons',
+      'Rückruf Reservierung für 2 Erwachsene und mit 2 Personen',
+      'Rückruf: Reservierung',
+    ],
+    [
+      'children as well',
+      'Rückruf Reservierung für 2 Personen mit 3 Kindern',
+      'Rückruf: Reservierung',
+    ],
+    ['a table for three', 'Rückruf Reservierung für 2 Personen zu dritt', 'Rückruf: Reservierung'],
+    [
+      'a prototype key as a number',
+      'Rückruf Reservierung für constructor Personen',
+      'Rückruf: Reservierung',
+    ],
+    [
+      'another prototype key',
+      'Rückruf Reservierung für __proto__ Personen',
+      'Rückruf: Reservierung',
+    ],
+  ])('%s', (_name, utterance, expected) => {
+    expect(title(utterance)).toBe(expected);
+  });
+});
+
+describe('birthday wording', () => {
+  it('says celebration only for a celebration or a reservation', () => {
+    expect(interpretCall('Rückruf wegen meines Geburtstags')).toStrictEqual({
+      kind: 'callback',
+      title: GENERIC_CALLBACK_TITLE,
+    });
+    expect(interpretCall('Rückruf, ich möchte meinen Geburtstag feiern')).toStrictEqual({
+      kind: 'callback',
+      title: 'Rückruf: Geburtstagsfeier',
+    });
+    expect(interpretCall('Rückruf, Tisch für meinen Geburtstag reservieren')).toStrictEqual({
+      kind: 'callback',
+      title: 'Rückruf: Reservierung für Geburtstagsfeier',
+    });
+  });
 });
