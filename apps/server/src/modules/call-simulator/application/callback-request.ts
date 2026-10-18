@@ -44,22 +44,46 @@ export type CallInterpretation =
 // "Rückruf", "zurückrufen", "zurückruft", "ruf(en Sie) mich bitte zurück".
 const CALLBACK_PHRASE = /rückruf|zurückruf|\bruf\p{L}*\s+(?:\p{L}+\s+){0,3}zurück\b/iu;
 
-// A clear refusal of the callback itself, in bounded forms: "nicht (mehr) zurückrufen", "rufen Sie
-// mich nicht zurück", "keinen Rückruf", "ohne Rückruf", "Rückruf nicht nötig". The negation must sit
-// next to the callback word: "nicht online buchen, bitte rufen Sie mich zurück" is not a refusal.
+// A clear refusal of the callback itself, in bounded forms: "nicht (mehr) zurückrufen", "nie
+// zurückrufen", "auf keinen Fall zurückrufen", "rufen Sie mich nicht zurück", "keinen Rückruf",
+// "Rückruf nicht erwünscht". The negation must sit next to the callback word: "nicht online buchen,
+// bitte rufen Sie mich zurück" is not a refusal. Contradicting instructions are refused as well: the
+// caller can ask again, an unwanted contact cannot be taken back.
+const NEGATION =
+  '(?:nicht|nie|niemals|keinesfalls|keineswegs|auf\\s+keinen\\s+fall|unter\\s+keinen\\s+umständen)';
+// Only these words may sit between the negation and the callback word, so "nicht erst morgen zurück",
+// "nicht zu spät zurück" and "nicht vor Montag zurück" stay callbacks.
+const NEGATION_FILLER = '(?:\\s+(?:mehr|bitte|wieder|noch|nochmal|nochmals|doch|lieber|besser))*';
+// A word that is not itself a negation: "vergessen Sie nicht den Rückruf" asks for the callback.
+const PLAIN_WORD = '(?:\\s+(?!nicht(?!\\p{L}))\\p{L}+)';
 const REFUSAL = [
-  // "nicht zurückrufen", "nicht mehr zurückrufen", "rufen Sie mich nicht zurück": only a closed list of
-  // filler words may sit between the negation and the callback word, so "nicht erst morgen zurück",
-  // "nicht zu spät zurück" and "nicht vor Montag zurück" stay callbacks.
-  /(?<!\p{L})nicht(?:\s+(?:mehr|bitte|wieder|noch|nochmal|nochmals))*\s+zurück(?:ruf|rufen)?(?!\p{L})/iu,
-  /(?<!\p{L})kein(?:en|e)?\s+(?:(?:weiteren|erneuten|weitere)\s+)?(?:zurück)?rückruf/iu,
+  new RegExp(`(?<!\\p{L})${NEGATION}${NEGATION_FILLER}\\s+zurück(?:ruf|rufen)?(?!\\p{L})`, 'iu'),
+  // "bitte nicht mehr anrufen", "rufen Sie mich nicht an" (ending the clause: "nicht anrufen vor 10" is a time).
+  new RegExp(
+    `(?<!\\p{L})${NEGATION}${NEGATION_FILLER}\\s+(?:anrufen|anruf|kontaktieren|belästigen)(?!\\p{L})(?=\\s*(?:[.!?;,:]|$))`,
+    'iu',
+  ),
+  new RegExp(
+    `\\bruf\\p{L}*${PLAIN_WORD}{0,2}\\s+${NEGATION}${NEGATION_FILLER}\\s+an(?!\\p{L})(?=\\s*(?:[.!?;,:]|$))`,
+    'iu',
+  ),
+  /(?<!\p{L})kein(?:en|e)?\s+(?:(?:weiteren|erneuten|weitere)\s+)?(?:(?:zurück)?rückruf|zurückruf|anruf)/iu,
   /(?<!\p{L})ohne\s+rückruf/iu,
-  // "Rückruf (bitte) nicht / nie / nicht nötig / verboten / unerwünscht / nein danke", ending the clause:
-  // "Rückruf bitte nicht zu spät" is a callback.
-  /rückruf(?:\s+bitte)?[\s:,.-]+(?:ist\s+)?(?:(?:nicht|nie)(?:\s+(?:mehr|nötig|erforderlich))*|unnötig|überflüssig|unerwünscht|verboten|nein(?:\s+danke)?)(?=\s*(?:[.!?;,:]|$))/iu,
-  // "unterlassen Sie den Rückruf", "Stornieren Sie den Rückruf", "Rückruf vermeiden".
-  /(?<!\p{L})(?:unterlass|vermeid|verbiet|stornier|abbestell|absag)\p{L}*(?:\s+\p{L}+){0,3}\s+(?:zurück)?rückruf/iu,
-  /rückruf\p{L}*(?:\s+\p{L}+){0,2}\s+(?:unterlass|vermeid|verbiet)\p{L}*/iu,
+  // "Rückruf (bitte) nicht / nie / auf keinen Fall / nicht erwünscht / unerwünscht / nein danke /
+  // erübrigt sich", ending the clause: "Rückruf bitte nicht zu spät" is a callback.
+  new RegExp(
+    `rückruf\\p{L}*(?:\\s+bitte)?[\\s:,.-]+(?:ist\\s+)?(?:(?:doch|lieber|besser|eher)\\s+)?(?:${NEGATION}(?:\\s+(?:mehr|nötig|erforderlich|notwendig|erwünscht|gewünscht|gewollt|erlaubt))*|unnötig|überflüssig|unerwünscht|verboten|nein(?:\\s+danke)?|entfällt|erübrigt\\s+sich|(?:hat\\s+sich\\s+)?erledigt)(?=\\s*(?:[.!?;,:]|$))`,
+    'iu',
+  ),
+  // "unterlassen Sie den Rückruf", "vergessen Sie den Rückruf", "Rückruf vermeiden".
+  new RegExp(
+    `(?<!\\p{L})(?:unterlass|vermeid|verbiet|stornier|abbestell|absag|vergess|vergiss|verzicht|widerruf)\\p{L}*${PLAIN_WORD}{0,3}\\s+(?:zurück)?rückruf`,
+    'iu',
+  ),
+  new RegExp(
+    `rückruf\\p{L}*${PLAIN_WORD}{0,2}\\s+(?:unterlass|vermeid|verbiet|vergess|vergiss|verzicht)\\p{L}*`,
+    'iu',
+  ),
 ];
 
 // The topic vocabulary.
@@ -81,10 +105,10 @@ const TOPIC_UNCERTAIN =
 const DETAIL_HEDGE =
   /(?<!\p{L})(?:oder|etwa|ungefähr|circa|zirka|rund|mindestens|höchstens|über|mehr|weniger)(?!\p{L})|(?<!\p{L})ca\.?(?!\p{L})/iu;
 
-// Guest counts. Every "<word> Personen" mention is read, supported or not, so that an unsupported
-// or contradicting count makes the whole detail uncertain instead of being skipped.
-const GUEST_MENTION =
-  /(?<![\p{L}\d])(?:(für|mit)\s+)?([\p{L}\d]+)\s+(?:person(?:en)?|gäste|gast|leute)(?!\p{L})/giu;
+// Guest counts. Every "<number> Personen" mention is read, supported or not, so that an unsupported
+// or contradicting count makes the whole detail uncertain instead of being skipped. A chain such as
+// "6–8", "6 bis 8", "5 oder 6" or "zwischen 6 und 8" is captured whole: it is a range, never the number
+// at its end.
 const NUMBER_WORDS: Readonly<Record<string, number>> = {
   eine: 1,
   zwei: 2,
@@ -99,6 +123,18 @@ const NUMBER_WORDS: Readonly<Record<string, number>> = {
   elf: 11,
   zwölf: 12,
 };
+const NUMBER = `(?:\\d+|${Object.keys(NUMBER_WORDS).join('|')})`;
+const RANGE_CONNECTOR =
+  '(?:\\s*[–—\\-/+]\\s*|\\s+(?:bis|oder|und|zu|plus|bzw\\.?|beziehungsweise)\\s+)';
+const GUEST_MENTION = new RegExp(
+  `(?<![\\p{L}\\d])(?:(für|mit)\\s+)?((?:${NUMBER}${RANGE_CONNECTOR})*[\\p{L}\\d]+)\\s+(?:person(?:en)?|gäste|gast|leute)(?!\\p{L})`,
+  'giu',
+);
+// An approximation or bound right before or after a count: the count is not exact.
+const COUNT_HEDGE_BEFORE =
+  /(?:bis\s+zu|zwischen|maximal|max\.?|mind\.?|mindestens|höchstens|etwa|circa|ca\.?|ungefähr|rund|knapp|gut|über|unter|mehr\s+als|weniger\s+als|wohl|vielleicht|schätzungsweise|plus|\+)\s*$/iu;
+const COUNT_HEDGE_AFTER =
+  /^\s*(?:\+|plus|oder|bzw|maximal|max|mindestens|etwa|circa|ca|ungefähr|rund|knapp|vielleicht|schätzungsweise|und\s+mehr)(?!\p{L})/iu;
 const MAX_GUESTS = 99;
 // Other words that give a head count: the total may not be the number that was read.
 const OTHER_GUESTS =
@@ -128,9 +164,12 @@ const LIMIT = new RegExp(
   'iu',
 );
 
-// A clause that is about the callback or the caller's own availability: its dates are not the booking's.
-const CALLBACK_CLAUSE =
-  /zurück|rückruf|(?<!\p{L})ruf(?:en|t|e)?(?!\p{L})|erreichbar|melde\p{L}*|anruf\p{L}*/iu;
+// A word that makes a clause, or the words around a date, about the callback or the caller's own
+// availability: the date there is when to call, not when to book.
+const CALLBACK_WORD =
+  /zurück|rückruf|(?<!\p{L})ruf(?:en|t|e)?(?!\p{L})|erreich\p{L}*|melde\p{L}*|anruf\p{L}*|telefon\p{L}*|sprech\p{L}*|kontakt\p{L}*/iu;
+// How many words on each side of a date are searched for a callback word.
+const DATE_NEIGHBOURS = 4;
 
 function canonical(list: readonly string[], lowered: string): string | undefined {
   return list.find((name) => name.toLocaleLowerCase('de-DE') === lowered);
@@ -168,6 +207,9 @@ function guestCount(utterance: string): number | undefined {
     for (const match of clause.matchAll(GUEST_MENTION)) {
       const value = numberOf((match[2] ?? '').toLocaleLowerCase('de-DE'));
       if (value === undefined) return undefined;
+      const before = clause.slice(0, match.index);
+      const after = clause.slice(match.index + match[0].length);
+      if (COUNT_HEDGE_BEFORE.test(before) || COUNT_HEDGE_AFTER.test(after)) return undefined;
       counts.add(value);
       if (match[1] !== undefined && inBooking) stated = true;
     }
@@ -178,41 +220,109 @@ function guestCount(utterance: string): number | undefined {
     : undefined;
 }
 
-function datesIn(text: string, into: { days: Set<string>; months: Set<string> }): boolean {
-  if (LIMIT.test(text)) return false;
-  for (const match of text.matchAll(WEEKDAY))
-    into.days.add((match[1] ?? '').toLocaleLowerCase('de-DE'));
-  for (const match of text.matchAll(MONTH))
-    into.months.add((match[1] ?? '').toLocaleLowerCase('de-DE'));
-  return true;
+const LIMIT_EVERYWHERE = new RegExp(LIMIT.source, 'giu');
+
+// A date phrase the booking itself can carry: "für|am|auf|zum [dem|den] <weekday>" or "im <month>".
+const DATE_PHRASE = `(?:(?:für|am|auf|zum)\\s+(?:(?:dem|den)\\s+)?(?:${WEEKDAYS.join('|')})${DAY_PART}|im\\s+(?:${MONTHS.join('|')}))(?!\\p{L})(?:\\s+im\\s+(?:${MONTHS.join('|')})(?!\\p{L}))?`;
+const GUESTS_PHRASE = '(?:für|mit)\\s+[\\p{L}\\d]+\\s+(?:person(?:en)?|gäste|gast|leute)';
+// Words that may stand between a date and the reservation verb: "für Samstag einen Tisch reservieren".
+const VERB_FILLER = '(?:einen|eine|ein|den|die|unseren|unsere|meinen|meine|bitte|gerne|mal|tisch)';
+
+interface DateMention {
+  readonly index: number;
+  readonly kind: 'day' | 'month';
+  readonly name: string;
 }
 
-// The date right after the topic word in a clause that is also about the callback: only
-// "<topic> für|am|auf|zum [dem|den] <weekday>" or "<topic> im <month>", nothing in between.
-const MIXED_DATE = new RegExp(
-  `^\\p{L}+\\s+(?:(?:für|am|auf|zum)\\s+(?:(?:dem|den)\\s+)?(?:${WEEKDAYS.join('|')})${DAY_PART}|im\\s+(?:${MONTHS.join('|')}))(?!\\p{L})`,
-  'iu',
-);
+function dateMentions(clause: string): DateMention[] {
+  const days = [...clause.matchAll(WEEKDAY)].map((m): DateMention => ({
+    index: m.index,
+    kind: 'day',
+    name: (m[1] ?? '').toLocaleLowerCase('de-DE'),
+  }));
+  const months = [...clause.matchAll(MONTH)].map((m): DateMention => ({
+    index: m.index,
+    kind: 'month',
+    name: (m[1] ?? '').toLocaleLowerCase('de-DE'),
+  }));
+  return [...days, ...months];
+}
+
+/** The words next to a date (before: ending at `start`, after: beginning at `end`) hold a callback word. */
+function callbackNear(clause: string, start: number, end: number): boolean {
+  const before = clause.slice(0, start).trim().split(/\s+/u).slice(-DATE_NEIGHBOURS).join(' ');
+  const after = clause.slice(end).trim().split(/\s+/u).slice(0, DATE_NEIGHBOURS).join(' ');
+  return CALLBACK_WORD.test(before) || CALLBACK_WORD.test(after);
+}
+
+/** The spans of the date phrases that the booking itself carries, in one clause. */
+function bookingDateSpans(clause: string): (readonly [number, number])[] {
+  const topic = bareBirthday(clause) ? '|geburtstags?' : '';
+  const topics = `(?:\\p{L}*reservier\\p{L}*|tischbuchung|tisch\\s+buchen|(?<!\\p{L})geburtstag(?:sfeier|sessen|sparty)${topic})(?!\\p{L})`;
+  const spans: (readonly [number, number])[] = [];
+  // The date follows the topic ("Reservierung für 6 Personen am Freitag"). When a callback word comes
+  // right after it ("Reservierung am Freitag zurückrufen"), the date may be the callback's: no booking date.
+  const after = new RegExp(
+    `(?<!\\p{L})${topics}\\s+(?:${GUESTS_PHRASE}\\s+)?(${DATE_PHRASE})`,
+    'giu',
+  );
+  for (const m of clause.matchAll(after)) {
+    const date = m[1] ?? '';
+    const start = m.index + m[0].length - date.length;
+    if (!callbackNear(clause, m.index + m[0].length, m.index + m[0].length)) {
+      spans.push([start, m.index + m[0].length]);
+    }
+  }
+  // The date comes before the reservation verb ("für Samstag einen Tisch reservieren").
+  const before = new RegExp(
+    `(?:${GUESTS_PHRASE}\\s+)?(${DATE_PHRASE})(?:\\s+${GUESTS_PHRASE})?(?:\\s+${VERB_FILLER})*\\s+${topics}`,
+    'giu',
+  );
+  for (const m of clause.matchAll(before)) {
+    const date = m[1] ?? '';
+    const start = m.index + m[0].indexOf(date);
+    spans.push([start, start + date.length]);
+  }
+  return spans;
+}
 
 /**
- * "am Freitag" or "im Dezember", only when the booking's own clauses give one date and no other
- * clause that is not about the callback contradicts it (a correction, an exception, a range).
+ * "am Freitag" or "im Dezember", only when a date is tied to the reservation or the celebration
+ * itself. Every date mention in the call is given one role: the booking's (it sits in a supported
+ * phrase with the topic and no callback word beside it), the callback's (it sits in a callback
+ * clause, or beside a callback word), or unknown. One booking date and no unknown date that differs
+ * from it, else no date: omitting is always safe, guessing is not.
  */
 function when(utterance: string): string | undefined {
   const booking = { days: new Set<string>(), months: new Set<string>() };
-  const others = { days: new Set<string>(), months: new Set<string>() };
+  const unknown = { days: new Set<string>(), months: new Set<string>() };
   for (const clause of utterance.split(CLAUSE_BREAK)) {
-    const topic = firstTopic(clause);
-    const aboutCallback = CALLBACK_CLAUSE.test(clause);
-    if (topic !== undefined && !aboutCallback) {
-      if (!datesIn(clause, booking)) return undefined;
-    } else if (topic !== undefined) {
-      const near = MIXED_DATE.exec(clause.slice(topic.index))?.[0];
-      if (near !== undefined) datesIn(near, booking);
-    } else if (!aboutCallback && !datesIn(clause, others)) {
-      return undefined;
-    } else if (!aboutCallback) {
-      continue;
+    const hasTopic = firstTopic(clause) !== undefined;
+    const aboutCallback = CALLBACK_WORD.test(clause);
+    const spans = hasTopic ? bookingDateSpans(clause) : [];
+    const limits = [...clause.matchAll(LIMIT_EVERYWHERE)].map((m) => [
+      m.index,
+      m.index + m[0].length,
+    ]);
+    for (const mention of dateMentions(clause)) {
+      const inside = (list: readonly (readonly number[])[]): boolean =>
+        list.some(([from = 0, to = 0]) => mention.index >= from && mention.index < to);
+      const bucket = mention.kind === 'day' ? 'days' : 'months';
+      if (inside(limits)) {
+        // "bis Freitag": a limit. Beside the callback it is the callback's; elsewhere it cannot be placed.
+        if (!aboutCallback) return undefined;
+        continue;
+      }
+      if (inside(spans)) {
+        booking[bucket].add(mention.name);
+      } else if (
+        aboutCallback &&
+        (!hasTopic || callbackNear(clause, mention.index, mention.index + mention.name.length))
+      ) {
+        continue;
+      } else {
+        unknown[bucket].add(mention.name);
+      }
     }
   }
   const conflicting = (a: Set<string>, b: Set<string>): boolean =>
@@ -220,8 +330,8 @@ function when(utterance: string): string | undefined {
   if (
     booking.days.size > 1 ||
     booking.months.size > 1 ||
-    conflicting(booking.days, others.days) ||
-    conflicting(booking.months, others.months)
+    conflicting(booking.days, unknown.days) ||
+    conflicting(booking.months, unknown.months)
   ) {
     return undefined;
   }

@@ -1108,6 +1108,10 @@ describe('PRODUCT-01 review findings: persisted titles, refusals and replays', (
       'Bitte nicht zurückrufen, ich möchte nicht reservieren, meine PIN lautet 4821.',
       'Ich möchte keinen Rückruf.',
       'Rufen Sie mich nicht zurück.',
+      'Bitte nie zurückrufen.',
+      'Bitte auf keinen Fall zurückrufen.',
+      'Rückruf ist nicht erwünscht.',
+      'Rufen Sie mich nie zurück. Ich möchte für sechs Personen reservieren.',
     ]) {
       const before = await rowCounts();
       const response = await simulate(call({ utterance }));
