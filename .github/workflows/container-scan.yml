@@ -36,6 +36,13 @@ jobs:
             hadolint/hadolint@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d \
             hadolint --failure-threshold warning - < apps/server/Dockerfile
 
+      # The runner is amd64 and the image is arm64: without emulation `docker run` fails with
+      # "exec format error". The package-manager check below used to read that failure as "the tool
+      # is absent" and pass; with emulation it actually runs `command -v` inside the image.
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: arm64
+
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       # linux/arm64 is the target (Graviton). Nothing else pins the architecture, so an image
