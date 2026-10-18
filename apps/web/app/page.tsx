@@ -13,7 +13,7 @@
  */
 
 import { cookies } from 'next/headers';
-import { SESSION_COOKIE_NAME, type TodayTask } from '@moin/contracts';
+import { SESSION_COOKIE_NAME, type ReadTodayTask } from '@moin/contracts';
 import { t } from '../lib/i18n.ts';
 import { ActionNotice, CompleteAction } from './complete-action.tsx';
 import { LiveToday } from './live-today.tsx';
@@ -22,6 +22,7 @@ import { emptyLine, groupToday } from '../lib/today.ts';
 import {
   LOGIN_PATH,
   SECTION_ORDER,
+  completeControlOf,
   formatCreatedAt,
   loadToday,
   sectionHeading,
@@ -31,7 +32,8 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-function TaskCard({ task }: { task: TodayTask }) {
+function TaskCard({ task }: { task: ReadTodayTask }) {
+  const control = completeControlOf(task);
   return (
     <li className="task" data-task-id={task.id}>
       <article aria-labelledby={`task-${task.id}`}>
@@ -52,8 +54,11 @@ function TaskCard({ task }: { task: TodayTask }) {
           <dt>{t('today.status')}</dt>
           <dd>{statusLabel(task.status)}</dd>
         </dl>
-        {task.type === 'callback' ? (
-          <CompleteAction taskId={task.id} title={task.title} version={task.version} />
+        {control.kind === 'action' ? (
+          <CompleteAction taskId={task.id} title={task.title} version={control.version} />
+        ) : null}
+        {control.kind === 'unavailable' ? (
+          <p data-testid="complete-unavailable">{t('today.complete.unavailable')}</p>
         ) : null}
       </article>
     </li>

@@ -94,9 +94,29 @@ describe('completeTask: confirmed outcomes', () => {
     [409, 'conflict'],
   ] as const)('maps the explicit HTTP %i to %s without any read-back', async (status, kind) => {
     const seen: Seen[] = [];
-    const result = await completeTask(TASK_ID, 1, COOKIES, script([{ status, body: {} }], seen));
+    const body = status === 404 ? { type: '/problems/not-found' } : {};
+    const result = await completeTask(TASK_ID, 1, COOKIES, script([{ status, body }], seen));
     expect(result).toStrictEqual({ kind });
     expect(seen).toHaveLength(1);
+  });
+
+  it('a bare 404 (the route is absent on an API rolled back) is unknown, never "the task is gone"', async () => {
+    const seen: Seen[] = [];
+    const nest = { statusCode: 404, message: `Cannot POST /api/tasks/${TASK_ID}/complete` };
+    const result = await completeTask(
+      TASK_ID,
+      1,
+      COOKIES,
+      script(
+        [
+          { status: 404, body: nest },
+          { status: 404, body: nest },
+        ],
+        seen,
+      ),
+    );
+    expect(result).toStrictEqual({ kind: 'unknown' });
+    expect(seen).toHaveLength(2);
   });
 });
 

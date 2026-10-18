@@ -75,6 +75,41 @@ describe('pollToday', () => {
   });
 });
 
+describe('polling across an API rollout (M2D-1)', () => {
+  const unversioned = Object.fromEntries(Object.entries(TASK).filter(([key]) => key !== 'version'));
+  const answering = (body: unknown) => () => Promise.resolve(Response.json(body));
+
+  it('announces the versioned contract on every poll', async () => {
+    let seen: HeadersInit | undefined;
+    await pollToday((_input, init) => {
+      seen = init?.headers;
+      return Promise.resolve(Response.json({ tasks: [], truncated: false }));
+    });
+    expect(seen).toMatchObject({ 'x-moin-today-contract': 'versioned' });
+  });
+
+  it('reads an API that predates versions as a list, not as a failure', async () => {
+    const result = await pollToday(answering({ tasks: [unversioned], truncated: false }));
+    expect(result.kind).toBe('ok');
+  });
+
+  it('sees the API upgrade as a change, so the page re-renders with Erledigt', async () => {
+    const before = await pollToday(answering({ tasks: [unversioned], truncated: false }));
+    const after = await pollToday(answering({ tasks: [TASK], truncated: false }));
+    expect(
+      before.kind === 'ok' && after.kind === 'ok' && before.fingerprint !== after.fingerprint,
+    ).toBe(true);
+  });
+
+  it('sees an API rollback as a change as well', async () => {
+    const before = await pollToday(answering({ tasks: [TASK], truncated: false }));
+    const after = await pollToday(answering({ tasks: [unversioned], truncated: false }));
+    expect(
+      before.kind === 'ok' && after.kind === 'ok' && before.fingerprint !== after.fingerprint,
+    ).toBe(true);
+  });
+});
+
 describe('nextDelayMs', () => {
   it('stays within the jitter band of the interval, doubles per failure and is capped', () => {
     expect(nextDelayMs(0, () => 0.5)).toBe(LIVE_POLL_MS);

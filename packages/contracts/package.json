@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Zod schemas for API DTOs, events, job payloads, tool schemas and templates; the source of the OpenAPI 3.1 document",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./test-support/pre-m2a-today": "./test-support/pre-m2a-today.ts"
   },
   "scripts": {
     "lint": "eslint .",

@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/home/adam/projects/business/moin",
+  "head": "6f96f340bf67110856d2204a48fd972ae60bffbe",
+  "mode": "committed",
+  "fix_ref": "6f96f340bf67110856d2204a48fd972ae60bffbe",
+  "fix_paths": [
+    "apps/web/lib/today-view.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "pnpm exec vitest run apps/web/lib/today-view.test.ts",
+  "started": "2026-10-18T05:33:16+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-10-18T05:33:17+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 0.72,
+    "tail": "     82|       let result: unknown;\n     83|       try {\n     84|         result = original.apply(this, args);\n       |                           ^\n     85|       } catch (error) {\n     86|         record(name, error);\n \u276f apps/web/lib/today-view.test.ts:153:20\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[2/4]\u23af\n\n FAIL  |unit| apps/web/lib/today-view.test.ts > what a card offers for Erledigt (M2D-1) > offers the action with the version the API sent, and only for callbacks\nTypeError: completeControlOf is not a function\n \u276f apps/web/lib/today-view.test.ts:172:12\n    170| describe('what a card offers for Erledigt (M2D-1)', () => {\n    171|   it('offers the action with the version the API sent, and only for ca\u2026\n    172|     expect(completeControlOf(TASK)).toStrictEqual({ kind: 'action', ve\u2026\n       |            ^\n    173|     expect(completeControlOf({ ...TASK, type: 'review' })).toStrictEqu\u2026\n    174|   });\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[3/4]\u23af\n\n FAIL  |unit| apps/web/lib/today-view.test.ts > what a card offers for Erledigt (M2D-1) > offers no action for a callback without a version, and says it is unavailable\nTypeError: completeControlOf is not a function\n \u276f apps/web/lib/today-view.test.ts:177:12\n    175|\n    176|   it('offers no action for a callback without a version, and says it i\u2026\n    177|     expect(completeControlOf({ ...TASK, version: null })).toStrictEqua\u2026\n       |            ^\n    178|   });\n    179| });\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[4/4]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  4 failed | 9 passed (13)\n   Start at  07:33:16\n   Duration  291ms (transform 52%, setup 21%, import 15%, tests 12%, worker 1%)\n"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 0.72,
+    "tail": "\n RUN  v5.0.2 /home/adam/projects/business/moin\n\n \u2713 |unit| apps/web/lib/today-view.test.ts (13 tests) 26ms\n\n Test Files  1 passed (1)\n      Tests  13 passed (13)\n   Start at  07:33:17\n   Duration  274ms (transform 49%, setup 20%, import 17%, tests 12%, worker 1%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/home/adam/projects/business/moin/.git/claude-evidence/mutation/20261018T053316Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}
