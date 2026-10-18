@@ -116,6 +116,11 @@ COPY --from=build --chown=node:node /app/packages/db/src ./packages/db/src
 COPY --from=build --chown=node:node /app/packages/kernel/src ./packages/kernel/src
 COPY --from=build --chown=node:node /app/packages/observability/src ./packages/observability/src
 
+# The reviewed SQL migrations, next to the runner that reads them (`packages/db/src/migrate.ts`
+# resolves `../migrations`). Without them the image can run the API but cannot create or upgrade
+# the schema it needs, which the demo stack found the hard way (M2D-2).
+COPY --from=build --chown=node:node /app/packages/db/migrations ./packages/db/migrations
+
 # `node` (uid 10xx) ships with the base image. Running as root would mean a process escape starts
 # with root in the container's namespace.
 USER node
@@ -135,4 +140,5 @@ EXPOSE 3000
 # health check would duplicate that with different semantics and no visibility.
 
 # Overridden per role: main-api.js · main-voice.js · main-worker.js · main-migrate.js
+# Schema runner: `node packages/db/src/cli.ts migrate` (reads DATABASE_MIGRATION_URL).
 CMD ["node", "apps/server/dist/main-api.js"]
