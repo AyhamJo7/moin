@@ -1687,3 +1687,10 @@ read as the booking day, corrections and exceptions invisible to the date rule, 
 clause, a birthday remark announced as a party); fixed in `f65fc16` with tests that failed first and official
 mutation KILLED for each group (`EV-P12-014-mutation-second-review-*.json`). Redelivery under changed rules: 422
 for newly unsupported words, 409 for a changed title, never a duplicate. Nothing VERIFIED.
+
+PRODUCT-01 third review (2026-10-18, PR #242, REQUEST_CHANGES at `ce3479e`: F2 callback dates, F3 count ranges, F4
+refusals; F1 closed and kept): dates now belong to the booking only inside an explicit phrase with the topic (a
+callback word beside them makes them the callback's), a number chain such as `6–8` or `bis`/`oder` is a range and
+voids the count, and the refusal list covers `nie`, `auf keinen Fall`, `nicht erwünscht`, `nicht mehr anrufen`.
+Fix `a993cd7`; tests written first (20 failures on the rejected code); official mutation KILLED for F2, F3, F4 and
+the real-PostgreSQL zero-write test (`EV-P12-014-mutation-final-review-*.json`). Nothing VERIFIED.

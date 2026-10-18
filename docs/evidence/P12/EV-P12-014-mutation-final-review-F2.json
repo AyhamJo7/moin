@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/home/adam/projects/business/moin",
+  "head": "a993cd751b0894123b0c2a6a0496da5ea78a539f",
+  "mode": "committed",
+  "fix_ref": "a993cd751b0894123b0c2a6a0496da5ea78a539f",
+  "fix_paths": [
+    "apps/server/src/modules/call-simulator/application/callback-request.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "pnpm exec vitest run apps/server/src/modules/call-simulator/application/callback-request.test.ts -t 'final review F2'",
+  "started": "2026-10-18T19:30:42+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-10-18T19:30:44+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 0.87,
+    "tail": "     \u2193 is unsupported: Bitte nicht mehr anrufen. R\u00fcckruf er\u00fcbrigt sich.\n     \u2193 is unsupported: Ich m\u00f6chte reservieren. Bitte rufen Sie mich nicht an, auch kein R\u00fcckruf.\n     \u2193 is unsupported: Bitte rufen Sie mich zur\u00fcck. Bitte nicht mehr anrufen.\n     \u2193 is unsupported: Vergessen Sie den R\u00fcckruf.\n     \u2193 is unsupported: Der R\u00fcckruf hat sich erledigt.\n     \u2193 is unsupported: Ich m\u00f6chte f\u00fcr sechs Personen reservieren. R\u00fcckruf bitte, aber keinesfalls zur\u00fcckrufen.\n     \u2193 a positive request with unrelated negation stays a callback: Ich m\u00f6chte nicht online reservieren. Bitte rufen Sie mich zur\u00fcck.\n     \u2193 a positive request with unrelated negation stays a callback: Ich m\u00f6chte reservieren, nicht online. Bitte um R\u00fcckruf.\n     \u2193 a positive request with unrelated negation stays a callback: Bitte nicht vor 18 Uhr zur\u00fcckrufen.\n     \u2193 a positive request with unrelated negation stays a callback: Bitte auf keinen Fall sp\u00e4ter als Freitag, aber rufen Sie mich zur\u00fcck.\n     \u2193 a positive request with unrelated negation stays a callback: Keine Eile, bitte R\u00fcckruf.\n     \u2193 a positive request with unrelated negation stays a callback: Bitte rufen Sie zur\u00fcck, aber nicht anrufen vor 10 Uhr.\n     \u2193 a positive request with unrelated negation stays a callback: Vergessen Sie nicht den R\u00fcckruf wegen einer Reservierung.\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 2 \u23af\u23af\u23af\u23af\u23af\u23af\u23af\n\n FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.test.ts > final review F2: a date counts only where the booking itself carries it > omits the date unless it is the booking day: reviewer A: telephone contact on Friday\n FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.test.ts > final review F2: a date counts only where the booking itself carries it > omits the date unless it is the booking day: reviewer B: the callback is on Friday\nAssertionError: expected 'R\u00fcckruf: Reservierung am Freitag' to be 'R\u00fcckruf: Reservierung' // Object.is equality\n\nExpected: \"R\u00fcckruf: Reservierung\"\nReceived: \"R\u00fcckruf: Reservierung am Freitag\"\n\n \u276f Proxy.toBe scripts/mutation-evidence-probe.ts:84:27\n     82|       let result: unknown;\n     83|       try {\n     84|         result = original.apply(this, args);\n       |                           ^\n     85|       } catch (error) {\n     86|         record(name, error);\n \u276f apps/server/src/modules/call-simulator/application/callback-request.test.ts:708:30\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/2]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  2 failed | 8 passed | 184 skipped (194)\n   Start at  21:30:42\n   Duration  356ms (transform 56%, setup 21%, import 16%, tests 6%, worker 1%)\n"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 0.82,
+    "tail": "\n RUN  v5.0.2 /home/adam/projects/business/moin\n\n \u2713 |unit| apps/server/src/modules/call-simulator/application/callback-request.test.ts (194 tests | 184 skipped) 15ms\n\n Test Files  1 passed (1)\n      Tests  10 passed | 184 skipped (194)\n   Start at  21:30:43\n   Duration  314ms (transform 54%, setup 22%, import 17%, tests 6%, worker 1%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/home/adam/projects/business/moin/.git/claude-evidence/mutation/20261018T193042Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}

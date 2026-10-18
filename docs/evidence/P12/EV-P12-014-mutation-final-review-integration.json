@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/home/adam/projects/business/moin",
+  "head": "a993cd751b0894123b0c2a6a0496da5ea78a539f",
+  "mode": "committed",
+  "fix_ref": "a993cd751b0894123b0c2a6a0496da5ea78a539f",
+  "fix_paths": [
+    "apps/server/src/modules/call-simulator/application/callback-request.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "set -a; eval \"$(grep -E '^TEST_' .env.example)\"; set +a; pnpm exec vitest run --project integration apps/server/src/modules/work/callback-today.integration.test.ts -t 'a refusal of the callback is 422'",
+  "started": "2026-10-18T19:30:52+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-10-18T19:30:59+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 4.03,
+    "tail": "     \u2193 a password after \"wegen\" reaches neither the response, the task, nor Today\n     \u2193 a contact after \"wegen\" reaches neither the response, the task, nor Today\n     \u2193 markup after \"wegen\" reaches neither the response, the task, nor Today\n     \u00d7 a refusal of the callback is 422 and writes nothing anywhere 106ms\n     \u2193 the row-count comparison does see an accepted callback (positive control)\n     \u2193 a positive request with an unrelated negation still creates the callback\n     \u2193 a completed callback replayed with the same words is not reopened (J2)\n     \u2193 a call accepted under the earlier rules is refused, not duplicated, when its words now read differently\n   \u2193 restart (M1) (1)\n     \u2193 the task survives a full API restart\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af\n\n FAIL  |integration| apps/server/src/modules/work/callback-today.integration.test.ts > PRODUCT-01 review findings: persisted titles, refusals and replays > a refusal of the callback is 422 and writes nothing anywhere\nAssertionError: Bitte nie zur\u00fcckrufen.: expected 201 to be 422 // Object.is equality\n\n- Expected\n+ Received\n\n- 422\n+ 201\n\n \u276f Proxy.toBe scripts/mutation-evidence-probe.ts:84:27\n     82|       let result: unknown;\n     83|       try {\n     84|         result = original.apply(this, args);\n       |                           ^\n     85|       } catch (error) {\n     86|         record(name, error);\n \u276f apps/server/src/modules/work/callback-today.integration.test.ts:1118:46\n \u276f evidenceBody packages/testing/src/mutation/evidence-state.ts:277:7\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/1]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  1 failed | 45 skipped (46)\n   Start at  21:30:52\n   Duration  3.35s (tests 51%, transform 37%, import 11%, setup 2%)\n"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 3.48,
+    "tail": "\n RUN  v5.0.2 /home/adam/projects/business/moin\n\n \u2713 |integration| apps/server/src/modules/work/callback-today.integration.test.ts (46 tests | 45 skipped) 1263ms\n\n Test Files  1 passed (1)\n      Tests  1 passed | 45 skipped (46)\n   Start at  21:30:56\n   Duration  2.94s (tests 58%, transform 28%, import 12%, setup 2%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/home/adam/projects/business/moin/.git/claude-evidence/mutation/20261018T193052Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}
