@@ -4,15 +4,21 @@
 |---|---|
 | Evidence ID | EV-P13-017 |
 | Item | P13.02.04 |
-| Date (UTC) | 2026-10-18 02:58 UTC |
-| Commit | `cc07c07ca7939f8c7790a719e0fd8c009261ff4a` |
+| Date (UTC) | 2026-10-18 03:50 UTC |
+| Commit | `9de05d5191d67f592092e3756056b07ff84c2e92` |
 | Environment | local |
 | Command / procedure | `.claude/bin/gates.py full`: `python3 .claude/bin/control_plane_check.py && python3 -m unittest discover -s .claude/tests -t .claude/tests` → pass (exit 0, 21.4 s); `uvx ruff@0.15.12 format --check --config .claude/ruff.toml .claude && uvx ruff@0.15.12 check --config .claude/ruff.toml .claude && uvx --from mypy==2.3.1 mypy --config-file .claude/mypy.ini` → pass (exit 0, 0.2 s); `node scripts/check-conventional-commit.ts --self-test && node scripts/check-no-ai-mentions.ts --self-test` → pass (exit 0, 0.1 s); `node scripts/check-adr-coverage.ts && node scripts/check-domain-coverage.ts && node scripts/check-dfd-coverage.ts && node scripts/check-threat-model-refs.ts && node scripts/check-data-classification.ts && node scripts/check-subprocessors.ts && node scripts/check-brand-strings.ts` → pass (exit 0, 1.4 s); `pnpm exec prettier --check .` → pass (exit 0, 5.8 s); `pnpm lint` → pass (exit 0, 3.3 s); `pnpm exec depcruise apps packages scripts --config .dependency-cruiser.cjs` → pass (exit 0, 1.0 s); `pnpm typecheck` → pass (exit 0, 1.1 s); `pnpm test` → pass (exit 0, 6.0 s); `pnpm test:integration` → pass (exit 0, 28.2 s); `node scripts/check-migrations.ts` → pass (exit 0, 0.1 s); `pnpm turbo run build` → pass (exit 0, 0.3 s); `node scripts/check-licences.ts` → pass (exit 0, 0.4 s); `gitleaks git --redact --no-banner --config .gitleaks.toml .` → pass (exit 0, 1.1 s) |
 | Result | PASS |
-| CI run / artifact | pending |
+| CI run / artifact | see "CI evidence"; remediation head run in the PR description |
 | Reviewer | pending |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).
+
+Gate re-run for the review remediation: `gates.py full` PASS 14/14 on the clean tree at `9de05d5`
+(code fingerprint `0d40743fcec1378e3c5077f0f8c058788f6059c82bccb1af3edb79b2716be286`, evidence file
+`20261018T034937Z-full.json`; an earlier attempt failed `integration` only because the local
+PostgreSQL and Keycloak had been stopped, and was repeated with the stack up). The command list in
+the row above is the one that run executed; the earlier `cc07c07` result is not reused.
 
 ## What this record shows
 
