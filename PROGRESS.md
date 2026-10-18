@@ -1628,3 +1628,14 @@ confirmed". Design, compatibility matrix, deployment and rollback sequence, cont
 what is not proven: `docs/development/api-web-rollout.md`. Official mutation KILLED for the API
 controller and for the web loader (records in `docs/evidence/P13/EV-P13-018-mutation-*.json`).
 Nothing is deployed and no hosting exists; P13.03.02 stays IN_PROGRESS; nothing is VERIFIED.
+
+M2D-2 (2026-10-18, branch `feat/p02-demo-packaged-stack` from 5204389, #240 merged): a local, packaged,
+synthetic KlarDesk demo. `deploy/demo/demo.sh up` starts the release image (one image, roles `migrate`,
+`api`, `web` per ADR-0001/INV-17), PostgreSQL, Keycloak and an nginx stand-in for the load balancer;
+`playwright.demo.config.ts` (7 tests) signs in through the real Keycloak, shows a simulated callback
+arriving by itself, completes it and proves persistence across reload, API restart and a stop/start.
+Fixed on the way: the server image had no SQL migrations; no owner-app image existed (the standalone
+output needs `.next/static` copied in, now fetched from a running container in `container-scan`); the
+`migrate` role logged success and exited 0 without migrating, and now runs the migrations and exits 1
+on failure. Official mutation KILLED for the migrate role and the image contents. Runbook:
+`docs/development/demo-stack.md`. No public deployment, no real telephony, nothing VERIFIED.
