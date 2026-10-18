@@ -373,6 +373,76 @@ describe('simulated callback call → persisted task (M1)', () => {
     ]);
     expect(title.rows[0]?.title).toBe('Rückruf erbeten');
   });
+
+  evidenceTest(
+    "states the reason a caller gave without wegen, and stores none of the caller's words (PRODUCT-01)",
+    async () => {
+      const marker = `QX${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+      const response = await simulate(
+        call({
+          utterance: `Es geht um eine Geburtstagsfeier im Dezember, Referenz ${marker}. Bitte rufen Sie zurück.`,
+        }),
+      );
+      expect(response.statusCode).toBe(201);
+      const { taskId } = response.json<{ taskId: string }>();
+      const stored = await admin.query<{ title: string }>('select title from tasks where id = $1', [
+        taskId,
+      ]);
+      expect(stored.rows[0]?.title).toBe('Rückruf: Geburtstagsfeier im Dezember');
+
+      // The owner's Today shows the same reason, through the shared contract.
+      const view = todayResponseSchema.parse((await today(await signIn(restaurantOwner))).json());
+      expect(view.tasks.find((t) => t.id === taskId)?.title).toBe(
+        'Rückruf: Geburtstagsfeier im Dezember',
+      );
+
+      // No table of the database holds the utterance (INV-07, INV-12): the marker appears nowhere.
+      const holders = await admin.query<{ table_name: string }>(
+        `select table_name from (
+           select table_name,
+                  (xpath('/row/c/text()', query_to_xml(
+                     format('select count(*) as c from public.%I t where t::text like %L', table_name, $1::text),
+                     false, true, '')))[1]::text::int as n
+             from information_schema.tables
+            where table_schema = 'public' and table_type = 'BASE TABLE') counted
+          where n > 0`,
+        [`%${marker}%`],
+      );
+      expect(holders.rows).toStrictEqual([]);
+
+      // The scan can see what is stored: the same query finds the title in the tasks table.
+      const control = await admin.query<{ table_name: string }>(
+        `select table_name from (
+           select table_name,
+                  (xpath('/row/c/text()', query_to_xml(
+                     format('select count(*) as c from public.%I t where t::text like %L', table_name, $1::text),
+                     false, true, '')))[1]::text::int as n
+             from information_schema.tables
+            where table_schema = 'public' and table_type = 'BASE TABLE') counted
+          where n > 0`,
+        ['%Rückruf: Geburtstagsfeier im Dezember%'],
+      );
+      expect(control.rows.map((row) => row.table_name)).toContain('tasks');
+    },
+  );
+
+  evidenceTest('a replayed call keeps the title it was first given (J2)', async () => {
+    const callSid = `SIM${randomUUID().replaceAll('-', '')}`;
+    const utterance = 'Ich möchte für sechs Personen reservieren. Bitte um Rückruf.';
+    const first = await simulate(call({ callSid, utterance }));
+    const replay = await simulate(call({ callSid, utterance }));
+    expect(first.statusCode).toBe(201);
+    expect(replay.json()).toStrictEqual({ ...first.json<object>(), replayed: true });
+    const { taskId } = first.json<{ taskId: string }>();
+    const rows = await admin.query<{ title: string; version: number }>(
+      'select title, version from tasks where id = $1',
+      [taskId],
+    );
+    expect(rows.rows[0]).toStrictEqual({
+      title: 'Rückruf: Reservierung für 6 Personen',
+      version: 1,
+    });
+  });
 });
 
 describe('the owner reads the task on Today (M1)', () => {
