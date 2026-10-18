@@ -2,21 +2,33 @@
  * What a simulated caller asked for, decided deterministically (P12.09.01, M1 vertical slice).
  *
  * The slice handles one intent: "please call me back". The utterance is normalised (Unicode NFC,
- * control characters removed, whitespace collapsed), recognised by fixed German phrases — no
- * model, no guess — and summarised into the task title, by the first rule that applies:
+ * control characters removed, whitespace collapsed) and recognised by fixed German phrases: no
+ * model, no guess. Three outcomes:
  *
- *  1. the topic the caller named after "wegen": "Rückruf: <topic>" (the M1 behaviour, unchanged);
- *  2. a reservation or birthday request, from a fixed vocabulary, with only the details that are
- *     stated exactly once and without hedging: "Rückruf: Reservierung für 6 Personen am Freitag";
- *  3. otherwise "Rückruf erbeten".
+ *  - unsupported: not a callback request, or a clear refusal of one ("bitte nicht zurückrufen",
+ *    "keinen Rückruf"). Nothing is created; the HTTP boundary answers 422 before any write.
+ *  - invalid: empty, or longer than the contract allows.
+ *  - callback, with a title built only from a closed grammar (never from the caller's words):
  *
- * Rule 2 never copies the caller's words: the title is a template filled with a topic word, a
- * guest count (1..99) and one weekday or month, each taken from a closed list or validated as a
- * number. A request for a callback is not a booking, so the title never says "reserviert" or
- * "bestätigt"; a negation or cancellation ("nicht", "kein", "stornieren", "absagen"), a change, doubt or alternative ("verschieben", "vielleicht", "oder") or an existing booking ("bereits", "bestätigt") makes it
- * ambiguous and falls back to rule 3. Anything that is not a callback request is unsupported and
- * creates nothing; the real conversation flows (P12) own every other intent. The raw utterance is
- * never stored (INV-07, INV-12). Pure, no I/O.
+ *      Rückruf erbeten
+ *      Rückruf: <Tischreservierung | Reservierung | Geburtstagsfeier | Reservierung für Geburtstagsfeier>
+ *               [ für N Personen] [ am <Wochentag> | im <Monat>]
+ *
+ *    The topic words come from a fixed vocabulary; N is a number from 1 to 99; the weekday and the
+ *    month come from fixed lists. Whatever else the caller said (names, numbers, health or
+ *    financial remarks, markup) cannot reach the title, because nothing is copied: it is filled
+ *    from validated values only. A detail is stated only when the evidence is unambiguous: a count
+ *    only if every count mention agrees, a date only if it sits in the booking's own clause and no
+ *    other date contradicts it, and neither when a hedge ("etwa", "mindestens", "oder") is present.
+ *    A negation, cancellation, change, doubt or existing booking ("nicht", "stornieren",
+ *    "verschieben", "vielleicht", "bereits") leaves the neutral title. A callback request is not a
+ *    booking, so the title never says reserved or confirmed.
+ *
+ * The raw utterance is never stored (INV-07, INV-12). The title takes part in the request hash of
+ * the call's acceptance (`callback-intake.ts`), so a call accepted under an earlier version of these
+ * rules and delivered again with the same words may be refused as a conflicting request (409), never
+ * duplicated or reopened. Pure, no I/O. Every pattern is linear and runs on input already capped at
+ * UTTERANCE_MAX_LENGTH characters.
  */
 
 import { TASK_TITLE_MAX_LENGTH, UTTERANCE_MAX_LENGTH } from '@moin/contracts';
@@ -31,22 +43,34 @@ export type CallInterpretation =
 // "Rückruf", "zurückrufen", "zurückruft", "ruf(en Sie) mich bitte zurück".
 const CALLBACK_PHRASE = /rückruf|zurückruf|\bruf\p{L}*\s+(?:\p{L}+\s+){0,3}zurück\b/iu;
 
-// The topic after "wegen", without its article: "wegen einer Tischreservierung" → "Tischreservierung".
-const TOPIC =
-  /\bwegen\s+(?:(?:einer|eines|einem|einen|der|des|dem|den|meiner|meines|meinem|meinen|unserer|unseres|unserem|unseren)\s+)?([^.!?,;:]+)/iu;
+// A clear refusal of the callback itself, in bounded forms: "nicht (mehr) zurückrufen", "rufen Sie
+// mich nicht zurück", "keinen Rückruf", "ohne Rückruf", "Rückruf nicht nötig". The negation must sit
+// next to the callback word: "nicht online buchen, bitte rufen Sie mich zurück" is not a refusal.
+const REFUSAL = [
+  /(?<!\p{L})nicht(?:\s+\p{L}+){0,2}\s+zurück/iu,
+  /(?<!\p{L})kein\p{L}*(?:\s+\p{L}+)?\s+rückruf/iu,
+  /(?<!\p{L})ohne\s+rückruf/iu,
+  /rückruf\s+(?:ist\s+)?(?:nicht|unnötig|überflüssig)(?!\p{L})/iu,
+];
 
-// Rule 2 vocabulary. Every pattern is linear (no nested quantifier) and runs on input already capped
-// at UTTERANCE_MAX_LENGTH characters. `\b` is ASCII-only, so boundaries use lookarounds on \p{L}.
+// The topic vocabulary.
 const RESERVATION = /reservier\p{L}*|tischbuchung|tisch\s+buchen/iu;
+const TABLE_RESERVATION = /tischreservierung/iu;
 const BIRTHDAY = /(?<!\p{L})geburtstag(?:sfeier|sessen|sparty)?(?!\p{L})/iu;
-// Anything that makes the request a negation, a cancellation, a change, a doubt, an alternative or
-// an existing booking: the title then stays neutral rather than state something that may be untrue.
-const AMBIGUOUS =
-  /(?<!\p{L})(?:nicht|kein\p{L}*|nie|niemals|ohne|storn\p{L}*|absag\p{L}*|abbestell\p{L}*|verschieb\p{L}*|umbuch\p{L}*|änder\p{L}*|statt|anstatt|ob|vielleicht|eventuell|eher|falls|oder|schon|bereits|bestätig\p{L}*)(?!\p{L})/iu;
 
-// "für sechs Personen", "für 4 Gäste": exact counts only. "für etwa sechs", "ca. 6" do not match.
-const GUESTS =
-  /(?<!\p{L})für\s+(\d{1,2}|eine|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf)\s+(?:person(?:en)?|gäste|gast)(?!\p{L})/giu;
+// The request itself is negated, cancelled, changed, doubted, or already booked: the title stays
+// neutral rather than state something that may be untrue.
+const TOPIC_UNCERTAIN =
+  /(?<!\p{L})(?:nicht|kein\p{L}*|nie|niemals|ohne|storn\p{L}*|absag\p{L}*|abbestell\p{L}*|verschieb\p{L}*|umbuch\p{L}*|änder\p{L}*|statt|anstatt|ob|vielleicht|eventuell|eher|falls|schon|bereits|bestätig\p{L}*)(?!\p{L})/iu;
+
+// An alternative or an approximation makes the details uncertain, not the topic.
+const DETAIL_HEDGE =
+  /(?<!\p{L})(?:oder|etwa|ungefähr|circa|zirka|rund|mindestens|höchstens|über|mehr|weniger)(?!\p{L})|(?<!\p{L})ca\.?(?!\p{L})/iu;
+
+// Guest counts. Every "<word> Personen" mention is read, supported or not, so that an unsupported
+// or contradicting count makes the whole detail uncertain instead of being skipped.
+const GUEST_MENTION =
+  /(?<![\p{L}\d])(?:(für|mit)\s+)?([\p{L}\d]+)\s+(?:person(?:en)?|gäste|gast|leute)(?!\p{L})/giu;
 const NUMBER_WORDS: Readonly<Record<string, number>> = {
   eine: 1,
   zwei: 2,
@@ -78,68 +102,93 @@ const MONTHS = [
   'November',
   'Dezember',
 ];
-const WEEKDAY = new RegExp(
-  `(?<!\\p{L})(${WEEKDAYS.join('|')})(?:abend|mittag|morgen|vormittag|nachmittag)?(?!\\p{L})`,
+const DAY_PART = '(?:abend|mittag|morgen|vormittag|nachmittag)?';
+const WEEKDAY = new RegExp(`(?<!\\p{L})(${WEEKDAYS.join('|')})${DAY_PART}(?!\\p{L})`, 'giu');
+const MONTH = new RegExp(`(?<!\\p{L})im\\s+(${MONTHS.join('|')})(?!\\p{L})`, 'giu');
+// "bis Freitag", "ab Montag", "nach dem Dezember": a limit or a start, not the day of the booking.
+const LIMIT = new RegExp(
+  `(?<!\\p{L})(?:bis|ab|vor|nach|bevor|spätestens|seit)\\s+(?:(?:dem|den|zum|im)\\s+)?(?:${WEEKDAYS.join('|')}${DAY_PART}|${MONTHS.join('|')})(?!\\p{L})`,
   'giu',
 );
-// A weekday or month that belongs to the callback ("bis Freitag", "rufen Sie mich Freitag zurück",
-// "zurück am Montag") is not the date of the booking, so it is not reported as one.
-const DAY_PART = '(?:abend|mittag|morgen|vormittag|nachmittag)?';
-const CALLBACK_WORD = '(?:zurück|rückruf)\\p{L}*';
-const CALLBACK_TIME = new RegExp(
-  `(?<!\\p{L})(?:bis|ab|vor|nach|bevor|spätestens|seit)\\s+(?:(?:dem|den|zum)\\s+)?(?:${WEEKDAYS.join('|')}|${MONTHS.join('|')})(?!\\p{L})` +
-    `|(?:${WEEKDAYS.join('|')})${DAY_PART}(?:\\s+\\p{L}+){0,2}\\s+${CALLBACK_WORD}` +
-    `|${CALLBACK_WORD}(?:\\s+\\p{L}+){0,2}\\s+(?:${WEEKDAYS.join('|')})`,
-  'iu',
-);
-const MONTH = new RegExp(`(?<!\\p{L})im\\s+(${MONTHS.join('|')})(?!\\p{L})`, 'giu');
 
-/** The one distinct value of a pattern's first group, or undefined when absent or contradictory. */
-function onlyMatch(text: string, pattern: RegExp): string | undefined {
-  const found = new Set<string>();
-  for (const match of text.matchAll(pattern))
-    found.add((match[1] ?? '').toLocaleLowerCase('de-DE'));
-  const [value] = found;
-  return found.size === 1 ? value : undefined;
-}
+// A clause that is about the callback itself: its dates are the callback's, not the booking's.
+const CALLBACK_CLAUSE = /zurück|rückruf|(?<!\p{L})ruf(?:en|t|e)?(?!\p{L})/iu;
 
-function canonical(list: readonly string[], lowered: string | undefined): string | undefined {
+function canonical(list: readonly string[], lowered: string): string | undefined {
   return list.find((name) => name.toLocaleLowerCase('de-DE') === lowered);
 }
 
-/** Guests, only when every mention agrees (4 and "vier" agree) and the count is between 1 and 99. */
+/** Guests: only when every count mention is supported and agrees, and the count is stated "für N". */
 function guestCount(text: string): number | undefined {
   const counts = new Set<number>();
-  for (const match of text.matchAll(GUESTS)) {
-    const raw = (match[1] ?? '').toLocaleLowerCase('de-DE');
-    counts.add(NUMBER_WORDS[raw] ?? Number(raw));
+  let stated = false;
+  for (const match of text.matchAll(GUEST_MENTION)) {
+    const raw = (match[2] ?? '').toLocaleLowerCase('de-DE');
+    const value = /^\d+$/u.test(raw) ? Number(raw) : NUMBER_WORDS[raw];
+    if (value === undefined) return undefined;
+    counts.add(value);
+    if (match[1] !== undefined) stated = true;
   }
   const [count] = counts;
-  return counts.size === 1 && count !== undefined && count >= 1 && count <= MAX_GUESTS
+  return stated && counts.size === 1 && count !== undefined && count >= 1 && count <= MAX_GUESTS
     ? count
     : undefined;
 }
 
-/** "am Freitag" or "im Dezember": a stated weekday wins over a stated month; never inferred. */
-function when(text: string): string | undefined {
-  if (CALLBACK_TIME.test(text)) return undefined;
-  const day = canonical(WEEKDAYS, onlyMatch(text, WEEKDAY));
+/**
+ * The parts of the utterance whose dates may belong to the booking: a clause that names the topic
+ * and is not about the callback, whole; in a clause that is both ("rufen Sie mich zurück wegen
+ * einer Tischreservierung für Samstag"), only the few words that follow the topic word.
+ */
+function bookingSegments(utterance: string): string[] {
+  const segments: string[] = [];
+  for (const clause of utterance.split(/[.!?;,:]+/u)) {
+    const topic = [RESERVATION, BIRTHDAY]
+      .map((pattern) => pattern.exec(clause))
+      .filter((match) => match !== null)
+      .sort((a, b) => a.index - b.index)[0];
+    if (topic === undefined) continue;
+    segments.push(
+      CALLBACK_CLAUSE.test(clause)
+        ? clause.slice(topic.index).split(/\s+/u).slice(0, 4).join(' ')
+        : clause,
+    );
+  }
+  return segments;
+}
+
+/** "am Freitag" or "im Dezember", only when the booking's own clauses agree; never inferred. */
+function when(utterance: string): string | undefined {
+  const days = new Set<string>();
+  const months = new Set<string>();
+  for (const segment of bookingSegments(utterance)) {
+    const text = segment.replace(LIMIT, ' ');
+    for (const match of text.matchAll(WEEKDAY))
+      days.add((match[1] ?? '').toLocaleLowerCase('de-DE'));
+    for (const match of text.matchAll(MONTH))
+      months.add((match[1] ?? '').toLocaleLowerCase('de-DE'));
+  }
+  if (days.size > 1 || months.size > 1) return undefined;
+  const day = canonical(WEEKDAYS, [...days][0] ?? '');
   if (day !== undefined) return `am ${day}`;
-  const month = canonical(MONTHS, onlyMatch(text, MONTH));
+  const month = canonical(MONTHS, [...months][0] ?? '');
   return month === undefined ? undefined : `im ${month}`;
 }
 
-/** Rule 2: a template over a closed vocabulary, or undefined when nothing is safely recognised. */
-function reservationTitle(utterance: string): string | undefined {
+/** The title for a recognised topic, or undefined when the request is not safely about one. */
+function topicTitle(utterance: string): string | undefined {
   const reservation = RESERVATION.test(utterance);
   const birthday = BIRTHDAY.test(utterance);
-  if ((!reservation && !birthday) || AMBIGUOUS.test(utterance)) return undefined;
+  if ((!reservation && !birthday) || TOPIC_UNCERTAIN.test(utterance)) return undefined;
   const topic =
     reservation && birthday
       ? 'Reservierung für Geburtstagsfeier'
       : birthday
         ? 'Geburtstagsfeier'
-        : 'Reservierung';
+        : TABLE_RESERVATION.test(utterance)
+          ? 'Tischreservierung'
+          : 'Reservierung';
+  if (DETAIL_HEDGE.test(utterance)) return `Rückruf: ${topic}`;
   const guests = guestCount(utterance);
   const people =
     guests === undefined ? '' : ` für ${String(guests)} ${guests === 1 ? 'Person' : 'Personen'}`;
@@ -172,15 +221,13 @@ export function interpretCall(rawUtterance: string): CallInterpretation {
     return { kind: 'invalid' };
   }
   if (!CALLBACK_PHRASE.test(utterance)) return { kind: 'unsupported' };
-  const topic = TOPIC.exec(utterance)?.[1]?.trim();
-  if (topic === undefined || topic.length === 0) {
-    const summary = reservationTitle(utterance);
-    return {
-      kind: 'callback',
-      title:
-        summary === undefined ? GENERIC_CALLBACK_TITLE : truncate(summary, TASK_TITLE_MAX_LENGTH),
-    };
-  }
-  const named = topic.charAt(0).toLocaleUpperCase('de-DE') + topic.slice(1);
-  return { kind: 'callback', title: truncate(`Rückruf: ${named}`, TASK_TITLE_MAX_LENGTH) };
+  // A refusal wins over any positive wording in the same request: contact work nobody wants is the
+  // worse mistake, and the caller can ask again.
+  if (REFUSAL.some((pattern) => pattern.test(utterance))) return { kind: 'unsupported' };
+  const summary = topicTitle(utterance);
+  return {
+    kind: 'callback',
+    title:
+      summary === undefined ? GENERIC_CALLBACK_TITLE : truncate(summary, TASK_TITLE_MAX_LENGTH),
+  };
 }
