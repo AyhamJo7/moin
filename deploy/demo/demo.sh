@@ -13,16 +13,15 @@ REALM_FILE="$REPO/docker/keycloak/realm-moin-local.json"
 OWNER_EMAIL=inhaber@musterrestaurant.example
 DB_USER=moin_owner
 
-# Compose needs DEMO_SIMULATOR_TOKEN just to parse the file (`${...:?}`). Commands that only read
-# or restart existing containers get a placeholder, which never reaches a container: it cannot, as
-# none of them creates or re-creates one. `up` (and `create`/`run`) use the real token or stop.
+# Compose needs DEMO_SIMULATOR_TOKEN just to parse the file (`${...:?}`). Subcommands that only read,
+# stop, start or restart existing containers (and `build`/`config`) get a placeholder, which never
+# reaches a container because none of them creates one. Every other subcommand, `up` above all,
+# needs the real token and stops without it: the placeholder is an allow-list, not a default.
 compose() {
   local token="${DEMO_SIMULATOR_TOKEN:-}"
   case "${1:-}" in
-    up | create | run)
-      [ -n "$token" ] || die "internal error: the simulator token was not prepared before '$1'"
-      ;;
-    *) token="${token:-read-only-placeholder}" ;;
+    ps | logs | stop | start | restart | down | exec | build | config) token="${token:-read-only-placeholder}" ;;
+    *) [ -n "$token" ] || die "internal error: the simulator token was not prepared before '${1:-}'" ;;
   esac
   DEMO_SIMULATOR_TOKEN="$token" docker compose -p "$PROJECT" -f "$DIR/docker-compose.yml" "$@"
 }
@@ -50,7 +49,7 @@ project_state() {
 # The simulated-call bearer is generated once per install and read back from the existing (running or
 # stopped) api container; it is never written to a file or printed. Prints nothing when the project has
 # no api container yet. Returns 1 if Docker cannot answer, 2 if the container exists but its token is
-# unreadable or the api container is not unique: never a silent rotation.
+# unreadable or malformed, or the api container is not unique: never a silent rotation.
 simulator_token() {
   local ids env token
   ids="$(service_container api)" || return 1
@@ -58,7 +57,9 @@ simulator_token() {
   [ "$(wc -l <<<"$ids")" -eq 1 ] || return 2
   env="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$ids")" || return 1
   token="$(sed -n 's/^CALL_SIMULATOR_TOKEN=//p' <<<"$env" | head -n 1)"
-  [ -n "$token" ] || return 2
+  # Only a token this script generated is reused: anything else (the placeholder, an older scheme, a
+  # hand-set value) is not ours to keep serving a bearer with.
+  [[ "$token" =~ ^demo-[0-9a-f]{48}$ ]] || return 2
   printf '%s\n' "$token"
 }
 
@@ -161,7 +162,7 @@ cmd_status() {
 }
 
 cmd_call() {
-  export_token
+  # `exec` runs inside the existing api container, which already holds its own token.
   local text="${1:-}"
   compose exec -T -e "DEMO_TEXT=$text" api node -e '
     const samples = [

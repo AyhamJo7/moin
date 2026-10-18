@@ -1643,6 +1643,6 @@ on failure. Official mutation KILLED for the migrate role and the image contents
 M2D-2 remediation (2026-10-18, PR #241): review finding F1 fixed in `a3a37b8`. `demo.sh` discovers the
 demo by Docker's Compose label instead of asking Compose without a token, recovers the existing simulator
 token (fail closed, never rotate), and refuses a real port conflict only when the demo's own edge is not
-running. `deploy/demo/tests/lifecycle.test.sh` (45 checks, in the unit gate); official mutation KILLED
+running. `deploy/demo/tests/lifecycle.test.sh` (69 checks, in the unit gate); official mutation KILLED
 (`docs/evidence/P02/EV-P02-050-mutation-demo-lifecycle.json`). F2 (package-manager probe) and F3 (mutable
 binfmt image) stay open follow-ups. Nothing VERIFIED.

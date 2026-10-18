@@ -43,9 +43,16 @@ case "$1" in
       stopped) [ "$all" = 1 ] || exit 0 ;;
     esac
     for svc in edge oidc api web postgres; do
-      if [ -z "$service" ] || [ "$service" = "$svc" ]; then echo "id-$svc"; fi
+      # partial: everything but the edge (the only container that publishes the ports) is running.
+      if [ "${FAKE_STATE:-}" = partial ] && [ "$svc" = edge ]; then continue; fi
+      if [ -z "$service" ] || [ "$service" = "$svc" ]; then
+        echo "id-$svc"
+        if [ "$svc" = api ] && [ "${FAKE_API_TWICE:-}" = 1 ]; then echo "id-api-2"; fi
+      fi
     done ;;
   inspect)
+    if [ "${FAKE_INSPECT_FAIL:-}" = 1 ]; then echo "error: no such container" >&2; exit 1; fi
+    case "$*" in *State.Health*) echo healthy; exit 0 ;; esac
     echo "PATH=/usr/bin"
     if [ "${FAKE_TOKEN_UNREADABLE:-}" != 1 ]; then echo "CALL_SIMULATOR_TOKEN=${FAKE_TOKEN}"; fi ;;
   compose)
@@ -56,6 +63,7 @@ case "$1" in
     fi
     echo "compose $*" >>"$FAKE_LOG"
     case " $* " in
+      *" ps -a -q "*) echo "id-fake"; exit 0 ;;
       *" up "*)
         echo "UP token_sha=$(printf %s "$DEMO_SIMULATOR_TOKEN" | sha256sum | cut -c1-16)" >>"$FAKE_LOG"
         printf %s "$DEMO_SIMULATOR_TOKEN" >"$FAKE_UP_TOKEN" ;;
@@ -106,7 +114,7 @@ sha() { printf %s "$1" | sha256sum | cut -c1-16; }
 used_token() { [ -f "$WORK/up_token" ] && [ "$(cat "$WORK/up_token")" = "$1" ]; }
 no_leak() { ! grep -qF -e "$1" "$OUT" "$ERR"; }
 
-RECOVERED="demo-recovered-token-0123456789abcdef"
+RECOVERED="demo-0123456789abcdef0123456789abcdef0123456789abcdef"
 unset DEMO_SIMULATOR_TOKEN
 export FAKE_TOKEN="$RECOVERED"
 
@@ -200,6 +208,57 @@ check "12 reset without --yes is refused" fails
 check "12 and touches nothing" not_logged "compose"
 run reset --yes
 check "12 reset --yes removes only the demo project's volumes" logged "compose -p moin-demo -f .*docker-compose.yml down -v --remove-orphans"
+
+
+# ---- 13. review additions: scoping of the port skip, unusable containers, the wrapper ----------
+export FAKE_STATE=partial FAKE_BUSY="3000"
+run up
+check "13 only the edge's presence skips the port check: others running without it, port busy, refused" fails
+check "13 and names port 3000" said "port 3000 is already in use"
+
+export FAKE_STATE=running FAKE_BUSY="3000,8081" FAKE_API_TWICE=1
+run up
+check "13 two api containers are not guessed between: up refuses" fails
+check "13 and starts nothing" not_logged "UP token_sha"
+unset FAKE_API_TWICE
+
+export FAKE_INSPECT_FAIL=1
+run up
+check "13 a failing inspect is an error: up refuses" fails
+check "13 and starts nothing" not_logged "UP token_sha"
+unset FAKE_INSPECT_FAIL
+
+export FAKE_TOKEN="read-only-placeholder"
+run up
+check "13 a token that is not one this script generated is not reused" fails
+check "13 and starts nothing" not_logged "UP token_sha"
+export FAKE_TOKEN="$RECOVERED"
+
+export FAKE_STATE=absent FAKE_BUSY=""
+DEMO_SIMULATOR_TOKEN=inherited-token-from-the-caller run up
+check "13 an inherited token is not used for a new demo either" ok
+check "13 a fresh token is generated instead" fresh_token
+
+# The wrapper: every subcommand that can create a container needs the real token.
+for sub in up create run pull; do
+  : >"$WORK/log"
+  FAKE_LOG="$WORK/log" PATH="$BIN:$PATH" bash -c 'source "$1"; unset DEMO_SIMULATOR_TOKEN; compose "$2" api' _ "$SCRIPT" "$sub" >"$OUT" 2>"$ERR"
+  STATUS=$?
+  check "13 compose $sub without a real token is refused" fails
+  check "13 compose $sub without a real token reaches no container" not_logged "compose -p"
+done
+FAKE_LOG="$WORK/log" PATH="$BIN:$PATH" bash -c 'source "$1"; unset DEMO_SIMULATOR_TOKEN; compose ps -q' _ "$SCRIPT" >"$OUT" 2>"$ERR"
+STATUS=$?
+check "13 compose ps (reads only) works without a token" ok
+
+# restart, start, call: the existing token is used and never printed.
+export FAKE_STATE=running FAKE_BUSY=""
+for cmd in restart start restart-api call; do
+  run "$cmd"
+  check "13 $cmd prints no token" no_leak "$RECOVERED"
+done
+run restart
+check "13 restart keeps the existing token" used_token "$RECOVERED"
 
 echo "demo lifecycle: $((checks - failures)) of $checks checks passed"
 [ "$failures" -eq 0 ]
