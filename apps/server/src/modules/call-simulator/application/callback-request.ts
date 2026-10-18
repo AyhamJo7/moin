@@ -42,7 +42,7 @@ export type CallInterpretation =
   | { readonly kind: 'invalid' };
 
 // "Rückruf", "zurückrufen", "zurückruft", "ruf(en Sie) mich bitte zurück".
-const CALLBACK_PHRASE = /rückruf|zurückruf|\bruf\p{L}*\s+(?:\p{L}+\s+){0,3}zurück\b/iu;
+const CALLBACK_PHRASE = /rückruf|zurückruf|zurückzuruf|\bruf\p{L}*\s+(?:\p{L}+\s+){0,3}zurück\b/iu;
 
 // A clear refusal of the callback itself, in bounded forms: "nicht (mehr) zurückrufen", "nie
 // zurückrufen", "auf keinen Fall zurückrufen", "rufen Sie mich nicht zurück", "keinen Rückruf",
@@ -67,12 +67,21 @@ const REFUSAL = [
     `\\bruf\\p{L}*${PLAIN_WORD}{0,2}\\s+${NEGATION}${NEGATION_FILLER}\\s+an(?!\\p{L})(?=\\s*(?:[.!?;,:]|$))`,
     'iu',
   ),
-  /(?<!\p{L})kein(?:en|e)?\s+(?:(?:weiteren|erneuten|weitere)\s+)?(?:(?:zurück)?rückruf|zurückruf|anruf)/iu,
+  /(?<!\p{L})kein(?:en|e)?\s+(?:(?:weiteren|erneuten|weitere)\s+)?(?:(?:zurück)?rückruf|zurückruf|anruf)(?!\p{L})(?!\s+(?:vor|bis|nach|ab|am|im|um|zwischen|auf|über|während|morgens?|abends|nachts|mittags|per|via|nur|außer)(?!\p{L}))/iu,
   /(?<!\p{L})ohne\s+rückruf/iu,
   // "Rückruf (bitte) nicht / nie / auf keinen Fall / nicht erwünscht / unerwünscht / nein danke /
   // erübrigt sich", ending the clause: "Rückruf bitte nicht zu spät" is a callback.
   new RegExp(
-    `rückruf\\p{L}*(?:\\s+bitte)?[\\s:,.-]+(?:ist\\s+)?(?:(?:doch|lieber|besser|eher)\\s+)?(?:${NEGATION}(?:\\s+(?:mehr|nötig|erforderlich|notwendig|erwünscht|gewünscht|gewollt|erlaubt))*|unnötig|überflüssig|unerwünscht|verboten|nein(?:\\s+danke)?|entfällt|erübrigt\\s+sich|(?:hat\\s+sich\\s+)?erledigt)(?=\\s*(?:[.!?;,:]|$))`,
+    `rückruf\\p{L}*(?:\\s+bitte)?[\\s:,.?!-]+(?:bitte\\s+)?(?:ist\\s+)?(?:(?:doch|lieber|besser|eher)\\s+)?(?:${NEGATION}(?:\\s+(?:mehr|nötig|erforderlich|notwendig|erwünscht|gewünscht|gewollt|erlaubt))*|unnötig|überflüssig|unerwünscht|verboten|nein(?:\\s+danke)?|entfällt|erübrigt\\s+sich|(?:hat\\s+sich\\s+)?erledigt)(?=\\s*(?:[.!?;,:]|$))`,
+    'iu',
+  ),
+  // "Ich möchte nicht, dass Sie mich zurückrufen", "Ich rufe Sie später zurück" (the caller calls, nobody has work).
+  /(?<!\p{L})nicht,?\s+dass\s+(?:(?!(?:zu|spät|später|erst|vor|nach|früh)(?!\p{L}))\p{L}+\s+){0,3}zurückruf/iu,
+  /(?<!\p{L})ich\s+ruf\p{L}*\s+(?:sie|euch)\s+(?:\p{L}+\s+){0,2}zurück/iu,
+  /(?<!\p{L})weder\s+(?:zurück)?rückruf/iu,
+  // "Rückruf brauche ich nicht", "Ein Rückruf wird nicht benötigt", "kommt nicht in Frage", "keinen Wert", "sein lassen".
+  new RegExp(
+    `rückruf\\p{L}*${PLAIN_WORD}{0,5}\\s+(?:nicht(?:\\s+(?:benötigt|sein|in\\s+frage))?|in\\s+frage)(?=\\s*(?:[.!?;,:]|$))|rückruf\\p{L}*${PLAIN_WORD}{0,3}\\s+keinen\\s+wert|lass\\p{L}*${PLAIN_WORD}{0,3}\\s+rückruf${PLAIN_WORD}{0,2}\\s+sein(?!\\p{L})`,
     'iu',
   ),
   // "unterlassen Sie den Rückruf", "vergessen Sie den Rückruf", "Rückruf vermeiden".
@@ -81,7 +90,7 @@ const REFUSAL = [
     'iu',
   ),
   new RegExp(
-    `rückruf\\p{L}*${PLAIN_WORD}{0,2}\\s+(?:unterlass|vermeid|verbiet|vergess|vergiss|verzicht)\\p{L}*`,
+    `rückruf\\p{L}*${PLAIN_WORD}{0,4}\\s+(?:unterlass|vermeid|verbiet|vergess|vergiss|verzicht)\\p{L}*`,
     'iu',
   ),
 ];
@@ -99,16 +108,17 @@ const CELEBRATE = /(?<!\p{L})(?:feier|feiern|feiere)(?!\p{L})/iu;
 // The request itself is negated, cancelled, changed, doubted, or already booked: the title stays
 // neutral rather than state something that may be untrue.
 const TOPIC_UNCERTAIN =
-  /(?<!\p{L})(?:nicht|kein\p{L}*|nie|niemals|ohne|storn\p{L}*|absag\p{L}*|abbestell\p{L}*|verschieb\p{L}*|umbuch\p{L}*|änder\p{L}*|statt|anstatt|ob|vielleicht|eventuell|eher|falls|schon|bereits|bestätig\p{L}*)(?!\p{L})/iu;
+  /(?<!\p{L})(?:nicht|kein\p{L}*|nie|niemals|ohne|storn\p{L}*|absag\p{L}*|abbestell\p{L}*|verschieb\p{L}*|umbuch\p{L}*|änder\p{L}*|statt|anstatt|ob|vielleicht|eventuell|eher|falls|schon|bereits|bestätig\p{L}*)(?!\p{L})|reservierungs\p{L}+/iu;
 
 // An alternative or an approximation makes the details uncertain, not the topic.
 const DETAIL_HEDGE =
-  /(?<!\p{L})(?:oder|etwa|ungefähr|circa|zirka|rund|mindestens|höchstens|über|mehr|weniger)(?!\p{L})|(?<!\p{L})ca\.?(?!\p{L})/iu;
+  /(?<!\p{L})(?:oder|etwa|ungefähr|circa|zirka|rund|mindestens|höchstens|über|mehr|weniger)(?!\p{L})|(?<!\p{L})(?:ca|evtl|ggf)\.?(?!\p{L})|(?<!\p{L})(?:gegebenenfalls|wahrscheinlich|voraussichtlich|möglicherweise|vermutlich|glaube|hoffentlich|soweit|sofern|unklar|unter\s+umständen|dazu|sondern|nein|weil|war|waren|wurde|wurden|gewesen|letzte\p{L}*|vergangen\p{L}*|gestern|erhöh\p{L}*|reduzier\p{L}*|verringer\p{L}*|prüf\p{L}*|verlänger\p{L}*)(?!\p{L})/iu;
 
 // Guest counts. Every "<number> Personen" mention is read, supported or not, so that an unsupported
 // or contradicting count makes the whole detail uncertain instead of being skipped. A chain such as
-// "6–8", "6 bis 8", "5 oder 6" or "zwischen 6 und 8" is captured whole: it is a range, never the number
-// at its end.
+// "6–8", "fünfzehn bis 20", "5 oder 6" or "zwischen 6 und 8" is captured whole, whatever the words before the
+// connector are (a number this interpreter does not know is still an endpoint): it is a range, never the
+// number at its end.
 const NUMBER_WORDS: Readonly<Record<string, number>> = {
   eine: 1,
   zwei: 2,
@@ -123,11 +133,10 @@ const NUMBER_WORDS: Readonly<Record<string, number>> = {
   elf: 11,
   zwölf: 12,
 };
-const NUMBER = `(?:\\d+|${Object.keys(NUMBER_WORDS).join('|')})`;
 const RANGE_CONNECTOR =
   '(?:\\s*[–—\\-/+]\\s*|\\s+(?:bis|oder|und|zu|plus|bzw\\.?|beziehungsweise)\\s+)';
 const GUEST_MENTION = new RegExp(
-  `(?<![\\p{L}\\d])(?:(für|mit)\\s+)?((?:${NUMBER}${RANGE_CONNECTOR})*[\\p{L}\\d]+)\\s+(?:person(?:en)?|gäste|gast|leute)(?!\\p{L})`,
+  `(?<![\\p{L}\\d])(?:(für|mit)\\s+)?((?:[\\p{L}\\d]+${RANGE_CONNECTOR})*[\\p{L}\\d]+)\\s+(?:person(?:en)?|gäste|gast|leute)(?!\\p{L})`,
   'giu',
 );
 // An approximation or bound right before or after a count: the count is not exact.
@@ -135,6 +144,13 @@ const COUNT_HEDGE_BEFORE =
   /(?:bis\s+zu|zwischen|maximal|max\.?|mind\.?|mindestens|höchstens|etwa|circa|ca\.?|ungefähr|rund|knapp|gut|über|unter|mehr\s+als|weniger\s+als|wohl|vielleicht|schätzungsweise|plus|\+)\s*$/iu;
 const COUNT_HEDGE_AFTER =
   /^\s*(?:\+|plus|oder|bzw|maximal|max|mindestens|etwa|circa|ca|ungefähr|rund|knapp|vielleicht|schätzungsweise|und\s+mehr)(?!\p{L})/iu;
+// Any further number in a clause that is not about the callback ("7 sind möglich", "nein 5") may restate the count.
+const OTHER_NUMBER = new RegExp(
+  `\\d|(?<!\\p{L})(?:${Object.keys(NUMBER_WORDS)
+    .filter((w) => w !== 'eine')
+    .join('|')})(?!\\p{L})`,
+  'iu',
+);
 const MAX_GUESTS = 99;
 // Other words that give a head count: the total may not be the number that was read.
 const OTHER_GUESTS =
@@ -155,6 +171,7 @@ const MONTHS = [
   'November',
   'Dezember',
 ];
+const ORDINAL_DATE = new RegExp(`\\d{1,2}\\.\\s*(?=(?:${MONTHS.join('|')})(?!\\p{L}))`, 'giu');
 const DAY_PART = '(?:abend|mittag|morgen|vormittag|nachmittag)?';
 const WEEKDAY = new RegExp(`(?<!\\p{L})(${WEEKDAYS.join('|')})${DAY_PART}(?!\\p{L})`, 'giu');
 const MONTH = new RegExp(`(?<!\\p{L})im\\s+(${MONTHS.join('|')})(?!\\p{L})`, 'giu');
@@ -167,7 +184,7 @@ const LIMIT = new RegExp(
 // A word that makes a clause, or the words around a date, about the callback or the caller's own
 // availability: the date there is when to call, not when to book.
 const CALLBACK_WORD =
-  /zurück|rückruf|(?<!\p{L})ruf(?:en|t|e)?(?!\p{L})|erreich\p{L}*|melde\p{L}*|anruf\p{L}*|telefon\p{L}*|sprech\p{L}*|kontakt\p{L}*/iu;
+  /zurück|rückruf|(?<!\p{L})ruf(?:en|t|e)?(?!\p{L})|erreich\p{L}*|melde\p{L}*|anruf\p{L}*|telefon\p{L}*|sprech\p{L}*|kontakt\p{L}*|klär\p{L}*|besprech\p{L}*|diskutier\p{L}*|erkundig\p{L}*|nachfrag\p{L}*|informier\p{L}*|auskunft/iu;
 // How many words on each side of a date are searched for a callback word.
 const DATE_NEIGHBOURS = 4;
 
@@ -214,6 +231,13 @@ function guestCount(utterance: string): number | undefined {
       if (match[1] !== undefined && inBooking) stated = true;
     }
   }
+  // An ordinal date ("12. Dezember") is a date, not a count, and its full stop is not a clause break.
+  const withoutOrdinals = utterance.replace(ORDINAL_DATE, ' ');
+  for (const clause of withoutOrdinals.split(CLAUSE_BREAK)) {
+    if (CALLBACK_WORD.test(clause)) continue;
+    const rest = clause.replace(GUEST_MENTION, ' ').replace(/\d+(?::\d+)?\s*uhr/giu, ' ');
+    if (OTHER_NUMBER.test(rest)) return undefined;
+  }
   const [count] = counts;
   return stated && counts.size === 1 && count !== undefined && count >= 1 && count <= MAX_GUESTS
     ? count
@@ -227,6 +251,19 @@ const DATE_PHRASE = `(?:(?:für|am|auf|zum)\\s+(?:(?:dem|den)\\s+)?(?:${WEEKDAYS
 const GUESTS_PHRASE = '(?:für|mit)\\s+[\\p{L}\\d]+\\s+(?:person(?:en)?|gäste|gast|leute)';
 // Words that may stand between a date and the reservation verb: "für Samstag einen Tisch reservieren".
 const VERB_FILLER = '(?:einen|eine|ein|den|die|unseren|unsere|meinen|meine|bitte|gerne|mal|tisch)';
+
+const EXISTING_BOOKING =
+  /(?<!\p{L})(?:habe|haben|hat|hatte|gebucht|bestätigt|bestehend\p{L}*|vorhanden|besteht|steht)(?!\p{L})/iu;
+const POSSESSIVE = /(?<!\p{L})(?:meine\p{L}*|unsere\p{L}*|ihre\p{L}*|bestehende\p{L}*)\s*$/iu;
+const DEFINITE = new RegExp(
+  `(?<!\\p{L})(?:die|der|dem|den|diese\\p{L}*)\\s*$|${POSSESSIVE.source}`,
+  'iu',
+);
+const DISCUSSING =
+  /(?:telefon|sprech|reden|red|klär|frag|erkundig|informier|auskunft)\p{L}*|(?<!\p{L})über(?!\p{L})/iu;
+
+// "für Freitag zwischen 10 und 12", "… gegen zehn Uhr", "… nach 15 Uhr": a window to call, not the booking.
+const CALL_WINDOW = /^\s+(?:zwischen|gegen|nach|vor|ab|bis|um|ca|etwa)(?!\p{L})/iu;
 
 interface DateMention {
   readonly index: number;
@@ -260,28 +297,40 @@ function bookingDateSpans(clause: string): (readonly [number, number])[] {
   const topic = bareBirthday(clause) ? '|geburtstags?' : '';
   const topics = `(?:\\p{L}*reservier\\p{L}*|tischbuchung|tisch\\s+buchen|(?<!\\p{L})geburtstag(?:sfeier|sessen|sparty)${topic})(?!\\p{L})`;
   const spans: (readonly [number, number])[] = [];
-  // The date follows the topic ("Reservierung für 6 Personen am Freitag"). When a callback word comes
-  // right after it ("Reservierung am Freitag zurückrufen"), the date may be the callback's: no booking date.
-  const after = new RegExp(
-    `(?<!\\p{L})${topics}\\s+(?:${GUESTS_PHRASE}\\s+)?(${DATE_PHRASE})`,
-    'giu',
-  );
+  // A new reservation or celebration is requested, not discussed, owned or already booked. A noun alone
+  // is not enough: a definite article or possessive ("die", "unsere"), a verb of discussing before it,
+  // or a word of an existing booking in the clause ("habe", "gebucht") means the date is unattributable.
+  const existing = EXISTING_BOOKING.test(clause);
+  // The date follows an indefinite or bare topic noun ("Reservierung für 6 Personen am Freitag"). A
+  // callback word right after the date ("Reservierung am Freitag zurückrufen") may make it the callback's.
+  const after = new RegExp(`${topics}\\s+(?:${GUESTS_PHRASE}\\s+)?(${DATE_PHRASE})`, 'giu');
   for (const m of clause.matchAll(after)) {
     const date = m[1] ?? '';
-    const start = m.index + m[0].length - date.length;
-    if (!callbackNear(clause, m.index + m[0].length, m.index + m[0].length)) {
-      spans.push([start, m.index + m[0].length]);
+    const end = m.index + m[0].length;
+    // A celebration is intended to happen even when called "die Geburtstagsfeier"; a reservation noun is not.
+    const birthday = /^geburtstag/iu.test(m[0]);
+    const lead = clause.slice(0, m.index).trim().split(/\s+/u);
+    if (
+      !existing &&
+      (!CALLBACK_WORD.test(clause) ||
+        (/^für/iu.test(date) && !CALL_WINDOW.test(clause.slice(end)))) &&
+      !(birthday ? POSSESSIVE : DEFINITE).test(lead.slice(-2).join(' ')) &&
+      !DISCUSSING.test(lead.slice(-3).join(' ')) &&
+      !callbackNear(clause, end, end)
+    ) {
+      spans.push([end - date.length, end]);
     }
   }
-  // The date comes before the reservation verb ("für Samstag einen Tisch reservieren").
+  // The date comes before the verb "reservieren" ("für Samstag einen Tisch reservieren"); the noun
+  // "Reservierung" after a date ("am Freitag die Reservierung besprechen") says nothing about the date.
   const before = new RegExp(
-    `(?:${GUESTS_PHRASE}\\s+)?(${DATE_PHRASE})(?:\\s+${GUESTS_PHRASE})?(?:\\s+${VERB_FILLER})*\\s+${topics}`,
+    `(?:${GUESTS_PHRASE}\\s+)?(${DATE_PHRASE})(?:\\s+${GUESTS_PHRASE})?(?:\\s+${VERB_FILLER})*\\s+reservieren(?!\\p{L})`,
     'giu',
   );
   for (const m of clause.matchAll(before)) {
     const date = m[1] ?? '';
     const start = m.index + m[0].indexOf(date);
-    spans.push([start, start + date.length]);
+    if (!existing) spans.push([start, start + date.length]);
   }
   return spans;
 }

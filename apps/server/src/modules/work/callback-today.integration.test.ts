@@ -1103,6 +1103,38 @@ describe('PRODUCT-01 review findings: persisted titles, refusals and replays', (
     );
   }
 
+  evidenceTest(
+    'an ambiguous day or count is never persisted or served as a booking detail (fourth review)',
+    async () => {
+      const cases: [string, string][] = [
+        [
+          'Ich möchte am Freitag die Reservierung telefonisch besprechen. Bitte Rückruf.',
+          'Rückruf: Reservierung',
+        ],
+        [
+          'Bitte Rückruf. Reservierung für 20 Personen, es werden fünfzehn bis 20 Personen.',
+          'Rückruf: Reservierung',
+        ],
+        [
+          'Bitte Rückruf. Reservierung für 8 Personen, es werden null bis acht Personen.',
+          'Rückruf: Reservierung',
+        ],
+        [
+          'Ich möchte einen Tisch für Samstag reservieren. Bitte um Rückruf.',
+          'Rückruf: Reservierung am Samstag',
+        ],
+      ];
+      for (const [utterance, expected] of cases) {
+        const response = await simulate(call({ utterance }));
+        expect(response.statusCode, utterance).toBe(201);
+        const { taskId } = response.json<{ taskId: string }>();
+        expect((await taskRow(taskId)).title, utterance).toBe(expected);
+        const view = todayResponseSchema.parse((await today(await signIn(restaurantOwner))).json());
+        expect(view.tasks.find((t) => t.id === taskId)?.title, utterance).toBe(expected);
+      }
+    },
+  );
+
   evidenceTest('a refusal of the callback is 422 and writes nothing anywhere', async () => {
     for (const utterance of [
       'Bitte nicht zurückrufen, ich möchte nicht reservieren, meine PIN lautet 4821.',
