@@ -21,7 +21,12 @@ does not accept the `Secure` session cookie over `http://localhost`). No `.env` 
 credential is read: every secret in the stack is a development-only fake that is already in the
 repository (`docker/keycloak/realm-moin-local.json`, `docker/postgres/init/`). The one generated
 value, the simulator's bearer, is created per install, lives in the `api` container's environment and
-is never written to a file or printed.
+is never written to a file or printed. `demo.sh` finds the demo by Docker's Compose project label, so
+it needs no token to tell whether the demo is absent, running or stopped; it reads the existing token
+back from the `api` container (running or stopped) and reuses it, so repeating `up`, `start`, `restart`
+or `call` never rotates it. If the container exists but its token cannot be read, the script stops and
+says so rather than rotate; `reset --yes` is then the way out. A `DEMO_SIMULATOR_TOKEN` left in your
+shell is ignored.
 
 ## Start, show, stop
 
@@ -117,6 +122,7 @@ deploy/demo/demo.sh up
 pnpm exec playwright test -c playwright.demo.config.ts   # 7 tests against the running stack, about 2.5 minutes
 scripts/check-web-image.sh moin-server:demo              # the CI's check of the web role, on a local build
 scripts/check-server-image.sh moin-server:demo           # every SQL migration is in the image
+bash deploy/demo/tests/lifecycle.test.sh                 # demo.sh up/start/stop/reset decisions, with fake docker (also in the unit gate)
 ```
 
 `playwright.demo.config.ts` starts nothing; it drives the stack at `http://localhost:3000` and restarts
@@ -139,3 +145,9 @@ developer build, this one tests the packages.
   (`docs/development/api-web-rollout.md`) remains the authority for mixed versions; this stack runs the
   G2 web with the G2 API only, and a rollout beyond it needs an inventory of deployed builds.
 - ADR-0001 names `web` as a role of the one image; this stack and the CI follow that. A release is therefore one digest, and the M2D-1 G0/G1/G2 rules still apply between releases.
+- Review follow-ups, not yet done and not blocking: (F2) the package-manager absence probe in
+  `container-scan` treats any failing `docker run` as "the tool is absent"; the positive check of the web
+  role is what catches a container that cannot start. (F3) `docker/setup-qemu-action` is pinned by
+  commit, but its default binfmt image is the mutable tag `latest`.
+- The lifecycle test uses a fake `docker`; a repeated real `up` against a running demo is a manual
+  check (`deploy/demo/demo.sh up` twice; the second must report no port conflict and keep the sign-in).

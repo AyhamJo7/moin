@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/home/adam/projects/business/moin",
+  "head": "a3a37b8569f1841d4c7a0cda270dd2f842c53203",
+  "mode": "committed",
+  "fix_ref": "a3a37b8569f1841d4c7a0cda270dd2f842c53203",
+  "fix_paths": [
+    "deploy/demo/demo.sh"
+  ],
+  "untracked_fix_files": [],
+  "test": "bash deploy/demo/tests/lifecycle.test.sh",
+  "started": "2026-10-18T07:57:47+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-10-18T07:57:48+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 0.31,
+    "tail": "  | demo: port 3000 is already in use; stop what uses it (a dev server may use 3000)\n  --- calls:\n  | docker info\n  | docker compose -p moin-demo -f /home/adam/projects/business/moin/deploy/demo/docker-compose.yml ps -q\nFAIL: 5 it does not claim a port conflict\n  --- status=1 stdout:\n  --- stderr:\n  | demo: port 3000 is already in use; stop what uses it (a dev server may use 3000)\n  --- calls:\n  | docker info\n  | docker compose -p moin-demo -f /home/adam/projects/business/moin/deploy/demo/docker-compose.yml ps -q\nFAIL: 9 and says it will not rotate\n  --- status=1 stdout:\n  --- stderr:\n  | demo: port 3000 is already in use; stop what uses it (a dev server may use 3000)\n  --- calls:\n  | docker info\n  | docker compose -p moin-demo -f /home/adam/projects/business/moin/deploy/demo/docker-compose.yml ps -q\nFAIL: 10 an inherited token is ignored for a running demo\n  --- status=1 stdout:\n  --- stderr:\n  | demo: port 3000 is already in use; stop what uses it (a dev server may use 3000)\n  --- calls:\n  | docker info\n  | docker compose -p moin-demo -f /home/adam/projects/business/moin/deploy/demo/docker-compose.yml ps -q\n  | compose compose -p moin-demo -f /home/adam/projects/business/moin/deploy/demo/docker-compose.yml ps -q\nFAIL: 11 start re-creates nothing under a different token\n  --- status=0 stdout:\n  | demo: synthetic tenant and owner are in place\n  --- stderr:\n  --- calls:\n  | docker compose -p moin-demo -f /home/adam/projects/business/moin/deploy/demo/docker-compose.yml ps -a -q api\n  | docker compose -p moin-demo -f /home/adam/projects/business/moin/deploy/demo/docker-compose.yml start\n  | compose compose -p moin-demo -f /home/adam/projects/business/moin/deploy/demo/docker-compose.yml start\n  | docker compose -p moin-demo -f /home/adam/projects/business/moin/deploy/demo/docker-compose.yml up -d --wait --wait-timeout 300\n  | compose compose -p moin-demo -f /home/adam/projects/business/moin/deploy/demo/docker-compose.yml up -d --wait --wait-timeout 300\n  | UP token_sha=05e40f317bbd1d7c\n  | docker compose -p moin-demo -f /home/adam/projects/business/moin/deploy/demo/docker-compose.yml exec -T postgres psql -q -U moin_owner -d moin -v owner_sub=fake-keycloak-subject -f -\n  | compose compose -p moin-demo -f /home/adam/projects/business/moin/deploy/demo/docker-compose.yml exec -T postgres psql -q -U moin_owner -d moin -v owner_sub=fake-keycloak-subject -f -\ndemo lifecycle: 34 of 45 checks passed"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 0.31,
+    "tail": "demo lifecycle: 45 of 45 checks passed"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/home/adam/projects/business/moin/.git/claude-evidence/mutation/20261018T075747Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}
