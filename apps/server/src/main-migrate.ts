@@ -1,16 +1,18 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
+import { migrate } from '@moin/db/migrate';
 import { createLogger } from '@moin/observability';
 import { ConfigurationError, loadConfig } from './config/env.ts';
+import { runMigrations } from './migrate-run.ts';
 import { MigrateRootModule } from './roots/migrate-root.module.ts';
 
 /**
  * The one-shot migration runner.
  *
  * It creates an application context rather than an HTTP server — there is nothing to serve — runs
- * to completion and exits with a meaningful code, because that exit code is what a deployment
- * gates on. The migrations themselves arrive with `packages/db` in P06; until then this proves
- * the role boots, resolves its configuration and exits cleanly rather than hanging a deploy.
+ * the reviewed SQL migrations (`packages/db`) and exits with a meaningful code, because that exit
+ * code is what a deployment gates on. `DATABASE_URL` must be the migration role's connection: DDL
+ * is not something the application role may do (ADR-0003). A failed migration exits 1.
  */
 async function main(): Promise<number> {
   let config;
@@ -40,8 +42,7 @@ async function main(): Promise<number> {
 
   const context = await NestFactory.createApplicationContext(MigrateRootModule, { logger: false });
   try {
-    logger.info({ outcome: 'no migrations to apply', count: 0 }, 'migration run complete');
-    return 0;
+    return await runMigrations(config.DATABASE_URL, migrate, logger);
   } finally {
     await context.close();
   }

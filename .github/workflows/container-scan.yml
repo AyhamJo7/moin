@@ -36,6 +36,13 @@ jobs:
             hadolint/hadolint@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d \
             hadolint --failure-threshold warning - < apps/server/Dockerfile
 
+      # The runner is amd64 and the image is arm64: without emulation `docker run` fails with
+      # "exec format error". The package-manager check below used to read that failure as "the tool
+      # is absent" and pass; with emulation it actually runs `command -v` inside the image.
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: arm64
+
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       # linux/arm64 is the target (Graviton). Nothing else pins the architecture, so an image
@@ -69,6 +76,15 @@ jobs:
             fi
           done
           echo "arm64, runs as node, no package manager in the runtime layer"
+
+      # The schema runner reads `../migrations` next to its own source; see the script.
+      - name: Assert the image carries the SQL migrations
+        run: scripts/check-server-image.sh moin-server:ci
+
+      # The `web` role of the same image: start it read-only and fetch the page and every script it
+      # references. A build that succeeds but leaves `.next/static` out serves HTML with dead scripts.
+      - name: The packaged owner app serves its pages and static assets
+        run: scripts/check-web-image.sh moin-server:ci
 
       - name: Trivy image scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0

@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/home/adam/projects/business/moin",
+  "head": "3912d90b23c50d8168291d417a8ca4cd90877cdd",
+  "mode": "committed",
+  "fix_ref": "de4fdd99cab477ac668072272843bcf49205100d",
+  "fix_paths": [
+    "apps/server/Dockerfile"
+  ],
+  "untracked_fix_files": [],
+  "test": "docker build -q -f apps/server/Dockerfile -t moin-server:mutation-probe . && scripts/check-server-image.sh moin-server:mutation-probe && CHECK_WEB_IMAGE_PORT=3997 scripts/check-web-image.sh moin-server:mutation-probe",
+  "started": "2026-10-18T07:09:34+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-10-18T07:10:00+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 8.08,
+    "tail": "sha256:1eb31d4b81250692c6eac5edb4b1be3a89455575aa9811a3956f3377b40dad15\nall 77 SQL migrations present in moin-server:mutation-probe\nnode:internal/modules/cjs/loader:1568\n  throw err;\n  ^\n\nError: Cannot find module '/app/web/apps/web/server.js'\n    at Module._resolveFilename (node:internal/modules/cjs/loader:1564:15)\n    at wrapResolveFilename (node:internal/modules/cjs/loader:1118:27)\n    at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1142:10)\n    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1169:12)\n    at Module._load (node:internal/modules/cjs/loader:1341:5)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:261:19)\n    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)\n    at node:internal/main/run_main_module:33:47 {\n  code: 'MODULE_NOT_FOUND',\n  requireStack: []\n}\n\nNode.js v24.21.0\nthe web image did not serve / with 200"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 17.66,
+    "tail": "sha256:db7aacdc263028eb05be241ba479972388ce8e9cc1eb0ea72c717fcad31adf71\nall 77 SQL migrations present in moin-server:mutation-probe\nweb image ok: / and 8 static assets served, public assets present"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/home/adam/projects/business/moin/.git/claude-evidence/mutation/20261018T070934Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}

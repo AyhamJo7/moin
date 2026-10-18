@@ -22,3 +22,6 @@ PROGRESS.md
 !.env.example
 test-results
 playwright-report
+deploy
+e2e
+scratch

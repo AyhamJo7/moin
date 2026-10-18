@@ -2,7 +2,8 @@
 #
 # One image per release; the role is chosen by the start command (INV-17). Building four images
 # would make "which code is in production" four questions instead of one, and would let the voice
-# role drift from the API role between deploys.
+# role drift from the API role between deploys. The `web` role (ADR-0001) is the Next.js
+# standalone server in the same image, under /app/web: `node web/apps/web/server.js`.
 #
 # The base is pinned by digest, not by tag: `node:24.21.0-bookworm-slim` is mutable and a
 # rebuild months later would silently produce a different image for the same source commit.
@@ -40,13 +41,14 @@ COPY packages/ui/package.json packages/ui/
 # blocks unreviewed lifecycle scripts, but stating it means the control survives a pnpm config
 # change rather than depending on a default.
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    pnpm install --frozen-lockfile --ignore-scripts --filter @moin/server... --filter .
+    pnpm install --frozen-lockfile --ignore-scripts --filter @moin/server... --filter @moin/web... --filter .
 
 # ---------------------------------------------------------------- build
 FROM deps AS build
 WORKDIR /app
 COPY . .
-RUN pnpm --filter @moin/server... build
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN pnpm --filter @moin/server... build && pnpm --filter @moin/web build
 
 # ---------------------------------------------------------------- production dependencies
 #
@@ -116,6 +118,19 @@ COPY --from=build --chown=node:node /app/packages/db/src ./packages/db/src
 COPY --from=build --chown=node:node /app/packages/kernel/src ./packages/kernel/src
 COPY --from=build --chown=node:node /app/packages/observability/src ./packages/observability/src
 
+# The `web` role: Next's standalone server. It does NOT include `.next/static` (every script the
+# browser loads) or `public/`, so both are copied next to it; `scripts/check-web-image.sh` fetches
+# a real asset from a running container in CI, because an image that renders HTML but serves 404 for
+# its scripts passes `next build`. Its own traced node_modules live under /app/web.
+COPY --from=build --chown=node:node /app/apps/web/.next/standalone ./web
+COPY --from=build --chown=node:node /app/apps/web/.next/static ./web/apps/web/.next/static
+COPY --from=build --chown=node:node /app/apps/web/public ./web/apps/web/public
+
+# The reviewed SQL migrations, next to the runner that reads them (`packages/db/src/migrate.ts`
+# resolves `../migrations`). Without them the image can run the API but cannot create or upgrade
+# the schema it needs, which the demo stack found the hard way (M2D-2).
+COPY --from=build --chown=node:node /app/packages/db/migrations ./packages/db/migrations
+
 # `node` (uid 10xx) ships with the base image. Running as root would mean a process escape starts
 # with root in the container's namespace.
 USER node
@@ -134,5 +149,5 @@ EXPOSE 3000
 # No HEALTHCHECK: the orchestrator (ECS) polls /healthz and /readyz itself, and a container-level
 # health check would duplicate that with different semantics and no visibility.
 
-# Overridden per role: main-api.js · main-voice.js · main-worker.js · main-migrate.js
+# Overridden per role: main-api.js · main-voice.js · main-worker.js · main-migrate.js · web/apps/web/server.js
 CMD ["node", "apps/server/dist/main-api.js"]

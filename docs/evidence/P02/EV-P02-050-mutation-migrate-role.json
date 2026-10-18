@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/home/adam/projects/business/moin",
+  "head": "de4fdd99cab477ac668072272843bcf49205100d",
+  "mode": "committed",
+  "fix_ref": "de4fdd99cab477ac668072272843bcf49205100d",
+  "fix_paths": [
+    "apps/server/src/main-migrate.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "pnpm --filter @moin/server build && scripts/check-migrate-role.sh",
+  "started": "2026-10-18T06:44:46+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-10-18T06:47:04+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 1.42,
+    "tail": ".                                        | \u2009WARN\u2009 Unsupported engine: wanted: {\"node\":\">=24.21.0 <25\"} (current: {\"node\":\"v26.10.0\",\"pnpm\":\"10.34.5\"})\n\n> @moin/server@0.0.0 build /home/adam/projects/business/moin/apps/server\n> tsc -p tsconfig.build.json\n\nexpected exit 1 from an unreachable database, got 0\n{\"level\":30,\"time\":\"2026-10-18T06:44:47.730Z\",\"service\":\"moin\",\"role\":\"migrate\",\"env\":\"development\",\"outcome\":\"no migrations to apply\",\"count\":0,\"msg\":\"migration run complete\"}"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 135.65,
+    "tail": ".                                        | \u2009WARN\u2009 Unsupported engine: wanted: {\"node\":\">=24.21.0 <25\"} (current: {\"node\":\"v26.10.0\",\"pnpm\":\"10.34.5\"})\n\n> @moin/server@0.0.0 build /home/adam/projects/business/moin/apps/server\n> tsc -p tsconfig.build.json\n\nthe migrate role exits 1 and reports failure when the database is unreachable"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/home/adam/projects/business/moin/.git/claude-evidence/mutation/20261018T064446Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}

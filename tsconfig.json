@@ -11,6 +11,7 @@
     "vitest.config.ts",
     "playwright.config.ts",
     "playwright.slice.config.ts",
+    "playwright.demo.config.ts",
     "e2e/**/*.ts"
   ],
   "exclude": ["node_modules", "**/dist", "**/.next", "apps", "packages"]

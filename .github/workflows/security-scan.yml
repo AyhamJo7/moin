@@ -97,7 +97,7 @@ jobs:
       - name: shellcheck
         run: |
           shopt -s globstar nullglob
-          files=(scripts/**/*.sh docker/**/*.sh)
+          files=(scripts/**/*.sh docker/**/*.sh deploy/**/*.sh)
           if [ ${#files[@]} -eq 0 ]; then
             echo "no shell scripts to check"
             exit 0
