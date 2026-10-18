@@ -95,7 +95,7 @@ seed() {
 cmd_up() {
   preflight
   export_token
-  compose build --quiet migrate web
+  compose build --quiet migrate
   compose up -d --wait --wait-timeout 300
   seed
   cat <<MSG
@@ -110,6 +110,14 @@ MSG
 cmd_status() {
   export DEMO_SIMULATOR_TOKEN=unused
   compose ps
+  # Containers that joined the edge's namespace report healthy from inside even after the edge was
+  # restarted underneath them; only a probe from the host tells whether the stack is reachable.
+  if [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$APP_URL/__edge" || true)" = 200 ]; then
+    echo "edge reachable at $APP_URL"
+  else
+    echo "edge NOT reachable at $APP_URL (run: deploy/demo/demo.sh restart)" >&2
+    exit 1
+  fi
 }
 
 cmd_call() {

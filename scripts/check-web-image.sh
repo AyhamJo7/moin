@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Starts the built owner-app image the way the demo and a deployment run it (read-only root,
+# Starts the `web` role of the built image the way the demo and a deployment run it (read-only root,
 # scratch tmpfs, non-root) and fetches what a browser would: the page, then every script and
 # stylesheet it references. `next build` succeeding proves none of this; the standalone output
 # leaves `.next/static` out unless the image copies it (M2D-2), and an image without it renders
@@ -11,15 +11,17 @@ name="moin-web-check-$$"
 port="${CHECK_WEB_IMAGE_PORT:-3000}"
 base="http://127.0.0.1:${port}"
 html="$(mktemp)"
+headers="$(mktemp)"
 
 cleanup() {
   docker rm -f "$name" >/dev/null 2>&1 || true
-  rm -f "$html"
+  rm -f "$html" "$headers"
 }
 trap cleanup EXIT
 
 docker run -d --name "$name" --read-only --tmpfs /tmp -p "127.0.0.1:${port}:3000" \
-  -e OWNER_API_ORIGIN=http://127.0.0.1:3101 "$image" >/dev/null
+  -e PORT=3000 -e HOSTNAME=0.0.0.0 -e OWNER_API_ORIGIN=http://127.0.0.1:3101 \
+  "$image" node web/apps/web/server.js >/dev/null
 
 # Bounded wait: 90 attempts, 2 s apart (the image may be an emulated arm64 build).
 up=0
@@ -35,16 +37,15 @@ fi
 
 count=0
 while read -r asset; do
-  code="$(curl -s -o /dev/null -D /tmp/check-web-image-headers.$$ -w '%{http_code}' "${base}${asset}")"
-  type="$(grep -i '^content-type:' /tmp/check-web-image-headers.$$ | tr -d '\r' || true)"
-  rm -f /tmp/check-web-image-headers.$$
+  code="$(curl -s -o /dev/null -D "$headers" -w '%{http_code}' "${base}${asset}")"
+  type="$(grep -i '^content-type:' "$headers" | tr -d '\r' || true)"
   [ "$code" = 200 ] || { echo "$asset returned $code" >&2; exit 1; }
   case "$asset" in
     *.js) echo "$type" | grep -qi 'javascript' || { echo "$asset has content type: $type" >&2; exit 1; } ;;
     *.css) echo "$type" | grep -qi 'text/css' || { echo "$asset has content type: $type" >&2; exit 1; } ;;
   esac
   count=$((count + 1))
-done < <(grep -o '/_next/static/[^"]*\.\(js\|css\)' "$html" | sort -u)
+done < <(grep -o '/_next/static/[^"?]*\.\(js\|css\)' "$html" | sort -u)
 
 [ "$count" -gt 0 ] || { echo "the page references no static assets" >&2; exit 1; }
 [ "$(curl -s -o /dev/null -w '%{http_code}' "${base}/icon.svg")" = 200 ] || { echo "public/icon.svg is missing from the image" >&2; exit 1; }

@@ -74,6 +74,11 @@ jobs:
       - name: Assert the image carries the SQL migrations
         run: scripts/check-server-image.sh moin-server:ci
 
+      # The `web` role of the same image: start it read-only and fetch the page and every script it
+      # references. A build that succeeds but leaves `.next/static` out serves HTML with dead scripts.
+      - name: The packaged owner app serves its pages and static assets
+        run: scripts/check-web-image.sh moin-server:ci
+
       - name: Trivy image scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -85,60 +90,10 @@ jobs:
           ignore-unfixed: true
           exit-code: '1'
 
-  web-image:
-    name: owner-app image (hadolint, build, serve, trivy)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: hadolint
-        run: |
-          docker run --rm -i \
-            hadolint/hadolint@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d \
-            hadolint --failure-threshold warning - < apps/web/Dockerfile
-
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-
-      - name: Build the owner-app image
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          file: apps/web/Dockerfile
-          platforms: linux/arm64
-          push: false
-          load: true
-          tags: moin-web:ci
-          cache-from: type=gha,scope=web
-          cache-to: type=gha,mode=max,scope=web
-
-      - name: Assert the image is what it claims to be
-        run: |
-          arch=$(docker image inspect moin-web:ci --format '{{.Architecture}}')
-          user=$(docker image inspect moin-web:ci --format '{{.Config.User}}')
-          [ "$arch" = "arm64" ] || { echo "expected arm64, got $arch" >&2; exit 1; }
-          [ "$user" = "node" ] || { echo "expected to run as node, got '$user'" >&2; exit 1; }
-
-      # Starts the image read-only and fetches the page and every script it references. A build
-      # that succeeds but leaves `.next/static` out of the image serves HTML with dead scripts.
-      - name: The packaged owner app serves its pages and static assets
-        run: scripts/check-web-image.sh moin-web:ci
-
-      - name: Trivy image scan
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          scan-type: image
-          image-ref: moin-web:ci
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: '1'
-
   container-scan:
     name: container-scan
     runs-on: ubuntu-24.04
-    needs: [image, web-image]
+    needs: [image]
     if: always()
     steps:
       - name: All checks passed

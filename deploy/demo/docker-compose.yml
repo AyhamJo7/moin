@@ -1,5 +1,5 @@
-# The packaged KlarDesk demo stack (M2D-2): the real API image, the real owner-app image, PostgreSQL
-# and Keycloak, started with `deploy/demo/demo.sh up`. Local only, over HTTP on loopback, with
+# The packaged KlarDesk demo stack (M2D-2): the release image (one image, the role chosen by the start
+# command: `migrate`, `api` and the `web` owner app), PostgreSQL and Keycloak, started with `deploy/demo/demo.sh up`. Local only, over HTTP on loopback, with
 # synthetic data. It is NOT a production baseline: it runs the API with NODE_ENV=development
 # because only that environment may use the local Keycloak and the simulated-call entry point
 # (config/env.ts), every credential is a development-only fake, and nothing here is hardened for
@@ -9,7 +9,9 @@
 # `api` and `web` join it with `network_mode: service:edge`, so inside it the API is
 # 127.0.0.1:3101 and the owner app 127.0.0.1:3001, like two containers of one ECS task. That is
 # what lets the owner app send the session cookie to the API over plain HTTP: its origin guard
-# accepts HTTPS or loopback only, and this keeps that guard unchanged. Restart api or web alone
+# accepts HTTPS or loopback only, and this keeps that guard unchanged. Production differs: roles
+# are separate services behind a load balancer (ADR-0001), so this stack does not exercise that
+# network path, only the packaged code and its configuration. Restart api or web alone
 # freely; restarting edge recreates the namespace, so use `demo.sh restart` for that.
 #
 # Keycloak joins the same namespace, so the issuer is `http://localhost:8081/realms/moin-local` for
@@ -48,7 +50,14 @@ services:
   oidc:
     image: *keycloak
     network_mode: 'service:edge'
-    command: ['start-dev', '--import-realm', '--http-port=8081']
+    command:
+      [
+        'start-dev',
+        '--import-realm',
+        '--http-port=8081',
+        '--hostname=http://localhost:8081',
+        '--hostname-strict=true',
+      ]
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: local-development-only
@@ -74,20 +83,27 @@ services:
     cpus: 1.5
     pids_limit: 400
 
-  # Applies the reviewed SQL migrations as the migration role, then exits. A failure exits non-zero
-  # and `api` (which waits for service_completed_successfully) never starts.
+  # The release's `migrate` role (ADR-0001): applies the reviewed SQL migrations as the migration
+  # role, then exits. A failure exits 1 and `api` (which waits for service_completed_successfully)
+  # never starts. This service also builds the one image (INV-17) that `api` and `web` run.
   migrate:
     image: moin-server:demo
     build:
       context: ../..
       dockerfile: apps/server/Dockerfile
-    command: ['node', 'packages/db/src/cli.ts', 'migrate']
+    command: ['node', 'apps/server/dist/main-migrate.js']
     environment:
-      DATABASE_MIGRATION_URL: postgres://moin_migrator:local-development-only@postgres:5432/moin
+      NODE_ENV: development
+      SERVER_ROLE: migrate
+      LOG_LEVEL: info
+      # The migration role's connection: DDL is not something the application role may do.
+      DATABASE_URL: postgres://moin_migrator:local-development-only@postgres:5432/moin
     depends_on:
       postgres:
         condition: service_healthy
     restart: 'no'
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
     read_only: true
     tmpfs: ['/tmp']
     mem_limit: 256m
@@ -101,6 +117,8 @@ services:
       - '127.0.0.1:8081:8081'
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
     read_only: true
     tmpfs: ['/tmp']
     healthcheck:
@@ -113,6 +131,7 @@ services:
 
   api:
     image: moin-server:demo
+    pull_policy: never
     network_mode: 'service:edge'
     command: ['node', 'apps/server/dist/main-api.js']
     environment:
@@ -151,16 +170,17 @@ services:
       timeout: 4s
       retries: 20
       start_period: 5s
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
     read_only: true
     tmpfs: ['/tmp']
     mem_limit: 512m
     pids_limit: 200
 
   web:
-    image: moin-web:demo
-    build:
-      context: ../..
-      dockerfile: apps/web/Dockerfile
+    image: moin-server:demo
+    pull_policy: never
+    command: ['node', 'web/apps/web/server.js']
     network_mode: 'service:edge'
     environment:
       PORT: '3001'
@@ -181,6 +201,8 @@ services:
       timeout: 4s
       retries: 20
       start_period: 5s
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
     read_only: true
     tmpfs: ['/tmp']
     mem_limit: 384m

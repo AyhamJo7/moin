@@ -1,12 +1,14 @@
 # The packaged demo stack (M2D-2)
 
 A local, repository-controlled KlarDesk you can show a restaurant owner over a screen share. It runs
-the **real packaged images** (the API image and the owner-app image the CI builds), PostgreSQL and
-Keycloak. It is **not** a hosted demo, **not** a production baseline, and the call is **simulated**.
+the **release image** (`apps/server/Dockerfile`: one image, the role chosen by the start command, as
+ADR-0001 and INV-17 require: `migrate`, `api` and the `web` owner app), PostgreSQL and Keycloak. The
+image is built locally from the same Dockerfile CI builds for linux/arm64; the local build is for this
+machine's architecture, so its digest is not the one CI checks. It is **not** a hosted demo, **not** a production baseline, and the call is **simulated**.
 
 | Statement                                            | State                                                   |
 | ---------------------------------------------------- | ------------------------------------------------------- |
-| Local demo on this machine, from the packaged images | **Verified** (EV-P02-050, evidence below)               |
+| Local demo on this machine, from the packaged images | **Verified** (EV-P02-051)                               |
 | A public or hosted demo                              | Unverified. Nothing here is published; there is no URL  |
 | Production deployment, hosting, TLS, WAF, backups    | Unverified. No infrastructure exists (P17)              |
 | Real telephone provider (Twilio) integration         | Unverified. The call below is the development simulator |
@@ -24,7 +26,7 @@ is never written to a file or printed.
 ## Start, show, stop
 
 ```bash
-deploy/demo/demo.sh up        # builds the two images, starts everything, seeds the synthetic tenant (about 1 minute)
+deploy/demo/demo.sh up        # builds the image, starts everything, seeds the synthetic tenant (about 1 minute)
 ```
 
 1. Open **http://localhost:3000** and choose **Anmelden**. Keycloak (the real sign-in form, at
@@ -56,20 +58,23 @@ Do not use `docker compose down -v` yourself.
 
 ## What runs
 
-| Component      | What it is                                                                                                                                |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `edge` (nginx) | The stand-in for the load balancer: one origin, `/api/*` to the API, the rest to the owner app. Publishes 3000 and 8081 on loopback only. |
-| `api`          | `moin-server:demo`, the compiled API, as user `node`, read-only root, `NODE_ENV=development` (see below)                                  |
-| `web`          | `moin-web:demo`, the Next.js standalone server with `.next/static` and `public/` copied in                                                |
-| `oidc`         | Keycloak with the committed realm; sign-in at `http://localhost:8081`                                                                     |
-| `postgres`     | PostgreSQL 17 + pgvector, not published; roles and migrations as in CI; the app runs as `moin_app` (NOBYPASSRLS, FORCE RLS)               |
-| `migrate`      | One-shot: the reviewed SQL migrations as `moin_migrator`; a failure stops `api` from starting                                             |
+| Component      | What it is                                                                                                                                               |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `edge` (nginx) | The stand-in for the load balancer: one origin, `/api/*` to the API, the rest to the owner app. Publishes 3000 and 8081 on loopback only.                |
+| `api`          | `moin-server:demo`, the compiled API (`main-api.js`), user `node`, read-only root, `NODE_ENV=development` (see below)                                    |
+| `web`          | the same image, role `web`: `node web/apps/web/server.js` (Next standalone with `.next/static` and `public/` copied in)                                  |
+| `oidc`         | Keycloak with the committed realm; sign-in at `http://localhost:8081`                                                                                    |
+| `postgres`     | PostgreSQL 17 + pgvector, not published; roles and migrations as in CI; the app runs as `moin_app` (NOBYPASSRLS, FORCE RLS)                              |
+| `migrate`      | the same image, role `migrate` (`main-migrate.js`): the reviewed SQL migrations as `moin_migrator`, then exits; a failure exits 1 and `api` never starts |
 
 `api`, `web` and `oidc` share the namespace of `edge` (`network_mode: service:edge`), like the
-containers of one ECS task. This keeps two guards exactly as they are: the owner app sends the session
+containers of one ECS task (production differs: separate services behind a load balancer, ADR-0001, so
+this stack exercises the packaged code and configuration, not that network path). This keeps two guards exactly as they are: the owner app sends the session
 cookie to the API only over HTTPS or loopback, and the API accepts only a loopback issuer for the
-local Keycloak. Consequence: restart `api` or `web` or `oidc` on their own freely
-(`demo.sh restart-api`), but use `demo.sh restart` for `edge`.
+local Keycloak. Consequence: restart `api`, `web` or `oidc` on their own freely
+(`demo.sh restart-api`), but if `edge` restarts, the others keep running in a dead namespace and still
+report healthy from inside; `demo.sh status` probes the edge from the host and says so, and
+`demo.sh restart` recovers it.
 
 ## Not a security baseline
 
@@ -80,7 +85,7 @@ Authentication, CSRF, FORCE RLS and the security headers are not relaxed (the ac
 a completion without the CSRF token and shows the hardened headers). Do not expose this stack to a
 network. A public demo is a separate decision (hosting, TLS, a production identity provider).
 
-## Failure and recovery (verified by hand on this machine)
+## Failure and recovery (observed by hand on this machine, see EV-P02-051; not automated)
 
 | Situation                                    | Behaviour                                                                                                                                           | Who recovers           |
 | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
@@ -110,7 +115,8 @@ No retry loop is unbounded: health waits are bounded (`up` 300 s, `restart-api` 
 ```bash
 deploy/demo/demo.sh up
 pnpm exec playwright test -c playwright.demo.config.ts   # 7 tests against the running stack, about 2.5 minutes
-scripts/check-web-image.sh moin-web:demo                 # the CI's image check, on a local build
+scripts/check-web-image.sh moin-server:demo              # the CI's check of the web role, on a local build
+scripts/check-server-image.sh moin-server:demo           # every SQL migration is in the image
 ```
 
 `playwright.demo.config.ts` starts nothing; it drives the stack at `http://localhost:3000` and restarts
@@ -125,9 +131,11 @@ developer build, this one tests the packages.
 - One synthetic tenant is seeded; cross-tenant isolation is proven by the integration suites, not
   re-proven in this browser suite.
 - There is no sign-out button yet; sessions end by expiry or revocation (the suite revokes through the database).
+- The seed runs as the Postgres superuser `moin_owner` (it bypasses RLS) and writes no audit event: it is synthetic bootstrap outside INV-10, idempotent, and only ever pointed at the `moin-demo` database.
+- The role setup (`docker/postgres/init`) and the Keycloak realm import run only when their volume is first created. After a repository update that changes either, `up` keeps the old roles or realm until `reset --yes`.
+- Behind the edge every caller shares one socket address, so the API's per-address auth throttle is one bucket for the whole demo.
 - Keycloak in `start-dev` uses about 500 MiB; the whole stack about 700 MiB.
 - G0/G1 web and API builds are not part of this stack. The M2D-1 matrix
   (`docs/development/api-web-rollout.md`) remains the authority for mixed versions; this stack runs the
   G2 web with the G2 API only, and a rollout beyond it needs an inventory of deployed builds.
-- `main-migrate` (the Nest entry point) is still a stub that applies nothing; the stack and any
-  release use `node packages/db/src/cli.ts migrate`, which applies the migrations and fails loudly.
+- ADR-0001 names `web` as a role of the one image; this stack and the CI follow that. A release is therefore one digest, and the M2D-1 G0/G1/G2 rules still apply between releases.
