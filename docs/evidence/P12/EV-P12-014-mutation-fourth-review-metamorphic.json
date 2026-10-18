@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/home/adam/projects/business/moin",
+  "head": "373675e98550ed24f03abc6cb7bb1cbb9f12b631",
+  "mode": "committed",
+  "fix_ref": "373675e98550ed24f03abc6cb7bb1cbb9f12b631",
+  "fix_paths": [
+    "apps/server/src/modules/call-simulator/application/callback-request.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "pnpm exec vitest run apps/server/src/modules/call-simulator/application/callback-request.properties.test.ts -t 'metamorphic'",
+  "started": "2026-10-18T20:35:48+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-10-18T20:35:50+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 0.97,
+    "tail": " FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.properties.test.ts > metamorphic properties over enumerated combinations > a callback or availability date never becomes, or changes, the booking date\nAssertionError: Ich m\u00f6chte am Montag die Reservierung telefonisch besprechen. Bitte R\u00fcckruf. Ich m\u00f6chte einen Tisch reservieren.: expected 'R\u00fcckruf: Reservierung am Montag' to be 'R\u00fcckruf: Reservierung' // Object.is equality\n\nExpected: \"R\u00fcckruf: Reservierung\"\nReceived: \"R\u00fcckruf: Reservierung am Montag\"\n\n \u276f Proxy.toBe scripts/mutation-evidence-probe.ts:84:27\n     82|       let result: unknown;\n     83|       try {\n     84|         result = original.apply(this, args);\n       |                           ^\n     85|       } catch (error) {\n     86|         record(name, error);\n \u276f apps/server/src/modules/call-simulator/application/callback-request.properties.test.ts:98:51\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/2]\u23af\n\n FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.properties.test.ts > metamorphic properties over enumerated combinations > adding uncertainty before or after an exact count removes the count\nAssertionError: Bitte R\u00fcckruf. Ich m\u00f6chte f\u00fcr 8 Personen reservieren. Es werden null bis acht Personen.: expected 'R\u00fcckruf: Reservierung f\u00fcr 8 Personen' to be 'R\u00fcckruf: Reservierung' // Object.is equality\n\nExpected: \"R\u00fcckruf: Reservierung\"\nReceived: \"R\u00fcckruf: Reservierung f\u00fcr 8 Personen\"\n\n \u276f Proxy.toBe scripts/mutation-evidence-probe.ts:84:27\n     82|       let result: unknown;\n     83|       try {\n     84|         result = original.apply(this, args);\n       |                           ^\n     85|       } catch (error) {\n     86|         record(name, error);\n \u276f apps/server/src/modules/call-simulator/application/callback-request.properties.test.ts:136:49\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[2/2]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  2 failed | 3 passed | 74 skipped (79)\n   Start at  22:35:48\n   Duration  408ms (transform 48%, tests 21%, setup 18%, import 13%, worker 1%)\n"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 1.02,
+    "tail": "\n RUN  v5.0.2 /home/adam/projects/business/moin\n\n \u2713 |unit| apps/server/src/modules/call-simulator/application/callback-request.properties.test.ts (79 tests | 74 skipped) 103ms\n\n Test Files  1 passed (1)\n      Tests  5 passed | 74 skipped (79)\n   Start at  22:35:49\n   Duration  451ms (transform 43%, tests 28%, setup 16%, import 12%, worker 1%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/home/adam/projects/business/moin/.git/claude-evidence/mutation/20261018T203548Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}

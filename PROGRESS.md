@@ -1694,3 +1694,10 @@ callback word beside them makes them the callback's), a number chain such as `6‚
 voids the count, and the refusal list covers `nie`, `auf keinen Fall`, `nicht erw√ºnscht`, `nicht mehr anrufen`.
 Fix `a993cd7`; tests written first (20 failures on the rejected code); official mutation KILLED for F2, F3, F4 and
 the real-PostgreSQL zero-write test (`EV-P12-014-mutation-final-review-*.json`). Nothing VERIFIED.
+
+PRODUCT-01 fourth review (2026-10-18, PR #242, REQUEST_CHANGES at `1608108`: F2 date after the noun
+"Reservierung", F3 ranges with unknown endpoints; F1 and F4 accepted): dates are the booking's only in two explicit
+constructions (noun phrase with date, or date before the verb "reservieren"), counts are classified as ranges before
+any value is chosen, and two rounds of independent adversarial probing (141 utterances) were fixed as classes. Fix
+`373675e`; official mutation KILLED for F2, F3, the metamorphic and adversarial groups and the real-PostgreSQL test
+(`EV-P12-014-mutation-fourth-review-*.json`). Nothing VERIFIED.
