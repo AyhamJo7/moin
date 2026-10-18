@@ -1607,3 +1607,15 @@ the old fixed-`A` replacement put back, 2 of 24 tests fail; with the fix, 24 pas
 `mutation_check.py` reports SURVIVED for this change, by construction: the fix is the test file
 itself, so reversing it restores the old test, which passes in 63 of 64 runs. No official KILLED
 result exists for it (UNVERIFIED by that harness); the evidence is the deterministic manual mutant.
+
+F2 follow-up, mutation correction (2026-10-18, supersedes the SURVIVED note above): the first
+official run reversed the repair in `validate.test.ts`, which also removed the new deterministic
+tests and left the original test, which fails only 1 run in 64. The discriminator now lives outside
+the reversed file: `packages/telephony/test-support/` forces `validate.test.ts`'s
+`randomBytes(16)` to a fixed value whose real signature starts with `A` and re-runs the file
+unchanged, with a premise check. Official result at `3053f93`: `mutation_check.py --fix-ref 3bdda1c
+--fix-paths packages/telephony/src/signature/validate.test.ts` with `pnpm exec vitest run -c
+packages/telephony/test-support/fixed-auth-token.vitest.config.ts` is KILLED: without the repair
+`isValidSignature > rejects a tampered signature` fails ("expected true to be false"), 1 of 23
+tests; with it 25 of 25 pass; restored byte-identical. Record:
+`docs/verification/telephony-tamper-mutation-20261018T050521Z.json`.
