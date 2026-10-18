@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/home/adam/projects/business/moin",
+  "head": "9cb135dad7d5759d595d667323df14ff756dc012",
+  "mode": "committed",
+  "fix_ref": "9cb135dad7d5759d595d667323df14ff756dc012",
+  "fix_paths": [
+    "apps/server/src/modules/call-simulator/application/callback-request.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "pnpm exec vitest run apps/server/src/modules/call-simulator/application/callback-request.test.ts -t 'F1:'",
+  "started": "2026-10-18T09:24:24+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-10-18T09:24:25+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 0.77,
+    "tail": "- Expected:\n/^R\u00fcckruf(?: erbeten|: (?:Tischreservierung|Reservierung|Geburtstagsfeier|Reservierung f\u00fcr Geburtstagsfeier)(?: f\u00fcr \\d{1,2} Personen?)?(?: (?:am|im) \\p{Lu}\\p{L}+)?)$/u\n\n+ Received:\n\"R\u00fcckruf: Reservierung meine PIN lautet 1234\"\n\n \u276f Proxy.toMatch scripts/mutation-evidence-probe.ts:84:27\n     82|       let result: unknown;\n     83|       try {\n     84|         result = original.apply(this, args);\n       |                           ^\n     85|       } catch (error) {\n     86|         record(name, error);\n \u276f apps/server/src/modules/call-simulator/application/callback-request.test.ts:366:33\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[13/14]\u23af\n\n FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.test.ts > F1: no caller words reach the title > keeps the safe \"wegen\" case, with its day stated as the booking day\nAssertionError: expected 'R\u00fcckruf: Tischreservierung f\u00fcr Samstag' to be 'R\u00fcckruf: Tischreservierung am Samstag' // Object.is equality\n\nExpected: \"R\u00fcckruf: Tischreservierung am Samstag\"\nReceived: \"R\u00fcckruf: Tischreservierung f\u00fcr Samstag\"\n\n \u276f Proxy.toBe scripts/mutation-evidence-probe.ts:84:27\n     82|       let result: unknown;\n     83|       try {\n     84|         result = original.apply(this, args);\n       |                           ^\n     85|       } catch (error) {\n     86|         record(name, error);\n \u276f apps/server/src/modules/call-simulator/application/callback-request.test.ts:375:7\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[14/14]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  14 failed | 1 passed | 93 skipped (108)\n   Start at  11:24:24\n   Duration  326ms (transform 53%, setup 24%, import 15%, tests 7%, worker 1%)\n"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 0.77,
+    "tail": "\n RUN  v5.0.2 /home/adam/projects/business/moin\n\n \u2713 |unit| apps/server/src/modules/call-simulator/application/callback-request.test.ts (108 tests | 93 skipped) 11ms\n\n Test Files  1 passed (1)\n      Tests  15 passed | 93 skipped (108)\n   Start at  11:24:25\n   Duration  274ms (transform 56%, setup 22%, import 16%, tests 5%, worker 1%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/home/adam/projects/business/moin/.git/claude-evidence/mutation/20261018T092424Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}

@@ -1668,3 +1668,22 @@ names the reason from a closed vocabulary (reservation, birthday celebration, gu
 month), only when stated without hedging or contradiction, and never copies the caller's words; the M1 "wegen"
 behaviour is unchanged, negations stay generic, no schema, contract or UI change, the utterance is still never
 stored. Official mutation KILLED (`docs/evidence/P12/EV-P12-014-mutation-callback-reason.json`). P12.09.01 stays open.
+
+PRODUCT-01 remediation (2026-10-18, PR #242, independent review of `6123c52` returned REQUEST_CHANGES, four
+findings, fixed in `9cb135d`): F1 (P1) the "wegen" branch copied caller words into the persistent title (a PIN,
+a health remark): nothing is copied any more, the title is filled from a closed vocabulary and validated
+numbers only; F2 a callback date was reported as the booking date: a date now counts only inside the booking's
+own clause; F3 a conflicting or unsupported guest count was ignored: every count mention must be supported and
+agree; F4 an explicit refusal of the callback still created a task: it is now unsupported (HTTP 422, zero
+writes). Changed expectations: the M1 tests that required copying free text after "wegen" were replaced and
+explained in `docs/evidence/P12/EV-P12-014-callback-reason-titles.md`. Replay: the title is part of the
+acceptance hash, so a call accepted under the earlier rules and delivered again with the same words can be
+refused with 409, never duplicated or reopened (tested). Official mutation KILLED per finding
+(`EV-P12-014-mutation-review-*.json`). Nothing VERIFIED.
+
+PRODUCT-01 second review (2026-10-18, PR #242): the internal privacy/security review of `9cb135d` found no Critical or
+High issue and several Medium and Low ones (refusal patterns too loose or too narrow, callback or availability days
+read as the booking day, corrections and exceptions invisible to the date rule, head counts outside the booking
+clause, a birthday remark announced as a party); fixed in `f65fc16` with tests that failed first and official
+mutation KILLED for each group (`EV-P12-014-mutation-second-review-*.json`). Redelivery under changed rules: 422
+for newly unsupported words, 409 for a changed title, never a duplicate. Nothing VERIFIED.
