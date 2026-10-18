@@ -18,7 +18,13 @@
  * signed-out state) and stops, and a hidden tab polls not at all.
  */
 
-import { TODAY_PATH, todayResponseSchema, type TodayTask } from '@moin/contracts';
+import {
+  TODAY_CONTRACT_HEADER,
+  TODAY_CONTRACT_VERSIONED,
+  TODAY_PATH,
+  parseTodayBody,
+  type ReadTodayTask,
+} from '@moin/contracts';
 
 /** Time between polls of a visible tab. Per-account budget is 50 requests a minute. */
 export const LIVE_POLL_MS = 15_000;
@@ -48,7 +54,7 @@ const JITTER_SHARE = 0.1;
  * What identifies the rendered list: every field the page shows or acts on, in render order,
  * plus the truncation flag. Equal fingerprints mean the same page.
  */
-export function fingerprintOf(tasks: readonly TodayTask[], truncated: boolean): string {
+export function fingerprintOf(tasks: readonly ReadTodayTask[], truncated: boolean): string {
   return JSON.stringify([
     truncated,
     tasks.map((task) => [
@@ -73,7 +79,7 @@ export async function pollToday(fetchImpl: typeof fetch = fetch): Promise<PollRe
   let response: Response;
   try {
     response = await fetchImpl(TODAY_PATH, {
-      headers: { accept: 'application/json' },
+      headers: { accept: 'application/json', [TODAY_CONTRACT_HEADER]: TODAY_CONTRACT_VERSIONED },
       cache: 'no-store',
       credentials: 'same-origin',
       redirect: 'error',
@@ -85,10 +91,10 @@ export async function pollToday(fetchImpl: typeof fetch = fetch): Promise<PollRe
   if (response.status === 401) return { kind: 'signed-out' };
   if (response.status !== 200) return { kind: 'failed' };
   try {
-    const parsed = todayResponseSchema.safeParse(await response.json());
-    return parsed.success
-      ? { kind: 'ok', fingerprint: fingerprintOf(parsed.data.tasks, parsed.data.truncated) }
-      : { kind: 'failed' };
+    const parsed = parseTodayBody(await response.json());
+    return parsed === null
+      ? { kind: 'failed' }
+      : { kind: 'ok', fingerprint: fingerprintOf(parsed.tasks, parsed.truncated) };
   } catch {
     return { kind: 'failed' };
   }

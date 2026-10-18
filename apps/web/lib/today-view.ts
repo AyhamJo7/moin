@@ -11,9 +11,11 @@
 
 import {
   SESSION_COOKIE_NAME,
+  TODAY_CONTRACT_HEADER,
+  TODAY_CONTRACT_VERSIONED,
   TODAY_PATH,
-  todayResponseSchema,
-  type TodayTask,
+  parseTodayBody,
+  type ReadTodayTask,
 } from '@moin/contracts';
 import { t, type I18nKey } from './i18n.ts';
 import type { TodaySection } from './today.ts';
@@ -51,7 +53,11 @@ export function safeApiOrigin(apiOrigin: string | undefined): apiOrigin is strin
 
 export type TodayLoad =
   | { readonly state: 'signed-out' }
-  | { readonly state: 'ready'; readonly tasks: readonly TodayTask[]; readonly truncated: boolean }
+  | {
+      readonly state: 'ready';
+      readonly tasks: readonly ReadTodayTask[];
+      readonly truncated: boolean;
+    }
   | { readonly state: 'error'; readonly reason: 'unconfigured' | 'unavailable' | 'contract' };
 
 export const SECTION_ORDER: readonly TodaySection[] = [
@@ -71,7 +77,7 @@ const SECTION_HEADINGS: Readonly<Record<TodaySection, I18nKey>> = {
   questions: 'today.section.questions',
 };
 
-const STATUS_LABELS: Readonly<Record<TodayTask['status'], I18nKey>> = {
+const STATUS_LABELS: Readonly<Record<ReadTodayTask['status'], I18nKey>> = {
   open: 'today.status.open',
   in_progress: 'today.status.in_progress',
   waiting: 'today.status.waiting',
@@ -83,16 +89,33 @@ export function sectionHeading(section: TodaySection): string {
   return t(SECTION_HEADINGS[section]);
 }
 
-export function statusLabel(status: TodayTask['status']): string {
+export function statusLabel(status: ReadTodayTask['status']): string {
   return t(STATUS_LABELS[status]);
 }
 
 /** Urgent first; then by kind. Nothing in this slice produces open questions yet. */
-export function sectionOf(task: TodayTask): TodaySection {
+export function sectionOf(task: ReadTodayTask): TodaySection {
   if (task.priority === 'urgent') return 'urgent';
   if (task.type === 'callback') return 'callbacks';
   if (task.type === 'booking') return 'appointments';
   return 'requests';
+}
+
+/**
+ * What a card offers for "Erledigt". Only a version the API itself sent can be presented back to
+ * it: a task without one (an API that predates versions) is shown but cannot be completed, so the
+ * optimistic lock is never skipped and a version is never guessed.
+ */
+export type CompleteControl =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'action'; readonly version: number }
+  | { readonly kind: 'unavailable' };
+
+export function completeControlOf(task: ReadTodayTask): CompleteControl {
+  if (task.type !== 'callback') return { kind: 'none' };
+  return task.version === null
+    ? { kind: 'unavailable' }
+    : { kind: 'action', version: task.version };
 }
 
 const CREATED_AT = new Intl.DateTimeFormat('de-DE', {
@@ -126,7 +149,11 @@ export async function loadToday(
   let response: Response;
   try {
     response = await fetchImpl(new URL(TODAY_PATH, apiOrigin), {
-      headers: { accept: 'application/json', cookie: `${SESSION_COOKIE_NAME}=${sessionToken}` },
+      headers: {
+        accept: 'application/json',
+        cookie: `${SESSION_COOKIE_NAME}=${sessionToken}`,
+        [TODAY_CONTRACT_HEADER]: TODAY_CONTRACT_VERSIONED,
+      },
       cache: 'no-store',
       redirect: 'error',
       signal: AbortSignal.timeout(TODAY_TIMEOUT_MS),
@@ -142,7 +169,7 @@ export async function loadToday(
   } catch {
     return { state: 'error', reason: 'contract' };
   }
-  const parsed = todayResponseSchema.safeParse(body);
-  if (!parsed.success) return { state: 'error', reason: 'contract' };
-  return { state: 'ready', tasks: parsed.data.tasks, truncated: parsed.data.truncated };
+  const parsed = parseTodayBody(body);
+  if (parsed === null) return { state: 'error', reason: 'contract' };
+  return { state: 'ready', tasks: parsed.tasks, truncated: parsed.truncated };
 }

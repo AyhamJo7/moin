@@ -103,11 +103,27 @@ export async function completeTask(
     case 403:
       return { kind: 'forbidden' };
     case 404:
-      return { kind: 'missing' };
+      // Only the API's own "no such task" is a missing task. A bare 404 means the route is not
+      // there (an API rolled back to before completion existed): the outcome is not established.
+      return (await isProblem(response, NOT_FOUND_PROBLEM))
+        ? { kind: 'missing' }
+        : reconcile(taskId, fetchImpl);
     case 409:
       return { kind: 'conflict' };
     default:
       return reconcile(taskId, fetchImpl);
+  }
+}
+
+/** The `type` of the API's problem answer for a task that does not exist for this owner. */
+const NOT_FOUND_PROBLEM = '/problems/not-found';
+
+async function isProblem(response: Response, type: string): Promise<boolean> {
+  try {
+    const body: unknown = await response.json();
+    return typeof body === 'object' && body !== null && 'type' in body && body.type === type;
+  } catch {
+    return false;
   }
 }
 

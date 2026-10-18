@@ -13,11 +13,23 @@
  * throttle all tenants together. Edge rate limits are the WAF's (P06.12.01, EXT-09).
  *
  * The response is parsed through the shared contract before it is sent, so the owner app and the
- * API cannot disagree about a task's shape without a test noticing.
+ * API cannot disagree about a task's shape without a test noticing. Task versions are sent only
+ * to a caller that announces it understands them (`TODAY_CONTRACT_HEADER`); everyone else gets the
+ * original shape, so an older owner app keeps working against this API during a rollout or
+ * rollback (M2D-1). Both shapes are the same rows of the same tenant: only `version` differs.
  */
 
-import { Controller, Get, UseGuards, UseInterceptors } from '@nestjs/common';
-import { TODAY_TASK_LIMIT, todayResponseSchema, type TodayResponse } from '@moin/contracts';
+import { Controller, Get, Headers, Res, UseGuards, UseInterceptors } from '@nestjs/common';
+import type { FastifyReply } from 'fastify';
+import {
+  TODAY_CONTRACT_HEADER,
+  TODAY_CONTRACT_VERSIONED,
+  TODAY_TASK_LIMIT,
+  legacyTodayResponseSchema,
+  todayResponseSchema,
+  type LegacyTodayResponse,
+  type TodayResponse,
+} from '@moin/contracts';
 import { WorkQueries } from '../../platform/work-queries.ts';
 import {
   AccountThrottleGuard,
@@ -33,20 +45,27 @@ export class TodayController {
   constructor(private readonly work: WorkQueries) {}
 
   @Get()
-  async today(): Promise<TodayResponse> {
+  async today(
+    @Headers(TODAY_CONTRACT_HEADER) contract: string | undefined,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): Promise<TodayResponse | LegacyTodayResponse> {
+    void reply.header('vary', TODAY_CONTRACT_HEADER);
     const { tasks, truncated } = await this.work.today(TODAY_TASK_LIMIT);
+    const rows = tasks.map((row) => ({
+      id: row.id,
+      title: row.title,
+      type: row.type,
+      status: row.status,
+      priority: row.priority,
+      createdAt: row.createdAt.toISOString(),
+      callerNumber: row.callerNumber,
+    }));
+    if (contract !== TODAY_CONTRACT_VERSIONED) {
+      return legacyTodayResponseSchema.parse({ truncated, tasks: rows });
+    }
     return todayResponseSchema.parse({
       truncated,
-      tasks: tasks.map((row) => ({
-        id: row.id,
-        title: row.title,
-        type: row.type,
-        status: row.status,
-        priority: row.priority,
-        createdAt: row.createdAt.toISOString(),
-        version: row.version,
-        callerNumber: row.callerNumber,
-      })),
+      tasks: rows.map((row, index) => ({ ...row, version: tasks[index]?.version })),
     });
   }
 }

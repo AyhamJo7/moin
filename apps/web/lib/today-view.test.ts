@@ -7,6 +7,7 @@ import type { TodayTask } from '@moin/contracts';
 import { allKeys } from './i18n.ts';
 import {
   SECTION_ORDER,
+  completeControlOf,
   formatCreatedAt,
   loadToday,
   safeApiOrigin,
@@ -70,6 +71,7 @@ describe('loadToday', () => {
     expect(seen[0]?.init?.headers).toStrictEqual({
       accept: 'application/json',
       cookie: `__Host-moin_sid=${TOKEN}`,
+      'x-moin-today-contract': 'versioned',
     });
     expect(seen[0]?.init?.cache).toBe('no-store');
     expect(seen[0]?.init?.redirect).toBe('error');
@@ -136,6 +138,43 @@ describe('loadToday', () => {
         reason: 'contract',
       });
     }
+  });
+});
+
+describe('a web built after task versions against an API built before them (M2D-1)', () => {
+  const unversioned = Object.fromEntries(Object.entries(TASK).filter(([key]) => key !== 'version'));
+
+  it('shows the tasks and leaves the version unknown rather than invented', async () => {
+    const result = await loadToday(
+      TOKEN,
+      API,
+      fakeFetch(() => json(200, { tasks: [unversioned], truncated: false })),
+    );
+    expect(result).toStrictEqual({
+      state: 'ready',
+      tasks: [{ ...unversioned, version: null }],
+      truncated: false,
+    });
+  });
+
+  it('still refuses a response that mixes versioned and unversioned tasks', async () => {
+    const result = await loadToday(
+      TOKEN,
+      API,
+      fakeFetch(() => json(200, { tasks: [TASK, unversioned], truncated: false })),
+    );
+    expect(result).toStrictEqual({ state: 'error', reason: 'contract' });
+  });
+});
+
+describe('what a card offers for Erledigt (M2D-1)', () => {
+  it('offers the action with the version the API sent, and only for callbacks', () => {
+    expect(completeControlOf(TASK)).toStrictEqual({ kind: 'action', version: TASK.version });
+    expect(completeControlOf({ ...TASK, type: 'review' })).toStrictEqual({ kind: 'none' });
+  });
+
+  it('offers no action for a callback without a version, and says it is unavailable', () => {
+    expect(completeControlOf({ ...TASK, version: null })).toStrictEqual({ kind: 'unavailable' });
   });
 });
 

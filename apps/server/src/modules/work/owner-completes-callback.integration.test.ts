@@ -17,6 +17,8 @@ import { fixedClock } from '@moin/kernel';
 import { assignTask, verifyAuditChain, withTenant } from '@moin/db';
 import {
   SIMULATED_CALL_PATH,
+  TODAY_CONTRACT_HEADER,
+  TODAY_CONTRACT_VERSIONED,
   TODAY_PATH,
   CSRF_HEADER_NAME,
   taskCompletePath,
@@ -221,7 +223,10 @@ function today(who: Browser | null = owner, on: NestFastifyApplication = app) {
   return on.inject({
     method: 'GET',
     url: TODAY_PATH,
-    headers: who === null ? {} : { cookie: who.cookie },
+    headers: {
+      [TODAY_CONTRACT_HEADER]: TODAY_CONTRACT_VERSIONED,
+      ...(who === null ? {} : { cookie: who.cookie }),
+    },
   });
 }
 

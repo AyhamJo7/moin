@@ -80,6 +80,50 @@ export const taskStateSchema = z.strictObject({
   version: z.number().int().positive(),
 });
 
+/**
+ * Mixed-version rollout (M2D-1). `version` joined the strict Today task in M2A, so a web build
+ * from before it rejects a response that carries it, and a build from after it rejects one that
+ * lacks it. The API therefore answers in the shape the caller announces: a web that understands
+ * versions sends this header, anything else (an older web, a probe) gets the original shape with
+ * no `version`. Contract step, once no web older than the header can be deployed or rolled back
+ * to: drop the legacy shape and the header, and make `version` unconditional again.
+ */
+export const TODAY_CONTRACT_HEADER = 'x-moin-today-contract';
+export const TODAY_CONTRACT_VERSIONED = 'versioned';
+
+/** The response shape from before task versions existed (still served to callers without the header). */
+export const legacyTodayTaskSchema = todayTaskSchema.omit({ version: true });
+export const legacyTodayResponseSchema = z.strictObject({
+  tasks: z.array(legacyTodayTaskSchema).max(TODAY_TASK_LIMIT),
+  truncated: z.boolean(),
+});
+
+export type LegacyTodayResponse = z.infer<typeof legacyTodayResponseSchema>;
+
+/** A task as the owner app reads it: `version` is null only when the API predates versions. */
+export type ReadTodayTask = Omit<TodayTask, 'version'> & { readonly version: number | null };
+export interface ReadToday {
+  readonly tasks: readonly ReadTodayTask[];
+  readonly truncated: boolean;
+}
+
+/**
+ * Parse a Today body for the owner app. The current shape wins; the legacy shape is accepted only
+ * as a whole (every task lacks `version`), so a response that mixes the two, or carries a bad
+ * version, is still a contract error. A missing version is kept as `null`, never invented: the
+ * task is shown but cannot be completed, because no version means no safe optimistic lock.
+ */
+export function parseTodayBody(body: unknown): ReadToday | null {
+  const current = todayResponseSchema.safeParse(body);
+  if (current.success) return current.data;
+  const legacy = legacyTodayResponseSchema.safeParse(body);
+  if (!legacy.success) return null;
+  return {
+    truncated: legacy.data.truncated,
+    tasks: legacy.data.tasks.map((task) => ({ ...task, version: null })),
+  };
+}
+
 export type CompleteTaskRequest = z.infer<typeof completeTaskRequestSchema>;
 export type TaskState = z.infer<typeof taskStateSchema>;
 

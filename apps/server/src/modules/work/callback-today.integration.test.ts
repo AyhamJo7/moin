@@ -15,7 +15,14 @@ import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fa
 import { createTestDatabase, evidenceTest, type TestDatabase } from '@moin/testing';
 import { fixedClock } from '@moin/kernel';
 import { completeTask, finaliseInteraction, ingestCall, setTaskStatus, withTenant } from '@moin/db';
-import { SIMULATED_CALL_PATH, TODAY_PATH, todayResponseSchema } from '@moin/contracts';
+import {
+  SIMULATED_CALL_PATH,
+  TODAY_CONTRACT_HEADER,
+  TODAY_CONTRACT_VERSIONED,
+  TODAY_PATH,
+  todayResponseSchema,
+} from '@moin/contracts';
+import * as preM2a from '@moin/contracts/test-support/pre-m2a-today';
 import { afterAll, beforeAll, describe, expect } from 'vitest';
 import { ConfigModule } from '../../config/config.module.ts';
 import { loadConfig } from '../../config/env.ts';
@@ -197,7 +204,10 @@ async function today(cookie: string | null, on: NestFastifyApplication = app) {
   return on.inject({
     method: 'GET',
     url: TODAY_PATH,
-    headers: cookie === null ? {} : { cookie },
+    headers: {
+      [TODAY_CONTRACT_HEADER]: TODAY_CONTRACT_VERSIONED,
+      ...(cookie === null ? {} : { cookie }),
+    },
   });
 }
 
@@ -411,6 +421,65 @@ describe('the owner reads the task on Today (M1)', () => {
     expect(ownIds).toContain(mine);
     expect(ownIds).not.toContain(theirs);
   });
+
+  evidenceTest(
+    'answers a web built before task versions in the shape it enforces, and a newer web with versions (M2D-1)',
+    async () => {
+      const mine = (await simulate(call())).json<{ taskId: string }>().taskId;
+      const theirs = (await simulate(call({ to: OTHER_NUMBER }))).json<{ taskId: string }>().taskId;
+      const cookie = await signIn(restaurantOwner);
+      const unannounced = await app.inject({ method: 'GET', url: TODAY_PATH, headers: { cookie } });
+
+      // Old web, new API: the frozen contract of the commit before versions parses the answer.
+      expect(unannounced.statusCode).toBe(200);
+      const oldView = preM2a.todayResponseSchema.parse(unannounced.json());
+      expect(JSON.stringify(unannounced.json())).not.toContain('"version"');
+      expect(unannounced.headers.vary).toContain(TODAY_CONTRACT_HEADER);
+      expect(unannounced.headers['cache-control']).toBe('private, no-store');
+
+      // New web, new API: the same tasks in the same order, each with the stored version.
+      const newView = todayResponseSchema.parse((await today(cookie)).json());
+      expect(newView.tasks.map((t) => t.id)).toStrictEqual(oldView.tasks.map((t) => t.id));
+      const stored = await admin.query<{ version: number }>(
+        'select version from tasks where id = $1',
+        [mine],
+      );
+      expect(newView.tasks.find((t) => t.id === mine)?.version).toBe(stored.rows[0]?.version);
+
+      // Tenant isolation holds in the legacy shape as well.
+      const ids = oldView.tasks.map((t) => t.id);
+      expect(ids).toContain(mine);
+      expect(ids).not.toContain(theirs);
+      const otherOld = await app.inject({
+        method: 'GET',
+        url: TODAY_PATH,
+        headers: { cookie: await signIn(otherOwner) },
+      });
+      const otherIds = preM2a.todayResponseSchema.parse(otherOld.json()).tasks.map((t) => t.id);
+      expect(otherIds).toContain(theirs);
+      expect(otherIds).not.toContain(mine);
+    },
+  );
+
+  evidenceTest(
+    'treats any other contract announcement as the legacy shape, and still needs a session',
+    async () => {
+      await simulate(call());
+      const cookie = await signIn(restaurantOwner);
+      for (const value of ['', 'Versioned', 'versioned, legacy', '2', 'legacy']) {
+        const response = await app.inject({
+          method: 'GET',
+          url: TODAY_PATH,
+          headers: { cookie, [TODAY_CONTRACT_HEADER]: value },
+        });
+        expect(response.statusCode).toBe(200);
+        expect(preM2a.todayResponseSchema.safeParse(response.json()).success).toBe(true);
+      }
+      const anonymous = await today(null);
+      expect(anonymous.statusCode).toBe(401);
+      expect(JSON.stringify(anonymous.json())).not.toContain('"version"');
+    },
+  );
 
   evidenceTest(
     'shows live work only: done, cancelled and snoozed tasks stay off Today',
