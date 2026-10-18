@@ -1593,3 +1593,7 @@ a `test.fail()` test that failed (blocking). Fixed by validating per-test record
 genuine Playwright control reports; latency wording corrected. Follow-up, not done: the telephony
 signature tamper test can pass an unchanged signature (`packages/telephony/src/signature/validate.test.ts`,
 needs its own narrow PR). Evidence: EV-P13-017 (review section).
+
+M2C P2 (2026-10-18): official `mutation_check.py` KILLED for F1 (fix-ref 9de05d5, CLI regression
+`scripts/check-slice-report.cli.test.ts`, tested at 79d4e57). F2 (telephony tamper test) still open.
+Evidence: EV-P13-017 (official mutation section).

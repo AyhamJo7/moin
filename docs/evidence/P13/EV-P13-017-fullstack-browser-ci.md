@@ -148,12 +148,12 @@ records, a passed result that recorded errors, a retry hiding an earlier failure
 and missing or malformed structure; and run the command itself: exit 0 for the real report, exit 1
 with REJECTED for the `test.fail()` report and for an empty, malformed or missing file, and exit 1
 through `| tee` under `bash -e -o pipefail` (exit 0 without pipefail, the reason the step sets it).
-Targeted mutants of the checker that each remove one guard (expected status, result status, the
-annotation list, the single-attempt rule, the statistics cross-check, the project check, global
-errors, per-result errors) are each killed by the suite (manual mutants; the repository's
-mutation-check tool needs a committed fix and the rewritten module would have failed on missing
-exports alone, which would not show sensitivity). One guard that no mutant could reach (a total
-count already implied by the identity and outcome checks) was deleted instead of kept untested.
+Eight further manual mutants of the checker, each removing one guard (expected status, result
+status, the annotation list, the single-attempt rule, the statistics cross-check, the project check,
+global errors, per-result errors), are each killed by this suite. They are supplementary only: they
+were not run by the repository's mutation tool and are not the official mutation result, which
+follows. One guard that no mutant could reach (a total count already implied by the identity and
+outcome checks) was deleted instead of kept untested.
 
 **Finding F3 (nonblocking, fixed).** The latency table now states each measurement's origin, above.
 
@@ -164,3 +164,34 @@ the test expects a failure that cannot happen (about 1 in 64 for a random Base64
 The test code does replace the first character with `A` (line 80); I did not reproduce the
 failure rate. Unrelated to this checker. Follow-up: a separate narrow PR should replace the first
 character with a value guaranteed to differ. Not changed in this PR.
+
+## Official mutation result for finding F1
+
+Requirement: a bug fix counts only with a regression test that `.claude/bin/mutation_check.py`
+reports KILLED (project instructions, section 5). The independent re-review found the manual mutants
+above did not meet it; this section does.
+
+- **Fix and mutant.** The fix is commit `9de05d5` (path `scripts/check-slice-report.ts`). The tool
+  reverse-applies exactly that diff, which restores the checker of `c90f163`: the version that
+  accepted a `test.fail()` run because it trusted `stats.expected` and `spec.ok`. So the mutant is
+  the original F1 defect, not a synthetic edit.
+- **Regression test.** `scripts/check-slice-report.cli.test.ts` (two tests). It imports nothing from
+  the checker; it spawns `node scripts/check-slice-report.ts <report>` on the real fixtures and
+  asserts the exit code and verdict. A checker that fails to load, crashes or lacks an export
+  cannot pass or fail it by accident in any way other than the exit-code and verdict assertions.
+- **Invocation** (tested commit `79d4e57`, clean tree, stack not needed):
+  `python3 .claude/bin/mutation_check.py --test "pnpm exec vitest run scripts/check-slice-report.cli.test.ts" --fix-ref 9de05d5 --fix-paths scripts/check-slice-report.ts --timeout 300`
+- **Result.** Verdict **KILLED**, exit 0. Without the fix: FAIL (exit 1, 0.82 s, `1 failed | 1
+  passed`); with the fix: PASS (exit 0, `2 passed`); fix restored byte-identical; the tests did not
+  change the tree. Official record: `.git/claude-evidence/mutation/20261018T042430Z.json` (local,
+  with the reverse-applied patch `20261018T042430Z.patch`); a verbatim copy is committed as
+  `docs/evidence/P13/EV-P13-017-mutation-20261018T042430Z.json`.
+- **Why it is killed for the right reason.** Under the mutant the clean test still passes (the real
+  CI report and a genuine all-pass report exit 0, not REJECTED), and exactly one test fails, with
+  `AssertionError: a failed required test was certified (exit code): expected +0 to be 1` on the
+  genuine `control-test-fail.json`. The first run of the tool also failed the clean-report test, but
+  only on the checker's summary wording; that assertion was removed so the kill is attributable
+  only to the certified failure. Controls run directly with the same command: the F1 checker exits
+  0 on the real CI report, the all-pass report and the `test.fail()` report; the fixed checker exits
+  0, 0 and 1.
+- **Not claimed.** F2 (the telephony signature tamper test) stays unresolved and unchanged.
