@@ -643,7 +643,18 @@ describe('L2: a guest count belongs to the booking', () => {
 });
 
 describe('birthday wording', () => {
-  it('says celebration only for a celebration or a reservation', () => {
+  it('says celebration only for a celebration or a reservation in the same clause', () => {
+    // A remark about someone's birthday in another clause is not a party (the earlier version said so).
+    expect(interpretCall('Rückruf wegen Reservierung, Geburtstag meiner Mutter')).toStrictEqual({
+      kind: 'callback',
+      title: 'Rückruf: Reservierung',
+    });
+    expect(
+      interpretCall('Rückruf bitte. Geburtstag meiner Mutter. Ich möchte reservieren'),
+    ).toStrictEqual({
+      kind: 'callback',
+      title: 'Rückruf: Reservierung',
+    });
     expect(interpretCall('Rückruf wegen meines Geburtstags')).toStrictEqual({
       kind: 'callback',
       title: GENERIC_CALLBACK_TITLE,
