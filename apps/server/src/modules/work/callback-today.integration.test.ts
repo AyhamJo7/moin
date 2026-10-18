@@ -1129,6 +1129,7 @@ describe('PRODUCT-01 review findings: persisted titles, refusals and replays', (
           'Bitte um Rückruf wegen einer Tischreservierung für eine Geburtstagsfeier.',
           'Rückruf: Reservierung für Geburtstagsfeier',
         ],
+        ['Bitte um Rückruf denn die Onlinebuchung funktioniert nicht.', 'Rückruf erbeten'],
       ];
       for (const [utterance, expected] of cases) {
         const response = await simulate(call({ utterance }));
@@ -1152,6 +1153,7 @@ describe('PRODUCT-01 review findings: persisted titles, refusals and replays', (
       'Bitte nicht zurückrufen.',
       'Bitte nicht mehr zurückrufen.',
       'Rufen Sie mich nie zurück. Ich möchte für sechs Personen reservieren.',
+      'Bitte zurückrufen, oder lieber doch nicht.',
     ]) {
       const before = await rowCounts();
       // The counts cover every public table, these four included: no task, outcome, acceptance or audit row.
@@ -1189,6 +1191,7 @@ describe('PRODUCT-01 review findings: persisted titles, refusals and replays', (
     async () => {
       for (const utterance of [
         'Ich möchte nicht online buchen, bitte rufen Sie mich zurück',
+        'Bitte um Rückruf denn die Onlinebuchung funktioniert nicht.',
         'Bitte zurückrufen, das Formular funktioniert nicht.',
       ]) {
         const response = await simulate(call({ utterance }));

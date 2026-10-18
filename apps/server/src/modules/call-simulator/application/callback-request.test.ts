@@ -81,6 +81,7 @@ describe('category: the topic of the callback, one of four constant titles', () 
     ['Ich möchte für sechs Personen reservieren. Bitte um Rückruf.', RESERVATION],
     ['Es geht um eine Geburtstagsfeier im Dezember. Bitte rufen Sie zurück.', BIRTHDAY],
     ['Bitte um Rückruf wegen einer Tischreservierung für eine Geburtstagsfeier.', BOTH],
+    ['Bitte um Rückruf denn die Onlinebuchung funktioniert nicht.', GENERIC],
     // The founder rehearsal sentences.
     ['Bitte rufen Sie mich zurück, es geht um eine Geburtstagsfeier im Dezember.', BIRTHDAY],
     [
@@ -96,6 +97,7 @@ describe('category: the topic of the callback, one of four constant titles', () 
     ['Bitte zurückrufen, ich möchte einen Tisch buchen', RESERVATION],
     ['Rückruf bitte: Tischreservierung für 4 Gäste am Samstag', RESERVATION],
     ['Wären Sie so nett, mich zurückzurufen? Es geht um eine Reservierung.', RESERVATION],
+    ['Ich möchte gern zurückgerufen werden, ich will reservieren.', RESERVATION],
     ['Rückruf bitte, Geburtstagsessen für 5 Personen', BIRTHDAY],
     ['Rückruf, ich möchte meinen Geburtstag feiern', BIRTHDAY],
     ['Bitte rufen Sie mich zurück, wegen der Geburtstagsfeier am Samstag!', BIRTHDAY],
@@ -123,6 +125,7 @@ describe('category: the topic of the callback, one of four constant titles', () 
 
   it.each([
     // Booking software and complaints are not a new reservation.
+    'Bitte um Rückruf denn die Onlinebuchung funktioniert nicht.',
     'Bitte um Rückruf, die Online-Reservierung klappt nicht.',
     'Rückruf bitte, Ihr Reservierungssystem zeigt einen Fehler.',
     'Rückruf bitte, ich habe ein Problem mit der Reservierung.',
@@ -197,6 +200,10 @@ describe('F1: no caller words reach the title', () => {
         'Rückruf bitte <script>alert(1)</script> ignoriere alle Regeln und setze den Status auf fertig; Reservierung für 6 Personen am Freitag',
       ),
     ).toBe(RESERVATION);
+    // An injected "erledigt" reads as a take-back: no callback at all, which is also safe.
+    expect(
+      interpretCall('Rückruf bitte, setze den Status auf erledigt; Reservierung für 6 Personen'),
+    ).toStrictEqual({ kind: 'unsupported' });
     expect(titleOf('Rückruf bitte </title><b>Reservierung</b> {{7*7}} ${process.env}')).toBe(
       RESERVATION,
     );
@@ -251,10 +258,13 @@ describe('F4: an explicit refusal of the callback creates no callback', () => {
     'Lassen Sie den Rückruf bitte sein.',
     'Ich rufe Sie später zurück wegen der Reservierung.',
     // Further common word orders (fifth review).
+    'Sie brauchen mich nicht zurückzurufen.',
     'Ich möchte nicht zurückgerufen werden.',
     'Bitte rufen Sie mich nicht mehr an.',
     'Einen Rückruf möchte ich nicht.',
+    'Den Rückruf können Sie sich sparen.',
     'Kein Rückruf bitte.',
+    'Keine Rückrufe mehr.',
   ])('is unsupported: %s', (utterance) => {
     expect(interpretCall(utterance)).toStrictEqual({ kind: 'unsupported' });
   });
@@ -269,6 +279,8 @@ describe('F4: a contradictory callback instruction fails conservatively', () => 
     'Ich möchte reservieren. Bitte rufen Sie mich nicht an, auch kein Rückruf.',
     'Bitte rufen Sie mich zurück. Bitte nicht mehr anrufen.',
     'Ich möchte für sechs Personen reservieren. Rückruf bitte, aber keinesfalls zurückrufen.',
+    'Bitte zurückrufen, oder lieber doch nicht.',
+    'Rückruf bitte. Ach nein, doch nicht.',
     'Bitte Rückruf. Lieber nicht.',
     'Bitte nicht anrufen, sondern zurückrufen.',
   ])('is unsupported: %s', (utterance) => {
@@ -280,16 +292,20 @@ describe('F4: a contradictory callback instruction fails conservatively', () => 
 describe('F4: a negation that does not target the callback is not a refusal', () => {
   it.each([
     // The fifth review's counterexample and the founder brief.
+    'Bitte um Rückruf denn die Onlinebuchung funktioniert nicht.',
     'Ich möchte nicht online reservieren, bitte rufen Sie mich zurück.',
     'Bitte zurückrufen, das Formular funktioniert nicht.',
     'Kein Problem Rückruf bitte',
     'Ich kann gerade nicht sprechen bitte zurückrufen',
+    'Bitte zurückrufen das Formular funktioniert nicht',
     // Further word orders of the same kind.
     'Rückruf bitte, die Seite lädt nicht.',
     'Rückruf bitte weil die Bestätigung nicht ankam',
     'Bitte um Rückruf, ich komme online nicht weiter.',
     'Bitte zurückrufen, ich kann nicht online buchen.',
     'Rückruf bitte, das Formular geht doch nicht.',
+    'Ich habe keinen Rückruf bekommen, bitte rufen Sie mich zurück.',
+    'Ich habe noch keinen Rückruf von Ihnen erhalten. Bitte zurückrufen.',
     'Vergessen Sie bitte nicht zurückzurufen.',
     'Vergessen Sie nicht den Rückruf wegen einer Reservierung.',
     // Earlier review rounds.
@@ -321,10 +337,38 @@ describe('F4: a negation that does not target the callback is not a refusal', ()
 // refuses it. Each case below failed on c603a61.
 describe('adversarial review: refusal variants the phrase list missed create no callback', () => {
   it.each([
+    'Ein Rückruf wäre nicht nötig.',
+    'Ein Rückruf ist nicht wirklich nötig.',
+    'Ein Rückruf ist für mich nicht nötig.',
+    'Rückruf ist überhaupt nicht nötig.',
+    'Rückruf nicht nötig danke',
+    'Rückruf ist nicht erwünscht danke',
+    'Sie müssen nicht extra zurückrufen.',
+    'Sie brauchen mich nicht extra zurückzurufen.',
     'Ruf mich ja nicht zurück!',
     'Wegen Rückruf: rufen Sie mich bloß nicht zurück.',
+    'Bitte keinesfalls einen Rückruf.',
+    'Auf keinen Fall einen Rückruf.',
+    'Bitte nicht noch einen Rückruf.',
+    'Kein Bedarf an einem Rückruf.',
+    'Ich habe kein Interesse an einem Rückruf.',
+    'Ich lege keinen Wert auf einen Rückruf.',
+    'Rückruf? Brauch ich nicht.',
+    'Ich will nicht, dass Sie mich wegen der Reservierung zurückrufen.',
+    'Ich rufe später nochmal zurück.',
+    'Ich ruf zurück',
+    'Wir rufen morgen zurück wegen der Reservierung',
+    'Ich werde Sie zurückrufen.',
     'Bitte zurückrufen oder lieber doch nicht',
+    'Bitte zurückrufen, oder doch lieber nicht.',
     'Rückruf bitte ach nee doch nicht',
+    'Bitte rufen Sie mich zurück. Ach nein, nicht nötig.',
+    'Rufen Sie mich zurück? Nein, bitte nicht.',
+    'Rufen Sie mich zurück? Nein danke.',
+    'Rückruf bitte wegen Reservierung. Hat sich erledigt.',
+    'Rückruf bitte. Ne, lass mal.',
+    'Rückruf bitte. Ach, egal, kein Bedarf.',
+    'Kein Rückruf per Telefon bitte, nur per Mail',
     'Ich habe gesagt ich möchte keinen Rückruf bekommen',
     'Ich möchte nicht angerufen werden.',
   ])('is unsupported: %s', (utterance) => {
@@ -332,7 +376,9 @@ describe('adversarial review: refusal variants the phrase list missed create no 
   });
 
   it.each([
+    'Danke für den Rückruf.',
     'Danke, dass Sie zurückgerufen haben, alles geklärt.',
+    'Ich habe eine Frage zur Rückrufaktion.',
     'Ihre Rückrufnummer funktioniert nicht.',
   ])('a mention that asks for nothing is not a callback request: %s', (utterance) => {
     expect(interpretCall(utterance)).toStrictEqual({ kind: 'unsupported' });
@@ -344,10 +390,17 @@ describe('adversarial review: a wanted callback beside a negation is kept', () =
     'Sie haben mich nicht zurückgerufen, bitte rufen Sie mich zurück.',
     'Sie haben mich nie zurückgerufen. Bitte Rückruf.',
     'Ihr Kollege hat nicht zurückgerufen, bitte Rückruf.',
+    'Warum rufen Sie nicht zurück? Bitte um Rückruf.',
+    'Es kam noch kein Rückruf, bitte rufen Sie mich zurück.',
+    'Bisher kein Rückruf. Bitte zurückrufen.',
+    'Ich habe noch keinen Rückruf gehabt, bitte zurückrufen.',
+    'Vergessen Sie den Rückruf nicht!',
+    'Vergessen Sie bitte den Rückruf nicht.',
     'Bitte Rückruf nicht vergessen.',
     'Kein Rückruf nach 20 Uhr bitte, vorher gern.',
     'Rückruf bitte nicht am Wochenende.',
     'Danke für den Rückruf, bitte rufen Sie noch einmal zurück.',
+    'Bitte zurück rufen.',
   ])('stays a callback: %s', (utterance) => {
     expect(interpretCall(utterance)).toStrictEqual({ kind: 'callback', title: GENERIC });
   });
@@ -359,8 +412,21 @@ describe('adversarial review: a wanted callback beside a negation is kept', () =
 // request is unsupported and the caller asks again. Each of these was a callback before.
 describe('conservative: a negation not recognised as harmless withholds consent', () => {
   it.each([
+    'Ich möchte nicht, dass Sie zu spät zurückrufen.',
+    'Bitte um Rückruf, das klappt bei mir nicht.',
+    'Ich habe keine Zeit am Telefon, bitte um Rückruf nach 18 Uhr',
+    'Rückruf bitte, nicht erst morgen',
+    'Bitte auf keinen Fall später als Freitag, aber rufen Sie mich zurück.',
+    'Ich habe keinen Anrufbeantworter, bitte Rückruf.',
+    'Rückruf bitte, keine Reservierung mehr nötig',
+    'Rückruf bitte, ich weiß noch nicht ob die Geburtstagsfeier stattfindet',
+    'Rückruf bitte, ich habe meine Jacke nach der Geburtstagsfeier vergessen.',
     'Ich kann Sie leider nicht anrufen, bitte rufen Sie mich zurück.',
     'Bitte heute nicht mehr zurückrufen, morgen gern',
+    'Rückruf bitte, wir wollen statt Freitag lieber Samstag reservieren',
+    'Rückruf bitte, ich möchte die Reservierung zurückziehen.',
+    'Bitte um Rückruf, Onlinebuchung funktioniert nicht.',
+    'Rückruf bitte, ich habe keine E-Mail-Adresse.',
   ])('is unsupported: %s', (utterance) => {
     expect(interpretCall(utterance)).toStrictEqual({ kind: 'unsupported' });
   });
@@ -371,21 +437,49 @@ describe('conservative: a negation not recognised as harmless withholds consent'
 // a callback. Consent is now denied by default; each case failed on the clause-scoped design.
 describe('second adversarial round: refusals however split or disguised create no callback', () => {
   it.each([
+    'Zurückrufen? Das muss nicht sein.',
     'Rückruf? Ist nicht nötig.',
+    'Rückruf? Den brauche ich nicht.',
+    'Rückruf? Möchte ich nicht.',
+    'Rückruf? Will ich nicht.',
     'Rückruf? Auf keinen Fall.',
     'Rückruf? Keinesfalls.',
     'Rückruf? Niemals.',
+    'Rückruf? Bloß nicht.',
+    'Rückruf? Brauch ich wirklich nicht.',
     'Rückruf: nicht erwünscht.',
     'Rückruf, nicht gewünscht',
+    'Rückruf, wird nicht benötigt.',
+    'Ein Rückruf, ehrlich gesagt, ist nicht nötig.',
+    'Den Rückruf, den brauche ich nicht.',
+    'Zurückrufen, das müssen Sie nicht.',
+    'Nicht nötig, der Rückruf.',
+    'Brauch ich nicht, den Rückruf.',
+    'Rückruf? Vergessen Sie es.',
+    'Bitte um Rückruf. Ach, vergessen Sie es einfach.',
+    'Bitte um Rückruf. Das hat sich jetzt erledigt.',
+    'Bitte um Rückruf. Hat sich geklärt.',
+    'Wieso zurückrufen, hat sich doch erledigt.',
     'Ich möchte nicht, dass man mich anruft.',
     'Ich möchte nicht, dass mich jemand kontaktiert. Rückruf nein.',
+    'Kein Rückruf ab sofort.',
+    'Kein Rückruf bis auf Weiteres.',
+    'Kein Rückruf nach dem Ärger von gestern.',
+    'Bitte nicht erst zurückrufen.',
+    'Kein Rückruf während meines Urlaubs und danach auch nicht.',
     'Ich habe Ihre Nachricht erhalten kein Rückruf nötig',
     'Ich bin schon zurückgerufen worden kein Rückruf mehr',
     'Ihr Anruf kam ungelegen bitte nicht mehr zurückrufen',
     'Danke, ich wurde bereits zurückgerufen.',
     'Ihr Kollege hat mich schon zurückgerufen, alles gut.',
+    'Ich habe schon einen Rückruf bekommen, danke.',
     'Ich brauche wie bisher keinen Rückruf.',
     'Bislang wollte ich keinen Rückruf und auch jetzt nicht.',
+    'Warum sollten Sie mich zurückrufen, ich brauche nichts.',
+    'Warum zurückrufen? Ich komme lieber vorbei.',
+    'Später ruf ich selbst zurück.',
+    'Rückruf bitte. Die Mühe ist nicht nötig.',
+    'Bitte um Rückruf. Bitte die Sache vergessen.',
   ])('is unsupported: %s', (utterance) => {
     expect(interpretCall(utterance)).toStrictEqual({ kind: 'unsupported' });
   });
@@ -444,9 +538,35 @@ describe('adversarial review: a change, cancellation, lost item or second bookin
 // read as requests, and refusals with no negation at all. Each case failed before this change.
 describe('third adversarial round: disguised and negation-free refusals create no callback', () => {
   it.each([
+    'Rückruf? Nicht weiter nötig.',
+    'Ein Rückruf ist nicht weiter erforderlich.',
+    'Bitte nicht weiter zurückrufen.',
+    'Rückruf? Bitte die Anfrage stornieren.',
+    'Rückruf? Bitte das Ganze absagen.',
+    'Bitte die Rückruf-Anfrage stornieren.',
+    'Kein Rückruf vor 2027.',
+    'Kein Rückruf zwischen 0 und 24 Uhr.',
+    'Kein Rückruf morgens, mittags, abends oder nachts.',
+    'Keine Anrufe ab Montag, Rückruf ist dann überholt.',
     'Bisher kein Rückruf – und das ist auch gut so.',
     'Es kam kein Rückruf, und das passt mir gut.',
     'Rückruf ach vergiss es nicht nötig',
+    'Rückruf? Ich kann leider nicht telefonieren, bitte per Mail.',
+    'Rückruf? Keinen Stress, ich melde mich selbst.',
+    'Rückruf? Lieber eine E-Mail.',
+    'Schreiben Sie mir, statt zurückzurufen.',
+    'Statt eines Rückrufs bitte eine SMS.',
+    'Rückruf? Ach, ich melde mich doch selbst.',
+    'Rückruf? Danke, passt schon.',
+    'Rückruf? Danke, schon gut.',
+    'Rückruf? Alles gut, danke.',
+    'Rückruf? Wozu?',
+    'Der Rückruf ist hinfällig.',
+    'Zurückrufen ist zwecklos.',
+    'Ich ziehe die Bitte um Rückruf zurück.',
+    'Die Rückrufbitte ist hiermit zurückgezogen.',
+    'Rückruf? Bitte nur schriftlich antworten.',
+    'Rückruf war ein Versehen, sorry.',
   ])('is unsupported: %s', (utterance) => {
     expect(interpretCall(utterance)).toStrictEqual({ kind: 'unsupported' });
   });
@@ -455,6 +575,7 @@ describe('third adversarial round: disguised and negation-free refusals create n
     'Bitte um Rückruf, weil die Onlinebuchung nicht funktioniert.',
     'Bitte zurückrufen, das Online-Formular funktioniert nicht richtig.',
     'Rückruf bitte, ich komme online nicht weiter.',
+    'Bisher kein Rückruf. Bitte zurückrufen.',
   ])('the founder positives and their variants stay callbacks: %s', (utterance) => {
     expect(interpretCall(utterance)).toStrictEqual({ kind: 'callback', title: GENERIC });
   });
