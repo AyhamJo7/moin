@@ -8,7 +8,7 @@ machine's architecture, so its digest is not the one CI checks. It is **not** a 
 
 | Statement                                            | State                                                   |
 | ---------------------------------------------------- | ------------------------------------------------------- |
-| Local demo on this machine, from the packaged images | **Verified** (EV-P02-051)                               |
+| Local demo on this machine, from the packaged images | **Verified** (EV-P02-050)                               |
 | A public or hosted demo                              | Unverified. Nothing here is published; there is no URL  |
 | Production deployment, hosting, TLS, WAF, backups    | Unverified. No infrastructure exists (P17)              |
 | Real telephone provider (Twilio) integration         | Unverified. The call below is the development simulator |
@@ -85,7 +85,7 @@ Authentication, CSRF, FORCE RLS and the security headers are not relaxed (the ac
 a completion without the CSRF token and shows the hardened headers). Do not expose this stack to a
 network. A public demo is a separate decision (hosting, TLS, a production identity provider).
 
-## Failure and recovery (observed by hand on this machine, see EV-P02-051; not automated)
+## Failure and recovery (observed by hand on this machine, see EV-P02-050; not automated)
 
 | Situation                                    | Behaviour                                                                                                                                           | Who recovers           |
 | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
