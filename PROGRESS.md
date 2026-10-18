@@ -1619,3 +1619,12 @@ packages/telephony/test-support/fixed-auth-token.vitest.config.ts` is KILLED: wi
 `isValidSignature > rejects a tampered signature` fails ("expected true to be false"), 1 of 23
 tests; with it 25 of 25 pass; restored byte-identical. Record:
 `docs/verification/telephony-tamper-mutation-20261018T050521Z.json`.
+
+M2D-1 (2026-10-18, branch `fix/p13-today-contract-compat` from 8ee81a2): the Today contract skew
+between web and API is handled by negotiation. The web sends `x-moin-today-contract: versioned`; the
+API answers in the legacy shape (no task `version`) otherwise; the web accepts the legacy shape whole,
+shows the task and withholds Erledigt (never a fabricated version); a bare 404 on completion is "not
+confirmed". Design, compatibility matrix, deployment and rollback sequence, contract-step criteria and
+what is not proven: `docs/development/api-web-rollout.md`. Official mutation KILLED for the API
+controller and for the web loader (records in `docs/evidence/P13/EV-P13-018-mutation-*.json`).
+Nothing is deployed and no hosting exists; P13.03.02 stays IN_PROGRESS; nothing is VERIFIED.

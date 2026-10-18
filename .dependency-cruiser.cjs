@@ -146,6 +146,14 @@ module.exports = {
       to: { path: '^apps/server/' },
     },
     {
+      name: 'contract-fixtures-only-from-tests',
+      severity: 'error',
+      comment:
+        'packages/contracts/test-support holds frozen copies of older contracts (M2D-1). Production code importing one would validate against a stale schema and still pass every gate.',
+      from: { pathNot: '\\.test\\.tsx?$' },
+      to: { path: '^packages/contracts/test-support/' },
+    },
+    {
       name: 'not-to-dev-dep',
       severity: 'error',
       comment:
