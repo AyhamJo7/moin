@@ -42,7 +42,8 @@ CFG
     fi
   done
   printf '%s' "$spec" >"$dir/today-callback.spec.ts"
-  (cd "$dir" && NODE_PATH="$ROOT/node_modules" "$ROOT/node_modules/.bin/playwright" test -c playwright.config.ts >/dev/null 2>&1 || true)
+  # A failing control exits non-zero by design; only the report matters.
+  (cd "$dir" && NODE_PATH="$ROOT/node_modules" "$ROOT/node_modules/.bin/playwright" test -c playwright.config.ts >/dev/null 2>&1) || true
   # Machine-specific absolute paths out, everything else verbatim.
   sed -e "s#$dir#/control#g" -e "s#$ROOT#/repo#g" -e "s#/home/[^\"]*/bin/node#/node#g" "$dir/report.json" >"$OUT/control-$name.json"
 }
