@@ -13,26 +13,65 @@ REALM_FILE="$REPO/docker/keycloak/realm-moin-local.json"
 OWNER_EMAIL=inhaber@musterrestaurant.example
 DB_USER=moin_owner
 
-compose() { docker compose -p "$PROJECT" -f "$DIR/docker-compose.yml" "$@"; }
+# Compose needs DEMO_SIMULATOR_TOKEN just to parse the file (`${...:?}`). Commands that only read
+# or restart existing containers get a placeholder, which never reaches a container: it cannot, as
+# none of them creates or re-creates one. `up` (and `create`/`run`) use the real token or stop.
+compose() {
+  local token="${DEMO_SIMULATOR_TOKEN:-}"
+  case "${1:-}" in
+    up | create | run)
+      [ -n "$token" ] || die "internal error: the simulator token was not prepared before '$1'"
+      ;;
+    *) token="${token:-read-only-placeholder}" ;;
+  esac
+  DEMO_SIMULATOR_TOKEN="$token" docker compose -p "$PROJECT" -f "$DIR/docker-compose.yml" "$@"
+}
 
 die() { echo "demo: $*" >&2; exit 1; }
 
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 is required"; }
 
-# The simulated-call bearer is generated once per install and read back from the running (or
-# stopped) api container; it is never written to a file or printed.
-simulator_token() {
-  local id
-  id="$(compose ps -a -q api 2>/dev/null || true)"
-  if [ -n "$id" ]; then
-    docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$id" |
-      sed -n 's/^CALL_SIMULATOR_TOKEN=//p' | head -n 1
-  fi
+# Discovery asks Docker for containers by the Compose project label. That is read-only, needs no
+# Compose file and so no token, prints nothing and exits 0 when the project has no containers, and
+# exits non-zero when Docker itself cannot answer: an empty result and an error are different things.
+project_containers() { docker ps "$@" -q --filter "label=com.docker.compose.project=$PROJECT"; }
+
+service_container() { project_containers -a --filter "label=com.docker.compose.service=$1"; }
+
+# absent | running | stopped; non-zero when Docker cannot be queried.
+project_state() {
+  local all running
+  all="$(project_containers -a)" || return 1
+  if [ -z "$all" ]; then echo absent; return 0; fi
+  running="$(project_containers)" || return 1
+  if [ -n "$running" ]; then echo running; else echo stopped; fi
 }
 
+# The simulated-call bearer is generated once per install and read back from the existing (running or
+# stopped) api container; it is never written to a file or printed. Prints nothing when the project has
+# no api container yet. Returns 1 if Docker cannot answer, 2 if the container exists but its token is
+# unreadable or the api container is not unique: never a silent rotation.
+simulator_token() {
+  local ids env token
+  ids="$(service_container api)" || return 1
+  [ -n "$ids" ] || return 0
+  [ "$(wc -l <<<"$ids")" -eq 1 ] || return 2
+  env="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$ids")" || return 1
+  token="$(sed -n 's/^CALL_SIMULATOR_TOKEN=//p' <<<"$env" | head -n 1)"
+  [ -n "$token" ] || return 2
+  printf '%s\n' "$token"
+}
+
+# The token the next `up` must use: the existing project's, else a fresh one. Whatever a caller left in
+# DEMO_SIMULATOR_TOKEN is ignored, so an inherited value can never rotate a running demo's token.
 export_token() {
-  local token
-  token="$(simulator_token)"
+  local token status=0
+  token="$(simulator_token)" || status=$?
+  case "$status" in
+    0) ;;
+    1) die "cannot read the demo's containers from Docker; is it running?" ;;
+    *) die "the demo's api container exists but its simulator token cannot be read (or it is not unique); refusing to rotate it. Run: deploy/demo/demo.sh reset --yes (deletes demo data) and then up" ;;
+  esac
   if [ -z "$token" ]; then token="demo-$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"; fi
   export DEMO_SIMULATOR_TOKEN="$token"
 }
@@ -52,14 +91,16 @@ wait_healthy() {
 
 port_busy() { ss -ltn "sport = :$1" 2>/dev/null | grep -q LISTEN; }
 
-running_here() { [ -n "$(compose ps -q 2>/dev/null || true)" ]; }
-
+# The ports are ours exactly when the edge container (the only one that publishes them) is running.
 preflight() {
   need docker; need curl; need python3; need ss
   docker info >/dev/null 2>&1 || die "Docker is not running (start Docker Desktop and enable WSL integration)"
-  if ! running_here; then
+  local edge
+  edge="$(project_containers --filter "label=com.docker.compose.service=edge")" ||
+    die "cannot query Docker for the demo project"
+  if [ -z "$edge" ]; then
     for p in "$APP_PORT" "$KEYCLOAK_PORT"; do
-      if port_busy "$p"; then die "port $p is already in use; stop what uses it (a dev server may use 3000)"; fi
+      if port_busy "$p"; then die "port $p is already in use by something other than the demo; stop it (a dev server may use 3000)"; fi
     done
   fi
 }
@@ -108,7 +149,6 @@ MSG
 }
 
 cmd_status() {
-  export DEMO_SIMULATOR_TOKEN=unused
   compose ps
   # Containers that joined the edge's namespace report healthy from inside even after the edge was
   # restarted underneath them; only a probe from the host tells whether the stack is reachable.
@@ -161,24 +201,28 @@ cmd_check() {
 
 cmd_reset() {
   [ "${1:-}" = "--yes" ] || die "reset deletes the demo database and the demo Keycloak users; run: demo.sh reset --yes"
-  export DEMO_SIMULATOR_TOKEN=unused
   # -p moin-demo and this compose file scope the volume removal to the demo project's own two
   # volumes; nothing of the development stack (project "moin") can be named here.
   compose down -v --remove-orphans
   echo "demo: demo data removed; run demo.sh up for a fresh start"
 }
 
-case "${1:-}" in
-  up) cmd_up ;;
-  stop) export DEMO_SIMULATOR_TOKEN=unused; compose stop ;;
-  start) export_token; compose start; compose up -d --wait --wait-timeout 300; seed ;;
-  restart) export_token; compose restart edge; compose restart oidc api web; compose up -d --wait --wait-timeout 300 ;;
-  restart-api) export_token; compose restart api; wait_healthy api ;;
-  down) export DEMO_SIMULATOR_TOKEN=unused; compose down --remove-orphans ;;
-  reset) shift; cmd_reset "${1:-}" ;;
-  status) cmd_status ;;
-  logs) export DEMO_SIMULATOR_TOKEN=unused; shift; compose logs --tail 100 "$@" ;;
-  call) shift; cmd_call "${1:-}" ;;
-  check) cmd_check ;;
-  *) sed -n '2,3p' "${BASH_SOURCE[0]}"; exit 2 ;;
-esac
+main() {
+  case "${1:-}" in
+    up) cmd_up ;;
+    stop) compose stop ;;
+    start) export_token; compose start; compose up -d --wait --wait-timeout 300; seed ;;
+    restart) export_token; compose restart edge; compose restart oidc api web; compose up -d --wait --wait-timeout 300 ;;
+    restart-api) export_token; compose restart api; wait_healthy api ;;
+    down) compose down --remove-orphans ;;
+    reset) shift; cmd_reset "${1:-}" ;;
+    status) cmd_status ;;
+    logs) shift; compose logs --tail 100 "$@" ;;
+    call) shift; cmd_call "${1:-}" ;;
+    check) cmd_check ;;
+    *) sed -n '2,3p' "${BASH_SOURCE[0]}"; exit 2 ;;
+  esac
+}
+
+# Sourced (by a read-only check), the functions are available and nothing runs.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then main "$@"; fi
