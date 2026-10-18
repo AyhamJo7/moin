@@ -1,0 +1,38 @@
+[
+  {
+    "id": "T1-sweep-window-shrunk",
+    "invariant": "P06.12.01: the opportunistic sweep deletes only buckets untouched for a full day",
+    "expected": "A shorter window deletes buckets still in use, so an exhausted bucket is recreated full on the source's next request: a throttle bypass anyone triggers by waiting an hour.",
+    "file": "packages/db/migrations/0023_auth_throttle.sql",
+    "find": "        WHERE updated_at < v_now - INTERVAL '24 hours'\n        LIMIT 100",
+    "replace": "        WHERE updated_at < v_now - INTERVAL '1 hour'\n        LIMIT 100",
+    "killingTest": {
+      "file": "packages/db/src/auth-throttle.integration.test.ts",
+      "fullName": "auth throttle buckets (0023) > a recently exhausted bucket survives another source's sweep"
+    }
+  },
+  {
+    "id": "T2-sweep-cap-removed",
+    "invariant": "P06.12.01: bounded work, one take sweeps at most 100 stale rows",
+    "expected": "Without the cap one sign-in pays for every stale row a rotating scanner left behind.",
+    "file": "packages/db/migrations/0023_auth_throttle.sql",
+    "find": "        WHERE updated_at < v_now - INTERVAL '24 hours'\n        LIMIT 100\n",
+    "replace": "        WHERE updated_at < v_now - INTERVAL '24 hours'\n",
+    "killingTest": {
+      "file": "packages/db/src/auth-throttle.integration.test.ts",
+      "fullName": "auth throttle buckets (0023) > one take sweeps at most 100 stale rows"
+    }
+  },
+  {
+    "id": "T3-take-ignores-balance",
+    "invariant": "P06.12.01: a take is granted only when the bucket holds the cost",
+    "expected": "Every take is granted until the CHECK on tokens rejects it, so the ceiling is whatever the constraint happens to allow, and concurrent callers see errors instead of 429s.",
+    "file": "packages/db/migrations/0023_auth_throttle.sql",
+    "find": "  IF v_tokens >= p_cost THEN",
+    "replace": "  IF v_tokens >= 0 THEN",
+    "killingTest": {
+      "file": "packages/db/src/auth-throttle.integration.test.ts",
+      "fullName": "auth throttle buckets (0023) > concurrent takes never grant more than the bucket holds"
+    }
+  }
+]

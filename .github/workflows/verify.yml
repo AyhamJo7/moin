@@ -71,6 +71,7 @@ jobs:
           node scripts/check-data-classification.ts
           node scripts/check-subprocessors.ts
           node scripts/check-brand-strings.ts
+          node scripts/check-ledger-ids.ts
 
   unit:
     name: unit tests

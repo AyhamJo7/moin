@@ -1,0 +1,36 @@
+# Deterministic git hooks. They run for every committer, human or agent, local or cloud, and do not
+# depend on anyone remembering a checklist: a push with a known formatting, lint, type or ledger
+# failure stops here instead of in CI. CI stays the source of truth (16 checks on the exact head).
+#
+# Installed by `pnpm install` (the root `prepare` script). Manual: `pnpm exec lefthook install`.
+# Bypassing them (`--no-verify`, `LEFTHOOK=0`) is not allowed for agent sessions; the policy hook
+# blocks it.
+
+commit-msg:
+  jobs:
+    - name: conventional commit subject
+      run: node scripts/check-conventional-commit.ts --title "$(git stripspace --strip-comments < {1} | head -n 1)"
+    - name: no tool attribution (A-22)
+      run: node scripts/check-no-ai-mentions.ts --text "$(git stripspace --strip-comments < {1})"
+
+pre-commit:
+  parallel: true
+  jobs:
+    - name: prettier (staged)
+      run: pnpm exec prettier --check --ignore-unknown {staged_files}
+    - name: secrets (staged)
+      run: gitleaks git --staged --redact --no-banner --config .gitleaks.toml .
+
+pre-push:
+  parallel: true
+  jobs:
+    - name: prettier (pushed files)
+      run: pnpm exec prettier --check --ignore-unknown {push_files}
+    - name: lint
+      run: pnpm lint
+    - name: typecheck
+      run: pnpm typecheck
+    - name: unit tests
+      run: pnpm test
+    - name: evidence ledger IDs
+      run: node scripts/check-ledger-ids.ts
