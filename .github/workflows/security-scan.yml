@@ -104,13 +104,23 @@ jobs:
           fi
           shellcheck "${files[@]}"
 
+      # The repository's own rules are self-tested first, like the gitleaks rules: a custom rule
+      # that has never matched anything is worse than none, because it is counted on.
+      - name: semgrep custom rules are self-testing
+        run: |
+          docker run --rm -v "${PWD}:/src" -w /src \
+            semgrep/semgrep@sha256:acaac22ffc7b7cc5926de0751b223bce0b2491c33d18422fa72f632c78d81198 \
+            semgrep --test --config .semgrep/moin.yml .semgrep/moin.ts
+
       - name: semgrep
         run: |
           docker run --rm -v "${PWD}:/src" -w /src \
             semgrep/semgrep@sha256:acaac22ffc7b7cc5926de0751b223bce0b2491c33d18422fa72f632c78d81198 \
             semgrep --config=p/typescript --config=p/security-audit --config=p/secrets \
+              --config=.semgrep/moin.yml \
               --error --skip-unknown-extensions \
               --exclude='.claude' \
+              --exclude='.semgrep' \
               --exclude='**/__fixtures__/**'
 
   filesystem:

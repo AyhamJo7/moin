@@ -1,0 +1,50 @@
+# Deterministic findings as review comments on the changed lines (reviewdog), so the author and
+# the independent reviewer see them in the diff instead of digging through a job log. This job
+# never gates: `security-scan` is the blocking semgrep run. It reports only on lines the PR adds.
+#
+# Same-repository pull requests only. A fork's GITHUB_TOKEN is read-only, so posting would fail,
+# and a fork's code should not run with a write-capable token anyway.
+name: review-annotations
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: review-annotations-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  semgrep:
+    name: semgrep findings on changed lines
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: reviewdog/action-setup@d8a7baabd7f3e8544ee4dbde3ee41d0011c3a93f # v1.5.0
+        with:
+          reviewdog_version: v0.21.2
+
+      - name: semgrep (SARIF)
+        run: |
+          docker run --rm -v "${PWD}:/src" -w /src \
+            semgrep/semgrep@sha256:acaac22ffc7b7cc5926de0751b223bce0b2491c33d18422fa72f632c78d81198 \
+            semgrep --config=p/typescript --config=p/security-audit --config=.semgrep/moin.yml \
+              --skip-unknown-extensions --exclude='.claude' --exclude='.semgrep' \
+              --exclude='**/__fixtures__/**' --sarif --output=semgrep.sarif
+
+      - name: reviewdog
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          reviewdog -f=sarif -name=semgrep -reporter=github-pr-review \
+            -filter-mode=added -fail-level=none < semgrep.sarif

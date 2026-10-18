@@ -367,6 +367,8 @@ export interface TodayTaskRow {
   readonly type: TaskType | null;
   readonly priority: TaskPriority;
   readonly createdAt: Date;
+  /** The row's optimistic-lock version: the owner's next action must present it (P07.13). */
+  readonly version: number;
   /** The calling number when the task came from a call and the number is E.164; else null. */
   readonly callerNumber: string | null;
 }
@@ -390,6 +392,7 @@ export async function listTodayTasks(
     type: string | null;
     priority: string;
     created_at: Date;
+    version: string;
     caller_number: string | null;
   }>(
     // A task that carries an accepted callback request is a callback, whatever its row type: the
@@ -397,7 +400,7 @@ export async function listTodayTasks(
     `select t.id, t.title, t.status,
        coalesce(t.type, case when exists (
          select 1 from callback_acceptances a where a.task_id = t.id) then 'callback' end) as type,
-       t.priority, t.created_at,
+       t.priority, t.created_at, t.version::text,
        (select case when c.from_number ~ '^\\+[1-9][0-9]{6,14}$' then c.from_number end
           from calls c where c.conversation_id = t.conversation_id
           order by c.created_at limit 1) as caller_number
@@ -415,9 +418,41 @@ export async function listTodayTasks(
     type: (row.type ?? null) as TaskType | null,
     priority: row.priority as TaskPriority,
     createdAt: row.created_at,
+    version: Number(row.version),
     callerNumber: row.caller_number,
   }));
   return { tasks: rows, truncated: result.rows.length > capped };
+}
+
+/**
+ * One task of the current tenant, in any status, or null when no such task is visible. Row-level
+ * security makes another tenant's task indistinguishable from a missing one (P06.07.03).
+ */
+export async function getTask(client: TenantClient, taskId: string): Promise<Task | null> {
+  const result = await client.query<TaskRow>(
+    `select id, title, status, type, priority, assignee_user_id, due_at,
+  snoozed_until, conversation_id, version::text from tasks where id = $1`,
+    [taskId],
+  );
+  const row = result.rows[0];
+  return row === undefined ? null : toTask(row);
+}
+
+/**
+ * One task of the current tenant, row-locked for the rest of the transaction (`FOR UPDATE`), or
+ * null when none is visible. A caller that judges who may act on the task reads it here, so the
+ * decision is made on the committed assignment and nothing can reassign the task until it
+ * commits; a concurrent reassignment either lands first (and is seen) or waits. The task row is
+ * locked before any audit append, the order the J3 fix established.
+ */
+export async function lockTask(client: TenantClient, taskId: string): Promise<Task | null> {
+  const result = await client.query<TaskRow>(
+    `select id, title, status, type, priority, assignee_user_id, due_at,
+  snoozed_until, conversation_id, version::text from tasks where id = $1 for update`,
+    [taskId],
+  );
+  const row = result.rows[0];
+  return row === undefined ? null : toTask(row);
 }
 
 export async function listOpenTasks(client: TenantClient, limit = 50): Promise<Task[]> {
