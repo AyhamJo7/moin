@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/home/adam/projects/business/moin",
+  "head": "c564c72384bbffd799e31bacee5d36d03e88cb60",
+  "mode": "committed",
+  "fix_ref": "371b1567fb11f84ad4fd24a94fcf83a4466bc346",
+  "fix_paths": [
+    "apps/server/src/modules/call-simulator/application/callback-request.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "pnpm --filter @moin/server exec vitest run src/modules/call-simulator/application/callback-request.test.ts -t 'category: the topic of the callback'",
+  "started": "2026-10-18T23:29:19+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-10-18T23:29:20+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 0.77,
+    "tail": " FAIL  src/modules/call-simulator/application/callback-request.test.ts > category: the topic of the callback, one of four constant titles > an uncertain, changed, existing or complaint topic gives the generic title: Bitte R\u00fcckruf wegen unserer Reservierung am Freitag.\n FAIL  src/modules/call-simulator/application/callback-request.test.ts > category: the topic of the callback, one of four constant titles > an uncertain, changed, existing or complaint topic gives the generic title: R\u00fcckruf wegen Reservierung am Freitag war das Essen kalt\n FAIL  src/modules/call-simulator/application/callback-request.test.ts > category: the topic of the callback, one of four constant titles > an uncertain, changed, existing or complaint topic gives the generic title: R\u00fcckruf bitte, ich habe eine Frage zur Reservierung\n FAIL  src/modules/call-simulator/application/callback-request.test.ts > category: the topic of the callback, one of four constant titles > an uncertain, changed, existing or complaint topic gives the generic title: R\u00fcckruf bitte, Reservierung oder Abholung\nAssertionError: expected 'R\u00fcckruf: Reservierung' to be 'R\u00fcckruf erbeten' // Object.is equality\n\nExpected: \"R\u00fcckruf erbeten\"\nReceived: \"R\u00fcckruf: Reservierung\"\n\n \u276f src/modules/call-simulator/application/callback-request.test.ts:154:34\n    152|     'an uncertain, changed, existing or complaint topic gives the gene\u2026\n    153|     (utterance) => {\n    154|       expect(titleOf(utterance)).toBe(GENERIC);\n       |                                  ^\n    155|     },\n    156|   );\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[11/21]\u23af\n\n FAIL  src/modules/call-simulator/application/callback-request.test.ts > category: the topic of the callback, one of four constant titles > never states a callback request as a booking\nTypeError: CALLBACK_TITLES is not iterable\n \u276f src/modules/call-simulator/application/callback-request.test.ts:166:25\n    164|\n    165|   it('never states a callback request as a booking', () => {\n    166|     for (const title of CALLBACK_TITLES) {\n       |                         ^\n    167|       expect(title).not.toMatch(/reserviert|best\u00e4tigt|gebucht|zugesagt\u2026\n    168|     }\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[12/21]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  21 failed | 30 passed | 288 skipped (339)\n   Start at  01:29:19\n   Duration  279ms (transform 38%, import 37%, tests 24%, worker 1%)\n\nundefined\n/home/adam/projects/business/moin/apps/server:\n\u2009ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL\u2009 Command failed with exit code 1: vitest run src/modules/call-simulator/application/callback-request.test.ts -t category: the topic of the callback"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 0.67,
+    "tail": ".                                        | \u2009WARN\u2009 Unsupported engine: wanted: {\"node\":\">=24.21.0 <25\"} (current: {\"node\":\"v26.10.0\",\"pnpm\":\"10.34.5\"})\n\n RUN  v5.0.2 /home/adam/projects/business/moin/apps/server\n\n\n Test Files  1 passed (1)\n      Tests  51 passed | 288 skipped (339)\n   Start at  01:29:20\n   Duration  201ms (import 42%, transform 40%, tests 17%, worker 2%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "7cabfdd87ab62cb44330257aacda45e9e00a4425",
+  "patch_file": "/home/adam/projects/business/moin/.git/claude-evidence/mutation/20261018T232919Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}

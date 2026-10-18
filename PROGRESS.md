@@ -1701,3 +1701,13 @@ constructions (noun phrase with date, or date before the verb "reservieren"), co
 any value is chosen, and two rounds of independent adversarial probing (141 utterances) were fixed as classes. Fix
 `373675e`; official mutation KILLED for F2, F3, the metamorphic and adversarial groups and the real-PostgreSQL test
 (`EV-P12-014-mutation-fourth-review-*.json`). Nothing VERIFIED.
+
+PRODUCT-01 fifth review and founder scope reduction (2026-10-19, PR #242, REQUEST_CHANGES at `009b8ed`: F4 false
+refusal of "Bitte um Rückruf denn die Onlinebuchung funktioniert nicht."): callback titles are now one of four
+category constants (no guest count, weekday, month or caller words; detail extraction removed, deferred in
+EV-P12-015), and contact consent is denied unless every refusal word is explained by a closed harmless
+construction, after three independent adversarial rounds showed refusal phrase lists fail toward unwanted
+contact. Fixes `371b156` (category) and `c564c72` (consent), test `2208cb6`; official mutation KILLED for category
+recognition, category-only output, the false-refusal and missed-refusal groups and three real-PostgreSQL tests
+(`EV-P12-015-mutation-*.json`). Known residue: refusals phrased without any known refusal word. Nothing VERIFIED;
+the running demo keeps the earlier build until an approved rebuild.

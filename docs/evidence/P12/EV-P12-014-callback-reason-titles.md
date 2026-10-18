@@ -112,3 +112,10 @@ Verdict OK TO MERGE: no Critical or High. It confirmed that no caller text can r
 **Fresh adversarial review.** A reviewer who had not seen the implementation probed 80 new utterances, then 61 more after the first fixes. Fixed in the grammar (tests added): compound nouns; past, complaint, hedge and condition words (`war`, `weil`, `vermutlich`, `sofern`, `unklar`, `glaube`, `hoffentlich`, `soweit`); other numbers around a count; `am` dates in a callback clause; call windows after a date (`zwischen 10 und 12`, `gegen`, `nach 15 Uhr`); further refusals (`nicht, dass Sie mich zurückrufen`, `Rückruf? Nein danke`, `brauche ich nicht`, `kommt nicht in Frage`, `keinen Wert`, `sein lassen`, `weder`, `ich rufe Sie später zurück`); false refusals (`kein Rückruf morgens`, `nicht, dass Sie zu spät zurückrufen`, `ich rufe Sie sonst an`). Accepted as conservative losses, not fixed: `aber nur für 4 Personen` (the count sits in a clause without the topic), a phone number or table number in a non-callback clause voids the count, date before `eine Reservierung machen`, a time between count and date, `für den nächsten Freitag`. Still unsupported as callbacks (older recogniser limit): more than three words between "ruf" and "zurück".
 
 **Official mutation (fix `373675e`, reversing the interpreter to `1608108`):** F2, F3, metamorphic, adversarial and the real-PostgreSQL test each KILLED (without fix exit 1 on title assertions, with fix exit 0, restored, tree unchanged). Records `EV-P12-014-mutation-fourth-review-*.json`. The reverted implementation is the deliberately defective alternative; finite tests do not prove safety for all German.
+
+## Superseded by the founder scope reduction (fifth review, EV-P12-015)
+
+The guest-count, weekday and month extraction described in this record was removed on the founder's
+decision of 2026-10-19 (commit `371b156`): a callback title is now one of four category constants and
+carries no detail. The sections above remain as the history of the review rounds; they no longer describe
+the current behaviour. Current contract, tests and mutation evidence: EV-P12-015.
