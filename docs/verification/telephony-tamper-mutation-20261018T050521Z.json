@@ -1,0 +1,31 @@
+{
+  "verdict": "KILLED",
+  "repo": "/home/adam/projects/business/moin",
+  "head": "3053f93fc449a93d3e94d8b1f07b46655c1347ad",
+  "mode": "committed",
+  "fix_ref": "3bdda1c36e1d73d08c8d63a8612a2a313ee4575b",
+  "fix_paths": ["packages/telephony/src/signature/validate.test.ts"],
+  "untracked_fix_files": [],
+  "test": "pnpm exec vitest run -c packages/telephony/test-support/fixed-auth-token.vitest.config.ts",
+  "started": "2026-10-18T05:05:21+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-10-18T05:05:23+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 0.57,
+    "tail": "\n RUN  v5.0.2 /home/adam/projects/business/moin\n\n \u276f |telephony-fixed-auth-token| packages/telephony/src/signature/validate.test.ts (22 tests | 1 failed) 9ms\n   \u276f isValidSignature (9)\n     \u00d7 rejects a tampered signature 4ms\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af\n\n FAIL  |telephony-fixed-auth-token| packages/telephony/src/signature/validate.test.ts > isValidSignature > rejects a tampered signature\nAssertionError: expected true to be false // Object.is equality\n\n- Expected\n+ Received\n\n- false\n+ true\n\n \u276f packages/telephony/src/signature/validate.test.ts:81:90\n     79|   it('rejects a tampered signature', () => {\n     80|     const flipped = `A${signature.slice(1)}`;\n     81|     expect(isValidSignature({ authToken: AUTH_TOKEN, url, signature: f\u2026\n       |                                                                                          ^\n     82|       false,\n     83|     );\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/1]\u23af\n\n\n Test Files  1 failed | 1 passed (2)\n      Tests  1 failed | 22 passed (23)\n   Start at  07:05:22\n   Duration  133ms (transform 63%, import 15%, setup 10%, tests 9%, worker 3%)\n"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 0.56,
+    "tail": "\n RUN  v5.0.2 /home/adam/projects/business/moin\n\n\n Test Files  2 passed (2)\n      Tests  25 passed (25)\n   Start at  07:05:22\n   Duration  131ms (transform 58%, import 14%, tests 14%, setup 10%, worker 3%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/home/adam/projects/business/moin/.git/claude-evidence/mutation/20261018T050521Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}
