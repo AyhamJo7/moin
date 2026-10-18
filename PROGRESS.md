@@ -1646,3 +1646,25 @@ token (fail closed, never rotate), and refuses a real port conflict only when th
 running. `deploy/demo/tests/lifecycle.test.sh` (69 checks, in the unit gate); official mutation KILLED
 (`docs/evidence/P02/EV-P02-050-mutation-demo-lifecycle.json`). F2 (package-manager probe) and F3 (mutable
 binfmt image) stay open follow-ups. Nothing VERIFIED.
+
+Founder demo rehearsal (2026-10-18, local packaged demo from `db12ecd`; DEMO_READY_WITH_LIMITATIONS, not pilot-ready, nothing founder-VERIFIED).
+Founder-observed: real Keycloak sign-in; three leftover callbacks completed with Erledigt; a simulated callback
+arrived on Heute by itself and was completed; a browser refresh did not bring it back. Founder timing estimate
+for the arrival: about four seconds, informal and not instrumented (the automated suite measured about 15 s,
+EV-P13-016/017). Database-verified by the operator afterwards: 0 open and 10 done tasks; the new task `done`,
+version 4, three audit status events by the signed-in owner. Established only by earlier automated tests, not
+re-done in the rehearsal: API restart, stop/start, call replay, a second live session and a revoked session
+(`playwright.demo.config.ts`, EV-P02-050). Findings: (1) the card showed the generic "Rückruf erbeten" for a
+birthday request: addressed by PRODUCT-01 (PR for `feat/p12-callback-reason-titles`); (2) UX-01, deferred and
+not started: Heute looks browser-default. The only stylesheet is one inline `<style>` in `apps/web/app/layout.tsx`
+(page width, task card, Erledigt button, focus outlines); the screenshot shows that applied, so the hypothesis is
+missing styling work, not a missing asset; a browser console/network capture and the choice of a frontend design
+skill come first. The rehearsal screenshot lived only in an ephemeral scratchpad (the empty Heute state, no caller
+data) and is not kept in the repository; a permanent copy would belong under `docs/evidence/` as a reference with
+its SHA-256, after the founder decides.
+
+PRODUCT-01 (2026-10-18, branch `feat/p12-callback-reason-titles` from `db12ecd`): the simulator's task title now
+names the reason from a closed vocabulary (reservation, birthday celebration, guest count 1..99, one weekday or
+month), only when stated without hedging or contradiction, and never copies the caller's words; the M1 "wegen"
+behaviour is unchanged, negations stay generic, no schema, contract or UI change, the utterance is still never
+stored. Official mutation KILLED (`docs/evidence/P12/EV-P12-014-mutation-callback-reason.json`). P12.09.01 stays open.
