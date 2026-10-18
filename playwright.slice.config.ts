@@ -8,7 +8,8 @@ import { defineConfig, devices } from '@playwright/test';
  * web build with the local API proxy (`OWNER_API_PROXY_ORIGIN=http://127.0.0.1:3101 pnpm --filter
  * @moin/web build`). The spec starts its own API process and owner-app server against a fresh
  * test database, so it never touches the development database. The pull-request e2e job has none
- * of those services yet; until it does, this suite runs locally (docs/development/m1-vertical-slice.md).
+ * of those services, so this suite has its own CI job, `e2e-slice` in `verify.yml`; locally see
+ * docs/development/m1-vertical-slice.md.
  *
  * One worker, no retries: the spec restarts the API mid-test and owns fixed ports.
  */
@@ -17,7 +18,12 @@ export default defineConfig({
   forbidOnly: true,
   retries: 0,
   workers: 1,
-  reporter: 'list',
+  // In CI the JSON report lets `scripts/check-slice-report.ts` fail the job unless every required
+  // acceptance test ran and passed (a skipped or missing test must not read as green).
+  reporter:
+    process.env['CI'] === undefined
+      ? 'list'
+      : [['list'], ['json', { outputFile: 'test-results/slice-report.json' }]],
   timeout: 120_000,
   expect: { timeout: 10_000 },
   use: {

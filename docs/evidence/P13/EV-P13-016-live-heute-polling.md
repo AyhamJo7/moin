@@ -40,7 +40,7 @@ fingerprint is compared in memory only. Inactivity: every guarded read slides th
 expiry, so a tab without input for 30 min stops polling (found in review, fixed in `7d967ad`).
 
 **Failure and recovery.** A failed poll (network, 429, 5xx, bad body, throw) keeps the list and backs
-off 15 s → 120 s; polls never overlap; a hidden tab does not poll and polls at once when shown or
+off (30 s after one failure, 60 s after two, 120 s from three on); polls never overlap; a hidden tab does not poll and polls at once when shown or
 when the browser reports `online`; a 401 triggers a server render (signed-out page, no task data)
 and is retried with backoff if the page stays. Reconciliation reads the current state, not missed
 events. Nothing is promised for a hidden/suspended tab or while disconnected.
@@ -56,7 +56,11 @@ Task row `created_at` (Postgres) to the card visible in Chromium, same host cloc
 | Completion in one session reaching a second, independently signed-in session | 15.36 s (first run 15.36 s) |
 | Network returns after an outage (`online` event) | 0.09 s |
 
-The limit is 60 s; the expected worst case is one interval plus a request and a render (about 17 s).
+The limit is 60 s. Samples: two local runs of each scenario, one host, so Postgres and the browser
+share a clock; `created_at` is stamped at transaction start, so the figures slightly overstate. The
+healthy worst case is one jittered interval (up to 16.5 s) plus a request and a render, and up to
+8 s more if the poll itself is slow (its timeout). The two rows' "first run" values are the earlier
+run of the same suite, not a separate measurement method.
 
 ## Tests and what each proves
 

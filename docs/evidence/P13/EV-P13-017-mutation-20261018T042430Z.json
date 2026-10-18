@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/home/adam/projects/business/moin",
+  "head": "79d4e57cc7bf33bd324a897752f9fdabff4a413c",
+  "mode": "committed",
+  "fix_ref": "9de05d5191d67f592092e3756056b07ff84c2e92",
+  "fix_paths": [
+    "scripts/check-slice-report.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "pnpm exec vitest run scripts/check-slice-report.cli.test.ts",
+  "started": "2026-10-18T04:24:30+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-10-18T04:24:32+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 0.82,
+    "tail": "\n RUN  v5.0.2 /home/adam/projects/business/moin\n\n \u276f |unit| scripts/check-slice-report.cli.test.ts (2 tests | 1 failed) 136ms\n   \u276f check-slice-report as a command (2)\n     \u2713 certifies the real green CI report and a genuine all-pass report 89ms\n     \u00d7 does not certify the genuine report in which a required test used test.fail() and failed 46ms\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af\n\n FAIL  |unit| scripts/check-slice-report.cli.test.ts > check-slice-report as a command > does not certify the genuine report in which a required test used test.fail() and failed\nAssertionError: a failed required test was certified (exit code): expected +0 to be 1 // Object.is equality\n\n- Expected\n+ Received\n\n- 1\n+ 0\n\n \u276f Proxy.toBe scripts/mutation-evidence-probe.ts:84:27\n     82|       let result: unknown;\n     83|       try {\n     84|         result = original.apply(this, args);\n       |                           ^\n     85|       } catch (error) {\n     86|         record(name, error);\n \u276f scripts/check-slice-report.cli.test.ts:33:80\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/1]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  1 failed | 1 passed (2)\n   Start at  06:24:30\n   Duration  376ms (tests 46%, transform 37%, setup 16%, worker 1%, import 1%)\n"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 0.82,
+    "tail": "\n RUN  v5.0.2 /home/adam/projects/business/moin\n\n \u2713 |unit| scripts/check-slice-report.cli.test.ts (2 tests) 135ms\n\n Test Files  1 passed (1)\n      Tests  2 passed (2)\n   Start at  06:24:31\n   Duration  368ms (tests 44%, transform 38%, setup 16%, worker 1%, import 1%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/home/adam/projects/business/moin/.git/claude-evidence/mutation/20261018T042430Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}

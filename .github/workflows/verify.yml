@@ -218,6 +218,131 @@ jobs:
           path: playwright-report/
           retention-days: 7
 
+  # The real customer workflow in a real browser (M2C): sign in through Keycloak, a simulated call
+  # becomes a PostgreSQL task, the already-open Heute shows it by itself, Erledigt completes it,
+  # and it stays completed across reload and replay. Everything runs for real except the call: a
+  # fresh PostgreSQL test database as the NOBYPASSRLS application role, the compiled API, the
+  # standalone owner app and the Keycloak realm from the compose file. Separate from `e2e` (the
+  # smoke and accessibility suite, which needs none of these services). Mandatory: it is in the
+  # `verify` job's needs, and a missing, skipped or failing acceptance test fails it.
+  e2e-slice:
+    name: full-stack browser acceptance (postgres, keycloak)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      # Real PostgreSQL, matching the local stack. An embedded substitute runs as superuser and
+      # silently bypasses row-level security, so isolation tests against one would pass while
+      # proving nothing (INV-01).
+      postgres:
+        image: pgvector/pgvector@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
+        env:
+          POSTGRES_USER: moin_owner
+          POSTGRES_PASSWORD: ci-only-not-a-secret
+          POSTGRES_DB: moin
+          POSTGRES_INITDB_ARGS: '--encoding=UTF8 --locale=C'
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U moin_owner -d moin"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      TEST_DATABASE_ADMIN_URL: postgres://moin_owner:ci-only-not-a-secret@127.0.0.1:5432/postgres
+      TEST_DATABASE_MIGRATOR_URL: postgres://moin_migrator:ci-only-not-a-secret@127.0.0.1:5432/postgres
+      TEST_DATABASE_APP_URL: postgres://moin_app:ci-only-not-a-secret@127.0.0.1:5432/postgres
+      TEST_DATABASE_PROVISIONER_URL: postgres://moin_provisioner:ci-only-not-a-secret@127.0.0.1:5432/postgres
+      TEST_DATABASE_IDENTITY_URL: postgres://moin_identity:ci-only-not-a-secret@127.0.0.1:5432/postgres
+      TEST_OIDC_ISSUER_URL: http://127.0.0.1:8080/realms/moin-local
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+
+      # Both builds first, so a compile error fails in seconds, before any service starts. The API
+      # runs from `dist` (Node cannot run the server's decorators from source). The web build
+      # compiles in the loopback `/api/*` proxy the browser needs when the two run as separate
+      # local processes; the build refuses any non-loopback origin.
+      - run: pnpm --filter @moin/server build
+      - run: pnpm --filter @moin/web build
+        env:
+          OWNER_API_PROXY_ORIGIN: http://127.0.0.1:3101
+
+      # The service container runs no init scripts, so the roles the local stack creates are
+      # created here instead. The application role is NOBYPASSRLS exactly as in production.
+      - name: Create database roles
+        env:
+          PGPASSWORD: ci-only-not-a-secret
+        run: |
+          psql -h 127.0.0.1 -U moin_owner -d moin -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE moin_app WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
+          CREATE ROLE moin_migrator WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
+          CREATE ROLE moin_readonly WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
+          CREATE ROLE moin_provisioner WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
+          CREATE ROLE moin_dispatcher WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
+          CREATE ROLE moin_support_ro WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
+          CREATE ROLE moin_reporting WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
+          CREATE ROLE moin_identity WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
+          GRANT CONNECT ON DATABASE moin TO moin_app, moin_migrator, moin_readonly,
+            moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting, moin_identity;
+          GRANT CREATE ON DATABASE moin TO moin_migrator;
+          REVOKE TEMPORARY ON DATABASE moin FROM PUBLIC;
+          GRANT TEMPORARY ON DATABASE moin TO moin_app, moin_migrator, moin_readonly,
+            moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting;
+          REVOKE CONNECT, TEMPORARY ON DATABASE postgres FROM PUBLIC;
+          GRANT CONNECT, TEMPORARY ON DATABASE postgres TO moin_app, moin_migrator, moin_readonly,
+            moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting;
+          REVOKE CONNECT ON DATABASE template1 FROM PUBLIC;
+          REVOKE EXECUTE ON FUNCTION lo_create(oid), lo_creat(integer), lo_from_bytea(oid, bytea) FROM PUBLIC;
+          SQL
+
+      - name: Start the local OIDC provider
+        run: docker compose up -d --wait oidc
+
+      - name: Browser acceptance
+        run: pnpm exec playwright test -c playwright.slice.config.ts
+
+      # Runs even when the tests failed or were skipped: the job fails unless the report shows
+      # every required test ran and passed.
+      - name: Check the acceptance report
+        if: always()
+        # `bash` with pipefail: the checker's exit code must survive the pipe into `tee`.
+        shell: bash
+        run: |
+          touch test-results/live-today-timings.jsonl
+          node scripts/check-slice-report.ts test-results/slice-report.json test-results/live-today-timings.jsonl | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Service diagnostics
+        if: failure()
+        run: |
+          docker compose logs --no-color --tail 200 oidc || true
+          tail -n 200 test-results/e2e-slice-processes.log || true
+
+      # Reports, timings and process logs carry only synthetic fixtures (INV-16) and no caller
+      # content (INV-12 log allowlist); traces and screenshots are kept for failures only.
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-slice
+          path: |
+            test-results/
+            !test-results/**/*.zip
+          retention-days: 14
+          if-no-files-found: error
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-slice-traces
+          path: test-results/**/*.zip
+          retention-days: 7
+          if-no-files-found: ignore
+
   # ---------------------------------------------------------------------------------------
   # Slots reserved by P02.06.05. Each fails loudly if its script exists but does not pass, and
   # is skipped with a visible reason until the phase that creates it. A job that silently passes
@@ -316,7 +441,7 @@ jobs:
   verify:
     name: verify
     runs-on: ubuntu-24.04
-    needs: [static, unit, integration, build, e2e, rls-catalog, openapi-drift]
+    needs: [static, unit, integration, build, e2e, e2e-slice, rls-catalog, openapi-drift]
     if: always()
     steps:
       # One required check to configure in the ruleset, and it cannot pass while any job failed,

@@ -1,0 +1,479 @@
+{
+  "config": {
+    "argv": [
+      "/opt/hostedtoolcache/node/24.21.0/x64/bin/node",
+      "/home/runner/work/moin/moin/node_modules/@playwright/test/cli.js",
+      "test",
+      "-c",
+      "playwright.slice.config.ts"
+    ],
+    "configFile": "/home/runner/work/moin/moin/playwright.slice.config.ts",
+    "rootDir": "/home/runner/work/moin/moin/e2e/vertical-slice",
+    "failOnFlakyTests": false,
+    "forbidOnly": true,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "ci": {
+        "commitHref": "https://github.com/AyhamJo7/moin/commit/fbb003f8a7ed9f5924f6b57707dc8e3ab834715a",
+        "commitHash": "fbb003f8a7ed9f5924f6b57707dc8e3ab834715a",
+        "prHref": "https://github.com/AyhamJo7/moin/pull/238",
+        "prTitle": "ci: run the full-stack browser acceptance on every pull request",
+        "prBaseHash": "cbef5f56589912447ee1b98e6fafaf68082e6cb9",
+        "buildHref": "https://github.com/AyhamJo7/moin/actions/runs/39092001906"
+      },
+      "gitCommit": {
+        "shortHash": "fbb003f",
+        "hash": "fbb003f8a7ed9f5924f6b57707dc8e3ab834715a",
+        "subject": "Merge c90f1633adc334fc4dce727f3077273bb5b15ad1 into cbef5f56589912447ee1b98e6fafaf68082e6cb9",
+        "body": "Merge c90f1633adc334fc4dce727f3077273bb5b15ad1 into cbef5f56589912447ee1b98e6fafaf68082e6cb9\n",
+        "author": {
+          "name": "iQuantum",
+          "email": "140757050+AyhamJo7@users.noreply.github.com",
+          "time": 1792292348000
+        },
+        "committer": {
+          "name": "GitHub",
+          "email": "noreply@github.com",
+          "time": 1792292348000
+        },
+        "branch": "HEAD"
+      },
+      "gitDiff": "diff --git a/.github/workflows/verify.yml b/.github/workflows/verify.yml\nindex cd975a8..4348c44 100644\n--- a/.github/workflows/verify.yml\n+++ b/.github/workflows/verify.yml\n@@ -218,6 +218,131 @@ jobs:\n           path: playwright-report/\n           retention-days: 7\n \n+  # The real customer workflow in a real browser (M2C): sign in through Keycloak, a simulated call\n+  # becomes a PostgreSQL task, the already-open Heute shows it by itself, Erledigt completes it,\n+  # and it stays completed across reload and replay. Everything runs for real except the call: a\n+  # fresh PostgreSQL test database as the NOBYPASSRLS application role, the compiled API, the\n+  # standalone owner app and the Keycloak realm from the compose file. Separate from `e2e` (the\n+  # smoke and accessibility suite, which needs none of these services). Mandatory: it is in the\n+  # `verify` job's needs, and a missing, skipped or failing acceptance test fails it.\n+  e2e-slice:\n+    name: full-stack browser acceptance (postgres, keycloak)\n+    runs-on: ubuntu-24.04\n+    timeout-minutes: 20\n+    services:\n+      # Real PostgreSQL, matching the local stack. An embedded substitute runs as superuser and\n+      # silently bypasses row-level security, so isolation tests against one would pass while\n+      # proving nothing (INV-01).\n+      postgres:\n+        image: pgvector/pgvector@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f\n+        env:\n+          POSTGRES_USER: moin_owner\n+          POSTGRES_PASSWORD: ci-only-not-a-secret\n+          POSTGRES_DB: moin\n+          POSTGRES_INITDB_ARGS: '--encoding=UTF8 --locale=C'\n+        ports: ['5432:5432']\n+        options: >-\n+          --health-cmd \"pg_isready -U moin_owner -d moin\"\n+          --health-interval 2s\n+          --health-timeout 5s\n+          --health-retries 30\n+    env:\n+      TEST_DATABASE_ADMIN_URL: postgres://moin_owner:ci-only-not-a-secret@127.0.0.1:5432/postgres\n+      TEST_DATABASE_MIGRATOR_URL: postgres://moin_migrator:ci-only-not-a-secret@127.0.0.1:5432/postgres\n+      TEST_DATABASE_APP_URL: postgres://moin_app:ci-only-not-a-secret@127.0.0.1:5432/postgres\n+      TEST_DATABASE_PROVISIONER_URL: postgres://moin_provisioner:ci-only-not-a-secret@127.0.0.1:5432/postgres\n+      TEST_DATABASE_IDENTITY_URL: postgres://moin_identity:ci-only-not-a-secret@127.0.0.1:5432/postgres\n+      TEST_OIDC_ISSUER_URL: http://127.0.0.1:8080/realms/moin-local\n+    steps:\n+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n+        with:\n+          persist-credentials: false\n+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0\n+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0\n+        with:\n+          node-version-file: .nvmrc\n+          cache: pnpm\n+      - run: pnpm install --frozen-lockfile\n+      - run: pnpm exec playwright install --with-deps chromium\n+\n+      # Both builds first, so a compile error fails in seconds, before any service starts. The API\n+      # runs from `dist` (Node cannot run the server's decorators from source). The web build\n+      # compiles in the loopback `/api/*` proxy the browser needs when the two run as separate\n+      # local processes; the build refuses any non-loopback origin.\n+      - run: pnpm --filter @moin/server build\n+      - run: pnpm --filter @moin/web build\n+        env:\n+          OWNER_API_PROXY_ORIGIN: http://127.0.0.1:3101\n+\n+      # The service container runs no init scripts, so the roles the local stack creates are\n+      # created here instead. The application role is NOBYPASSRLS exactly as in production.\n+      - name: Create database roles\n+        env:\n+          PGPASSWORD: ci-only-not-a-secret\n+        run: |\n+          psql -h 127.0.0.1 -U moin_owner -d moin -v ON_ERROR_STOP=1 <<'SQL'\n+          CREATE ROLE moin_app WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;\n+          CREATE ROLE moin_migrator WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;\n+          CREATE ROLE moin_readonly WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;\n+          CREATE ROLE moin_provisioner WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;\n+          CREATE ROLE moin_dispatcher WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;\n+          CREATE ROLE moin_support_ro WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;\n+          CREATE ROLE moin_reporting WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;\n+          CREATE ROLE moin_identity WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;\n+          GRANT CONNECT ON DATABASE moin TO moin_app, moin_migrator, moin_readonly,\n+            moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting, moin_identity;\n+          GRANT CREATE ON DATABASE moin TO moin_migrator;\n+          REVOKE TEMPORARY ON DATABASE moin FROM PUBLIC;\n+          GRANT TEMPORARY ON DATABASE moin TO moin_app, moin_migrator, moin_readonly,\n+            moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting;\n+          REVOKE CONNECT, TEMPORARY ON DATABASE postgres FROM PUBLIC;\n+          GRANT CONNECT, TEMPORARY ON DATABASE postgres TO moin_app, moin_migrator, moin_readonly,\n+            moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting;\n+          REVOKE CONNECT ON DATABASE template1 FROM PUBLIC;\n+          REVOKE EXECUTE ON FUNCTION lo_create(oid), lo_creat(integer), lo_from_bytea(oid, bytea) FROM PUBLIC;\n+          SQL\n+\n+      - name: Start the local OIDC provider\n+        run: docker compose up -d --wait oidc\n+\n+      - name: Browser acceptance\n+        run: pnpm exec playwright test -c playwright.slice.config.ts\n+\n+      # Runs even when the tests failed or were skipped: the job fails unless the report shows\n+      # every required test ran and passed.\n+      - name: Check the acceptance report\n+        if: always()\n+        # `bash` with pipefail: the checker's exit code must survive the pipe into `tee`.\n+        shell: bash\n+        run: |\n+          touch test-results/live-today-timings.jsonl\n+          node scripts/check-slice-report.ts test-results/slice-report.json test-results/live-today-timings.jsonl | tee -a \"$GITHUB_STEP_SUMMARY\"\n+\n+      - name: Service diagnostics\n+        if: failure()\n+        run: |\n+          docker compose logs --no-color --tail 200 oidc || true\n+          tail -n 200 test-results/e2e-slice-processes.log || true\n+\n+      # Reports, timings and process logs carry only synthetic fixtures (INV-16) and no caller\n+      # content (INV-12 log allowlist); traces and screenshots are kept for failures only.\n+      - if: always()\n+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n+        with:\n+          name: e2e-slice\n+          path: |\n+            test-results/\n+            !test-results/**/*.zip\n+          retention-days: 14\n+          if-no-files-found: error\n+      - if: failure()\n+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n+        with:\n+          name: e2e-slice-traces\n+          path: test-results/**/*.zip\n+          retention-days: 7\n+          if-no-files-found: ignore\n+\n   # ---------------------------------------------------------------------------------------\n   # Slots reserved by P02.06.05. Each fails loudly if its script exists but does not pass, and\n   # is skipped with a visible reason until the phase that creates it. A job that silently passes\n@@ -316,7 +441,7 @@ jobs:\n   verify:\n     name: verify\n     runs-on: ubuntu-24.04\n-    needs: [static, unit, integration, build, e2e, rls-catalog, openapi-drift]\n+    needs: [static, unit, integration, build, e2e, e2e-slice, rls-catalog, openapi-drift]\n     if: always()\n     steps:\n       # One required check to configure in the ruleset, and it cannot pass while any job failed,\ndiff --git a/PLAN.md b/PLAN.md\nindex 378eeac..f9edb38 100644\n--- a/PLAN.md\n+++ b/PLAN.md\n@@ -149,7 +149,7 @@ Single source of status. Tier columns show the status of that phase's items for\n | P10 | AI orchestration, policy, templates, evals | IN_PROGRESS | — | IN_PROGRESS | — | — | EXT-12 / DG-14 (no EU model access); DG-01 not taken. Libraries built and unit-tested but imported by no runtime: gateway port + OpenAI EU adapter, structured outputs, resilience, redaction, version sets, policy engine, tool guard, template loader, rules, life-safety lexicon, injection guard, eval scorer, cost micros (LAUNCH: alternative-provider contract, rollout flags). `templates/` and `evals/` are empty; no metric is emitted; no QG-07 CI job (M0) | Wire the gateway, policy engine and tool guard into the call path; build the eval datasets |\n | P11 | Telephony platform | IN_PROGRESS | — | IN_PROGRESS | — | — | EXT-10 NOT_STARTED (an unverified 2026-10-15 note reports a suspended Twilio account) / EXT-11; DG-01 not taken. Wired: signed inbound webhook → number-to-tenant resolution → disclosure TwiML → WSS session that runs the P04 measurement script; tokens and CallSid dedup in memory. Not wired: call machine, finaliser, fallback layers, degraded capture, caps, metering, reconciliation, drain, absence alarm (unit-tested helpers; LAUNCH: transfer validation) (M0) | Vertical slice: call machine + finaliser + capture on the relay path |\n | P12 | Reception conversation flows & voice eval | IN_PROGRESS | — | — | — | — | EXT-20, EXT-12, EXT-10. Turn helpers (greeting, intent routing, FAQ answer, callback/lead/appointment capture, escalation, silence/barge-in, outcome writer, summary draft) unit-tested and imported by no runtime; PROGRESS claims for P12.01/P12.02 cited the wrong PLAN items and P12.07.04/P12.13.05 do not exist — corrected (M0) | Vertical slice: deterministic capture end to end on the simulator |\n-| P13 | Owner web app | IN_PROGRESS | — | NOT_STARTED | — | — | DG-10 open. Heute is a server-rendered page reading the session tenant's live tasks from `GET /api/today` (shared contract; signed-out, loading, error and empty states); an open, visible Heute polls that read every 15 s and re-renders on change (M2B, EV-P13-016: measured 15.4 s arrival, local browser test only; no SSE, no stale indicator, no fallback E2E, so P13.02.04 and P13.10 stay open). A callback card has **Erledigt** (M2A, EV-P13-015): `POST /api/tasks/:id/complete` with the task version walks the existing task machine as the signed-in member (owner/admin any task, staff own or unassigned; 409 stale, 403 not allowed, 404 other tenant; a lost answer is read back, never reported as a failure); no other card action, optimistic UI or completed-tasks view exists. No other owner view exists; the service worker is still unregistered; of the `apps/web/lib` helpers only `today` and `i18n` are now used (M1 vertical slice, 2026-10-17) | Heute: P13.02.04 in CI and summary counts (P13.02.02); SSE and stale indicator (P13.10); then the remaining PILOT views |\n+| P13 | Owner web app | IN_PROGRESS | — | NOT_STARTED | — | — | DG-10 open. Heute is a server-rendered page reading the session tenant's live tasks from `GET /api/today` (shared contract; signed-out, loading, error and empty states); an open, visible Heute polls that read every 15 s and re-renders on change (M2B, EV-P13-016: measured 15.4 s arrival, the vertical-slice browser suite now also runs in GitHub CI on real PostgreSQL and Keycloak, 10 of 10, 15.9 s arrival, EV-P13-017; no SSE, no stale indicator, no fallback E2E, so P13.10 stays open). A callback card has **Erledigt** (M2A, EV-P13-015): `POST /api/tasks/:id/complete` with the task version walks the existing task machine as the signed-in member (owner/admin any task, staff own or unassigned; 409 stale, 403 not allowed, 404 other tenant; a lost answer is read back, never reported as a failure); no other card action, optimistic UI or completed-tasks view exists. No other owner view exists; the service worker is still unregistered; of the `apps/web/lib` helpers only `today` and `i18n` are now used (M1 vertical slice, 2026-10-17) | Heute: summary counts (P13.02.02); SSE and stale indicator (P13.10); then the remaining PILOT views |\n | P14 | Notifications & escalation | IN_PROGRESS | — | NOT_STARTED | — | — | EXT-09 SES (needs the DG-00 domain), DG-12. Tables and services for notifications, escalation and deliveries (0071–0073, real-Postgres tests); no sender (email/SMS/push), no timer wiring; the canary is a pure evaluator (M0) | Senders behind ports (SMTP locally, SES/SMS late-bound) |\n | P15 | Operations baseline | IN_PROGRESS | — | NOT_STARTED | — | — | EXT-09. Runbooks (`docs/runbooks/`) and pure helpers (PII log scanner, metric names, alarm/canary/incident/KPI/cost shapes); no telemetry pipeline, no metric emission, no deployed alarm, dashboard or canary (M0) | Instrumentation in code; alarms and dashboards in Terraform |\n | P16 | Privacy, DSAR, AI-Act controls | IN_PROGRESS | — | IN_PROGRESS | — | — | EXT-02/04, DG-13. Pure decision/state helpers (retention, overrides, rectification, erasure, deletion ledger, subprocessor register, disclosure records, scope guard, turn-log policy; LAUNCH: self-service export, termination state machine); no engine, job, persistence wiring or E2E (M0) | Retention engine and export/erasure end to end on real tables |\n@@ -3496,7 +3496,7 @@ App shell and auth flows · Today · interaction cards and actions · Inbox · C\n   - [ ] P13.02.01 Sections: Dringend · Rückrufe · Neue Anfragen · Termine/Reservierungen zu bestätigen · Offene Kundenfragen (Documents hidden until P34; T-08)\n   - [ ] P13.02.02 \"Automatisch erledigt\" summary counts (calls answered, FAQs resolved, requests captured, enquiries routed)\n   - [x] P13.02.03 Empty states that reassure (\"Alles erledigt\"), not blank — EV-P13-014\n-  - [ ] P13.02.04 E2E test: a simulated call appears in the right section within 60 s (LG-P13)\n+  - [x] P13.02.04 E2E test: a simulated call appears in the right section within 60 s (LG-P13) — EV-P13-017\n - [ ] **P13.03 Interaction cards and actions** `[G:PILOT]`\n   - [ ] P13.03.01 Card layout: person, time + channel, reason, captured facts (template labels), result, next action (L522–563)\n   - [ ] P13.03.02 Actions: [Anrufen] (`tel:`), [Zuweisen] (LAUNCH with P22), [Erledigt], [Später], [Notiz]; optimistic UI with idempotency keys and 409 handling\ndiff --git a/PROGRESS.md b/PROGRESS.md\nindex 073635b..e526538 100644\n--- a/PROGRESS.md\n+++ b/PROGRESS.md\n@@ -1,11 +1,11 @@\n ---\n-mission: M2B open Heute updates by itself (M2A #233 merged at 7caad73)\n+mission: M2C full-stack browser acceptance in CI (M2B #237 merged at cbef5f5)\n status: active\n mode: interactive\n phase: M1 (cross-phase slice: P07, P12, P13)\n tier: PILOT\n plan: docs/development/m1-vertical-slice.md\n-next: independent review of the M2B draft PR; P13.03.02 remaining card actions not started\n+next: independent review of the M2C draft PR; P13.03.02 remaining card actions not started\n updated: 2026-10-17\n ---\n \n@@ -1582,3 +1582,8 @@ M2B (2026-10-17, branch `feat/p13-02-heute-live-updates` from 7caad73): an open\n `GET /api/today` every 15 s while visible and re-renders on change; no SSE exists server-side. Arrival\n measured 15.4 s in a local browser test (not in CI). P13.02.04 and P13.10 stay open; nothing is\n VERIFIED. Evidence: EV-P13-016.\n+\n+M2C (2026-10-18, branch `ci/p02-05-fullstack-browser-acceptance` from cbef5f5): mandatory CI job\n+`e2e-slice` runs the vertical-slice browser suite on real PostgreSQL and Keycloak (10 of 10, 15.9 s\n+arrival, run 39090443360); removing the live wiring fails it (run 39090964507). P13.02.04 ticked\n+with EV-P13-017; P13.10 stays open; nothing is VERIFIED. Evidence: EV-P13-017.\ndiff --git a/docs/development/m1-vertical-slice.md b/docs/development/m1-vertical-slice.md\nindex ec76908..1b61473 100644\n--- a/docs/development/m1-vertical-slice.md\n+++ b/docs/development/m1-vertical-slice.md\n@@ -110,19 +110,28 @@ helpers for P13.10), and a poll adds no channel that could be subscribed to with\n Code: `apps/web/lib/live-today.ts`, `apps/web/app/live-today.tsx`.\n \n - **Guarantee.** Healthy connection, visible tab: a committed task or completion is on screen\n-  within about one interval plus a request and a render (measured 15.4 s, limit 60 s).\n+  within about one interval plus a request and a render (measured 15.0 to 15.4 s in the local browser test, from the task row's `created_at`, which is stamped at transaction start, so it slightly overstates; limit 60 s).\n - **Not promised.** A hidden or suspended tab does not poll; it polls at once when shown again (or\n   when the browser reports the network is back). Nothing is promised while disconnected.\n - **Idle.** Every guarded read slides the session's idle expiry, so a tab with no input (pointer,\n   key, touch, scroll) for 30 min stops polling and resumes on the next input; an unattended screen\n   goes stale rather than keeping a session alive (the stale indicator is P13.10).\n-- **Failures.** A failed poll keeps the list on screen and backs off (15 s doubling to 120 s); polls\n+- **Failures.** A failed poll keeps the list on screen and backs off (the next poll waits 30 s after one failure, 60 s after two, 120 s from three on; ±10 %); polls\n   never overlap; a 401 hands over to the server render (signed-out page, no task data; the loop ends when that page unmounts it);\n   the page's error state is left by the next good poll.\n - **Budget.** About 4 reads a minute per visible tab against the account's 50 a minute.\n - **Open.** The poller has no gate yet for P13.10 (SSE plus polling only as fallback) and exposes no\n   last-success signal for the stale indicator (P13.10.02). SSE with `Last-Event-ID`, the stale-data indicator and the polling-fallback E2E\n-  (P13.10), summary counts (P13.02.02). The browser test is local-only (needs Keycloak), not in CI.\n+  (P13.10), summary counts (P13.02.02). The browser suite also runs in CI (`e2e-slice` in `verify.yml`).\n+\n+## In CI\n+\n+The `e2e-slice` job in `.github/workflows/verify.yml` runs this suite on every pull request: a\n+PostgreSQL service container with the application roles, Keycloak from the compose file, the\n+compiled API, the standalone owner app (built with the loopback API proxy) and Chromium. It is in\n+the `verify` check's `needs`. `scripts/check-slice-report.ts` fails the job unless all ten tests ran\n+and passed, none skipped. Add a test to the suite and its title phrase to that script. The\n+`e2e-slice` artifact holds the report, the commit-to-render timings and the process log. To run it locally, see below.\n \n ## Run it locally\n \ndiff --git a/docs/evidence/INDEX.md b/docs/evidence/INDEX.md\nindex 3284808..ca63d38 100644\n--- a/docs/evidence/INDEX.md\n+++ b/docs/evidence/INDEX.md\n@@ -391,3 +391,4 @@ Appended by the M0 truth reconciliation; rows above are unchanged. Detail:\n | EV-P12-013 | P12.12.03 | 2026-10-17 | `5602fedb48fd` | J3: task rows and conversation locks are taken before the tenant audit head in the callback capture and the orphan sweep; no 40P01 against owner task writes | [EV-P12-013-task-audit-lock-order.md](P12/EV-P12-013-task-audit-lock-order.md) |\n | EV-P13-015 | P13.03.02 | 2026-10-17 | `ea78006c542a` | M2A: the owner completes a callback with Erledigt on Heute; the completion is versioned, audited as the owner's act and survives reload, API restart, concurrency and a replay of the original call | [EV-P13-015-owner-completes-callback.md](P13/EV-P13-015-owner-completes-callback.md) |\n | EV-P13-016 | P13.02.04 | 2026-10-17 | `7d967ad5e717` | M2B: an open Heute polls the authenticated Today read and re-renders on change; a new callback appears without reload (14.97 s measured, local browser test), a completion reaches another session, outage and revoked-session behaviour pinned | [EV-P13-016-live-heute-polling.md](P13/EV-P13-016-live-heute-polling.md) |\n+| EV-P13-017 | P13.02.04 | 2026-10-18 | `cc07c07ca793` | M2C: the sign-in, simulated call, live Heute, Erledigt and replay browser acceptance runs in GitHub CI against real PostgreSQL and Keycloak (10 of 10, 15.9 s arrival); removing the live-update wiring fails the job | [EV-P13-017-fullstack-browser-ci.md](P13/EV-P13-017-fullstack-browser-ci.md) |\ndiff --git a/docs/evidence/P13/EV-P13-016-live-heute-polling.md b/docs/evidence/P13/EV-P13-016-live-heute-polling.md\nindex a6baad0..9812db5 100644\n--- a/docs/evidence/P13/EV-P13-016-live-heute-polling.md\n+++ b/docs/evidence/P13/EV-P13-016-live-heute-polling.md\n@@ -40,7 +40,7 @@ fingerprint is compared in memory only. Inactivity: every guarded read slides th\n expiry, so a tab without input for 30 min stops polling (found in review, fixed in `7d967ad`).\n \n **Failure and recovery.** A failed poll (network, 429, 5xx, bad body, throw) keeps the list and backs\n-off 15 s → 120 s; polls never overlap; a hidden tab does not poll and polls at once when shown or\n+off (30 s after one failure, 60 s after two, 120 s from three on); polls never overlap; a hidden tab does not poll and polls at once when shown or\n when the browser reports `online`; a 401 triggers a server render (signed-out page, no task data)\n and is retried with backoff if the page stays. Reconciliation reads the current state, not missed\n events. Nothing is promised for a hidden/suspended tab or while disconnected.\n@@ -56,7 +56,11 @@ Task row `created_at` (Postgres) to the card visible in Chromium, same host cloc\n | Completion in one session reaching a second, independently signed-in session | 15.36 s (first run 15.36 s) |\n | Network returns after an outage (`online` event) | 0.09 s |\n \n-The limit is 60 s; the expected worst case is one interval plus a request and a render (about 17 s).\n+The limit is 60 s. Samples: two local runs of each scenario, one host, so Postgres and the browser\n+share a clock; `created_at` is stamped at transaction start, so the figures slightly overstate. The\n+healthy worst case is one jittered interval (up to 16.5 s) plus a request and a render, and up to\n+8 s more if the poll itself is slow (its timeout). The two rows' \"first run\" values are the earlier\n+run of the same suite, not a separate measurement method.\n \n ## Tests and what each proves\n \ndiff --git a/docs/evidence/P13/EV-P13-017-fullstack-browser-ci.md b/docs/evidence/P13/EV-P13-017-fullstack-browser-ci.md\nnew file mode 100644\nindex 0000000..112e714\n--- /dev/null\n+++ b/docs/evidence/P13/EV-P13-017-fullstack-browser-ci.md\n@@ -0,0 +1,107 @@\n+# EV-P13-017: M2C: the sign-in, simulated call, live Heute, Erledigt and replay browser acceptance runs in GitHub CI against real PostgreSQL and Keycloak (10 of 10, 15.9 s arrival); removing the live-update wiring fails the job\n+\n+| Field | Value |\n+|---|---|\n+| Evidence ID | EV-P13-017 |\n+| Item | P13.02.04 |\n+| Date (UTC) | 2026-10-18 02:58 UTC |\n+| Commit | `cc07c07ca7939f8c7790a719e0fd8c009261ff4a` |\n+| Environment | local |\n+| Command / procedure | `.claude/bin/gates.py full`: `python3 .claude/bin/control_plane_check.py && python3 -m unittest discover -s .claude/tests -t .claude/tests` → pass (exit 0, 21.4 s); `uvx ruff@0.15.12 format --check --config .claude/ruff.toml .claude && uvx ruff@0.15.12 check --config .claude/ruff.toml .claude && uvx --from mypy==2.3.1 mypy --config-file .claude/mypy.ini` → pass (exit 0, 0.2 s); `node scripts/check-conventional-commit.ts --self-test && node scripts/check-no-ai-mentions.ts --self-test` → pass (exit 0, 0.1 s); `node scripts/check-adr-coverage.ts && node scripts/check-domain-coverage.ts && node scripts/check-dfd-coverage.ts && node scripts/check-threat-model-refs.ts && node scripts/check-data-classification.ts && node scripts/check-subprocessors.ts && node scripts/check-brand-strings.ts` → pass (exit 0, 1.4 s); `pnpm exec prettier --check .` → pass (exit 0, 5.8 s); `pnpm lint` → pass (exit 0, 3.3 s); `pnpm exec depcruise apps packages scripts --config .dependency-cruiser.cjs` → pass (exit 0, 1.0 s); `pnpm typecheck` → pass (exit 0, 1.1 s); `pnpm test` → pass (exit 0, 6.0 s); `pnpm test:integration` → pass (exit 0, 28.2 s); `node scripts/check-migrations.ts` → pass (exit 0, 0.1 s); `pnpm turbo run build` → pass (exit 0, 0.3 s); `node scripts/check-licences.ts` → pass (exit 0, 0.4 s); `gitleaks git --redact --no-banner --config .gitleaks.toml .` → pass (exit 0, 1.1 s) |\n+| Result | PASS |\n+| CI run / artifact | pending |\n+| Reviewer | pending |\n+\n+Sensitive material is stored by reference only (PLAN.md evidence rules).\n+\n+## What this record shows\n+\n+Mission M2C, branch `ci/p02-05-fullstack-browser-acceptance` from `main` at `cbef5f5` (M2B #237\n+squash-merged; #234, #235, #236 also merged, so no open PR overlapped). It adds one mandatory job,\n+`e2e-slice`, to `.github/workflows/verify.yml` and puts it in the `verify` aggregate's `needs`, so\n+the existing required `verify` check covers it with no ruleset change. No application code changed.\n+\n+**Before.** The PR `e2e` job ran only `apps/web/e2e/smoke.spec.ts` (Chromium smoke and axe, no API,\n+no database, no sign-in). The vertical-slice suite (`e2e/vertical-slice/today-callback.spec.ts`,\n+`playwright.slice.config.ts`) needed Keycloak and PostgreSQL and ran only on a developer machine.\n+\n+**What the job runs.** PostgreSQL (the pinned pgvector image as a service container), the\n+`NOBYPASSRLS` application roles (the same role SQL as the `integration` and `rls-catalog` jobs),\n+Keycloak from the compose file with the committed realm, the compiled API (`dist/main-api.js`), and\n+the owner app's standalone server built with the loopback `/api/*` proxy. The spec builds a migrated\n+template database if none exists, creates a fresh test database from it, stages two tenants, the\n+owner's `users` row and the number routes through the fixture role, signs in through Keycloak's own\n+login form, and drives Chromium. Only the call itself is simulated, through the bearer-protected\n+test entry point. All credentials are the committed `ci-only-not-a-secret` placeholders and the\n+Keycloak fixture realm; no GitHub secret is used (INV-15, INV-16).\n+\n+**It cannot pass by testing nothing.** `scripts/check-slice-report.ts` reads Playwright's JSON\n+report and fails the step unless every one of the ten required test titles ran and passed, with no\n+skipped, flaky or failed test (retries are off). The step runs `if: always()` under `shell: bash`\n+(pipefail), so the checker's exit code survives the pipe into the job summary; both reviews found\n+that the first version lost it, and it was fixed (`bash -e` exits 0 and `bash -eo pipefail` exits 1\n+for the same bad report, shown locally). The job has no `continue-on-error`.\n+\n+## Acceptance matrix (all in a real browser, real PostgreSQL, real Keycloak)\n+\n+| Step | Test |\n+| --- | --- |\n+| Sign in through Keycloak; Heute; call; task persisted; callback card with caller and time; other tenant's task absent; axe; API restart | `a simulated callback call reaches the owner on Heute and stays there` |\n+| Erledigt persists as done/4 with three audit events by the owner; stays done after reload and an API restart; replay reopens nothing | `the owner completes a callback with Erledigt and it stays completed` |\n+| Already-open Heute shows a new callback by itself, once, without reload, focus kept, 60 s limit, commit-to-render measured | `a callback committed while Heute is open appears by itself, once, without a reload` |\n+| Completion reaches a second independently signed-in session; a call replay does not reopen it | `a completion reaches another open session, and a replay of the call does not reopen it` |\n+| Outage keeps the list, no error banner; reconciles when the network returns | `an outage leaves the list as it is, and the page reconciles when the network returns` |\n+| Revoked session: signed-out page, no task data | `a revoked session shows the signed-out page and no task data` |\n+| Stale view conflict, lost answer reconciled or unknown, request never sent, double click once | the four remaining Erledigt tests |\n+\n+**Not claimed.** There is one Keycloak fixture owner, so no browser session of a second tenant is\n+authenticated: cross-tenant protection is shown only by the other tenant's task never appearing for\n+the owner. Cross-tenant API behaviour stays in the integration suite.\n+\n+## CI evidence (GitHub Actions, run 39090443360, commit `cda55df`)\n+\n+Job `full-stack browser acceptance (postgres, keycloak)`: success, 4 m 58 s. Playwright: `10 passed\n+(3.3m)`, project `chromium`, file `e2e/vertical-slice/today-callback.spec.ts`, tests 1–10 listed in\n+the log. Report check: `10 passed, 0 failed, 0 skipped`. Artifact `e2e-slice` (117 KB, 14 days)\n+holds the JSON report, timings and process log. Commit-to-render (task row `created_at` to visible\n+card, one shared runner clock):\n+\n+| Scenario | CI | Local (M2B) |\n+| --- | --- | --- |\n+| New callback on an already-open Heute | 15.93 s | 14.97 s |\n+| Completion reaching another session | 15.86 s | 15.36 s |\n+| Network returns | 0.09 s | 0.09 s |\n+\n+The same job is green on `8b99976` (run 39091402625) after the revert described next.\n+\n+## Regression sensitivity\n+\n+- **In CI.** A temporary commit (`6614038`, reverted in `8b99976`; net diff to the green commit\n+  empty) removed the `LiveToday` mount from `apps/web/app/page.tsx`. Run 39090964507: the job\n+  failed; tests 7–10 (the live-update tests) failed on `expect(locator).toBeVisible()` after the\n+  60 s arrival wait while tests 1–6 passed, so the failure is the missing feature, not a setup\n+  error. The required `verify` check failed with it.\n+- **Official mutation check.** `mutation_check.py --fix-ref cbef5f5 --fix-paths apps/web/app/page.tsx`\n+  with the arrival test: KILLED (without the wiring FAIL in 75 s by arrival timeout, with it PASS\n+  in 46 s).\n+\n+## Reviews (QG-09)\n+\n+Security: no Critical/High. Medium M1 (checker exit code lost in the pipe) fixed; M2 (traces and\n+screenshots are retained and the \"synthetic only\" assumption is not enforced) accepted: every\n+credential and token in the run is a committed or per-run random fixture, and traces go to a\n+separate 7-day artifact on failure only. Low items (Postgres port binding as in the other jobs,\n+`--with-deps` as in the `e2e` job, title substring matching) accepted. Architecture: High H1 is the\n+same pipe bug, fixed; M2 (only six of ten tests required) fixed by requiring all ten; timeout\n+lowered to 20 minutes. Accepted and recorded: the role SQL now exists in three jobs (a shared file\n+would touch two unrelated required jobs); the 60 s arrival limit is a product claim and is not\n+loosened for CI (a failure there is a finding, not noise).\n+\n+## Limits\n+\n+The job costs about 5 minutes a pull request and runs in parallel with the others. Ports 3000,\n+3101 and 8080 are fixed, which is safe on a fresh hosted runner. The suite has not run on Firefox,\n+WebKit or phone viewports. Deployment compatibility stays a separate gate; the M2A warning stands\n+(the strict Today schema needs the API and the owner app deployed together). One unit-test gate\n+failed once during this mission and did not reproduce in two further full-gate runs and a\n+standalone run; its cause is UNVERIFIED.\ndiff --git a/playwright.slice.config.ts b/playwright.slice.config.ts\nindex 5c0a8f9..c271978 100644\n--- a/playwright.slice.config.ts\n+++ b/playwright.slice.config.ts\n@@ -8,7 +8,8 @@ import { defineConfig, devices } from '@playwright/test';\n  * web build with the local API proxy (`OWNER_API_PROXY_ORIGIN=http://127.0.0.1:3101 pnpm --filter\n  * @moin/web build`). The spec starts its own API process and owner-app server against a fresh\n  * test database, so it never touches the development database. The pull-request e2e job has none\n- * of those services yet; until it does, this suite runs locally (docs/development/m1-vertical-slice.md).\n+ * of those services, so this suite has its own CI job, `e2e-slice` in `verify.yml`; locally see\n+ * docs/development/m1-vertical-slice.md.\n  *\n  * One worker, no retries: the spec restarts the API mid-test and owns fixed ports.\n  */\n@@ -17,7 +18,12 @@ export default defineConfig({\n   forbidOnly: true,\n   retries: 0,\n   workers: 1,\n-  reporter: 'list',\n+  // In CI the JSON report lets `scripts/check-slice-report.ts` fail the job unless every required\n+  // acceptance test ran and passed (a skipped or missing test must not read as green).\n+  reporter:\n+    process.env['CI'] === undefined\n+      ? 'list'\n+      : [['list'], ['json', { outputFile: 'test-results/slice-report.json' }]],\n   timeout: 120_000,\n   expect: { timeout: 10_000 },\n   use: {\ndiff --git a/scripts/check-slice-report.test.ts b/scripts/check-slice-report.test.ts\nnew file mode 100644\nindex 0000000..6337d3f\n--- /dev/null\n+++ b/scripts/check-slice-report.test.ts\n@@ -0,0 +1,41 @@\n+import { describe, expect, it } from 'vitest';\n+import { REQUIRED_TITLES, problems, type PlaywrightReport } from './check-slice-report.ts';\n+\n+function report(\n+  titles: readonly string[],\n+  overrides: Partial<PlaywrightReport['stats']> = {},\n+  failing: readonly string[] = [],\n+): PlaywrightReport {\n+  return {\n+    stats: { expected: titles.length, unexpected: 0, flaky: 0, skipped: 0, ...overrides },\n+    suites: [\n+      { suites: [{ specs: titles.map((title) => ({ title, ok: !failing.includes(title) })) }] },\n+    ],\n+  };\n+}\n+\n+const ALL = REQUIRED_TITLES.map((phrase) => `a test where ${phrase}`);\n+\n+describe('the vertical-slice report check', () => {\n+  it('accepts a whole, green run', () => {\n+    expect(problems(report(ALL))).toStrictEqual([]);\n+  });\n+\n+  it('rejects a run that executed nothing', () => {\n+    expect(problems(report([], { expected: 0 })).length).toBeGreaterThan(0);\n+  });\n+\n+  it('rejects a missing required test even when everything that ran passed', () => {\n+    const found = problems(report(ALL.slice(1), { expected: ALL.length - 1 }));\n+    expect(found).toContain(`required test missing: \"${REQUIRED_TITLES[0] ?? ''}\"`);\n+  });\n+\n+  it('rejects skipped, flaky and failed tests', () => {\n+    expect(problems(report(ALL, { skipped: 1 }))).toContain('1 test(s) were skipped');\n+    expect(problems(report(ALL, { flaky: 1 }))).toContain('1 test(s) were flaky (retries are off)');\n+    const failing = ALL[2] ?? '';\n+    const found = problems(report(ALL, { unexpected: 1 }, [failing]));\n+    expect(found).toContain('1 test(s) failed');\n+    expect(found).toContain(`required test did not pass: \"${failing}\"`);\n+  });\n+});\ndiff --git a/scripts/check-slice-report.ts b/scripts/check-slice-report.ts\nnew file mode 100644\nindex 0000000..ea37b84\n--- /dev/null\n+++ b/scripts/check-slice-report.ts\n@@ -0,0 +1,108 @@\n+/**\n+ * Vertical-slice browser report check (M2C).\n+ *\n+ * The full-stack browser job must not pass by running nothing. Playwright exits 0 when every\n+ * test that ran passed, and a skipped test, a renamed test or a deleted file would still leave a\n+ * green job. This reads the JSON report of that run and fails unless every required acceptance\n+ * test ran and passed, with nothing skipped, flaky or unexpected.\n+ *\n+ *   node scripts/check-slice-report.ts <playwright-report.json> [live-today-timings.jsonl]\n+ *\n+ * Prints a Markdown summary (for the job summary) on stdout; problems go to stderr.\n+ */\n+\n+import { readFileSync } from 'node:fs';\n+\n+/**\n+ * Each entry is a phrase one required acceptance test's title contains: every test of the suite.\n+ * Adding a test to the suite means adding its phrase here, so none can vanish unnoticed.\n+ */\n+export const REQUIRED_TITLES: readonly string[] = [\n+  'a stale view gets a truthful conflict message',\n+  'a response lost after the commit is reconciled',\n+  'a lost response that cannot be read back',\n+  'a request that never reached the server',\n+  'reaches the owner on Heute and stays there',\n+  'completes a callback with Erledigt and it stays completed',\n+  'appears by itself, once, without a reload',\n+  'reaches another open session',\n+  'an outage leaves the list as it is',\n+  'a revoked session shows the signed-out page',\n+];\n+\n+interface Spec {\n+  title: string;\n+  ok: boolean;\n+}\n+\n+interface Suite {\n+  specs?: Spec[];\n+  suites?: Suite[];\n+}\n+\n+export interface PlaywrightReport {\n+  stats: { expected: number; unexpected: number; flaky: number; skipped: number };\n+  suites: Suite[];\n+}\n+\n+function specsOf(suites: readonly Suite[]): Spec[] {\n+  return suites.flatMap((suite) => [...(suite.specs ?? []), ...specsOf(suite.suites ?? [])]);\n+}\n+\n+/** What is wrong with a report; empty when the acceptance run is whole and green. */\n+export function problems(report: PlaywrightReport): string[] {\n+  const found: string[] = [];\n+  const { expected, unexpected, flaky, skipped } = report.stats;\n+  if (unexpected > 0) found.push(`${String(unexpected)} test(s) failed`);\n+  if (flaky > 0) found.push(`${String(flaky)} test(s) were flaky (retries are off)`);\n+  if (skipped > 0) found.push(`${String(skipped)} test(s) were skipped`);\n+  const specs = specsOf(report.suites);\n+  if (expected < REQUIRED_TITLES.length) {\n+    found.push(\n+      `only ${String(expected)} passing test(s), at least ${String(REQUIRED_TITLES.length)} required`,\n+    );\n+  }\n+  for (const phrase of REQUIRED_TITLES) {\n+    const match = specs.find((spec) => spec.title.includes(phrase));\n+    if (match === undefined) found.push(`required test missing: \"${phrase}\"`);\n+    else if (!match.ok) found.push(`required test did not pass: \"${match.title}\"`);\n+  }\n+  return found;\n+}\n+\n+function summary(report: PlaywrightReport, timings: string): string {\n+  const rows = specsOf(report.suites).map(\n+    (spec) => `| ${spec.ok ? 'pass' : 'FAIL'} | ${spec.title} |`,\n+  );\n+  return [\n+    '### Full-stack browser acceptance',\n+    '',\n+    `${String(report.stats.expected)} passed, ${String(report.stats.unexpected)} failed, ${String(report.stats.skipped)} skipped.`,\n+    '',\n+    '| Result | Test |',\n+    '| --- | --- |',\n+    ...rows,\n+    '',\n+    '#### Commit-to-render timings (task row `created_at` to visible card)',\n+    '',\n+    '```',\n+    timings.trim(),\n+    '```',\n+  ].join('\\n');\n+}\n+\n+function main(): number {\n+  const [reportPath, timingsPath] = process.argv.slice(2);\n+  if (reportPath === undefined) {\n+    console.error('usage: check-slice-report.ts <playwright-report.json> [timings.jsonl]');\n+    return 2;\n+  }\n+  const report = JSON.parse(readFileSync(reportPath, 'utf8')) as PlaywrightReport;\n+  const timings = timingsPath === undefined ? '' : readFileSync(timingsPath, 'utf8');\n+  console.log(summary(report, timings));\n+  const found = problems(report);\n+  for (const line of found) console.error(`slice report: ${line}`);\n+  return found.length === 0 ? 0 : 1;\n+}\n+\n+if (process.argv[1]?.endsWith('check-slice-report.ts') === true) process.exitCode = main();",
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/home/runner/work/moin/moin/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "ci": {
+            "commitHref": "https://github.com/AyhamJo7/moin/commit/fbb003f8a7ed9f5924f6b57707dc8e3ab834715a",
+            "commitHash": "fbb003f8a7ed9f5924f6b57707dc8e3ab834715a",
+            "prHref": "https://github.com/AyhamJo7/moin/pull/238",
+            "prTitle": "ci: run the full-stack browser acceptance on every pull request",
+            "prBaseHash": "cbef5f56589912447ee1b98e6fafaf68082e6cb9",
+            "buildHref": "https://github.com/AyhamJo7/moin/actions/runs/39092001906"
+          },
+          "gitCommit": {
+            "shortHash": "fbb003f",
+            "hash": "fbb003f8a7ed9f5924f6b57707dc8e3ab834715a",
+            "subject": "Merge c90f1633adc334fc4dce727f3077273bb5b15ad1 into cbef5f56589912447ee1b98e6fafaf68082e6cb9",
+            "body": "Merge c90f1633adc334fc4dce727f3077273bb5b15ad1 into cbef5f56589912447ee1b98e6fafaf68082e6cb9\n",
+            "author": {
+              "name": "iQuantum",
+              "email": "140757050+AyhamJo7@users.noreply.github.com",
+              "time": 1792292348000
+            },
+            "committer": {
+              "name": "GitHub",
+              "email": "noreply@github.com",
+              "time": 1792292348000
+            },
+            "branch": "HEAD"
+          },
+          "gitDiff": "diff --git a/.github/workflows/verify.yml b/.github/workflows/verify.yml\nindex cd975a8..4348c44 100644\n--- a/.github/workflows/verify.yml\n+++ b/.github/workflows/verify.yml\n@@ -218,6 +218,131 @@ jobs:\n           path: playwright-report/\n           retention-days: 7\n \n+  # The real customer workflow in a real browser (M2C): sign in through Keycloak, a simulated call\n+  # becomes a PostgreSQL task, the already-open Heute shows it by itself, Erledigt completes it,\n+  # and it stays completed across reload and replay. Everything runs for real except the call: a\n+  # fresh PostgreSQL test database as the NOBYPASSRLS application role, the compiled API, the\n+  # standalone owner app and the Keycloak realm from the compose file. Separate from `e2e` (the\n+  # smoke and accessibility suite, which needs none of these services). Mandatory: it is in the\n+  # `verify` job's needs, and a missing, skipped or failing acceptance test fails it.\n+  e2e-slice:\n+    name: full-stack browser acceptance (postgres, keycloak)\n+    runs-on: ubuntu-24.04\n+    timeout-minutes: 20\n+    services:\n+      # Real PostgreSQL, matching the local stack. An embedded substitute runs as superuser and\n+      # silently bypasses row-level security, so isolation tests against one would pass while\n+      # proving nothing (INV-01).\n+      postgres:\n+        image: pgvector/pgvector@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f\n+        env:\n+          POSTGRES_USER: moin_owner\n+          POSTGRES_PASSWORD: ci-only-not-a-secret\n+          POSTGRES_DB: moin\n+          POSTGRES_INITDB_ARGS: '--encoding=UTF8 --locale=C'\n+        ports: ['5432:5432']\n+        options: >-\n+          --health-cmd \"pg_isready -U moin_owner -d moin\"\n+          --health-interval 2s\n+          --health-timeout 5s\n+          --health-retries 30\n+    env:\n+      TEST_DATABASE_ADMIN_URL: postgres://moin_owner:ci-only-not-a-secret@127.0.0.1:5432/postgres\n+      TEST_DATABASE_MIGRATOR_URL: postgres://moin_migrator:ci-only-not-a-secret@127.0.0.1:5432/postgres\n+      TEST_DATABASE_APP_URL: postgres://moin_app:ci-only-not-a-secret@127.0.0.1:5432/postgres\n+      TEST_DATABASE_PROVISIONER_URL: postgres://moin_provisioner:ci-only-not-a-secret@127.0.0.1:5432/postgres\n+      TEST_DATABASE_IDENTITY_URL: postgres://moin_identity:ci-only-not-a-secret@127.0.0.1:5432/postgres\n+      TEST_OIDC_ISSUER_URL: http://127.0.0.1:8080/realms/moin-local\n+    steps:\n+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n+        with:\n+          persist-credentials: false\n+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0\n+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0\n+        with:\n+          node-version-file: .nvmrc\n+          cache: pnpm\n+      - run: pnpm install --frozen-lockfile\n+      - run: pnpm exec playwright install --with-deps chromium\n+\n+      # Both builds first, so a compile error fails in seconds, before any service starts. The API\n+      # runs from `dist` (Node cannot run the server's decorators from source). The web build\n+      # compiles in the loopback `/api/*` proxy the browser needs when the two run as separate\n+      # local processes; the build refuses any non-loopback origin.\n+      - run: pnpm --filter @moin/server build\n+      - run: pnpm --filter @moin/web build\n+        env:\n+          OWNER_API_PROXY_ORIGIN: http://127.0.0.1:3101\n+\n+      # The service container runs no init scripts, so the roles the local stack creates are\n+      # created here instead. The application role is NOBYPASSRLS exactly as in production.\n+      - name: Create database roles\n+        env:\n+          PGPASSWORD: ci-only-not-a-secret\n+        run: |\n+          psql -h 127.0.0.1 -U moin_owner -d moin -v ON_ERROR_STOP=1 <<'SQL'\n+          CREATE ROLE moin_app WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;\n+          CREATE ROLE moin_migrator WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;\n+          CREATE ROLE moin_readonly WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;\n+          CREATE ROLE moin_provisioner WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;\n+          CREATE ROLE moin_dispatcher WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;\n+          CREATE ROLE moin_support_ro WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;\n+          CREATE ROLE moin_reporting WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;\n+          CREATE ROLE moin_identity WITH LOGIN PASSWORD 'ci-only-not-a-secret' NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;\n+          GRANT CONNECT ON DATABASE moin TO moin_app, moin_migrator, moin_readonly,\n+            moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting, moin_identity;\n+          GRANT CREATE ON DATABASE moin TO moin_migrator;\n+          REVOKE TEMPORARY ON DATABASE moin FROM PUBLIC;\n+          GRANT TEMPORARY ON DATABASE moin TO moin_app, moin_migrator, moin_readonly,\n+            moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting;\n+          REVOKE CONNECT, TEMPORARY ON DATABASE postgres FROM PUBLIC;\n+          GRANT CONNECT, TEMPORARY ON DATABASE postgres TO moin_app, moin_migrator, moin_readonly,\n+            moin_provisioner, moin_dispatcher, moin_support_ro, moin_reporting;\n+          REVOKE CONNECT ON DATABASE template1 FROM PUBLIC;\n+          REVOKE EXECUTE ON FUNCTION lo_create(oid), lo_creat(integer), lo_from_bytea(oid, bytea) FROM PUBLIC;\n+          SQL\n+\n+      - name: Start the local OIDC provider\n+        run: docker compose up -d --wait oidc\n+\n+      - name: Browser acceptance\n+        run: pnpm exec playwright test -c playwright.slice.config.ts\n+\n+      # Runs even when the tests failed or were skipped: the job fails unless the report shows\n+      # every required test ran and passed.\n+      - name: Check the acceptance report\n+        if: always()\n+        # `bash` with pipefail: the checker's exit code must survive the pipe into `tee`.\n+        shell: bash\n+        run: |\n+          touch test-results/live-today-timings.jsonl\n+          node scripts/check-slice-report.ts test-results/slice-report.json test-results/live-today-timings.jsonl | tee -a \"$GITHUB_STEP_SUMMARY\"\n+\n+      - name: Service diagnostics\n+        if: failure()\n+        run: |\n+          docker compose logs --no-color --tail 200 oidc || true\n+          tail -n 200 test-results/e2e-slice-processes.log || true\n+\n+      # Reports, timings and process logs carry only synthetic fixtures (INV-16) and no caller\n+      # content (INV-12 log allowlist); traces and screenshots are kept for failures only.\n+      - if: always()\n+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n+        with:\n+          name: e2e-slice\n+          path: |\n+            test-results/\n+            !test-results/**/*.zip\n+          retention-days: 14\n+          if-no-files-found: error\n+      - if: failure()\n+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n+        with:\n+          name: e2e-slice-traces\n+          path: test-results/**/*.zip\n+          retention-days: 7\n+          if-no-files-found: ignore\n+\n   # ---------------------------------------------------------------------------------------\n   # Slots reserved by P02.06.05. Each fails loudly if its script exists but does not pass, and\n   # is skipped with a visible reason until the phase that creates it. A job that silently passes\n@@ -316,7 +441,7 @@ jobs:\n   verify:\n     name: verify\n     runs-on: ubuntu-24.04\n-    needs: [static, unit, integration, build, e2e, rls-catalog, openapi-drift]\n+    needs: [static, unit, integration, build, e2e, e2e-slice, rls-catalog, openapi-drift]\n     if: always()\n     steps:\n       # One required check to configure in the ruleset, and it cannot pass while any job failed,\ndiff --git a/PLAN.md b/PLAN.md\nindex 378eeac..f9edb38 100644\n--- a/PLAN.md\n+++ b/PLAN.md\n@@ -149,7 +149,7 @@ Single source of status. Tier columns show the status of that phase's items for\n | P10 | AI orchestration, policy, templates, evals | IN_PROGRESS | — | IN_PROGRESS | — | — | EXT-12 / DG-14 (no EU model access); DG-01 not taken. Libraries built and unit-tested but imported by no runtime: gateway port + OpenAI EU adapter, structured outputs, resilience, redaction, version sets, policy engine, tool guard, template loader, rules, life-safety lexicon, injection guard, eval scorer, cost micros (LAUNCH: alternative-provider contract, rollout flags). `templates/` and `evals/` are empty; no metric is emitted; no QG-07 CI job (M0) | Wire the gateway, policy engine and tool guard into the call path; build the eval datasets |\n | P11 | Telephony platform | IN_PROGRESS | — | IN_PROGRESS | — | — | EXT-10 NOT_STARTED (an unverified 2026-10-15 note reports a suspended Twilio account) / EXT-11; DG-01 not taken. Wired: signed inbound webhook → number-to-tenant resolution → disclosure TwiML → WSS session that runs the P04 measurement script; tokens and CallSid dedup in memory. Not wired: call machine, finaliser, fallback layers, degraded capture, caps, metering, reconciliation, drain, absence alarm (unit-tested helpers; LAUNCH: transfer validation) (M0) | Vertical slice: call machine + finaliser + capture on the relay path |\n | P12 | Reception conversation flows & voice eval | IN_PROGRESS | — | — | — | — | EXT-20, EXT-12, EXT-10. Turn helpers (greeting, intent routing, FAQ answer, callback/lead/appointment capture, escalation, silence/barge-in, outcome writer, summary draft) unit-tested and imported by no runtime; PROGRESS claims for P12.01/P12.02 cited the wrong PLAN items and P12.07.04/P12.13.05 do not exist — corrected (M0) | Vertical slice: deterministic capture end to end on the simulator |\n-| P13 | Owner web app | IN_PROGRESS | — | NOT_STARTED | — | — | DG-10 open. Heute is a server-rendered page reading the session tenant's live tasks from `GET /api/today` (shared contract; signed-out, loading, error and empty states); an open, visible Heute polls that read every 15 s and re-renders on change (M2B, EV-P13-016: measured 15.4 s arrival, local browser test only; no SSE, no stale indicator, no fallback E2E, so P13.02.04 and P13.10 stay open). A callback card has **Erledigt** (M2A, EV-P13-015): `POST /api/tasks/:id/complete` with the task version walks the existing task machine as the signed-in member (owner/admin any task, staff own or unassigned; 409 stale, 403 not allowed, 404 other tenant; a lost answer is read back, never reported as a failure); no other card action, optimistic UI or completed-tasks view exists. No other owner view exists; the service worker is still unregistered; of the `apps/web/lib` helpers only `today` and `i18n` are now used (M1 vertical slice, 2026-10-17) | Heute: P13.02.04 in CI and summary counts (P13.02.02); SSE and stale indicator (P13.10); then the remaining PILOT views |\n+| P13 | Owner web app | IN_PROGRESS | — | NOT_STARTED | — | — | DG-10 open. Heute is a server-rendered page reading the session tenant's live tasks from `GET /api/today` (shared contract; signed-out, loading, error and empty states); an open, visible Heute polls that read every 15 s and re-renders on change (M2B, EV-P13-016: measured 15.4 s arrival, the vertical-slice browser suite now also runs in GitHub CI on real PostgreSQL and Keycloak, 10 of 10, 15.9 s arrival, EV-P13-017; no SSE, no stale indicator, no fallback E2E, so P13.10 stays open). A callback card has **Erledigt** (M2A, EV-P13-015): `POST /api/tasks/:id/complete` with the task version walks the existing task machine as the signed-in member (owner/admin any task, staff own or unassigned; 409 stale, 403 not allowed, 404 other tenant; a lost answer is read back, never reported as a failure); no other card action, optimistic UI or completed-tasks view exists. No other owner view exists; the service worker is still unregistered; of the `apps/web/lib` helpers only `today` and `i18n` are now used (M1 vertical slice, 2026-10-17) | Heute: summary counts (P13.02.02); SSE and stale indicator (P13.10); then the remaining PILOT views |\n | P14 | Notifications & escalation | IN_PROGRESS | — | NOT_STARTED | — | — | EXT-09 SES (needs the DG-00 domain), DG-12. Tables and services for notifications, escalation and deliveries (0071–0073, real-Postgres tests); no sender (email/SMS/push), no timer wiring; the canary is a pure evaluator (M0) | Senders behind ports (SMTP locally, SES/SMS late-bound) |\n | P15 | Operations baseline | IN_PROGRESS | — | NOT_STARTED | — | — | EXT-09. Runbooks (`docs/runbooks/`) and pure helpers (PII log scanner, metric names, alarm/canary/incident/KPI/cost shapes); no telemetry pipeline, no metric emission, no deployed alarm, dashboard or canary (M0) | Instrumentation in code; alarms and dashboards in Terraform |\n | P16 | Privacy, DSAR, AI-Act controls | IN_PROGRESS | — | IN_PROGRESS | — | — | EXT-02/04, DG-13. Pure decision/state helpers (retention, overrides, rectification, erasure, deletion ledger, subprocessor register, disclosure records, scope guard, turn-log policy; LAUNCH: self-service export, termination state machine); no engine, job, persistence wiring or E2E (M0) | Retention engine and export/erasure end to end on real tables |\n@@ -3496,7 +3496,7 @@ App shell and auth flows · Today · interaction cards and actions · Inbox · C\n   - [ ] P13.02.01 Sections: Dringend · Rückrufe · Neue Anfragen · Termine/Reservierungen zu bestätigen · Offene Kundenfragen (Documents hidden until P34; T-08)\n   - [ ] P13.02.02 \"Automatisch erledigt\" summary counts (calls answered, FAQs resolved, requests captured, enquiries routed)\n   - [x] P13.02.03 Empty states that reassure (\"Alles erledigt\"), not blank — EV-P13-014\n-  - [ ] P13.02.04 E2E test: a simulated call appears in the right section within 60 s (LG-P13)\n+  - [x] P13.02.04 E2E test: a simulated call appears in the right section within 60 s (LG-P13) — EV-P13-017\n - [ ] **P13.03 Interaction cards and actions** `[G:PILOT]`\n   - [ ] P13.03.01 Card layout: person, time + channel, reason, captured facts (template labels), result, next action (L522–563)\n   - [ ] P13.03.02 Actions: [Anrufen] (`tel:`), [Zuweisen] (LAUNCH with P22), [Erledigt], [Später], [Notiz]; optimistic UI with idempotency keys and 409 handling\ndiff --git a/PROGRESS.md b/PROGRESS.md\nindex 073635b..e526538 100644\n--- a/PROGRESS.md\n+++ b/PROGRESS.md\n@@ -1,11 +1,11 @@\n ---\n-mission: M2B open Heute updates by itself (M2A #233 merged at 7caad73)\n+mission: M2C full-stack browser acceptance in CI (M2B #237 merged at cbef5f5)\n status: active\n mode: interactive\n phase: M1 (cross-phase slice: P07, P12, P13)\n tier: PILOT\n plan: docs/development/m1-vertical-slice.md\n-next: independent review of the M2B draft PR; P13.03.02 remaining card actions not started\n+next: independent review of the M2C draft PR; P13.03.02 remaining card actions not started\n updated: 2026-10-17\n ---\n \n@@ -1582,3 +1582,8 @@ M2B (2026-10-17, branch `feat/p13-02-heute-live-updates` from 7caad73): an open\n `GET /api/today` every 15 s while visible and re-renders on change; no SSE exists server-side. Arrival\n measured 15.4 s in a local browser test (not in CI). P13.02.04 and P13.10 stay open; nothing is\n VERIFIED. Evidence: EV-P13-016.\n+\n+M2C (2026-10-18, branch `ci/p02-05-fullstack-browser-acceptance` from cbef5f5): mandatory CI job\n+`e2e-slice` runs the vertical-slice browser suite on real PostgreSQL and Keycloak (10 of 10, 15.9 s\n+arrival, run 39090443360); removing the live wiring fails it (run 39090964507). P13.02.04 ticked\n+with EV-P13-017; P13.10 stays open; nothing is VERIFIED. Evidence: EV-P13-017.\ndiff --git a/docs/development/m1-vertical-slice.md b/docs/development/m1-vertical-slice.md\nindex ec76908..1b61473 100644\n--- a/docs/development/m1-vertical-slice.md\n+++ b/docs/development/m1-vertical-slice.md\n@@ -110,19 +110,28 @@ helpers for P13.10), and a poll adds no channel that could be subscribed to with\n Code: `apps/web/lib/live-today.ts`, `apps/web/app/live-today.tsx`.\n \n - **Guarantee.** Healthy connection, visible tab: a committed task or completion is on screen\n-  within about one interval plus a request and a render (measured 15.4 s, limit 60 s).\n+  within about one interval plus a request and a render (measured 15.0 to 15.4 s in the local browser test, from the task row's `created_at`, which is stamped at transaction start, so it slightly overstates; limit 60 s).\n - **Not promised.** A hidden or suspended tab does not poll; it polls at once when shown again (or\n   when the browser reports the network is back). Nothing is promised while disconnected.\n - **Idle.** Every guarded read slides the session's idle expiry, so a tab with no input (pointer,\n   key, touch, scroll) for 30 min stops polling and resumes on the next input; an unattended screen\n   goes stale rather than keeping a session alive (the stale indicator is P13.10).\n-- **Failures.** A failed poll keeps the list on screen and backs off (15 s doubling to 120 s); polls\n+- **Failures.** A failed poll keeps the list on screen and backs off (the next poll waits 30 s after one failure, 60 s after two, 120 s from three on; ±10 %); polls\n   never overlap; a 401 hands over to the server render (signed-out page, no task data; the loop ends when that page unmounts it);\n   the page's error state is left by the next good poll.\n - **Budget.** About 4 reads a minute per visible tab against the account's 50 a minute.\n - **Open.** The poller has no gate yet for P13.10 (SSE plus polling only as fallback) and exposes no\n   last-success signal for the stale indicator (P13.10.02). SSE with `Last-Event-ID`, the stale-data indicator and the polling-fallback E2E\n-  (P13.10), summary counts (P13.02.02). The browser test is local-only (needs Keycloak), not in CI.\n+  (P13.10), summary counts (P13.02.02). The browser suite also runs in CI (`e2e-slice` in `verify.yml`).\n+\n+## In CI\n+\n+The `e2e-slice` job in `.github/workflows/verify.yml` runs this suite on every pull request: a\n+PostgreSQL service container with the application roles, Keycloak from the compose file, the\n+compiled API, the standalone owner app (built with the loopback API proxy) and Chromium. It is in\n+the `verify` check's `needs`. `scripts/check-slice-report.ts` fails the job unless all ten tests ran\n+and passed, none skipped. Add a test to the suite and its title phrase to that script. The\n+`e2e-slice` artifact holds the report, the commit-to-render timings and the process log. To run it locally, see below.\n \n ## Run it locally\n \ndiff --git a/docs/evidence/INDEX.md b/docs/evidence/INDEX.md\nindex 3284808..ca63d38 100644\n--- a/docs/evidence/INDEX.md\n+++ b/docs/evidence/INDEX.md\n@@ -391,3 +391,4 @@ Appended by the M0 truth reconciliation; rows above are unchanged. Detail:\n | EV-P12-013 | P12.12.03 | 2026-10-17 | `5602fedb48fd` | J3: task rows and conversation locks are taken before the tenant audit head in the callback capture and the orphan sweep; no 40P01 against owner task writes | [EV-P12-013-task-audit-lock-order.md](P12/EV-P12-013-task-audit-lock-order.md) |\n | EV-P13-015 | P13.03.02 | 2026-10-17 | `ea78006c542a` | M2A: the owner completes a callback with Erledigt on Heute; the completion is versioned, audited as the owner's act and survives reload, API restart, concurrency and a replay of the original call | [EV-P13-015-owner-completes-callback.md](P13/EV-P13-015-owner-completes-callback.md) |\n | EV-P13-016 | P13.02.04 | 2026-10-17 | `7d967ad5e717` | M2B: an open Heute polls the authenticated Today read and re-renders on change; a new callback appears without reload (14.97 s measured, local browser test), a completion reaches another session, outage and revoked-session behaviour pinned | [EV-P13-016-live-heute-polling.md](P13/EV-P13-016-live-heute-polling.md) |\n+| EV-P13-017 | P13.02.04 | 2026-10-18 | `cc07c07ca793` | M2C: the sign-in, simulated call, live Heute, Erledigt and replay browser acceptance runs in GitHub CI against real PostgreSQL and Keycloak (10 of 10, 15.9 s arrival); removing the live-update wiring fails the job | [EV-P13-017-fullstack-browser-ci.md](P13/EV-P13-017-fullstack-browser-ci.md) |\ndiff --git a/docs/evidence/P13/EV-P13-016-live-heute-polling.md b/docs/evidence/P13/EV-P13-016-live-heute-polling.md\nindex a6baad0..9812db5 100644\n--- a/docs/evidence/P13/EV-P13-016-live-heute-polling.md\n+++ b/docs/evidence/P13/EV-P13-016-live-heute-polling.md\n@@ -40,7 +40,7 @@ fingerprint is compared in memory only. Inactivity: every guarded read slides th\n expiry, so a tab without input for 30 min stops polling (found in review, fixed in `7d967ad`).\n \n **Failure and recovery.** A failed poll (network, 429, 5xx, bad body, throw) keeps the list and backs\n-off 15 s → 120 s; polls never overlap; a hidden tab does not poll and polls at once when shown or\n+off (30 s after one failure, 60 s after two, 120 s from three on); polls never overlap; a hidden tab does not poll and polls at once when shown or\n when the browser reports `online`; a 401 triggers a server render (signed-out page, no task data)\n and is retried with backoff if the page stays. Reconciliation reads the current state, not missed\n events. Nothing is promised for a hidden/suspended tab or while disconnected.\n@@ -56,7 +56,11 @@ Task row `created_at` (Postgres) to the card visible in Chromium, same host cloc\n | Completion in one session reaching a second, independently signed-in session | 15.36 s (first run 15.36 s) |\n | Network returns after an outage (`online` event) | 0.09 s |\n \n-The limit is 60 s; the expected worst case is one interval plus a request and a render (about 17 s).\n+The limit is 60 s. Samples: two local runs of each scenario, one host, so Postgres and the browser\n+share a clock; `created_at` is stamped at transaction start, so the figures slightly overstate. The\n+healthy worst case is one jittered interval (up to 16.5 s) plus a request and a render, and up to\n+8 s more if the poll itself is slow (its timeout). The two rows' \"first run\" values are the earlier\n+run of the same suite, not a separate measurement method.\n \n ## Tests and what each proves\n \ndiff --git a/docs/evidence/P13/EV-P13-017-fullstack-browser-ci.md b/docs/evidence/P13/EV-P13-017-fullstack-browser-ci.md\nnew file mode 100644\nindex 0000000..112e714\n--- /dev/null\n+++ b/docs/evidence/P13/EV-P13-017-fullstack-browser-ci.md\n@@ -0,0 +1,107 @@\n+# EV-P13-017: M2C: the sign-in, simulated call, live Heute, Erledigt and replay browser acceptance runs in GitHub CI against real PostgreSQL and Keycloak (10 of 10, 15.9 s arrival); removing the live-update wiring fails the job\n+\n+| Field | Value |\n+|---|---|\n+| Evidence ID | EV-P13-017 |\n+| Item | P13.02.04 |\n+| Date (UTC) | 2026-10-18 02:58 UTC |\n+| Commit | `cc07c07ca7939f8c7790a719e0fd8c009261ff4a` |\n+| Environment | local |\n+| Command / procedure | `.claude/bin/gates.py full`: `python3 .claude/bin/control_plane_check.py && python3 -m unittest discover -s .claude/tests -t .claude/tests` → pass (exit 0, 21.4 s); `uvx ruff@0.15.12 format --check --config .claude/ruff.toml .claude && uvx ruff@0.15.12 check --config .claude/ruff.toml .claude && uvx --from mypy==2.3.1 mypy --config-file .claude/mypy.ini` → pass (exit 0, 0.2 s); `node scripts/check-conventional-commit.ts --self-test && node scripts/check-no-ai-mentions.ts --self-test` → pass (exit 0, 0.1 s); `node scripts/check-adr-coverage.ts && node scripts/check-domain-coverage.ts && node scripts/check-dfd-coverage.ts && node scripts/check-threat-model-refs.ts && node scripts/check-data-classification.ts && node scripts/check-subprocessors.ts && node scripts/check-brand-strings.ts` → pass (exit 0, 1.4 s); `pnpm exec prettier --check .` → pass (exit 0, 5.8 s); `pnpm lint` → pass (exit 0, 3.3 s); `pnpm exec depcruise apps packages scripts --config .dependency-cruiser.cjs` → pass (exit 0, 1.0 s); `pnpm typecheck` → pass (exit 0, 1.1 s); `pnpm test` → pass (exit 0, 6.0 s); `pnpm test:integration` → pass (exit 0, 28.2 s); `node scripts/check-migrations.ts` → pass (exit 0, 0.1 s); `pnpm turbo run build` → pass (exit 0, 0.3 s); `node scripts/check-licences.ts` → pass (exit 0, 0.4 s); `gitleaks git --redact --no-banner --config .gitleaks.toml .` → pass (exit 0, 1.1 s) |\n+| Result | PASS |\n+| CI run / artifact | pending |\n+| Reviewer | pending |\n+\n+Sensitive material is stored by reference only (PLAN.md evidence rules).\n+\n+## What this record shows\n+\n+Mission M2C, branch `ci/p02-05-fullstack-browser-acceptance` from `main` at `cbef5f5` (M2B #237\n+squash-merged; #234, #235, #236 also merged, so no open PR overlapped). It adds one mandatory job,\n+`e2e-slice`, to `.github/workflows/verify.yml` and puts it in the `verify` aggregate's `needs`, so\n+the existing required `verify` check covers it with no ruleset change. No application code changed.\n+\n+**Before.** The PR `e2e` job ran only `apps/web/e2e/smoke.spec.ts` (Chromium smoke and axe, no API,\n+no database, no sign-in). The vertical-slice suite (`e2e/vertical-slice/today-callback.spec.ts`,\n+`playwright.slice.config.ts`) needed Keycloak and PostgreSQL and ran only on a developer machine.\n+\n+**What the job runs.** PostgreSQL (the pinned pgvector image as a service container), the\n+`NOBYPASSRLS` application roles (the same role SQL as the `integration` and `rls-catalog` jobs),\n+Keycloak from the compose file with the committed realm, the compiled API (`dist/main-api.js`), and\n+the owner app's standalone server built with the loopback `/api/*` proxy. The spec builds a migrated\n+template database if none exists, creates a fresh test database from it, stages two tenants, the\n+owner's `users` row and the number routes through the fixture role, signs in through Keycloak's own\n+login form, and drives Chromium. Only the call itself is simulated, through the bearer-protected\n+test entry point. All credentials are the committed `ci-only-not-a-secret` placeholders and the\n+Keycloak fixture realm; no GitHub secret is used (INV-15, INV-16).\n+\n+**It cannot pass by testing nothing.** `scripts/check-slice-report.ts` reads Playwright's JSON\n+report and fails the step unless every one of the ten required test titles ran and passed, with no\n+skipped, flaky or failed test (retries are off). The step runs `if: always()` under `shell: bash`\n+(pipefail), so the checker's exit code survives the pipe into the job summary; both reviews found\n+that the first version lost it, and it was fixed (`bash -e` exits 0 and `bash -eo pipefail` exits 1\n+for the same bad report, shown locally). The job has no `continue-on-error`.\n+\n+## Acceptance matrix (all in a real browser, real PostgreSQL, real Keycloak)\n+\n+| Step | Test |\n+| --- | --- |\n+| Sign in through Keycloak; Heute; call; task persisted; callback card with caller and time; other tenant's task absent; axe; API restart | `a simulated callback call reaches the owner on Heute and stays there` |\n+| Erledigt persists as done/4 with three audit events by the owner; stays done after reload and an API restart; replay reopens nothing | `the owner completes a callback with Erledigt and it stays completed` |\n+| Already-open Heute shows a new callback by itself, once, without reload, focus kept, 60 s limit, commit-to-render measured | `a callback committed while Heute is open appears by itself, once, without a reload` |\n+| Completion reaches a second independently signed-in session; a call replay does not reopen it | `a completion reaches another open session, and a replay of the call does not reopen it` |\n+| Outage keeps the list, no error banner; reconciles when the network returns | `an outage leaves the list as it is, and the page reconciles when the network returns` |\n+| Revoked session: signed-out page, no task data | `a revoked session shows the signed-out page and no task data` |\n+| Stale view conflict, lost answer reconciled or unknown, request never sent, double click once | the four remaining Erledigt tests |\n+\n+**Not claimed.** There is one Keycloak fixture owner, so no browser session of a second tenant is\n+authenticated: cross-tenant protection is shown only by the other tenant's task never appearing for\n+the owner. Cross-tenant API behaviour stays in the integration suite.\n+\n+## CI evidence (GitHub Actions, run 39090443360, commit `cda55df`)\n+\n+Job `full-stack browser acceptance (postgres, keycloak)`: success, 4 m 58 s. Playwright: `10 passed\n+(3.3m)`, project `chromium`, file `e2e/vertical-slice/today-callback.spec.ts`, tests 1–10 listed in\n+the log. Report check: `10 passed, 0 failed, 0 skipped`. Artifact `e2e-slice` (117 KB, 14 days)\n+holds the JSON report, timings and process log. Commit-to-render (task row `created_at` to visible\n+card, one shared runner clock):\n+\n+| Scenario | CI | Local (M2B) |\n+| --- | --- | --- |\n+| New callback on an already-open Heute | 15.93 s | 14.97 s |\n+| Completion reaching another session | 15.86 s | 15.36 s |\n+| Network returns | 0.09 s | 0.09 s |\n+\n+The same job is green on `8b99976` (run 39091402625) after the revert described next.\n+\n+## Regression sensitivity\n+\n+- **In CI.** A temporary commit (`6614038`, reverted in `8b99976`; net diff to the green commit\n+  empty) removed the `LiveToday` mount from `apps/web/app/page.tsx`. Run 39090964507: the job\n+  failed; tests 7–10 (the live-update tests) failed on `expect(locator).toBeVisible()` after the\n+  60 s arrival wait while tests 1–6 passed, so the failure is the missing feature, not a setup\n+  error. The required `verify` check failed with it.\n+- **Official mutation check.** `mutation_check.py --fix-ref cbef5f5 --fix-paths apps/web/app/page.tsx`\n+  with the arrival test: KILLED (without the wiring FAIL in 75 s by arrival timeout, with it PASS\n+  in 46 s).\n+\n+## Reviews (QG-09)\n+\n+Security: no Critical/High. Medium M1 (checker exit code lost in the pipe) fixed; M2 (traces and\n+screenshots are retained and the \"synthetic only\" assumption is not enforced) accepted: every\n+credential and token in the run is a committed or per-run random fixture, and traces go to a\n+separate 7-day artifact on failure only. Low items (Postgres port binding as in the other jobs,\n+`--with-deps` as in the `e2e` job, title substring matching) accepted. Architecture: High H1 is the\n+same pipe bug, fixed; M2 (only six of ten tests required) fixed by requiring all ten; timeout\n+lowered to 20 minutes. Accepted and recorded: the role SQL now exists in three jobs (a shared file\n+would touch two unrelated required jobs); the 60 s arrival limit is a product claim and is not\n+loosened for CI (a failure there is a finding, not noise).\n+\n+## Limits\n+\n+The job costs about 5 minutes a pull request and runs in parallel with the others. Ports 3000,\n+3101 and 8080 are fixed, which is safe on a fresh hosted runner. The suite has not run on Firefox,\n+WebKit or phone viewports. Deployment compatibility stays a separate gate; the M2A warning stands\n+(the strict Today schema needs the API and the owner app deployed together). One unit-test gate\n+failed once during this mission and did not reproduce in two further full-gate runs and a\n+standalone run; its cause is UNVERIFIED.\ndiff --git a/playwright.slice.config.ts b/playwright.slice.config.ts\nindex 5c0a8f9..c271978 100644\n--- a/playwright.slice.config.ts\n+++ b/playwright.slice.config.ts\n@@ -8,7 +8,8 @@ import { defineConfig, devices } from '@playwright/test';\n  * web build with the local API proxy (`OWNER_API_PROXY_ORIGIN=http://127.0.0.1:3101 pnpm --filter\n  * @moin/web build`). The spec starts its own API process and owner-app server against a fresh\n  * test database, so it never touches the development database. The pull-request e2e job has none\n- * of those services yet; until it does, this suite runs locally (docs/development/m1-vertical-slice.md).\n+ * of those services, so this suite has its own CI job, `e2e-slice` in `verify.yml`; locally see\n+ * docs/development/m1-vertical-slice.md.\n  *\n  * One worker, no retries: the spec restarts the API mid-test and owns fixed ports.\n  */\n@@ -17,7 +18,12 @@ export default defineConfig({\n   forbidOnly: true,\n   retries: 0,\n   workers: 1,\n-  reporter: 'list',\n+  // In CI the JSON report lets `scripts/check-slice-report.ts` fail the job unless every required\n+  // acceptance test ran and passed (a skipped or missing test must not read as green).\n+  reporter:\n+    process.env['CI'] === undefined\n+      ? 'list'\n+      : [['list'], ['json', { outputFile: 'test-results/slice-report.json' }]],\n   timeout: 120_000,\n   expect: { timeout: 10_000 },\n   use: {\ndiff --git a/scripts/check-slice-report.test.ts b/scripts/check-slice-report.test.ts\nnew file mode 100644\nindex 0000000..6337d3f\n--- /dev/null\n+++ b/scripts/check-slice-report.test.ts\n@@ -0,0 +1,41 @@\n+import { describe, expect, it } from 'vitest';\n+import { REQUIRED_TITLES, problems, type PlaywrightReport } from './check-slice-report.ts';\n+\n+function report(\n+  titles: readonly string[],\n+  overrides: Partial<PlaywrightReport['stats']> = {},\n+  failing: readonly string[] = [],\n+): PlaywrightReport {\n+  return {\n+    stats: { expected: titles.length, unexpected: 0, flaky: 0, skipped: 0, ...overrides },\n+    suites: [\n+      { suites: [{ specs: titles.map((title) => ({ title, ok: !failing.includes(title) })) }] },\n+    ],\n+  };\n+}\n+\n+const ALL = REQUIRED_TITLES.map((phrase) => `a test where ${phrase}`);\n+\n+describe('the vertical-slice report check', () => {\n+  it('accepts a whole, green run', () => {\n+    expect(problems(report(ALL))).toStrictEqual([]);\n+  });\n+\n+  it('rejects a run that executed nothing', () => {\n+    expect(problems(report([], { expected: 0 })).length).toBeGreaterThan(0);\n+  });\n+\n+  it('rejects a missing required test even when everything that ran passed', () => {\n+    const found = problems(report(ALL.slice(1), { expected: ALL.length - 1 }));\n+    expect(found).toContain(`required test missing: \"${REQUIRED_TITLES[0] ?? ''}\"`);\n+  });\n+\n+  it('rejects skipped, flaky and failed tests', () => {\n+    expect(problems(report(ALL, { skipped: 1 }))).toContain('1 test(s) were skipped');\n+    expect(problems(report(ALL, { flaky: 1 }))).toContain('1 test(s) were flaky (retries are off)');\n+    const failing = ALL[2] ?? '';\n+    const found = problems(report(ALL, { unexpected: 1 }, [failing]));\n+    expect(found).toContain('1 test(s) failed');\n+    expect(found).toContain(`required test did not pass: \"${failing}\"`);\n+  });\n+});\ndiff --git a/scripts/check-slice-report.ts b/scripts/check-slice-report.ts\nnew file mode 100644\nindex 0000000..ea37b84\n--- /dev/null\n+++ b/scripts/check-slice-report.ts\n@@ -0,0 +1,108 @@\n+/**\n+ * Vertical-slice browser report check (M2C).\n+ *\n+ * The full-stack browser job must not pass by running nothing. Playwright exits 0 when every\n+ * test that ran passed, and a skipped test, a renamed test or a deleted file would still leave a\n+ * green job. This reads the JSON report of that run and fails unless every required acceptance\n+ * test ran and passed, with nothing skipped, flaky or unexpected.\n+ *\n+ *   node scripts/check-slice-report.ts <playwright-report.json> [live-today-timings.jsonl]\n+ *\n+ * Prints a Markdown summary (for the job summary) on stdout; problems go to stderr.\n+ */\n+\n+import { readFileSync } from 'node:fs';\n+\n+/**\n+ * Each entry is a phrase one required acceptance test's title contains: every test of the suite.\n+ * Adding a test to the suite means adding its phrase here, so none can vanish unnoticed.\n+ */\n+export const REQUIRED_TITLES: readonly string[] = [\n+  'a stale view gets a truthful conflict message',\n+  'a response lost after the commit is reconciled',\n+  'a lost response that cannot be read back',\n+  'a request that never reached the server',\n+  'reaches the owner on Heute and stays there',\n+  'completes a callback with Erledigt and it stays completed',\n+  'appears by itself, once, without a reload',\n+  'reaches another open session',\n+  'an outage leaves the list as it is',\n+  'a revoked session shows the signed-out page',\n+];\n+\n+interface Spec {\n+  title: string;\n+  ok: boolean;\n+}\n+\n+interface Suite {\n+  specs?: Spec[];\n+  suites?: Suite[];\n+}\n+\n+export interface PlaywrightReport {\n+  stats: { expected: number; unexpected: number; flaky: number; skipped: number };\n+  suites: Suite[];\n+}\n+\n+function specsOf(suites: readonly Suite[]): Spec[] {\n+  return suites.flatMap((suite) => [...(suite.specs ?? []), ...specsOf(suite.suites ?? [])]);\n+}\n+\n+/** What is wrong with a report; empty when the acceptance run is whole and green. */\n+export function problems(report: PlaywrightReport): string[] {\n+  const found: string[] = [];\n+  const { expected, unexpected, flaky, skipped } = report.stats;\n+  if (unexpected > 0) found.push(`${String(unexpected)} test(s) failed`);\n+  if (flaky > 0) found.push(`${String(flaky)} test(s) were flaky (retries are off)`);\n+  if (skipped > 0) found.push(`${String(skipped)} test(s) were skipped`);\n+  const specs = specsOf(report.suites);\n+  if (expected < REQUIRED_TITLES.length) {\n+    found.push(\n+      `only ${String(expected)} passing test(s), at least ${String(REQUIRED_TITLES.length)} required`,\n+    );\n+  }\n+  for (const phrase of REQUIRED_TITLES) {\n+    const match = specs.find((spec) => spec.title.includes(phrase));\n+    if (match === undefined) found.push(`required test missing: \"${phrase}\"`);\n+    else if (!match.ok) found.push(`required test did not pass: \"${match.title}\"`);\n+  }\n+  return found;\n+}\n+\n+function summary(report: PlaywrightReport, timings: string): string {\n+  const rows = specsOf(report.suites).map(\n+    (spec) => `| ${spec.ok ? 'pass' : 'FAIL'} | ${spec.title} |`,\n+  );\n+  return [\n+    '### Full-stack browser acceptance',\n+    '',\n+    `${String(report.stats.expected)} passed, ${String(report.stats.unexpected)} failed, ${String(report.stats.skipped)} skipped.`,\n+    '',\n+    '| Result | Test |',\n+    '| --- | --- |',\n+    ...rows,\n+    '',\n+    '#### Commit-to-render timings (task row `created_at` to visible card)',\n+    '',\n+    '```',\n+    timings.trim(),\n+    '```',\n+  ].join('\\n');\n+}\n+\n+function main(): number {\n+  const [reportPath, timingsPath] = process.argv.slice(2);\n+  if (reportPath === undefined) {\n+    console.error('usage: check-slice-report.ts <playwright-report.json> [timings.jsonl]');\n+    return 2;\n+  }\n+  const report = JSON.parse(readFileSync(reportPath, 'utf8')) as PlaywrightReport;\n+  const timings = timingsPath === undefined ? '' : readFileSync(timingsPath, 'utf8');\n+  console.log(summary(report, timings));\n+  const found = problems(report);\n+  for (const line of found) console.error(`slice report: ${line}`);\n+  return found.length === 0 ? 0 : 1;\n+}\n+\n+if (process.argv[1]?.endsWith('check-slice-report.ts') === true) process.exitCode = main();",
+          "actualWorkers": 1
+        },
+        "id": "chromium",
+        "name": "chromium",
+        "testDir": "/home/runner/work/moin/moin/e2e/vertical-slice",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 120000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list",
+        null
+      ],
+      [
+        "json",
+        {
+          "outputFile": "test-results/slice-report.json"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.63.0",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "today-callback.spec.ts",
+      "file": "today-callback.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "a simulated callback call reaches the owner on Heute and stays there",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 9103,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-18T03:00:48.276Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "379b5ea05453fdaee60e-4d69d8f0f3535131b86a",
+          "file": "today-callback.spec.ts",
+          "line": 312,
+          "column": 1
+        },
+        {
+          "title": "the owner completes a callback with Erledigt and it stays completed",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 9789,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-18T03:01:00.344Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "379b5ea05453fdaee60e-6ce735de28a0e6115cee",
+          "file": "today-callback.spec.ts",
+          "line": 356,
+          "column": 1
+        },
+        {
+          "title": "a stale view gets a truthful conflict message and the current state",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1590,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-18T03:01:10.149Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "379b5ea05453fdaee60e-3b65ff1b54e7e81121e7",
+          "file": "today-callback.spec.ts",
+          "line": 436,
+          "column": 1
+        },
+        {
+          "title": "a response lost after the commit is reconciled by reading the task, not reported as a failure",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1086,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-18T03:01:11.750Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "379b5ea05453fdaee60e-73ddeeb03b725665e778",
+          "file": "today-callback.spec.ts",
+          "line": 492,
+          "column": 1
+        },
+        {
+          "title": "a lost response that cannot be read back is unknown, and the refreshed view shows the truth",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1277,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-18T03:01:12.847Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "379b5ea05453fdaee60e-81693db0424d614cf766",
+          "file": "today-callback.spec.ts",
+          "line": 514,
+          "column": 1
+        },
+        {
+          "title": "a request that never reached the server is unknown to the browser; the retry completes once, by keyboard",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1085,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-18T03:01:14.133Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "379b5ea05453fdaee60e-58847bcf803a8e387e49",
+          "file": "today-callback.spec.ts",
+          "line": 534,
+          "column": 1
+        },
+        {
+          "title": "a callback committed while Heute is open appears by itself, once, without a reload",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 36824,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-18T03:01:15.231Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "379b5ea05453fdaee60e-c63d5f1b21a4b21f2f95",
+          "file": "today-callback.spec.ts",
+          "line": 607,
+          "column": 1
+        },
+        {
+          "title": "a completion reaches another open session, and a replay of the call does not reopen it",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 53425,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-18T03:01:52.066Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "379b5ea05453fdaee60e-ed23f6f7f72c1ff15c4b",
+          "file": "today-callback.spec.ts",
+          "line": 650,
+          "column": 1
+        },
+        {
+          "title": "an outage leaves the list as it is, and the page reconciles when the network returns",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 30203,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-18T03:02:45.505Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "379b5ea05453fdaee60e-c545308783ee3e6bd1a7",
+          "file": "today-callback.spec.ts",
+          "line": 685,
+          "column": 1
+        },
+        {
+          "title": "a revoked session shows the signed-out page and no task data",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 120000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 45407,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-18T03:03:15.720Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "379b5ea05453fdaee60e-09c0b21bf6d24d1b0a0a",
+          "file": "today-callback.spec.ts",
+          "line": 724,
+          "column": 1
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-10-18T03:00:46.667Z",
+    "duration": 199743.389,
+    "expected": 10,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

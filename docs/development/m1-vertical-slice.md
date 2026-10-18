@@ -110,19 +110,28 @@ helpers for P13.10), and a poll adds no channel that could be subscribed to with
 Code: `apps/web/lib/live-today.ts`, `apps/web/app/live-today.tsx`.
 
 - **Guarantee.** Healthy connection, visible tab: a committed task or completion is on screen
-  within about one interval plus a request and a render (measured 15.4 s, limit 60 s).
+  within about one interval plus a request and a render (measured 15.0 to 15.4 s in the local browser test, from the task row's `created_at`, which is stamped at transaction start, so it slightly overstates; limit 60 s).
 - **Not promised.** A hidden or suspended tab does not poll; it polls at once when shown again (or
   when the browser reports the network is back). Nothing is promised while disconnected.
 - **Idle.** Every guarded read slides the session's idle expiry, so a tab with no input (pointer,
   key, touch, scroll) for 30 min stops polling and resumes on the next input; an unattended screen
   goes stale rather than keeping a session alive (the stale indicator is P13.10).
-- **Failures.** A failed poll keeps the list on screen and backs off (15 s doubling to 120 s); polls
+- **Failures.** A failed poll keeps the list on screen and backs off (the next poll waits 30 s after one failure, 60 s after two, 120 s from three on; ±10 %); polls
   never overlap; a 401 hands over to the server render (signed-out page, no task data; the loop ends when that page unmounts it);
   the page's error state is left by the next good poll.
 - **Budget.** About 4 reads a minute per visible tab against the account's 50 a minute.
 - **Open.** The poller has no gate yet for P13.10 (SSE plus polling only as fallback) and exposes no
   last-success signal for the stale indicator (P13.10.02). SSE with `Last-Event-ID`, the stale-data indicator and the polling-fallback E2E
-  (P13.10), summary counts (P13.02.02). The browser test is local-only (needs Keycloak), not in CI.
+  (P13.10), summary counts (P13.02.02). The browser suite also runs in CI (`e2e-slice` in `verify.yml`).
+
+## In CI
+
+The `e2e-slice` job in `.github/workflows/verify.yml` runs this suite on every pull request: a
+PostgreSQL service container with the application roles, Keycloak from the compose file, the
+compiled API, the standalone owner app (built with the loopback API proxy) and Chromium. It is in
+the `verify` check's `needs`. `scripts/check-slice-report.ts` fails the job unless all ten tests ran
+and passed, none skipped. Add a test to the suite and its title phrase to that script. The
+`e2e-slice` artifact holds the report, the commit-to-render timings and the process log. To run it locally, see below.
 
 ## Run it locally
 
