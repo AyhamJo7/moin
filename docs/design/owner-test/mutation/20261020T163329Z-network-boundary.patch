@@ -1,0 +1,246 @@
+diff --git a/docs/decisions/DG-10-owner-app-visual-language.md b/docs/decisions/DG-10-owner-app-visual-language.md
+index 349eb93..daa3ffc 100644
+--- a/docs/decisions/DG-10-owner-app-visual-language.md
++++ b/docs/decisions/DG-10-owner-app-visual-language.md
+@@ -93,12 +93,47 @@ A and B don't imply C. Viewing the mock-ups, whether by the founder or anyone el
+   - its moderator page, its checks and the session material.
+ - **Limits:**
+   - **Outside the product:** nothing outside the pnpm workspace, the release image and its build context (`docs` is in `.dockerignore`). No file in `apps/`, `packages/`, `infrastructure/`, migrations, CI or deployment configuration is added or changed.
+-  - **No connections:** no network request (the page's CSP has `connect-src 'none'`), no server, no account, no real customer data. It is never deployed publicly.
++  - **No server, no application connections:**
++    - **Delivery:** the prototype is opened from local files (`file://`) on the moderator's computer. No server is run.
++    - **CSP:** the page's `connect-src 'none'` blocks its own programmatic connections (fetch, XHR, WebSocket, beacon). It doesn't govern loading the page's own files, following its links, or handing a `tel:` link to the phone app.
++    - **Also excluded:** accounts, real customer data, external assets, analytics and telemetry. It is never deployed publicly.
++    - **Correction note (2026-10-20, after independent review):** the first wording ("no network request") overstated what the CSP does. The boundary itself, no server, is unchanged.
+   - **Not a code source:** no prototype code may be copied into `apps/web` or `packages/ui`; the implementation is built under ADR-0025.
+   - **What a result proves:** usability of the design only. It is not P13 acceptance and proves nothing about persistence, authentication, live updates or recovery.
+ - **Expiry:** the exception ends when DG-10 is decided (TAKEN, changed or rejected) or on 2026-12-31, whichever comes first. The prototype is then removed in a docs PR; evidence keeps the commit SHA it was tested at.
+ - **Unchanged:** DG-10 stays **PROVISIONAL**. Item C (evidence complete) stays NOT_STARTED until an owner session has actually taken place and been recorded. P13.01 stays blocked.
+ 
++### Proposed amendment: phone access over the local network (**NOT AUTHORIZED**)
++
++**Status:** a proposal for the founder's decision. It is **not authorised**, and no part of it may be carried out until the founder records approval here, with the date and the approved values. Until then, the owner test can't run on a phone. Phone tasks (T3, T5 on the phone, T7, T10) and criterion C5's phone half stay "nicht getestet", so DG-10's evidence can't be complete.
++
++**Why it is needed:** a participant's phone can't open files on the moderator's computer. Serving the prototype to a phone means running an HTTP server, which the recorded exception excludes.
++
++**What an approval would allow, and nothing more:**
++
++1. **What is served:** only the versioned synthetic prototype at a named commit: a copy of `docs/design/owner-test/prototype/` and `docs/design/review/mockups/proposal.css`, read-only. Nothing else from the repository is in the served directory.
++2. **Where:** bound to one founder-approved LAN interface address in one approved subnet. Not a wildcard bind on all interfaces, which is not equivalent and isn't approved by this proposal.
++3. **Port:** one temporary, predetermined port, open only for the session.
++4. **No public routing:** no router port forwarding, tunnel or other internet exposure.
++5. **No product services:** no production API, Keycloak, database or other application service is reachable through it. The prototype references none, and its CSP blocks programmatic connections.
++6. **No telemetry:** no application telemetry, analytics or external assets.
++7. **Lifecycle:** started immediately before the session and stopped immediately after, by the moderator. Its start and stop times go on the observation sheet.
++8. **Access logs:**
++   - access logging disabled where the server allows it;
++   - otherwise the log goes to a temporary file that is deleted after the session;
++   - the phone's local-network address and the requested paths are treated as personal data of the participant;
++   - the consent text says so.
++9. **Preflight:** a phone connectivity check with the moderator's own phone before the participant arrives.
++10. **Nothing persisted:** no credentials, accounts or caller data, and nothing stored on the server.
++
++**WSL2:** a server inside WSL2 sits behind NAT and isn't reachable from the LAN by default. Making it reachable (port proxying, firewall rules) is a separate change to the founder's machine and needs its own approval; this proposal doesn't include it. The founder chooses one of:
++
++- **(a)** a server on the Windows host bound to the approved interface;
++- **(b)** a separate computer;
++- **(c)** an isolated network for the session, such as a dedicated hotspot, so that only the moderator's devices and the participant's phone share it.
++
++**Values the founder must fill in to approve:** the interface address and subnet, the port, the serving machine, the logging treatment, the retention of any log, and the session dates the approval covers.
++
+ ## Options considered
+ 
+ | Option                                                   | Why not                                                                                                                     |
+diff --git a/docs/design/owner-test/README.md b/docs/design/owner-test/README.md
+index 80afd35..3daf0be 100644
+--- a/docs/design/owner-test/README.md
++++ b/docs/design/owner-test/README.md
+@@ -16,7 +16,19 @@
+ | "Stand HH:MM"                                          | a synthetic clock starting at 09:42                                                                                                                                |
+ | Server, database, sign-in, live updates, CSRF, tenants | **none.** Nothing here shows that any of them work                                                                                                                 |
+ 
+-The page sends nothing anywhere: its CSP has `connect-src 'none'`, and the check below asserts that no request leaves the device.
++**Network behaviour, precisely:**
++
++| What                                                     | In the prototype                                                                                                              |
++| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
++| The page's own files (HTML, CSS, JS)                     | loaded by the browser from local files (`file://`). No server is run (DG-10 record)                                           |
++| State in the browser                                     | the tab's `sessionStorage` only: which tasks were completed in this scenario, and a session marker. It is never sent anywhere |
++| Programmatic connections (fetch, XHR, WebSocket, beacon) | none in the code, and blocked by the CSP `connect-src 'none'`                                                                 |
++| External APIs, analytics, telemetry, fonts, images       | none: the CSP allows only the page's own files                                                                                |
++| Navigations                                              | "Aktualisieren", "Neu laden" and the moderator links reload the page's own file                                               |
++| Call links                                               | a `tel:` link hands the number to the device's phone app, which happens outside the page                                      |
++| Server access logs                                       | none, because there is no server. A phone session would need one: see §3                                                      |
++
++The check below asserts that every request the page makes is a local file. It can't say anything about a server that doesn't exist.
+ 
+ ## 2. Isolation from the product
+ 
+@@ -27,21 +39,21 @@ The page sends nothing anywhere: its CSP has `connect-src 'none'`, and the check
+ ## 3. Running a session
+ 
+ - **Laptop:** open `prototype/moderator.html` in Chrome or Edge, and start each scenario from there, in the same tab. Opening the files directly (`file://`) works.
+-- **Participant's phone:** the phone needs an HTTP address on the same local network. One way is a static server started from `docs/design` on a machine the phone can reach:
+-
+-  ```bash
+-  python3 -m http.server 8080 --bind 0.0.0.0 --directory docs/design
+-  # phone: http://<laptop-address>:8080/owner-test/prototype/moderator.html
+-  ```
+-
+-  - **WSL2:** a server inside WSL2 isn't reachable from the phone by default. Run it on the Windows host, or forward the port.
+-  - **Exposure:** never expose the server beyond the local network, and stop it after the session.
++- **Participant's phone: NOT AUTHORIZED.** A phone can't open files on the moderator's computer, and serving them over the network needs a server. The recorded exception excludes a server.
++  - The [proposed amendment](../../decisions/DG-10-owner-app-visual-language.md#proposed-amendment-phone-access-over-the-local-network-not-authorized) (interface, port, logging, lifecycle, WSL2) waits for the founder's decision. Until it is approved and recorded, there is no phone procedure, and none may be improvised.
++  - Without it, the phone tasks and C5's phone half stay "nicht getestet".
++- **Session readiness:** **not ready** for a complete DG-10 session. Outstanding:
++  - phone access (above);
++  - the participant (an owner);
++  - the founder's completion of the consent text;
++  - confirmation of the C1–C8 thresholds;
++  - the manual screen-reader passes.
+ 
+ - **Reset between participants:** each "Starten" link on the moderator page clears this tab's completions. Close the tab after the session.
+ 
+ ## 4. Before every session
+ 
+-1. On the commit to be tested, run `node docs/design/owner-test/check-prototype.mjs` from the repository root. It must report 0 failures. It covers:
++1. On the commit to be tested, run `node docs/design/owner-test/check-prototype.mjs` and `node docs/design/owner-test/check-concurrency.mjs` from the repository root. Both must report 0 failures; the concurrency check covers overlapping completions, resets and focus. It covers:
+    - every scenario at 320, 360, 390, 640, 720, 768, 1280 and 1440 px (640 and 720 are a 1280 and 1440 px window at 200% zoom), plus 200% phone text size: no horizontal scroll, contrast, 44 px targets 8 px apart, labels inside names, no overlap in a row, the Heute contracts, and axe;
+    - keyboard order and visible focus;
+    - completing a task, state across "Aktualisieren", reset, all done;
+diff --git a/docs/design/owner-test/observation-sheet.md b/docs/design/owner-test/observation-sheet.md
+index 5b1153e..bb1dbcf 100644
+--- a/docs/design/owner-test/observation-sheet.md
++++ b/docs/design/owner-test/observation-sheet.md
+@@ -4,22 +4,24 @@ Copy this sheet for each session. Fill it in during and right after the session.
+ 
+ ## 1. Session header
+ 
+-| Field                                                                               | Entry            |
+-| ----------------------------------------------------------------------------------- | ---------------- |
+-| Date, start and end time                                                            |                  |
+-| Session authorised by the founder (date, form)                                      |                  |
+-| Moderator / note-taker (roles, not names)                                           |                  |
+-| Participant's role: restaurant **owner** who handles callbacks themselves? (yes/no) |                  |
+-| Counts as DG-10 evidence (only if the line above is "yes")                          |                  |
+-| Also P13's session? (founder decision; Gurlitt owner?)                              |                  |
+-| Consent: notes / audio / screen (each yes or no)                                    |                  |
+-| Prototype version (`data-version`)                                                  | DG-10-Prototyp 1 |
+-| Commit SHA tested                                                                   |                  |
+-| SHA-256 of the prototype files and `proposal.css` (README §4)                       |                  |
+-| `check-prototype.mjs` result on that SHA (failures, date)                           |                  |
+-| Laptop: browser and version, window width, zoom                                     |                  |
+-| Phone: model class, OS, browser, text size setting                                  |                  |
+-| Order actually run, and any deviation from the kit                                  |                  |
++| Field                                                                                                | Entry            |
++| ---------------------------------------------------------------------------------------------------- | ---------------- |
++| Date, start and end time                                                                             |                  |
++| Session authorised by the founder (date, form)                                                       |                  |
++| Moderator / note-taker (roles, not names)                                                            |                  |
++| Participant's role: restaurant **owner** who handles callbacks themselves? (yes/no)                  |                  |
++| Counts as DG-10 evidence (only if the line above is "yes")                                           |                  |
++| Also P13's session? (founder decision; Gurlitt owner?)                                               |                  |
++| Consent: notes / audio / screen (each yes or no)                                                     |                  |
++| Phone-access approval in the DG-10 record (date, approved values), or "none: phone tasks not tested" |                  |
++| Only with an approved phone route: server start and stop times, and what happened to its log         |                  |
++| Prototype version (`data-version`)                                                                   | DG-10-Prototyp 1 |
++| Commit SHA tested                                                                                    |                  |
++| SHA-256 of the prototype files and `proposal.css` (README §4)                                        |                  |
++| `check-prototype.mjs` result on that SHA (failures, date)                                            |                  |
++| Laptop: browser and version, window width, zoom                                                      |                  |
++| Phone: model class, OS, browser, text size setting                                                   |                  |
++| Order actually run, and any deviation from the kit                                                   |                  |
+ 
+ ## 2. Per task
+ 
+diff --git a/docs/design/owner-test/prototype/index.html b/docs/design/owner-test/prototype/index.html
+index 9197490..c99f2f5 100644
+--- a/docs/design/owner-test/prototype/index.html
++++ b/docs/design/owner-test/prototype/index.html
+@@ -42,8 +42,8 @@
+     </svg>
+     <a class="skip-link" href="#inhalt">Zum Inhalt springen</a>
+     <p class="proposal-label">
+-      Prototyp für einen Nutzertest – alle Aufgaben und Nummern sind erfunden. Es wird nichts an
+-      einen Server gesendet.
++      Prototyp für einen Nutzertest – alle Aufgaben und Nummern sind erfunden. Ihre Eingaben gehen
++      an keinen Dienst; der Browser merkt sie sich nur in diesem Fenster.
+     </p>
+     <header class="topbar">
+       <div class="frame topbar-inner">
+diff --git a/docs/design/owner-test/prototype/moderator.html b/docs/design/owner-test/prototype/moderator.html
+index 8498ec7..f8753f9 100644
+--- a/docs/design/owner-test/prototype/moderator.html
++++ b/docs/design/owner-test/prototype/moderator.html
+@@ -27,7 +27,10 @@
+         </li>
+         <li>
+           Öffnen Sie die Links <strong>im selben Tab</strong>. Gespeichert wird nur in diesem Tab
+-          (sessionStorage); nichts wird an einen Server gesendet.
++          (sessionStorage). Die Seite baut keine Verbindungen auf und lädt keine fremden Inhalte;
++          geladen werden nur ihre eigenen Dateien. Kein Server: Die Seite wird als Datei auf diesem
++          Rechner geöffnet. Die Nutzung auf dem Telefon ist NICHT freigegeben (DG-10-Aufzeichnung,
++          vorgeschlagene Ergänzung).
+         </li>
+         <li>
+           Die Rufnummern sind erfundene Testnummern (+49 30 0000…). Ein Tippen öffnet nur die
+diff --git a/docs/design/owner-test/session-kit.md b/docs/design/owner-test/session-kit.md
+index 980d40c..ac6a4be 100644
+--- a/docs/design/owner-test/session-kit.md
++++ b/docs/design/owner-test/session-kit.md
+@@ -9,20 +9,21 @@
+ - [ ] **Session authorised.** The founder has authorised this session (date, place, participant) in writing.
+ - [ ] **Participant qualifies.** The participant is a restaurant **owner** who handles callbacks themselves (test plan §1.3). If the session is also P13's acceptance session, it is the Gurlitt owner.
+ - [ ] **Consent text approved.** The founder has approved the consent text (§3), including the data-protection details marked "vom Gründer festzulegen". There are two printed copies.
+-- [ ] **Check passed.** `node docs/design/owner-test/check-prototype.mjs` reports 0 failures on the commit being tested. The commit SHA and file digest are entered on the observation sheet.
++- [ ] **Checks passed.** `node docs/design/owner-test/check-prototype.mjs` and `node docs/design/owner-test/check-concurrency.mjs` report 0 failures on the commit being tested. The commit SHA and file digest are entered on the observation sheet.
+ - [ ] **Laptop ready:** Chrome or Edge, German locale, zoom 100%, the moderator page open, notifications off.
+-- [ ] **Phone path tested.** The participant's phone reaches the prototype address (README §3); the moderator has tried it on a second phone.
++- [ ] **Phone access authorised. Currently NOT AUTHORIZED.** The founder has approved and recorded the phone-access amendment in the DG-10 record, with interface, port, logging and dates. Until then, skip block A and record its tasks as "nicht getestet". Never start a server without that record.
++- [ ] **Phone path tested (only after approval).** The moderator's own phone reaches the prototype through the approved route.
+ - [ ] **Dialler tested.** Tapping a number opens the dialler with an invalid fixture number, and the moderator cancels.
+ - [ ] **No recording** unless the participant agreed to it separately (§3).
+ 
+ ## 2. Running order
+ 
+-Phone first, because owners mostly use Heute on a phone and C5 needs an unprompted discovery on each device.
++Phone first, because owners mostly use Heute on a phone and C5 needs an unprompted discovery on each device. **Phone access is not authorised yet:** until the founder approves it in the DG-10 record, run block B only and record block A's tasks as "nicht getestet". The session then can't complete DG-10's evidence.
+ 
+ | Block                                               | Task                                           | Device                 | Scenario (moderator page)                    | Minutes |
+ | --------------------------------------------------- | ---------------------------------------------- | ---------------------- | -------------------------------------------- | ------- |
+ | Welcome                                             | consent, two warm-up questions (§4)            | —                      | —                                            | 3       |
+-| A, phone                                            | T3                                             | phone                  | Morgen                                       | 2       |
++| A, phone (only with approved phone access)          | T3                                             | phone                  | Morgen                                       | 2       |
+ |                                                     | T5 (phone)                                     | phone                  | Morgen (same tab, continue)                  | 1       |
+ |                                                     | T6                                             | phone                  | Morgen: the participant activates "Erledigt" | 2       |
+ |                                                     | T10                                            | phone                  | Volle Liste                                  | 2       |
+@@ -52,7 +53,9 @@ The founder adapts the parts marked "vom Gründer festzulegen" before the first
+ > - Die Teilnahme ist freiwillig. Sie können jederzeit ohne Angabe von Gründen abbrechen.
+ > - Wir machen schriftliche Notizen zu dem, was Sie tun und sagen – ohne Ihren Namen. Ton-, Bild- oder Bildschirmaufnahmen machen wir nur, wenn Sie unten gesondert zustimmen.
+ > - Die Notizen dienen nur dazu, den Entwurf zu verbessern und eine Produktentscheidung zu belegen. Sie werden außerhalb des Programmcodes gespeichert; aufbewahrt bis _(vom Gründer festzulegen)_; verantwortlich: _(vom Gründer festzulegen)_; Kontakt für Fragen oder Löschung: _(vom Gründer festzulegen)_.
+-> - Auf Ihrem Telefon öffnen Sie nur eine Testseite im Browser. Es wird nichts installiert, und die Seite sendet nichts. Wenn sich beim Tippen auf eine Nummer die Telefon-App öffnet, brechen Sie bitte ab – es wird niemand angerufen.
++> - Sie arbeiten mit einer Testseite im Browser. Es wird nichts installiert. Die Seite sendet Ihre Eingaben an keinen Dienst und keine Datenbank; was Sie als erledigt markieren, merkt sich nur der Browser in diesem Fenster.
++> - Nur falls der Test auch auf Ihrem Telefon stattfindet: Dann lädt Ihr Telefon die Testseite über das lokale Netz von einem Rechner der Moderation. Dieser Rechner kann dabei die Adresse Ihres Telefons im lokalen Netz und die abgerufenen Seiten kurzzeitig protokollieren. Ein solches Protokoll wird _(vom Gründer festzulegen)_ und spätestens nach der Sitzung gelöscht.
++> - Wenn sich beim Tippen auf eine Nummer die Telefon-App öffnet, brechen Sie bitte ab – es wird niemand angerufen.
+ >
+ > ☐ Ich bin mit der Teilnahme und mit schriftlichen Notizen einverstanden.
+ > ☐ Ich bin zusätzlich mit einer Aufnahme einverstanden: ☐ Ton ☐ Bildschirm (freiwillig).
+@@ -103,4 +106,4 @@ The founder adapts the parts marked "vom Gründer festzulegen" before the first
+ > Gab es etwas, das Sie gesucht und nicht gefunden haben?
+ > Würden Sie diese Seite morgens zwischen zwei Gästen nutzen? Warum (nicht)?
+ 
+-Thank the participant. Close the browser tab on every device, and stop the local server.
++Thank the participant. Close the browser tab on every device. If a server was run under an approved amendment, stop it, and handle its log as approved.
+diff --git a/docs/design/owner-usability-test.md b/docs/design/owner-usability-test.md
+index 2d1ced2..39c7eb8 100644
+--- a/docs/design/owner-usability-test.md
++++ b/docs/design/owner-usability-test.md
+@@ -39,6 +39,8 @@ Before a session counts as DG-10 evidence:
+ | Static mock-up **HTML pages**, opened on the device          | [review/mockups/](review/mockups/)                                              | real scrolling, real layout at the device's width, and `tel:` links that open the dialler; buttons do nothing                                                 |
+ | **Interactive prototype** (synthetic, in-browser simulation) | [owner-test/prototype/](owner-test/prototype/), moderator page `moderator.html` | completing a task, the pending state, the outcome notice, focus movement, the simulated re-read, the loading and error states; every task below can run on it |
+ 
++**Phone delivery:** both the static HTML pages and the prototype reach a phone only through a server. That is **not authorised** until the founder approves the phone-access amendment in the DG-10 record. Until then, phone tasks are "nicht getestet".
++
+ Every session records exactly which artefact it used, with its commit SHA or image digest. The runbook, the per-task scenarios and the forms are in [owner-test/session-kit.md](owner-test/session-kit.md) and [owner-test/observation-sheet.md](owner-test/observation-sheet.md).
+ 
+ ## 4. Tasks

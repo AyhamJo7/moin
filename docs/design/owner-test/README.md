@@ -64,4 +64,5 @@ The check below asserts that every request the page makes is a local file. It ca
 ## 5. The session material
 
 - [session-kit.md](session-kit.md): the runbook, the German moderator script, and the German consent and privacy text.
+- [check-concurrency.mjs](check-concurrency.mjs) and [check-boundary.mjs](check-boundary.mjs): the deterministic concurrency regressions and the network and authorisation boundary checks; the mutation evidence for every fix is in [mutation-evidence.md](mutation-evidence.md).
 - [observation-sheet.md](observation-sheet.md): the session header, per-task measurements, the severity rubric, the separate DG-10 and P13 matrices, and the evidence location.

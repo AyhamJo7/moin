@@ -1,0 +1,186 @@
+diff --git a/docs/design/owner-test/prototype/prototype.js b/docs/design/owner-test/prototype/prototype.js
+index 33cabaf..547aa5b 100644
+--- a/docs/design/owner-test/prototype/prototype.js
++++ b/docs/design/owner-test/prototype/prototype.js
+@@ -203,6 +203,20 @@
+     history.replaceState(null, '', selfUrl);
+   }
+ 
++  // The session this document belongs to. A fresh start (?neu=1) clears everything and writes a new
++  // marker, so a completion scheduled by an older document (for example one restored from the
++  // back/forward cache) sees a different marker and is dropped instead of writing into the new
++  // session.
++  if (store.get('session', null) === null) store.set('session', `${Date.now()}-${Math.random()}`);
++  const session = store.get('session', null);
++
++  // Completions in flight, by task id: the one source of truth for "Wird gespeichert …". Rows are
++  // re-rendered from it, so a re-render caused by another task can't reset a pending task, and a
++  // replacement button can't start a second completion. Per document: a reload abandons them.
++  const pending = new Set();
++  const done = () => store.get(`${scenarioName}:done`, []);
++  const isUnavailable = (id) => (scenario.unavailable ?? []).includes(id);
++
+   const head = document.getElementById('kopf');
+   const content = document.getElementById('aufgaben');
+   const notice = document.getElementById('meldung');
+@@ -229,40 +243,72 @@
+             'div',
+             { class: 'page-tools' },
+             h('span', { class: 'status-line' }, icon('clock'), `Stand ${clock()}`),
+-            h('a', { class: 'btn btn-secondary', href: selfUrl }, 'Aktualisieren'),
++            h(
++              'a',
++              { class: 'btn btn-secondary', href: selfUrl, 'data-focus-key': 'refresh' },
++              'Aktualisieren',
++            ),
+           )
+         : null,
+     );
+   }
+ 
+   function completeButton(t) {
+-    let inFlight = false;
++    const key = `${t.id}:action`;
++    if (pending.has(t.id)) {
++      // The visible label stays part of the accessible name while pending (WCAG 2.5.3).
++      // aria-disabled (not disabled) keeps it focusable for keyboard and screen-reader users; it
++      // has no handler, so activating it does nothing.
++      return h(
++        'button',
++        {
++          class: 'btn btn-outline',
++          type: 'button',
++          'aria-label': `Wird gespeichert …: ${t.title}`,
++          'aria-busy': 'true',
++          'aria-disabled': 'true',
++          'data-focus-key': key,
++        },
++        'Wird gespeichert …',
++      );
++    }
+     const button = h(
+       'button',
+-      { class: 'btn btn-outline', type: 'button', 'aria-label': `Erledigt: ${t.title}` },
++      {
++        class: 'btn btn-outline',
++        type: 'button',
++        'aria-label': `Erledigt: ${t.title}`,
++        'data-focus-key': key,
++      },
+       icon('check'),
+       'Erledigt',
+     );
+-    button.addEventListener('click', () => {
+-      // A second activation while pending does nothing (DESIGN.md §7).
+-      if (inFlight) return;
+-      inFlight = true;
+-      button.setAttribute('aria-busy', 'true');
+-      button.setAttribute('aria-disabled', 'true');
+-      // The visible label stays part of the accessible name while pending (WCAG 2.5.3).
+-      button.setAttribute('aria-label', `Wird gespeichert …: ${t.title}`);
+-      button.replaceChildren('Wird gespeichert …');
+-      setTimeout(() => {
+-        store.set(`${scenarioName}:done`, [...store.get(`${scenarioName}:done`, []), t.id]);
+-        renderList();
+-        say('Der Rückruf ist als erledigt markiert.');
+-      }, PENDING_MS);
+-    });
++    button.addEventListener('click', () => start(t.id));
+     return button;
+   }
+ 
++  /** Begin one task's simulated completion. Pending, done or unavailable tasks are left alone. */
++  function start(id) {
++    if (pending.has(id) || done().includes(id) || isUnavailable(id)) return;
++    pending.add(id);
++    renderList();
++    setTimeout(() => finish(id), PENDING_MS);
++  }
++
++  /** End one task's simulated completion: recorded once, announced once, or dropped if stale. */
++  function finish(id) {
++    if (!pending.delete(id)) return;
++    if (store.get('session', null) !== session) {
++      renderList();
++      return;
++    }
++    if (!done().includes(id)) store.set(`${scenarioName}:done`, [...done(), id]);
++    const kept = renderList();
++    say('Der Rückruf ist als erledigt markiert.', { focus: !kept });
++  }
++
+   function taskRow(t) {
+-    const unavailable = (scenario.unavailable ?? []).includes(t.id);
++    const unavailable = isUnavailable(t.id);
+     return h(
+       'li',
+       { class: t.urgent ? 'task task--urgent' : 'task', 'data-task-id': t.id },
+@@ -285,7 +331,16 @@
+           'dl',
+           { class: 'cell-phone' },
+           h('dt', { class: 'visually-hidden' }, 'Anrufer'),
+-          h('dd', {}, h('a', { class: 'phone', href: `tel:${t.phone}` }, icon('phone'), t.phone)),
++          h(
++            'dd',
++            {},
++            h(
++              'a',
++              { class: 'phone', href: `tel:${t.phone}`, 'data-focus-key': `${t.id}:call` },
++              icon('phone'),
++              t.phone,
++            ),
++          ),
+         ),
+         h(
+           'dl',
+@@ -349,10 +404,16 @@
+     );
+   }
+ 
+-  /** The simulated server read: the scenario's tasks minus the ones completed in this tab. */
++  /**
++   * The simulated server read: the scenario's tasks minus the ones completed in this tab, with
++   * pending tasks drawn from `pending`. Focus is put back on the control it was on, matched by its
++   * key, because the re-render replaces every node. Returns false when the focused control no
++   * longer exists (its task left the list) or nothing in the page had focus.
++   */
+   function renderList() {
+-    const done = new Set(store.get(`${scenarioName}:done`, []));
+-    const open = scenario.tasks.filter((t) => !done.has(t.id));
++    const focusKey = document.activeElement?.dataset?.focusKey ?? null;
++    const completed = new Set(done());
++    const open = scenario.tasks.filter((t) => !completed.has(t.id));
+     const groups = {
+       urgent: open.filter((t) => t.urgent),
+       callbacks: open.filter((t) => !t.urgent),
+@@ -374,6 +435,10 @@
+     if (empty.length > 0) blocks.push(quiet(empty));
+     head.replaceChildren(pageHead(true));
+     content.replaceChildren(h('div', { class: 'sections' }, blocks));
++    const again =
++      focusKey === null ? null : document.querySelector(`[data-focus-key="${focusKey}"]`);
++    again?.focus();
++    return again !== null;
+   }
+ 
+   function renderLoading() {
+@@ -428,11 +493,15 @@
+     );
+   }
+ 
+-  /** The outcome sentence: outside every task, and it takes focus (the row it came from is gone). */
+-  function say(message) {
+-    noticeText.textContent = message;
++  /**
++   * The outcome sentence, outside every task. A new text node per completion, so the live region
++   * announces each one even when the words repeat. It takes focus only when the control that had
++   * focus is gone (its row left the list); otherwise the owner keeps working where they are.
++   */
++  function say(message, { focus }) {
++    noticeText.replaceChildren(document.createTextNode(message));
+     notice.hidden = false;
+-    notice.focus();
++    if (focus) notice.focus();
+   }
+ 
+   document.documentElement.dataset.version = VERSION;

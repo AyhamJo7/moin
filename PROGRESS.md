@@ -1765,3 +1765,16 @@ work-queue Heute under `docs/design/owner-test/`:
 - C3 now reads "phone dialler opened".
   Added the German session kit, consent text and observation sheet, with separate DG-10 and P13 matrices. No owner
   session has taken place, nothing VERIFIED, DG-10 stays PROVISIONAL, P13.01 stays blocked.
+
+DG-10 prototype remediation (2026-10-20, same draft PR #244, from rejected head `76fea39`): independent review
+REQUEST_CHANGES with two blocking P2 findings.
+
+- F1: completing one task re-rendered the list and reset a second pending task. The history became
+  ["t101","t102","t102"] with three announcements. Deterministic fake-clock regressions came first (`3787c62`, red:
+  9 of 36 failing). The fix (`ca5d818`) keeps pending completions in one registry keyed by task id, adds a session
+  marker against stale callbacks, restores focus by key, and announces each completion once. Mutation-check KILLED.
+- F2: the material contradicted itself (no server, yet a serving instruction bound to all interfaces, and "sendet
+  nichts"). The no-server boundary is kept with precise CSP wording (`29a0047`) and the serving instruction removed.
+  Phone access is a separate proposal headed NOT AUTHORIZED, for the founder. The consent covers possible address
+  logging, and a boundary check was added (negative control KILLED). No server was started and no network test run.
+  Phone tasks remain untested until the founder decides. No owner session, nothing VERIFIED, DG-10 PROVISIONAL.
