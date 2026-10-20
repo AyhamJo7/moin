@@ -1722,3 +1722,17 @@ the screenshot-baseline plan (13 images, CI never writes baselines) and the tool
 references; Chrome DevTools MCP pin and hardening as a founder action). The review package
 (`docs/design/review/`) contains static mock-ups only, labelled as proposals; no before screenshot of the
 application exists yet (gate 2a). P13.01.04 stays IN_PROGRESS; nothing VERIFIED.
+
+UX-01 Gate 0 remediation (2026-10-20, same draft PR #243, docs only, from rejected head `a98d7b4`): independent review
+REQUEST_CHANGES with two P2 and one P3 findings; design direction and architecture were accepted and are unchanged.
+P2-F1: `docs/design/DESIGN.md` §6.1 now specifies refresh health as proposed future behaviour. A client-side failure
+clock runs only while the page is visible and attended, and any successful read, unchanged or not, resets it.
+"Aktualisierung verzögert" appears after more than 2 minutes of real failures, never for hidden, idle, unchanged or
+no-new-work cases. The current poller exposes none of this state; a separate gate RH with eight acceptance proofs
+covers it. P2-F2: the DG-10 record now separates provisional direction, accepted planning guidance and evidence
+complete; the owner usability test is NOT_STARTED, DG-10 stays PROVISIONAL, P13.01 stays blocked, and four
+founder decisions are listed. PLAN names that evidence EV-P13-003, but that ID is already taken by another record.
+P3: the "Bedienrahmen" swatch label goes from white (3.70:1) to `#1C1B19` (4.65:1). A text-contrast audit of all
+mock-ups found no other failures, and three images were regenerated from source; the other five re-render byte for
+byte. ADR-0025 D2 now documents the Tailwind entry, export and `@source` registration of `@moin/ui`, with proofs
+required on the standalone image. Nothing implemented, nothing VERIFIED.

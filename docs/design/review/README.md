@@ -23,6 +23,7 @@
 ![Foundations: tokens, type, spacing, buttons, status](images/foundations-1440.png)
 
 - Every text pair is 4.5:1 or more, and control boundaries and focus rings are 3:1 or more. The full table is in DESIGN.md §3.1.
+- **Correction after independent review:** the "Bedienrahmen" swatch label was white on `#8A847C` (3.70:1, below 4.5:1). It is now `--color-text` `#1C1B19` on the same swatch (4.65:1). The control-border token is unchanged, because it is a 3:1 boundary colour, not a text ground. A computed-style audit of every visible text element in the four mock-ups at 390 and 1440 px now finds no pair below its WCAG threshold.
 - **The primary blue `#1D5FA8` in each state:** default 6.5:1, hover 8.7:1, pressed 11.0:1 (white text on each). The focus ring is 6.5:1 on white and 5.9:1 on the canvas.
 - There is no decorative warm accent (DG-10). The warmth is in the neutral ground `#F6F5F2` and the text greys.
 
@@ -90,13 +91,15 @@ Shown from top to bottom:
 1. signed out;
 2. loading (skeleton plus the existing status text);
 3. read failed (warning alert with "Neu laden");
-4. refresh failing while the list stays visible ("Stand HH:MM · Aktualisierung fehlgeschlagen");
+4. refresh delayed: more than 2 minutes of failed refreshes on a visible, attended page, with the list still shown ("Aktualisierung verzögert", [DESIGN.md](../DESIGN.md) §6.1). This is proposed future behaviour; today's polling doesn't expose the state it needs. Brief failures, a hidden tab and an idle pause show no notice, so they have no image;
 5. completion unavailable on an older API;
 6. truncated list (no counts);
 7. after "Erledigt" (the success notice, which receives focus);
 8. keyboard focus on "Erledigt".
 
-The dashed "Zustand" and "Anmerkung" labels explain the mock-up only and are not part of the design. The wording of the refresh-failure line and its 2-minute threshold (P13.10.02) are proposals that enter `de.json` only at implementation.
+The dashed "Zustand" and "Anmerkung" labels explain the mock-up only and are not part of the design. The wording of the refresh-delayed notice and its 2-minute threshold (P13.10.02) are proposals that enter `de.json` only at implementation (refresh-health gate RH).
+
+**Images regenerated after independent review:** `foundations-1440.png` (contrast correction) and `heute-states-1440.png` / `-390.png` (state 4). The other five images are unchanged: re-rendering their unchanged sources in the same environment reproduced them byte for byte.
 
 ## I. What changes compared with today's unstyled Heute
 

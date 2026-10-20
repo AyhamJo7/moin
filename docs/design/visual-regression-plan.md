@@ -7,18 +7,18 @@ Screenshots are a tripwire against unintended visual change. They never replace 
 
 ## 1. Environment (everything fixed)
 
-| Variable          | Fixed value                                                                                                                                                                  |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Application state | the vertical-slice stack (built API and web, PostgreSQL, local Keycloak), as in `playwright.slice.config.ts`, never the founder's packaged demo                              |
-| Data              | a fresh database per run, seeded only through the existing simulated-call endpoint with the fixed synthetic set in §3                                                        |
-| Browser           | Playwright **1.63.0** Chromium, in the official Playwright container image for that version, pinned by digest when the job is written                                        |
-| Fonts             | whatever that image ships; the design uses the system UI stack, and the pinned image makes the resolved fonts deterministic                                                  |
-| Locale, timezone  | `locale: 'de-DE'`, `timezoneId: 'Europe/Berlin'`                                                                                                                             |
-| Motion            | `reducedMotion: 'reduce'`, `toHaveScreenshot({ animations: 'disabled', caret: 'hide' })`                                                                                     |
-| Pointer           | mouse moved to `(0, 0)` before each capture (no hover state)                                                                                                                 |
-| Device scale      | 1                                                                                                                                                                            |
-| Dynamic values    | masked, not faked: every `<time>`, the page date, and the "Stand HH:MM" line. They are server-rendered from real clocks, so the browser clock can't legitimately freeze them |
-| Tolerance         | `maxDiffPixelRatio: 0.01`, `threshold: 0.2` (Playwright defaults otherwise)                                                                                                  |
+| Variable          | Fixed value                                                                                                                                                                                                                                               |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Application state | the vertical-slice stack (built API and web, PostgreSQL, local Keycloak), as in `playwright.slice.config.ts`, never the founder's packaged demo                                                                                                           |
+| Data              | a fresh database per run, seeded only through the existing simulated-call endpoint with the fixed synthetic set in §3                                                                                                                                     |
+| Browser           | Playwright **1.63.0** Chromium, in the official Playwright container image for that version, pinned by digest when the job is written                                                                                                                     |
+| Fonts             | whatever that image ships; the design uses the system UI stack, and the pinned image makes the resolved fonts deterministic                                                                                                                               |
+| Locale, timezone  | `locale: 'de-DE'`, `timezoneId: 'Europe/Berlin'`                                                                                                                                                                                                          |
+| Motion            | `reducedMotion: 'reduce'`, `toHaveScreenshot({ animations: 'disabled', caret: 'hide' })`                                                                                                                                                                  |
+| Pointer           | mouse moved to `(0, 0)` before each capture (no hover state)                                                                                                                                                                                              |
+| Device scale      | 1                                                                                                                                                                                                                                                         |
+| Dynamic values    | masked, not faked: every `<time>`, the page date, and the "Stand HH:MM" line. They come from real clocks: the server's for the render, and the page's last successful read for "Stand" (DESIGN.md §6.1). The browser clock can't legitimately freeze them |
+| Tolerance         | `maxDiffPixelRatio: 0.01`, `threshold: 0.2` (Playwright defaults otherwise)                                                                                                                                                                               |
 
 No production data, no personal data and no real phone numbers are used, ever.
 
@@ -95,3 +95,4 @@ PLAN's 360, 768 and 1280 stay mandatory functional widths. Screenshots go where 
 - Under `forcedColors: 'active'`, buttons and focus stay visible (one smoke check).
 - The CSP header is present and no `securitypolicyviolation` event fires.
 - The existing business assertions pass unchanged. Selectors are only ever added (DESIGN.md §5, preserved contracts).
+- The refresh-delayed notice (DESIGN.md §6.1) has no baseline. It is time-dependent, so the refresh-health gate RH proves it with fake-timer unit tests and one slice E2E, not with a screenshot. The matrix stays at 13 images.

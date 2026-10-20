@@ -104,7 +104,10 @@
         </div>
       </div>
 
-      <p class="state-label">Zustand: Aktualisierung gestört (Liste bleibt sichtbar)</p>
+      <p class="state-label">
+        Zustand: Aktualisierung verzögert (sichtbare, aktive Seite; Abrufe seit über 2 Minuten
+        fehlgeschlagen; Liste bleibt sichtbar)
+      </p>
       <div class="state">
         <div class="page-head">
           <div>
@@ -113,15 +116,25 @@
           </div>
           <div class="page-tools">
             <span class="status-line status-line--warning"
-              ><svg class="icon" aria-hidden="true"><use href="#i-warn" /></svg>Stand 09:42 ·
-              Aktualisierung fehlgeschlagen</span
+              ><svg class="icon" aria-hidden="true"><use href="#i-warn" /></svg>Stand 09:42</span
             >
             <a class="btn btn-secondary" href="#">Aktualisieren</a>
           </div>
         </div>
+        <div class="alert alert--warning" role="status" style="margin-top: 16px">
+          <svg class="icon" aria-hidden="true"><use href="#i-warn" /></svg>
+          <div>
+            <p><strong>Aktualisierung verzögert</strong></p>
+            <p>
+              Die angezeigten Aufgaben sind möglicherweise nicht auf dem neuesten Stand. Bitte
+              aktualisieren Sie die Seite.
+            </p>
+          </div>
+        </div>
         <p class="state-label" style="margin: 0">
-          Anmerkung zum Entwurf: Text- und Schwellenwert (2 Minuten, P13.10.02) sind Vorschläge; der
-          Wortlaut kommt vor der Umsetzung in den Katalog.
+          Anmerkung zum Entwurf: künftiges Verhalten, noch nicht umgesetzt (DESIGN.md §6.1). Kurze
+          Fehlversuche, ein verborgener Tab oder eine Pause ohne Eingabe zeigen diesen Hinweis
+          nicht. Wortlaut und Schwelle (2 Minuten, P13.10.02) sind Vorschläge.
         </p>
       </div>
 

@@ -1,6 +1,6 @@
 # ADR-0025 — Owner web app: frontend architecture and design system
 
-- **Status:** PROPOSED (pending founder acceptance; UX-01 Gate 0). Documented, not implemented: no dependency named here is installed yet.
+- **Status:** PROPOSED (pending founder acceptance; UX-01 Gate 0). Documented, not implemented: no dependency named here is installed yet. Accepting this ADR doesn't take DG-10 or unblock P13.01; see the [DG-10 record](../decisions/DG-10-owner-app-visual-language.md).
 - **Deciders:** founder
 - **Phase:** P13
 - **Related:** DG-10, ADR-0001, ADR-0034, INV-02, INV-12, INV-17, QG-03, QG-09
@@ -49,6 +49,44 @@ Adopting those now adds dependencies with nothing to use them. Not recording the
 - `next build` compiles the CSS into a hashed file under `.next/static`, which the image already copies. Nothing is added to the runtime image beyond that stylesheet.
 - Design tokens live as CSS custom properties in `packages/ui/src/tokens.css` under `@theme` ([DESIGN.md](../design/DESIGN.md) §3).
 - No CSS-in-JS runtime, no inline `style` props in components, no web fonts (the system UI stack).
+
+**D2 wiring.** These are planned changes, written against the repository as it stands at Gate 0:
+
+- `@moin/web` doesn't yet depend on `@moin/ui`.
+- `@moin/ui` exports only `.` (`./src/index.ts`).
+- `next.config.ts` transpiles only `@moin/contracts`.
+- The root `.gitignore` ignores `dist/`, `.next/` and `node_modules/`.
+- `.dockerignore` excludes `docs`.
+
+None of the following has been built or run, and the output paths and resolution details below are unverified until the gate that adds the dependencies proves them.
+
+1. **Stylesheet entry point:** a new `apps/web/app/globals.css`, imported once from `apps/web/app/layout.tsx` (`import './globals.css';`). It replaces that layout's inline `<style>` block.
+
+   ```css
+   @import 'tailwindcss' source('..');
+   @import '@moin/ui/tokens.css';
+   @source '../../../packages/ui/src';
+   @source not '../../../packages/ui/src/**/*.test.*';
+   ```
+
+2. **PostCSS:** `apps/web/postcss.config.mjs` registers `@tailwindcss/postcss`. Its default export is framework-required (A-22).
+3. **Tokens export:** `packages/ui/package.json` gains `"./tokens.css": "./src/tokens.css"` in `exports`, so the second `@import` resolves through the workspace link. The gate confirms that Tailwind's resolver honours that export. If it doesn't, the import becomes the relative path `../../../packages/ui/src/tokens.css`, and the gate records which form is used.
+4. **Workspace link:** `@moin/web` adds `"@moin/ui": "workspace:*"`, and `transpilePackages` becomes `['@moin/contracts', '@moin/ui']`, because `@moin/ui`, like `@moin/contracts`, ships TypeScript source.
+5. **Source scanning.**
+   - **Base path:** `source('..')` pins Tailwind's automatic detection to `apps/web`, relative to the stylesheet, so the result doesn't depend on the directory the build runs from (pnpm filter, turbo or the image).
+   - **What automatic detection skips:** files ignored by `.gitignore` (so `.next/` and `packages/ui/dist/`), everything under `node_modules` (so the `@moin/ui` workspace symlink in `apps/web/node_modules`), CSS files and lock files.
+   - **Registering `@moin/ui`:** its sources lie outside the base path and would also be reached only through `node_modules`, so they are **not** found automatically. The explicit `@source` registers `packages/ui/src`, and `@source not` keeps its test files out.
+   - **Mock-ups:** `docs/design/review/mockups/` is outside every registered path and excluded from the image build context, so its classes never reach the bundle.
+6. **Build and image output:**
+   - `next build` emits the compiled stylesheet as a hashed file under `.next/static/`, which the image already copies next to the standalone server (`apps/server/Dockerfile`).
+   - The deps stage already copies `packages/ui/package.json`, and `--filter @moin/web...` installs `@moin/ui`'s dependencies once the workspace link exists. No Dockerfile change is expected; the gate shows whether one is needed.
+
+**Proof required at adoption, on the production standalone image, not on `next dev`:**
+
+- the built CSS contains a token from `tokens.css` and a utility used only inside `packages/ui/src`, which proves the explicit source registration;
+- `scripts/check-web-image.sh`, extended to require at least one `.css` asset with `text/css`, passes against the built image (amd64 and arm64);
+- the vertical-slice spec reads a computed token value on Heute from the standalone server (for example, the body background `rgb(246, 245, 242)`), and no `securitypolicyviolation` fires;
+- `check-licences.ts` and `pnpm audit --prod` pass with the new dependencies.
 
 **D3 — Shared UI components.**
 

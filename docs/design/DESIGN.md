@@ -1,6 +1,7 @@
 # Owner app design system (DESIGN.md)
 
 - **Status:** PROPOSED: pending founder acceptance (UX-01 Gate 0). Not binding until the founder accepts it, and nothing here is implemented yet.
+- **What acceptance means:** founder acceptance makes this file planning guidance for UX-01. It does **not** complete DG-10, whose PLAN evidence (an owner usability test) is still outstanding, and it does not by itself unblock P13.01 implementation. See [DG-10](../decisions/DG-10-owner-app-visual-language.md), "Status and what remains open".
 - **Scope:** the owner web app (`apps/web`) and its shared components (`packages/ui`). It does not cover marketing pages or the Keycloak sign-in theme.
 - **Decided with:** [DG-10](../decisions/DG-10-owner-app-visual-language.md) (visual language) and [ADR-0025](../adr/0025-frontend-architecture.md) (frontend architecture).
 - **Review package:** [review/README.md](review/README.md) (proposal mock-ups, not screenshots of the app).
@@ -10,7 +11,7 @@
 When sources disagree, the higher one wins:
 
 1. PLAN, the invariants (INV-01…INV-20), security, accessibility (WCAG 2.2 AA, P13.12) and repository governance.
-2. The founder-approved DG-10 decision.
+2. The DG-10 decision, once taken with its PLAN evidence ([record](../decisions/DG-10-owner-app-visual-language.md)).
 3. The adopted ADR-0025.
 4. This file, once approved.
 5. Suggestions from external design skills, references and tools. They are advisory only and never override 1–4 ([design-references.md](design-references.md)).
@@ -91,13 +92,13 @@ Contrast follows WCAG 2.x relative luminance. "Surface" is `#FFFFFF`, "canvas" i
 
 ### 3.2 Status semantics
 
-| Meaning                          | Visual                                          | Text (from `de.json`)                                   |
-| -------------------------------- | ----------------------------------------------- | ------------------------------------------------------- |
-| Needs attention now (`urgent`)   | urgent badge plus a 4 px urgent bar on the card | badge "Dringend"; section heading "Dringend"            |
-| Open                             | primary text on info background                 | "Offen"                                                 |
-| In progress or waiting           | muted text on sunken background                 | "In Bearbeitung", "Wartet"                              |
-| Outcome confirmed by the API     | success notice with a check icon                | `today.complete.done`                                   |
-| Read failed, stale, not possible | warning alert with an icon                      | `today.error`, `today.complete.unavailable`, stale line |
+| Meaning                          | Visual                                          | Text (from `de.json`)                             |
+| -------------------------------- | ----------------------------------------------- | ------------------------------------------------- |
+| Needs attention now (`urgent`)   | urgent badge plus a 4 px urgent bar on the card | badge "Dringend"; section heading "Dringend"      |
+| Open                             | primary text on info background                 | "Offen"                                           |
+| In progress or waiting           | muted text on sunken background                 | "In Bearbeitung", "Wartet"                        |
+| Outcome confirmed by the API     | success notice with a check icon                | `today.complete.done`                             |
+| Read failed, stale, not possible | warning alert with an icon                      | `today.error`, `today.complete.unavailable`, §6.1 |
 
 Icons come from `lucide-react` and are `aria-hidden="true"`, because their meaning is always also in the text.
 
@@ -155,7 +156,7 @@ There are no entrance animations, staggered reveals, hover scaling, scroll effec
 **Page header.**
 
 - The h1 is "Heute", followed by the date in German long form.
-- The status line reads "Stand HH:MM", the time of the last successful read of the task list.
+- The status line reads "Stand HH:MM", the time of the last successful read of the task list as observed by this page: the server's read for the first render, then every successful poll, **including one whose answer is unchanged and causes no re-render** (§6.1). It is never a backend freshness timestamp. Today's page has no status line; it arrives with the refresh-health gate (§6.1).
 - "Aktualisieren" stays a **link** styled as a secondary button.
 
 **Sections.**
@@ -219,17 +220,84 @@ There are no entrance animations, staggered reveals, hover scaling, scroll effec
 
 ## 6. States
 
-| State                        | Treatment                                                                                                                                                                                                 |
-| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Signed out                   | page header, `today.signedOut` text, "Anmelden" as a primary link to `/api/auth/login`                                                                                                                    |
-| Loading                      | three skeleton cards in the section frame plus the existing `role="status"` text "Aufgaben werden geladen …"                                                                                              |
-| Empty                        | every section shows its heading and "Alles erledigt."                                                                                                                                                     |
-| Populated                    | cards per §5; counts per §2                                                                                                                                                                               |
-| Truncated                    | `role="note"` truncation text below the header; no counts; empty sections say `today.noneShown`                                                                                                           |
-| Error (read failed)          | warning alert (`role="alert"`) with `today.error` and "Neu laden"                                                                                                                                         |
-| Degraded: stale              | the status line switches to the warning tone, "Stand HH:MM · Aktualisierung fehlgeschlagen". After 2 minutes without a successful read, the view is marked possibly out of date (P13.10.02). Never "live" |
-| Degraded: action unavailable | the card keeps its facts; `today.complete.unavailable` replaces the button                                                                                                                                |
-| After an action              | the outcome notice above the sections, success or warning tone by result, with focus                                                                                                                      |
+| State                        | Treatment                                                                                                                                                                                 |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Signed out                   | page header, `today.signedOut` text, "Anmelden" as a primary link to `/api/auth/login`                                                                                                    |
+| Loading                      | three skeleton cards in the section frame plus the existing `role="status"` text "Aufgaben werden geladen …"                                                                              |
+| Empty                        | every section shows its heading and "Alles erledigt."                                                                                                                                     |
+| Populated                    | cards per §5; counts per §2                                                                                                                                                               |
+| Truncated                    | `role="note"` truncation text below the header; no counts; empty sections say `today.noneShown`                                                                                           |
+| Error (read failed)          | warning alert (`role="alert"`) with `today.error` and "Neu laden"                                                                                                                         |
+| Degraded: refresh delayed    | only after more than 2 minutes of failed refreshes on a visible, attended page; never because the tab was hidden, the owner was idle or nothing changed. Full rules in §6.1. Never "live" |
+| Degraded: action unavailable | the card keeps its facts; `today.complete.unavailable` replaces the button                                                                                                                |
+| After an action              | the outcome notice above the sections, success or warning tone by result, with focus                                                                                                      |
+
+### 6.1 Refresh health (proposed future behaviour, not implemented)
+
+Everything in this section is **proposed**. None of it exists in the current code, and none of it is VERIFIED. It implements P13.10.02 ("stale-data indicator after 2 min without updates"), read here as "2 minutes without a **successful refresh**", not "2 minutes without new tasks". The founder confirms that reading (DG-10 record, "Founder decisions").
+
+**Today's polling, as built** (`apps/web/lib/live-today.ts`, `apps/web/app/live-today.tsx`, M2B):
+
+- a visible, attended tab polls `GET /api/today` every 15 s (`LIVE_POLL_MS`), each request timing out after 8 s;
+- a failure backs off to 30 s, 60 s, then at most 120 s between attempts (`LIVE_BACKOFF_MAX_MS`), with ±10% jitter, and leaves the list on screen;
+- a hidden tab, or a tab without input for 30 minutes (`LIVE_IDLE_MS`), stops polling. Showing the tab, coming back online, or the first input after the idle pause polls at once (`wake`);
+- a 401 hands over to the server render, which shows the signed-out state and unmounts the poller;
+- an unchanged answer does nothing; a changed one calls `router.refresh()`.
+
+**What the code doesn't provide yet.** `startLivePoll` reports only "the list changed" (`onChange`). It reports no unchanged success, no failure, no time of the last success and no suspension or resumption; its failure count is internal. `LiveToday` renders nothing, and the page has no status line. This behaviour therefore **needs a change to the poller's state machine**: it must report each attempt's result with its time, and when polling is suspended or resumed. It also needs `LiveToday` (or a sibling client component) to render the status line and the notice. That change adds markup, not requests: the client still makes only the existing same-origin read (ADR-0025 D1).
+
+**The failure clock.** All rules hang on one client-side clock:
+
+- It **starts** when an attempt fails and no failure is already being timed since the last success.
+- It **runs only while the page is visible and attended.** Hidden and idle time pauses it; it neither advances nor resets.
+- It **resets to zero** on any successful read, changed or unchanged.
+
+A failed attempt is a network error, the 8 s timeout, any status other than 200 and 401, or a body the contract parser rejects.
+
+**States:**
+
+| State                                    | Condition                                                         | Treatment                                                                                                                                                                    |
+| ---------------------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Initial loading                          | the server is rendering the first page                            | `loading.tsx`: skeleton plus "Aufgaben werden geladen …" (§6 Loading)                                                                                                        |
+| Initial-load failure                     | the server read failed                                            | the existing immediate `role="alert"` with `today.error` and "Neu laden". No list, so no refresh-health notice. Polling continues, and the first success re-renders the page |
+| Healthy polling                          | visible, attended, last attempt succeeded                         | "Stand HH:MM" in muted text                                                                                                                                                  |
+| Successful refresh, unchanged answer     | a 200 whose fingerprint equals the rendered one                   | counts as success: the clock resets, "Stand" advances to this read's time, any notice clears. No server re-render                                                            |
+| Failed attempts, under 2 minutes         | visible, attended, clock between 0 and 2 minutes                  | **no visible change**: the list and "Stand HH:MM" (still the last success) stay. Backoff retries as built                                                                    |
+| Refresh delayed                          | clock above 2 minutes **and** the latest completed attempt failed | "Stand HH:MM" turns to the warning tone with an icon, and the notice below appears                                                                                           |
+| Hidden tab                               | `document.visibilityState` is not `visible`                       | polling suspended, clock paused, nothing raised. Unseen, so no notice can appear meanwhile                                                                                   |
+| Idle                                     | no input for 30 minutes                                           | the same as a hidden tab                                                                                                                                                     |
+| Returning (tab shown, input, online)     | suspension ends                                                   | an immediate recovery poll (`wake`). Until it completes, no notice is **newly** raised: the clock was paused, so it can't have crossed 2 minutes                             |
+| Recovery                                 | any later successful read                                         | the clock resets, the notice disappears, "Stand" advances, and a changed list re-renders                                                                                     |
+| Session expired or authentication failed | the poll gets 401                                                 | the existing authentication path: server render, signed-out state, "Anmelden". A 401 that render doesn't confirm counts as a failed attempt                                  |
+
+**The notice** (proposed wording; it enters `de.json` only at implementation):
+
+- **Title:** "Aktualisierung verzögert"
+- **Text:** "Die angezeigten Aufgaben sind möglicherweise nicht auf dem neuesten Stand. Bitte aktualisieren Sie die Seite."
+- **Presentation:** a warning `Alert` below the page header, with `role="status"` (polite). It never takes focus, because it appears without user action. The existing "Aktualisieren" link is the action.
+
+**It is never raised because:**
+
+- no new callbacks arrived;
+- the last successful answer was unchanged;
+- the tab was hidden;
+- polling was suspended while idle;
+- the owner returned and the recovery poll hasn't completed yet.
+
+Only failed attempts on a visible, attended page move the clock.
+
+**Implementation and acceptance: UX-01 refresh-health gate (RH).** RH is its own gate and PR, separate from styling. Its markup can use the tokens if they exist by then and the existing unstyled markup otherwise. It is accepted only with these executable proofs, each run on the real code:
+
+1. A successful unchanged answer resets the clock, advances "Stand" and clears the notice, without a server re-render (unit test of the poller's state logic with fake timers).
+2. Failed attempts on a visible, attended page raise the notice after more than 2 minutes, and not before (unit; plus one slice E2E with the API made unreachable).
+3. Hidden-tab and idle suspension never raise a notice, however long they last, including 2 minutes or more after an earlier failure (unit).
+4. Showing the tab, coming back online, or the first input after an idle pause starts an immediate recovery poll (unit; the existing "polls at once when it is shown again" test stays green).
+5. A successful recovery clears the notice (unit and slice E2E).
+6. An initial-load failure keeps its existing immediate `role="alert"` treatment, and no refresh-health notice appears (existing page tests plus one assertion).
+7. Session expiry goes through the existing authentication path: on a confirmed 401 the signed-out state renders (existing behaviour; regression test).
+8. The retained list, interval, backoff, timeout, idle rule, no-overlap rule and `router.refresh` on change behave as today, unless a change is intended, named in the PR and tested. The existing `apps/web/lib/live-today.test.ts` cases and `e2e/vertical-slice/today-callback.spec.ts` pass unchanged.
+
+The regression tests are mutation-checked. RH supplies the stale-indicator half of P13.10.03. The SSE half stays open until the API has an event stream (ADR-0025 D4).
 
 ## 7. Interaction rules
 
