@@ -1748,3 +1748,20 @@ as 11 images from 5 Heute pages plus foundations; the 7 card-layout images were 
 `render-mockups.mjs` checks overflow, contrast, targets, preserved contracts and axe, and renders byte-identically.
 `owner-usability-test.md` plans a 20–30-minute moderated session with 11 tasks, marked static or interactive.
 No participant has been tested, DG-10 stays PROVISIONAL, P13.01 stays blocked, nothing implemented, nothing VERIFIED.
+
+DG-10 owner-test prototype (2026-10-20, branch `test/p13-01-dg10-owner-prototype` from `cbd2255`, the squash of #243):
+the founder authorised only an isolated, synthetic interactive prototype for DG-10's owner usability test. It is
+recorded in the DG-10 record as a preparatory exception: no PLAN amendment, because no phase, gate or threshold
+changes. It expires when DG-10 is decided or on 2026-12-31. The prototype is a static in-browser simulation of the
+work-queue Heute under `docs/design/owner-test/`:
+
+- outside the pnpm workspace and the image build context, so it can't reach the release image;
+- with a CSP that allows no network connections;
+- with six scenarios and a moderator page;
+- its check, `check-prototype.mjs`, ran 233 checks with 0 failures, three times in a row.
+  P3 fixes:
+- the pending label no longer overlaps the caller number at 320/360 px (row-overlap and label-in-name checks
+  added; mutation-check KILLED at `83cbe12`);
+- C3 now reads "phone dialler opened".
+  Added the German session kit, consent text and observation sheet, with separate DG-10 and P13 matrices. No owner
+  session has taken place, nothing VERIFIED, DG-10 stays PROVISIONAL, P13.01 stays blocked.

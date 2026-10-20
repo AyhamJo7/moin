@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'self'; img-src 'self'; connect-src 'none'; form-action 'none'; base-uri 'none'"
+    />
+    <meta name="robots" content="noindex" />
+    <title>Moderation – DG-10-Prototyp 1</title>
+    <link rel="stylesheet" href="../../review/mockups/proposal.css" />
+    <link rel="stylesheet" href="prototype.css" />
+  </head>
+  <body>
+    <main class="frame moderator">
+      <h1>Moderation: DG-10-Prototyp 1</h1>
+      <p>
+        Nur für die Moderation – diese Seite sieht die teilnehmende Person nicht. Ablauf, Aufgaben
+        und Kriterien: <code>docs/design/owner-test/session-kit.md</code>.
+      </p>
+      <ul>
+        <li>
+          Jeder Link unten startet das Szenario <strong>frisch</strong>: Er löscht alle in diesem
+          Tab als erledigt markierten Aufgaben. Danach bleibt der Stand bis zum nächsten Start
+          erhalten, auch über „Aktualisieren“.
+        </li>
+        <li>
+          Öffnen Sie die Links <strong>im selben Tab</strong>. Gespeichert wird nur in diesem Tab
+          (sessionStorage); nichts wird an einen Server gesendet.
+        </li>
+        <li>
+          Die Rufnummern sind erfundene Testnummern (+49 30 0000…). Ein Tippen öffnet nur die
+          Telefon-App; die Person bricht ab, bevor sie wählt.
+        </li>
+        <li>
+          „Erledigt“ ist simuliert: nach gut einer Sekunde verschwindet die Zeile. Das beweist
+          nichts über die echte Anwendung.
+        </li>
+      </ul>
+
+      <h2>Szenarien</h2>
+      <div class="scenarios">
+        <div class="scenario">
+          <p><strong>Morgen</strong><small>4 Rückrufe, 1 dringend – T2, T3, T5, T6</small></p>
+          <a class="btn btn-primary" href="index.html?szenario=morgen&amp;neu=1">Starten</a>
+        </div>
+        <div class="scenario">
+          <p>
+            <strong>Volle Liste</strong
+            ><small>10 Rückrufe, 2 dringend, einige vom Vorabend – T1, T4, T10, T11</small>
+          </p>
+          <a class="btn btn-primary" href="index.html?szenario=voll&amp;neu=1">Starten</a>
+        </div>
+        <div class="scenario">
+          <p><strong>Nichts offen</strong><small>alle Bereiche leer – T7</small></p>
+          <a class="btn btn-primary" href="index.html?szenario=leer&amp;neu=1">Starten</a>
+        </div>
+        <div class="scenario">
+          <p>
+            <strong>Langsames Laden</strong
+            ><small>bei jedem Laden 1,8 s Platzhalter, dann die Liste – T8</small>
+          </p>
+          <a class="btn btn-primary" href="index.html?szenario=laden&amp;neu=1">Starten</a>
+        </div>
+        <div class="scenario">
+          <p>
+            <strong>Laden fehlgeschlagen</strong
+            ><small>erst die Fehlermeldung; „Neu laden“ zeigt dann die Liste – T8</small>
+          </p>
+          <a class="btn btn-primary" href="index.html?szenario=fehler&amp;neu=1">Starten</a>
+        </div>
+        <div class="scenario">
+          <p>
+            <strong>Erledigt nicht möglich</strong
+            ><small>bei „Rückruf: Reservierung“ ist Erledigt nicht verfügbar – T9</small>
+          </p>
+          <a class="btn btn-primary" href="index.html?szenario=nicht-moeglich&amp;neu=1">Starten</a>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>

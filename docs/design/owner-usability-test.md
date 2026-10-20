@@ -13,8 +13,11 @@ Before a session counts as DG-10 evidence:
 1. **The sequencing decision** in the DG-10 record (decision 1): test before DG-10 is taken (a), or after a PLAN change (b).
 2. **The artefact**, see §3:
    - The static mock-ups need nothing more.
-   - Tasks marked "interactive" need an **authorized interactive prototype**. Building a styled Heute for it is P13.01 work, which DG-10 blocks; it needs the founder's explicit permission. Until then, those tasks stay untested and are reported as such, never as passed.
-3. **A participant:** a representative restaurant owner or operator who works the phone and callbacks themselves, recruited by the founder. PLAN names the Gurlitt owner for P13's session. One owner meets PLAN's wording; two or three more operators make the findings more reliable.
+   - Tasks marked "interactive" need the **interactive prototype**. The founder authorised it on 2026-10-20 as a narrowly scoped exception for this test only (DG-10 record, "Recorded founder decisions"). It is built in [owner-test/prototype/](owner-test/prototype/) and is not P13.01 work.
+3. **A participant:** PLAN's DG-10 evidence is an **owner** usability test (L507).
+   - **Who counts:** the owner of a small, phone-heavy restaurant who handles callbacks themselves, recruited by the founder. Only an owner's session counts as DG-10 evidence. Staff or operators may add findings but can't stand in for the owner.
+   - **P13's session** names the Gurlitt owner (PLAN P13, acceptance criteria). If the sessions are combined, the participant must be that owner.
+   - **Product principle:** the participant needs no AI or software knowledge (BLUEPRINT L58–64); the material contains no AI jargon (BR-060).
 4. **Consent** to take part and to written notes. Audio, video and screen recording are made only with separate explicit consent, and recordings are stored outside the repository (§6).
 5. **Synthetic data only.** No real customer, number or business data appears in the material or the notes.
    - The `+49 30 0000…` fixture numbers aren't valid subscriber numbers.
@@ -30,13 +33,13 @@ Before a session counts as DG-10 evidence:
 
 ## 3. Artefacts
 
-| Artefact                                            | Where                              | Interaction it supports                                                                                              |
-| --------------------------------------------------- | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| Static mock-up **images**                           | [review/images/](review/images/)   | looking and pointing only                                                                                            |
-| Static mock-up **HTML pages**, opened on the device | [review/mockups/](review/mockups/) | real scrolling, real layout at the device's width, and `tel:` links that open the dialler; buttons do nothing        |
-| **Authorized interactive prototype** (not built)    | founder decision (§1.2)            | completing a task, the pending state, the outcome notice, focus movement, the server re-read, the real loading state |
+| Artefact                                                     | Where                                                                           | Interaction it supports                                                                                                                                       |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Static mock-up **images**                                    | [review/images/](review/images/)                                                | looking and pointing only                                                                                                                                     |
+| Static mock-up **HTML pages**, opened on the device          | [review/mockups/](review/mockups/)                                              | real scrolling, real layout at the device's width, and `tel:` links that open the dialler; buttons do nothing                                                 |
+| **Interactive prototype** (synthetic, in-browser simulation) | [owner-test/prototype/](owner-test/prototype/), moderator page `moderator.html` | completing a task, the pending state, the outcome notice, focus movement, the simulated re-read, the loading and error states; every task below can run on it |
 
-Every session records exactly which artefact it used, with its commit SHA or image digest.
+Every session records exactly which artefact it used, with its commit SHA or image digest. The runbook, the per-task scenarios and the forms are in [owner-test/session-kit.md](owner-test/session-kit.md) and [owner-test/observation-sheet.md](owner-test/observation-sheet.md).
 
 ## 4. Tasks
 
@@ -62,16 +65,16 @@ T4 checks the layout's central claim, that the list reads top to bottom in the A
 
 These criteria are proposed; the founder confirms or changes them before the first session.
 
-| #      | Criterion                                                                   | Applies to               |
-| ------ | --------------------------------------------------------------------------- | ------------------------ |
-| C1     | the most urgent callback found within 10 s, unassisted                      | T1                       |
-| C2     | the reason for the call stated from the title, unassisted                   | T2                       |
-| C3     | the call started from the number, unassisted                                | T3                       |
-| C4     | the next callback in order named correctly                                  | T4                       |
-| **C5** | **"Erledigt" found without prompting within 10 s, on phone and on desktop** | T5                       |
-| C6     | completion understood                                                       | T6 (interactive)         |
-| C7     | empty, loading and unavailable states understood                            | T7, T8 (interactive), T9 |
-| C8     | the phone layout navigated, unassisted                                      | T10                      |
+| #      | Criterion                                                                                                                          | Applies to               |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| C1     | the most urgent callback found within 10 s, unassisted                                                                             | T1                       |
+| C2     | the reason for the call stated from the title, unassisted                                                                          | T2                       |
+| C3     | the phone dialler opened with the caller's number from the call link, unassisted (the participant then cancels; no call is placed) | T3                       |
+| C4     | the next callback in order named correctly                                                                                         | T4                       |
+| **C5** | **"Erledigt" found without prompting within 10 s, on phone and on desktop**                                                        | T5                       |
+| C6     | completion understood                                                                                                              | T6 (interactive)         |
+| C7     | empty, loading and unavailable states understood                                                                                   | T7, T8 (interactive), T9 |
+| C8     | the phone layout navigated, unassisted                                                                                             | T10                      |
 
 - **Outcome:**
   - DG-10 evidence is complete only when every criterion has been assessed on its required artefact and passed, or the founder records why a failed or untested criterion is accepted.
@@ -94,5 +97,7 @@ These criteria are proposed; the founder confirms or changes them before the fir
 - **Who closes DG-10:** the founder reads the record and takes the DG-10 decision. A session, the moderator or the engineering side never marks DG-10 TAKEN, VERIFIED or COMPLETE.
 
 ## 7. Moderator opening script (German)
+
+The full German script, consent text and checklist are in [owner-test/session-kit.md](owner-test/session-kit.md).
 
 > Vielen Dank, dass Sie sich Zeit nehmen. Wir testen heute nicht Sie, sondern einen Entwurf für eine Seite, auf der Betriebe ihre Rückrufe sehen. Alles, was Sie sehen, ist ausgedacht: keine echten Kunden, keine echten Nummern. Bitte sagen Sie laut, was Sie denken, auch wenn etwas unklar ist – gerade das hilft uns. Es gibt keine falschen Antworten. Ich lese Ihnen kurze Aufgaben vor; wenn Sie fertig sind, sagen Sie einfach „fertig“. Darf ich mir dabei Notizen machen?
