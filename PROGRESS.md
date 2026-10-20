@@ -1711,3 +1711,14 @@ contact. Fixes `371b156` (category) and `c564c72` (consent), test `2208cb6`; off
 recognition, category-only output, the false-refusal and missed-refusal groups and three real-PostgreSQL tests
 (`EV-P12-015-mutation-*.json`). Known residue: refusals phrased without any known refusal word. Nothing VERIFIED;
 the running demo keeps the earlier build until an approved rebuild.
+
+UX-01 Gate 0 documentation (2026-10-20, docs-only draft PR, branch `docs/p13-01-ux01-gate0-design` from `9995f2d`):
+proposed founder records for the owner-app design authority, all marked pending founder acceptance and none
+implemented: DG-10 (`docs/decisions/DG-10-owner-app-visual-language.md`, provisional: calm, premium, light,
+high-contrast; warm neutrals, blue `#1D5FA8`, system fonts, no decorative accent), ADR-0025
+(`docs/adr/0025-frontend-architecture.md`, PROPOSED: Tailwind 4.3.3 build-time, local `@moin/ui`, lucide-react;
+TanStack Query/SSE, next-intl, overlay primitives and dark mode DEFERRED with triggers), `docs/design/DESIGN.md`,
+the screenshot-baseline plan (13 images, CI never writes baselines) and the tooling decisions (read-only pinned
+references; Chrome DevTools MCP pin and hardening as a founder action). The review package
+(`docs/design/review/`) contains static mock-ups only, labelled as proposals; no before screenshot of the
+application exists yet (gate 2a). P13.01.04 stays IN_PROGRESS; nothing VERIFIED.

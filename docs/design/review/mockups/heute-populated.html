@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Heute – Entwurf (befüllt)</title>
+    <link rel="stylesheet" href="proposal.css" />
+  </head>
+  <body>
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <symbol id="i-check" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" /></symbol>
+      <symbol id="i-alert" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9" />
+        <line x1="12" y1="7.5" x2="12" y2="12.5" />
+        <line x1="12" y1="16" x2="12.01" y2="16" />
+      </symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9" />
+        <polyline points="12 7 12 12 15.5 14" />
+      </symbol>
+      <symbol id="i-phone" viewBox="0 0 24 24">
+        <path
+          d="M5 4h3.5l2 5-2.4 1.5a11 11 0 0 0 5.4 5.4L15 13.5l5 2V19a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"
+        />
+      </symbol>
+    </svg>
+    <p class="proposal-label">
+      Entwurf zur Gestaltung (UX-01 Gate 0) – keine implementierte Ansicht. Alle Daten sind
+      synthetisch.
+    </p>
+    <a class="skip-link" href="#inhalt">Zum Inhalt springen</a>
+    <header class="bar">
+      <div class="frame">
+        <span class="brand">KlarDesk</span>
+        <nav aria-label="Hauptbereiche">
+          <ul class="nav">
+            <li><a href="#" aria-current="page">Heute</a></li>
+          </ul>
+        </nav>
+      </div>
+    </header>
+    <main id="inhalt" class="frame">
+      <div class="page-head">
+        <div>
+          <h1>Heute</h1>
+          <p class="page-date">Dienstag, 20. Oktober 2026</p>
+        </div>
+        <div class="page-tools">
+          <span class="status-line"
+            ><svg class="icon" aria-hidden="true"><use href="#i-clock" /></svg>Stand 09:42</span
+          >
+          <a class="btn btn-secondary" href="#">Aktualisieren</a>
+        </div>
+      </div>
+
+      <section class="section" aria-labelledby="section-urgent">
+        <div class="section-head">
+          <h2 id="section-urgent">Dringend</h2>
+          <span class="count"><span class="visually-hidden">Aufgaben: </span>1</span>
+        </div>
+        <ul class="cards">
+          <li class="card card--urgent" data-task-id="t1">
+            <article aria-labelledby="task-t1">
+              <div class="card-head">
+                <h3 id="task-t1">Rückruf erbeten</h3>
+                <div class="badges">
+                  <span class="badge badge--urgent"
+                    ><svg class="icon" aria-hidden="true"><use href="#i-alert" /></svg
+                    >Dringend</span
+                  >
+                  <span class="badge badge--open"
+                    ><span class="visually-hidden">Status: </span>Offen</span
+                  >
+                </div>
+              </div>
+              <dl class="facts">
+                <dt>Anrufer</dt>
+                <dd>
+                  <a class="phone" href="tel:+493000000101"
+                    ><svg class="icon" aria-hidden="true"><use href="#i-phone" /></svg
+                    >+493000000101</a
+                  >
+                </dd>
+                <dt>Eingegangen</dt>
+                <dd><time datetime="2026-10-20T07:14:00Z">20.10.2026, 09:14</time></dd>
+              </dl>
+              <div class="card-actions">
+                <button
+                  class="btn btn-primary"
+                  type="button"
+                  aria-label="Erledigt: Rückruf erbeten"
+                >
+                  <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>Erledigt
+                </button>
+              </div>
+            </article>
+          </li>
+        </ul>
+      </section>
+
+      <section class="section" aria-labelledby="section-callbacks">
+        <div class="section-head">
+          <h2 id="section-callbacks">Rückrufe</h2>
+          <span class="count"><span class="visually-hidden">Aufgaben: </span>3</span>
+        </div>
+        <ul class="cards">
+          <li class="card" data-task-id="t2">
+            <article aria-labelledby="task-t2">
+              <div class="card-head">
+                <h3 id="task-t2">Rückruf: Reservierung</h3>
+                <span class="badge badge--open"
+                  ><span class="visually-hidden">Status: </span>Offen</span
+                >
+              </div>
+              <dl class="facts">
+                <dt>Anrufer</dt>
+                <dd>
+                  <a class="phone" href="tel:+493000000102"
+                    ><svg class="icon" aria-hidden="true"><use href="#i-phone" /></svg
+                    >+493000000102</a
+                  >
+                </dd>
+                <dt>Eingegangen</dt>
+                <dd><time datetime="2026-10-20T06:58:00Z">20.10.2026, 08:58</time></dd>
+              </dl>
+              <div class="card-actions">
+                <button
+                  class="btn btn-primary"
+                  type="button"
+                  aria-label="Erledigt: Rückruf: Reservierung"
+                >
+                  <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>Erledigt
+                </button>
+              </div>
+            </article>
+          </li>
+          <li class="card" data-task-id="t3">
+            <article aria-labelledby="task-t3">
+              <div class="card-head">
+                <h3 id="task-t3">Rückruf: Geburtstagsfeier</h3>
+                <span class="badge badge--open"
+                  ><span class="visually-hidden">Status: </span>Offen</span
+                >
+              </div>
+              <dl class="facts">
+                <dt>Anrufer</dt>
+                <dd>
+                  <a class="phone" href="tel:+493000000103"
+                    ><svg class="icon" aria-hidden="true"><use href="#i-phone" /></svg
+                    >+493000000103</a
+                  >
+                </dd>
+                <dt>Eingegangen</dt>
+                <dd><time datetime="2026-10-20T06:31:00Z">20.10.2026, 08:31</time></dd>
+              </dl>
+              <div class="card-actions">
+                <button
+                  class="btn btn-primary"
+                  type="button"
+                  aria-label="Erledigt: Rückruf: Geburtstagsfeier"
+                >
+                  <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>Erledigt
+                </button>
+              </div>
+            </article>
+          </li>
+          <li class="card" data-task-id="t4">
+            <article aria-labelledby="task-t4">
+              <div class="card-head">
+                <h3 id="task-t4">Rückruf: Reservierung für Geburtstagsfeier</h3>
+                <span class="badge badge--open"
+                  ><span class="visually-hidden">Status: </span>Offen</span
+                >
+              </div>
+              <dl class="facts">
+                <dt>Anrufer</dt>
+                <dd>
+                  <a class="phone" href="tel:+493000000104"
+                    ><svg class="icon" aria-hidden="true"><use href="#i-phone" /></svg
+                    >+493000000104</a
+                  >
+                </dd>
+                <dt>Eingegangen</dt>
+                <dd><time datetime="2026-10-20T05:47:00Z">20.10.2026, 07:47</time></dd>
+              </dl>
+              <div class="card-actions">
+                <button
+                  class="btn btn-primary"
+                  type="button"
+                  aria-label="Erledigt: Rückruf: Reservierung für Geburtstagsfeier"
+                >
+                  <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>Erledigt
+                </button>
+              </div>
+            </article>
+          </li>
+        </ul>
+      </section>
+
+      <div style="margin-top: 32px">
+        <section class="section section--quiet" aria-labelledby="section-requests">
+          <h2 id="section-requests">Neue Anfragen</h2>
+          <p class="empty">
+            <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>Alles erledigt.
+          </p>
+        </section>
+        <section class="section section--quiet" aria-labelledby="section-appointments">
+          <h2 id="section-appointments">Termine/Reservierungen zu bestätigen</h2>
+          <p class="empty">
+            <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>Alles erledigt.
+          </p>
+        </section>
+        <section class="section section--quiet" aria-labelledby="section-questions">
+          <h2 id="section-questions">Offene Kundenfragen</h2>
+          <p class="empty">
+            <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>Alles erledigt.
+          </p>
+        </section>
+      </div>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Heute – Entwurf (leer)</title>
+    <link rel="stylesheet" href="proposal.css" />
+  </head>
+  <body>
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <symbol id="i-check" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" /></symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9" />
+        <polyline points="12 7 12 12 15.5 14" />
+      </symbol>
+    </svg>
+    <p class="proposal-label">
+      Entwurf zur Gestaltung (UX-01 Gate 0) – keine implementierte Ansicht. Alle Daten sind
+      synthetisch.
+    </p>
+    <header class="bar">
+      <div class="frame">
+        <span class="brand">KlarDesk</span>
+        <nav aria-label="Hauptbereiche">
+          <ul class="nav">
+            <li><a href="#" aria-current="page">Heute</a></li>
+          </ul>
+        </nav>
+      </div>
+    </header>
+    <main id="inhalt" class="frame">
+      <div class="page-head">
+        <div>
+          <h1>Heute</h1>
+          <p class="page-date">Dienstag, 20. Oktober 2026</p>
+        </div>
+        <div class="page-tools">
+          <span class="status-line"
+            ><svg class="icon" aria-hidden="true"><use href="#i-clock" /></svg>Stand 09:42</span
+          >
+          <a class="btn btn-secondary" href="#">Aktualisieren</a>
+        </div>
+      </div>
+      <section class="section section--quiet" aria-labelledby="section-urgent">
+        <h2 id="section-urgent">Dringend</h2>
+        <p class="empty">
+          <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>Alles erledigt.
+        </p>
+      </section>
+      <section class="section section--quiet" aria-labelledby="section-callbacks">
+        <h2 id="section-callbacks">Rückrufe</h2>
+        <p class="empty">
+          <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>Alles erledigt.
+        </p>
+      </section>
+      <section class="section section--quiet" aria-labelledby="section-requests">
+        <h2 id="section-requests">Neue Anfragen</h2>
+        <p class="empty">
+          <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>Alles erledigt.
+        </p>
+      </section>
+      <section class="section section--quiet" aria-labelledby="section-appointments">
+        <h2 id="section-appointments">Termine/Reservierungen zu bestätigen</h2>
+        <p class="empty">
+          <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>Alles erledigt.
+        </p>
+      </section>
+      <section class="section section--quiet" aria-labelledby="section-questions">
+        <h2 id="section-questions">Offene Kundenfragen</h2>
+        <p class="empty">
+          <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>Alles erledigt.
+        </p>
+      </section>
+    </main>
+  </body>
+</html>
