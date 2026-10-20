@@ -39,6 +39,8 @@ Before a session counts as DG-10 evidence:
 | Static mock-up **HTML pages**, opened on the device          | [review/mockups/](review/mockups/)                                              | real scrolling, real layout at the device's width, and `tel:` links that open the dialler; buttons do nothing                                                 |
 | **Interactive prototype** (synthetic, in-browser simulation) | [owner-test/prototype/](owner-test/prototype/), moderator page `moderator.html` | completing a task, the pending state, the outcome notice, focus movement, the simulated re-read, the loading and error states; every task below can run on it |
 
+**Phone delivery:** both the static HTML pages and the prototype reach a phone only through a server. That is **not authorised** until the founder approves the phone-access amendment in the DG-10 record. Until then, phone tasks are "nicht getestet".
+
 Every session records exactly which artefact it used, with its commit SHA or image digest. The runbook, the per-task scenarios and the forms are in [owner-test/session-kit.md](owner-test/session-kit.md) and [owner-test/observation-sheet.md](owner-test/observation-sheet.md).
 
 ## 4. Tasks

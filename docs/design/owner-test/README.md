@@ -16,7 +16,19 @@
 | "Stand HH:MM"                                          | a synthetic clock starting at 09:42                                                                                                                                |
 | Server, database, sign-in, live updates, CSRF, tenants | **none.** Nothing here shows that any of them work                                                                                                                 |
 
-The page sends nothing anywhere: its CSP has `connect-src 'none'`, and the check below asserts that no request leaves the device.
+**Network behaviour, precisely:**
+
+| What                                                     | In the prototype                                                                                                              |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| The page's own files (HTML, CSS, JS)                     | loaded by the browser from local files (`file://`). No server is run (DG-10 record)                                           |
+| State in the browser                                     | the tab's `sessionStorage` only: which tasks were completed in this scenario, and a session marker. It is never sent anywhere |
+| Programmatic connections (fetch, XHR, WebSocket, beacon) | none in the code, and blocked by the CSP `connect-src 'none'`                                                                 |
+| External APIs, analytics, telemetry, fonts, images       | none: the CSP allows only the page's own files                                                                                |
+| Navigations                                              | "Aktualisieren", "Neu laden" and the moderator links reload the page's own file                                               |
+| Call links                                               | a `tel:` link hands the number to the device's phone app, which happens outside the page                                      |
+| Server access logs                                       | none, because there is no server. A phone session would need one: see §3                                                      |
+
+The check below asserts that every request the page makes is a local file. It can't say anything about a server that doesn't exist.
 
 ## 2. Isolation from the product
 
@@ -27,21 +39,21 @@ The page sends nothing anywhere: its CSP has `connect-src 'none'`, and the check
 ## 3. Running a session
 
 - **Laptop:** open `prototype/moderator.html` in Chrome or Edge, and start each scenario from there, in the same tab. Opening the files directly (`file://`) works.
-- **Participant's phone:** the phone needs an HTTP address on the same local network. One way is a static server started from `docs/design` on a machine the phone can reach:
-
-  ```bash
-  python3 -m http.server 8080 --bind 0.0.0.0 --directory docs/design
-  # phone: http://<laptop-address>:8080/owner-test/prototype/moderator.html
-  ```
-
-  - **WSL2:** a server inside WSL2 isn't reachable from the phone by default. Run it on the Windows host, or forward the port.
-  - **Exposure:** never expose the server beyond the local network, and stop it after the session.
+- **Participant's phone: NOT AUTHORIZED.** A phone can't open files on the moderator's computer, and serving them over the network needs a server. The recorded exception excludes a server.
+  - The [proposed amendment](../../decisions/DG-10-owner-app-visual-language.md#proposed-amendment-phone-access-over-the-local-network-not-authorized) (interface, port, logging, lifecycle, WSL2) waits for the founder's decision. Until it is approved and recorded, there is no phone procedure, and none may be improvised.
+  - Without it, the phone tasks and C5's phone half stay "nicht getestet".
+- **Session readiness:** **not ready** for a complete DG-10 session. Outstanding:
+  - phone access (above);
+  - the participant (an owner);
+  - the founder's completion of the consent text;
+  - confirmation of the C1–C8 thresholds;
+  - the manual screen-reader passes.
 
 - **Reset between participants:** each "Starten" link on the moderator page clears this tab's completions. Close the tab after the session.
 
 ## 4. Before every session
 
-1. On the commit to be tested, run `node docs/design/owner-test/check-prototype.mjs` from the repository root. It must report 0 failures. It covers:
+1. On the commit to be tested, run `node docs/design/owner-test/check-prototype.mjs` and `node docs/design/owner-test/check-concurrency.mjs` from the repository root. Both must report 0 failures; the concurrency check covers overlapping completions, resets and focus. It covers:
    - every scenario at 320, 360, 390, 640, 720, 768, 1280 and 1440 px (640 and 720 are a 1280 and 1440 px window at 200% zoom), plus 200% phone text size: no horizontal scroll, contrast, 44 px targets 8 px apart, labels inside names, no overlap in a row, the Heute contracts, and axe;
    - keyboard order and visible focus;
    - completing a task, state across "Aktualisieren", reset, all done;

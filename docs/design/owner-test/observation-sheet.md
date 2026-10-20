@@ -4,22 +4,24 @@ Copy this sheet for each session. Fill it in during and right after the session.
 
 ## 1. Session header
 
-| Field                                                                               | Entry            |
-| ----------------------------------------------------------------------------------- | ---------------- |
-| Date, start and end time                                                            |                  |
-| Session authorised by the founder (date, form)                                      |                  |
-| Moderator / note-taker (roles, not names)                                           |                  |
-| Participant's role: restaurant **owner** who handles callbacks themselves? (yes/no) |                  |
-| Counts as DG-10 evidence (only if the line above is "yes")                          |                  |
-| Also P13's session? (founder decision; Gurlitt owner?)                              |                  |
-| Consent: notes / audio / screen (each yes or no)                                    |                  |
-| Prototype version (`data-version`)                                                  | DG-10-Prototyp 1 |
-| Commit SHA tested                                                                   |                  |
-| SHA-256 of the prototype files and `proposal.css` (README §4)                       |                  |
-| `check-prototype.mjs` result on that SHA (failures, date)                           |                  |
-| Laptop: browser and version, window width, zoom                                     |                  |
-| Phone: model class, OS, browser, text size setting                                  |                  |
-| Order actually run, and any deviation from the kit                                  |                  |
+| Field                                                                                                | Entry            |
+| ---------------------------------------------------------------------------------------------------- | ---------------- |
+| Date, start and end time                                                                             |                  |
+| Session authorised by the founder (date, form)                                                       |                  |
+| Moderator / note-taker (roles, not names)                                                            |                  |
+| Participant's role: restaurant **owner** who handles callbacks themselves? (yes/no)                  |                  |
+| Counts as DG-10 evidence (only if the line above is "yes")                                           |                  |
+| Also P13's session? (founder decision; Gurlitt owner?)                                               |                  |
+| Consent: notes / audio / screen (each yes or no)                                                     |                  |
+| Phone-access approval in the DG-10 record (date, approved values), or "none: phone tasks not tested" |                  |
+| Only with an approved phone route: server start and stop times, and what happened to its log         |                  |
+| Prototype version (`data-version`)                                                                   | DG-10-Prototyp 1 |
+| Commit SHA tested                                                                                    |                  |
+| SHA-256 of the prototype files and `proposal.css` (README §4)                                        |                  |
+| `check-prototype.mjs` result on that SHA (failures, date)                                            |                  |
+| Laptop: browser and version, window width, zoom                                                      |                  |
+| Phone: model class, OS, browser, text size setting                                                   |                  |
+| Order actually run, and any deviation from the kit                                                   |                  |
 
 ## 2. Per task
 

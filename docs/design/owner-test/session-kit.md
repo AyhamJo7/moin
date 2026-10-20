@@ -9,20 +9,21 @@
 - [ ] **Session authorised.** The founder has authorised this session (date, place, participant) in writing.
 - [ ] **Participant qualifies.** The participant is a restaurant **owner** who handles callbacks themselves (test plan §1.3). If the session is also P13's acceptance session, it is the Gurlitt owner.
 - [ ] **Consent text approved.** The founder has approved the consent text (§3), including the data-protection details marked "vom Gründer festzulegen". There are two printed copies.
-- [ ] **Check passed.** `node docs/design/owner-test/check-prototype.mjs` reports 0 failures on the commit being tested. The commit SHA and file digest are entered on the observation sheet.
+- [ ] **Checks passed.** `node docs/design/owner-test/check-prototype.mjs` and `node docs/design/owner-test/check-concurrency.mjs` report 0 failures on the commit being tested. The commit SHA and file digest are entered on the observation sheet.
 - [ ] **Laptop ready:** Chrome or Edge, German locale, zoom 100%, the moderator page open, notifications off.
-- [ ] **Phone path tested.** The participant's phone reaches the prototype address (README §3); the moderator has tried it on a second phone.
+- [ ] **Phone access authorised. Currently NOT AUTHORIZED.** The founder has approved and recorded the phone-access amendment in the DG-10 record, with interface, port, logging and dates. Until then, skip block A and record its tasks as "nicht getestet". Never start a server without that record.
+- [ ] **Phone path tested (only after approval).** The moderator's own phone reaches the prototype through the approved route.
 - [ ] **Dialler tested.** Tapping a number opens the dialler with an invalid fixture number, and the moderator cancels.
 - [ ] **No recording** unless the participant agreed to it separately (§3).
 
 ## 2. Running order
 
-Phone first, because owners mostly use Heute on a phone and C5 needs an unprompted discovery on each device.
+Phone first, because owners mostly use Heute on a phone and C5 needs an unprompted discovery on each device. **Phone access is not authorised yet:** until the founder approves it in the DG-10 record, run block B only and record block A's tasks as "nicht getestet". The session then can't complete DG-10's evidence.
 
 | Block                                               | Task                                           | Device                 | Scenario (moderator page)                    | Minutes |
 | --------------------------------------------------- | ---------------------------------------------- | ---------------------- | -------------------------------------------- | ------- |
 | Welcome                                             | consent, two warm-up questions (§4)            | —                      | —                                            | 3       |
-| A, phone                                            | T3                                             | phone                  | Morgen                                       | 2       |
+| A, phone (only with approved phone access)          | T3                                             | phone                  | Morgen                                       | 2       |
 |                                                     | T5 (phone)                                     | phone                  | Morgen (same tab, continue)                  | 1       |
 |                                                     | T6                                             | phone                  | Morgen: the participant activates "Erledigt" | 2       |
 |                                                     | T10                                            | phone                  | Volle Liste                                  | 2       |
@@ -52,7 +53,9 @@ The founder adapts the parts marked "vom Gründer festzulegen" before the first 
 > - Die Teilnahme ist freiwillig. Sie können jederzeit ohne Angabe von Gründen abbrechen.
 > - Wir machen schriftliche Notizen zu dem, was Sie tun und sagen – ohne Ihren Namen. Ton-, Bild- oder Bildschirmaufnahmen machen wir nur, wenn Sie unten gesondert zustimmen.
 > - Die Notizen dienen nur dazu, den Entwurf zu verbessern und eine Produktentscheidung zu belegen. Sie werden außerhalb des Programmcodes gespeichert; aufbewahrt bis _(vom Gründer festzulegen)_; verantwortlich: _(vom Gründer festzulegen)_; Kontakt für Fragen oder Löschung: _(vom Gründer festzulegen)_.
-> - Auf Ihrem Telefon öffnen Sie nur eine Testseite im Browser. Es wird nichts installiert, und die Seite sendet nichts. Wenn sich beim Tippen auf eine Nummer die Telefon-App öffnet, brechen Sie bitte ab – es wird niemand angerufen.
+> - Sie arbeiten mit einer Testseite im Browser. Es wird nichts installiert. Die Seite sendet Ihre Eingaben an keinen Dienst und keine Datenbank; was Sie als erledigt markieren, merkt sich nur der Browser in diesem Fenster.
+> - Nur falls der Test auch auf Ihrem Telefon stattfindet: Dann lädt Ihr Telefon die Testseite über das lokale Netz von einem Rechner der Moderation. Dieser Rechner kann dabei die Adresse Ihres Telefons im lokalen Netz und die abgerufenen Seiten kurzzeitig protokollieren. Ein solches Protokoll wird _(vom Gründer festzulegen)_ und spätestens nach der Sitzung gelöscht.
+> - Wenn sich beim Tippen auf eine Nummer die Telefon-App öffnet, brechen Sie bitte ab – es wird niemand angerufen.
 >
 > ☐ Ich bin mit der Teilnahme und mit schriftlichen Notizen einverstanden.
 > ☐ Ich bin zusätzlich mit einer Aufnahme einverstanden: ☐ Ton ☐ Bildschirm (freiwillig).
@@ -103,4 +106,4 @@ The founder adapts the parts marked "vom Gründer festzulegen" before the first 
 > Gab es etwas, das Sie gesucht und nicht gefunden haben?
 > Würden Sie diese Seite morgens zwischen zwei Gästen nutzen? Warum (nicht)?
 
-Thank the participant. Close the browser tab on every device, and stop the local server.
+Thank the participant. Close the browser tab on every device. If a server was run under an approved amendment, stop it, and handle its log as approved.
