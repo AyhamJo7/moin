@@ -105,7 +105,7 @@ A and B don't imply C. Viewing the mock-ups, whether by the founder or anyone el
 
 ### Proposed amendment: phone access over the local network (**NOT AUTHORIZED**)
 
-**Status:** a proposal for the founder's decision. It is **not authorised**, and no part of it may be carried out until the founder records approval here, with the date and the approved values. Until then, the owner test can't run on a phone. Phone tasks (T3, T5 on the phone, T7, T10) and criterion C5's phone half stay "nicht getestet", so DG-10's evidence can't be complete.
+**Status:** a proposal for the founder's decision. It is **not authorised**, and no part of it may be carried out until the founder records approval here, with the date and the approved values. Until then, the owner test can't run on a phone. Phone tasks (T3, T5 on the phone, T6, T7, T10) and criterion C5's phone half stay "nicht getestet", so DG-10's evidence can't be complete.
 
 **Why it is needed:** a participant's phone can't open files on the moderator's computer. Serving the prototype to a phone means running an HTTP server, which the recorded exception excludes.
 

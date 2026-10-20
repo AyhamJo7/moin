@@ -7,7 +7,7 @@ Both fixes on this branch were proven with the repository's official mutation ch
 3. restores the fix and runs the test again, which must **pass**;
 4. confirms the restoration is byte-identical and that the test changed no tracked file.
 
-- **The patch files in `mutation/`** are byte copies of the reversal patches the tool wrote. Their SHA-256 is listed below.
+- **The patch files in `mutation/`** are byte copies of the reversal patches the tool wrote. Their SHA-256 is listed below. **They are evidence only: never apply them.** Applying one would restore the defect it proves, and the network-boundary patch would bring back a serving command the founder hasn't authorised.
 - **The full JSON records** stay in the local evidence store at the paths shown. They aren't committed: they hold absolute local paths, and prettier would rewrite them.
 
 ## 1. Overlapping completions (independent review finding F1)

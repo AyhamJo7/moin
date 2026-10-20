@@ -137,7 +137,14 @@ for (const name of ['index', 'moderator']) {
   expect(!csp.includes('unsafe-inline'), `${name}: CSP allows no inline code`);
 }
 
-// 6. The observation sheet records the authorisation and any server lifecycle.
+// 6. The reversal patches kept as mutation evidence still contain the old wording by design; they
+//    are labelled as never to be applied.
+expect(
+  flat(read('mutation-evidence.md')).includes('They are evidence only: never apply them.'),
+  'mutation-evidence: patches labelled as never to be applied',
+);
+
+// 7. The observation sheet records the authorisation and any server lifecycle.
 expect(
   flat(files.sheet).includes('Phone-access approval'),
   'sheet: records the phone-access approval',

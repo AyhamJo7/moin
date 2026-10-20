@@ -436,7 +436,9 @@
     head.replaceChildren(pageHead(true));
     content.replaceChildren(h('div', { class: 'sections' }, blocks));
     const again =
-      focusKey === null ? null : document.querySelector(`[data-focus-key="${focusKey}"]`);
+      focusKey === null
+        ? null
+        : document.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`);
     again?.focus();
     return again !== null;
   }
