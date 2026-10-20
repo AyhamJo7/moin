@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/home/adam/projects/business/moin",
+  "head": "f65fc16a42b4a3c9f36953e003f648f8f1e4c414",
+  "mode": "committed",
+  "fix_ref": "f65fc16a42b4a3c9f36953e003f648f8f1e4c414",
+  "fix_paths": [
+    "apps/server/src/modules/call-simulator/application/callback-request.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "pnpm exec vitest run apps/server/src/modules/call-simulator/application/callback-request.test.ts -t 'M1:'",
+  "started": "2026-10-18T09:29:11+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-10-18T09:29:12+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 0.72,
+    "tail": "     \u2193 a range\n     \u2193 a range with bis\n     \u2193 a birthday of someone else\n     \u2193 still reports the booking day beside the callback day\n   \u2193 L2: a guest count belongs to the booking (6)\n     \u2193 catering for another event\n     \u2193 adults and persons\n     \u2193 children as well\n     \u2193 a table for three\n     \u2193 a prototype key as a number\n     \u2193 another prototype key\n   \u2193 birthday wording (1)\n     \u2193 says celebration only for a celebration or a reservation\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 2 \u23af\u23af\u23af\u23af\u23af\u23af\u23af\n\n FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.test.ts > M1: a negation that does not refuse the callback is not a refusal > is still a callback: Kein Problem R\u00fcckruf bitte\n FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.test.ts > M1: a negation that does not refuse the callback is not a refusal > is still a callback: Ich kann gerade nicht sprechen bitte zur\u00fcckrufen\nAssertionError: expected 'unsupported' to be 'callback' // Object.is equality\n\nExpected: \"callback\"\nReceived: \"unsupported\"\n\n \u276f Proxy.toBe scripts/mutation-evidence-probe.ts:84:27\n     82|       let result: unknown;\n     83|       try {\n     84|         result = original.apply(this, args);\n       |                           ^\n     85|       } catch (error) {\n     86|         record(name, error);\n \u276f apps/server/src/modules/call-simulator/application/callback-request.test.ts:537:43\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/2]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  2 failed | 3 passed | 134 skipped (139)\n   Start at  11:29:11\n   Duration  262ms (transform 53%, setup 25%, import 17%, tests 5%, worker 1%)\n"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 0.72,
+    "tail": "\n RUN  v5.0.2 /home/adam/projects/business/moin\n\n \u2713 |unit| apps/server/src/modules/call-simulator/application/callback-request.test.ts (139 tests | 134 skipped) 5ms\n\n Test Files  1 passed (1)\n      Tests  5 passed | 134 skipped (139)\n   Start at  11:29:12\n   Duration  251ms (transform 56%, setup 23%, import 17%, tests 3%, worker 1%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "eba890d73ae21b09b32b2bedf8dddcd22ff17477",
+  "patch_file": "/home/adam/projects/business/moin/.git/claude-evidence/mutation/20261018T092911Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}

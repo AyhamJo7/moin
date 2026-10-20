@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/home/adam/projects/business/moin",
+  "head": "c564c72384bbffd799e31bacee5d36d03e88cb60",
+  "mode": "committed",
+  "fix_ref": "c564c72384bbffd799e31bacee5d36d03e88cb60",
+  "fix_paths": [
+    "apps/server/src/modules/call-simulator/application/callback-request.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "pnpm --filter @moin/server exec vitest run src/modules/call-simulator/application/callback-request.test.ts -t 'a negation that does not target the callback'",
+  "started": "2026-10-18T23:29:22+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-10-18T23:29:23+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 0.67,
+    "tail": "     \u00d7 stays a callback, with the generic title: Bitte zur\u00fcckrufen das Formular funktioniert nicht 1ms\n     \u00d7 stays a callback, with the generic title: Ich habe keinen R\u00fcckruf bekommen, bitte rufen Sie mich zur\u00fcck. 1ms\n     \u00d7 stays a callback, with the generic title: Ich habe noch keinen R\u00fcckruf von Ihnen erhalten. Bitte zur\u00fcckrufen. 0ms\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 4 \u23af\u23af\u23af\u23af\u23af\u23af\u23af\n\n FAIL  src/modules/call-simulator/application/callback-request.test.ts > F4: a negation that does not target the callback is not a refusal > stays a callback, with the generic title: Bitte um R\u00fcckruf denn die Onlinebuchung funktioniert nicht.\n FAIL  src/modules/call-simulator/application/callback-request.test.ts > F4: a negation that does not target the callback is not a refusal > stays a callback, with the generic title: Bitte zur\u00fcckrufen das Formular funktioniert nicht\n FAIL  src/modules/call-simulator/application/callback-request.test.ts > F4: a negation that does not target the callback is not a refusal > stays a callback, with the generic title: Ich habe keinen R\u00fcckruf bekommen, bitte rufen Sie mich zur\u00fcck.\n FAIL  src/modules/call-simulator/application/callback-request.test.ts > F4: a negation that does not target the callback is not a refusal > stays a callback, with the generic title: Ich habe noch keinen R\u00fcckruf von Ihnen erhalten. Bitte zur\u00fcckrufen.\nAssertionError: expected { kind: 'unsupported' } to strictly equal { kind: 'callback', \u2026(1) }\n\n- Expected\n+ Received\n\n  {\n-   \"kind\": \"callback\",\n-   \"title\": \"R\u00fcckruf erbeten\",\n+   \"kind\": \"unsupported\",\n  }\n\n \u276f src/modules/call-simulator/application/callback-request.test.ts:325:38\n    323|     'Ich habe versucht Sie zu erreichen. Bitte rufen Sie mich zur\u00fcck. \u2026\n    324|   ])('stays a callback, with the generic title: %s', (utterance) => {\n    325|     expect(interpretCall(utterance)).toStrictEqual({ kind: 'callback',\u2026\n       |                                      ^\n    326|   });\n    327|\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/4]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  4 failed | 24 passed | 311 skipped (339)\n   Start at  01:29:22\n   Duration  200ms (import 42%, transform 37%, tests 19%, worker 2%)\n\nundefined\n/home/adam/projects/business/moin/apps/server:\n\u2009ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL\u2009 Command failed with exit code 1: vitest run src/modules/call-simulator/application/callback-request.test.ts -t a negation that does not target the callback"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 0.67,
+    "tail": ".                                        | \u2009WARN\u2009 Unsupported engine: wanted: {\"node\":\">=24.21.0 <25\"} (current: {\"node\":\"v26.10.0\",\"pnpm\":\"10.34.5\"})\n\n RUN  v5.0.2 /home/adam/projects/business/moin/apps/server\n\n\n Test Files  1 passed (1)\n      Tests  28 passed | 311 skipped (339)\n   Start at  01:29:23\n   Duration  198ms (import 43%, transform 40%, tests 15%, worker 2%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "8363bc33bca0ae5ac4a79a9af3f51be56b85e8fd",
+  "patch_file": "/home/adam/projects/business/moin/.git/claude-evidence/mutation/20261018T232922Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}

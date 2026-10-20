@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/home/adam/projects/business/moin",
+  "head": "373675e98550ed24f03abc6cb7bb1cbb9f12b631",
+  "mode": "committed",
+  "fix_ref": "373675e98550ed24f03abc6cb7bb1cbb9f12b631",
+  "fix_paths": [
+    "apps/server/src/modules/call-simulator/application/callback-request.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "pnpm exec vitest run apps/server/src/modules/call-simulator/application/callback-request.properties.test.ts -t 'F2:'",
+  "started": "2026-10-18T20:35:44+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-10-18T20:35:46+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 0.92,
+    "tail": "     \u2193 the hedge or call window voids the detail: R\u00fcckruf wegen Reservierung f\u00fcr Freitag, sofern es klappt.\n     \u2193 the hedge or call window voids the detail: Bitte R\u00fcckruf wegen einer Reservierung f\u00fcr Freitag zwischen 10 und 12 Uhr.\n     \u2193 the hedge or call window voids the detail: Bitte R\u00fcckruf wegen einer Reservierung f\u00fcr Freitag gegen zehn Uhr.\n     \u2193 the hedge or call window voids the detail: Bitte R\u00fcckruf wegen einer Reservierung f\u00fcr Freitag nach 15 Uhr.\n     \u2193 an everyday positive request stays a callback: Ich m\u00f6chte einen Tisch reservieren, aber nur f\u00fcr 4 Personen. Bitte rufen Sie mich zur\u00fcck.\n     \u2193 an everyday positive request stays a callback: W\u00e4ren Sie so nett, mich zur\u00fcckzurufen? Es geht um eine Reservierung.\n     \u2193 an everyday positive request stays a callback: Ich habe versucht Sie zu erreichen. Bitte rufen Sie mich zur\u00fcck. Ich rufe Sie sonst morgen an.\n     \u2193 an everyday positive request stays a callback: Ich m\u00f6chte nicht, dass Sie zu sp\u00e4t zur\u00fcckrufen.\n     \u2193 an everyday positive request stays a callback: Kein R\u00fcckruf morgen fr\u00fch, danach gern.\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 6 \u23af\u23af\u23af\u23af\u23af\u23af\u23af\n\n FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.properties.test.ts > F2: a reservation noun alone does not license a date > no booking date: Ich m\u00f6chte am Freitag die Reservierung telefonisch besprechen. Bitte R\u00fcckruf.\n FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.properties.test.ts > F2: a reservation noun alone does not license a date > no booking date: Ich m\u00f6chte am Freitag die Reservierung besprechen. Bitte R\u00fcckruf.\n FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.properties.test.ts > F2: a reservation noun alone does not license a date > no booking date: Ich m\u00f6chte eine Reservierung am Freitag kl\u00e4ren. Bitte R\u00fcckruf.\n FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.properties.test.ts > F2: a reservation noun alone does not license a date > no booking date: Ich habe eine Reservierung am Freitag. Bitte R\u00fcckruf.\n FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.properties.test.ts > F2: a reservation noun alone does not license a date > no booking date: Bitte R\u00fcckruf wegen unserer Reservierung am Freitag.\n FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.properties.test.ts > F2: a reservation noun alone does not license a date > no booking date: Ich m\u00f6chte am Freitag die Reservierung kl\u00e4ren. Bitte R\u00fcckruf.\nAssertionError: expected 'R\u00fcckruf: Reservierung am Freitag' to be 'R\u00fcckruf: Reservierung' // Object.is equality\n\nExpected: \"R\u00fcckruf: Reservierung\"\nReceived: \"R\u00fcckruf: Reservierung am Freitag\"\n\n \u276f Proxy.toBe scripts/mutation-evidence-probe.ts:84:27\n     82|       let result: unknown;\n     83|       try {\n     84|         result = original.apply(this, args);\n       |                           ^\n     85|       } catch (error) {\n     86|         record(name, error);\n \u276f apps/server/src/modules/call-simulator/application/callback-request.properties.test.ts:25:32\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/6]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  6 failed | 7 passed | 66 skipped (79)\n   Start at  22:35:44\n   Duration  386ms (transform 57%, setup 20%, import 14%, tests 8%, worker 1%)\n"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 0.92,
+    "tail": "\n RUN  v5.0.2 /home/adam/projects/business/moin\n\n \u2713 |unit| apps/server/src/modules/call-simulator/application/callback-request.properties.test.ts (79 tests | 66 skipped) 22ms\n\n Test Files  1 passed (1)\n      Tests  13 passed | 66 skipped (79)\n   Start at  22:35:45\n   Duration  359ms (transform 54%, setup 21%, import 16%, tests 8%, worker 1%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/home/adam/projects/business/moin/.git/claude-evidence/mutation/20261018T203544Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}

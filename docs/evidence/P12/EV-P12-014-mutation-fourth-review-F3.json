@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/home/adam/projects/business/moin",
+  "head": "373675e98550ed24f03abc6cb7bb1cbb9f12b631",
+  "mode": "committed",
+  "fix_ref": "373675e98550ed24f03abc6cb7bb1cbb9f12b631",
+  "fix_paths": [
+    "apps/server/src/modules/call-simulator/application/callback-request.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "pnpm exec vitest run apps/server/src/modules/call-simulator/application/callback-request.properties.test.ts -t 'F3:'",
+  "started": "2026-10-18T20:35:46+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-10-18T20:35:47+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 0.92,
+    "tail": "\nExpected: \"R\u00fcckruf: Reservierung\"\nReceived: \"R\u00fcckruf: Reservierung f\u00fcr 20 Personen\"\n\n \u276f Proxy.toBe scripts/mutation-evidence-probe.ts:84:27\n     82|       let result: unknown;\n     83|       try {\n     84|         result = original.apply(this, args);\n       |                           ^\n     85|       } catch (error) {\n     86|         record(name, error);\n \u276f apps/server/src/modules/call-simulator/application/callback-request.properties.test.ts:59:32\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/4]\u23af\n\n FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.properties.test.ts > F3: any range or hedge voids the count, whatever its endpoints are > no count: Bitte R\u00fcckruf. Reservierung f\u00fcr 8 Personen, es werden null bis acht Personen.\n FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.properties.test.ts > F3: any range or hedge voids the count, whatever its endpoints are > no count: Bitte R\u00fcckruf. Reservierung f\u00fcr 8 Personen, es werden hundert bis 8 Personen.\n FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.properties.test.ts > F3: any range or hedge voids the count, whatever its endpoints are > no count: Bitte R\u00fcckruf. Reservierung f\u00fcr 8 Personen, es werden drei\u00dfig-8 Personen.\nAssertionError: expected 'R\u00fcckruf: Reservierung f\u00fcr 8 Personen' to be 'R\u00fcckruf: Reservierung' // Object.is equality\n\nExpected: \"R\u00fcckruf: Reservierung\"\nReceived: \"R\u00fcckruf: Reservierung f\u00fcr 8 Personen\"\n\n \u276f Proxy.toBe scripts/mutation-evidence-probe.ts:84:27\n     82|       let result: unknown;\n     83|       try {\n     84|         result = original.apply(this, args);\n       |                           ^\n     85|       } catch (error) {\n     86|         record(name, error);\n \u276f apps/server/src/modules/call-simulator/application/callback-request.properties.test.ts:59:32\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[2/4]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  4 failed | 10 passed | 65 skipped (79)\n   Start at  22:35:46\n   Duration  361ms (transform 54%, setup 22%, import 15%, tests 8%, worker 1%)\n"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 0.87,
+    "tail": "\n RUN  v5.0.2 /home/adam/projects/business/moin\n\n \u2713 |unit| apps/server/src/modules/call-simulator/application/callback-request.properties.test.ts (79 tests | 65 skipped) 22ms\n\n Test Files  1 passed (1)\n      Tests  14 passed | 65 skipped (79)\n   Start at  22:35:47\n   Duration  350ms (transform 54%, setup 21%, import 15%, tests 8%, worker 1%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/home/adam/projects/business/moin/.git/claude-evidence/mutation/20261018T203546Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}

@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/home/adam/projects/business/moin",
+  "head": "9cb135dad7d5759d595d667323df14ff756dc012",
+  "mode": "committed",
+  "fix_ref": "9cb135dad7d5759d595d667323df14ff756dc012",
+  "fix_paths": [
+    "apps/server/src/modules/call-simulator/application/callback-request.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "pnpm exec vitest run apps/server/src/modules/call-simulator/application/callback-request.test.ts -t 'F4:'",
+  "started": "2026-10-18T09:24:29+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-10-18T09:24:30+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 0.72,
+    "tail": " \u276f Proxy.toStrictEqual scripts/mutation-evidence-probe.ts:84:27\n     82|       let result: unknown;\n     83|       try {\n     84|         result = original.apply(this, args);\n       |                           ^\n     85|       } catch (error) {\n     86|         record(name, error);\n \u276f apps/server/src/modules/call-simulator/application/callback-request.test.ts:511:38\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/8]\u23af\n\n FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.test.ts > F4: an explicit refusal of the callback creates no callback > is unsupported: R\u00fcckruf wegen einer Reservierung, aber bitte keinen R\u00fcckruf mehr\nAssertionError: expected { kind: 'callback', \u2026(1) } to strictly equal { kind: 'unsupported' }\n\n- Expected\n+ Received\n\n  {\n-   \"kind\": \"unsupported\",\n+   \"kind\": \"callback\",\n+   \"title\": \"R\u00fcckruf: Reservierung\",\n  }\n\n \u276f Proxy.toStrictEqual scripts/mutation-evidence-probe.ts:84:27\n     82|       let result: unknown;\n     83|       try {\n     84|         result = original.apply(this, args);\n       |                           ^\n     85|       } catch (error) {\n     86|         record(name, error);\n \u276f apps/server/src/modules/call-simulator/application/callback-request.test.ts:511:38\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[2/8]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  8 failed | 4 passed | 96 skipped (108)\n   Start at  11:24:29\n   Duration  281ms (transform 53%, setup 23%, import 16%, tests 7%, worker 1%)\n"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 0.77,
+    "tail": "\n RUN  v5.0.2 /home/adam/projects/business/moin\n\n \u2713 |unit| apps/server/src/modules/call-simulator/application/callback-request.test.ts (108 tests | 96 skipped) 7ms\n\n Test Files  1 passed (1)\n      Tests  12 passed | 96 skipped (108)\n   Start at  11:24:30\n   Duration  282ms (transform 58%, setup 22%, import 15%, tests 3%, worker 1%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/home/adam/projects/business/moin/.git/claude-evidence/mutation/20261018T092429Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}

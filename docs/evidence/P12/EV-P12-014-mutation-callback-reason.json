@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/home/adam/projects/business/moin",
+  "head": "d286ef0443ddd64cc91e73c2ad1a5b1b647a0f38",
+  "mode": "committed",
+  "fix_ref": "d286ef0443ddd64cc91e73c2ad1a5b1b647a0f38",
+  "fix_paths": [
+    "apps/server/src/modules/call-simulator/application/callback-request.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "pnpm exec vitest run apps/server/src/modules/call-simulator/application/callback-request.test.ts",
+  "started": "2026-10-18T08:45:11+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-10-18T08:45:12+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 0.87,
+    "tail": " FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.test.ts > interpretCall: reservation and birthday requests (PRODUCT-01) > names a birthday only for the words that mean a birthday celebration\nAssertionError: expected 'R\u00fcckruf erbeten' to be 'R\u00fcckruf: Geburtstagsfeier f\u00fcr 5 Perso\u2026' // Object.is equality\n\nExpected: \"R\u00fcckruf: Geburtstagsfeier f\u00fcr 5 Personen\"\nReceived: \"R\u00fcckruf erbeten\"\n\n \u276f Proxy.toBe scripts/mutation-evidence-probe.ts:84:27\n     82|       let result: unknown;\n     83|       try {\n     84|         result = original.apply(this, args);\n       |                           ^\n     85|       } catch (error) {\n     86|         record(name, error);\n \u276f apps/server/src/modules/call-simulator/application/callback-request.test.ts:285:69\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[19/29]\u23af\n\n FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.test.ts > interpretCall: reservation and birthday requests (PRODUCT-01) > the longest possible title fits the bound without being cut\nAssertionError: expected 'R\u00fcckruf erbeten' to be 'R\u00fcckruf: Reservierung f\u00fcr Geburtstags\u2026' // Object.is equality\n\nExpected: \"R\u00fcckruf: Reservierung f\u00fcr Geburtstagsfeier f\u00fcr 99 Personen am Donnerstag\"\nReceived: \"R\u00fcckruf erbeten\"\n\n \u276f Proxy.toBe scripts/mutation-evidence-probe.ts:84:27\n     82|       let result: unknown;\n     83|       try {\n     84|         result = original.apply(this, args);\n       |                           ^\n     85|       } catch (error) {\n     86|         record(name, error);\n \u276f apps/server/src/modules/call-simulator/application/callback-request.test.ts:294:21\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[20/29]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  29 failed | 34 passed (63)\n   Start at  10:45:11\n   Duration  387ms (transform 55%, setup 21%, import 12%, tests 10%, worker 1%)\n"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 0.82,
+    "tail": "\n RUN  v5.0.2 /home/adam/projects/business/moin\n\n \u2713 |unit| apps/server/src/modules/call-simulator/application/callback-request.test.ts (63 tests) 18ms\n\n Test Files  1 passed (1)\n      Tests  63 passed (63)\n   Start at  10:45:12\n   Duration  302ms (transform 54%, setup 23%, import 14%, tests 8%, worker 1%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/home/adam/projects/business/moin/.git/claude-evidence/mutation/20261018T084511Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}

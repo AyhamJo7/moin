@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/home/adam/projects/business/moin",
+  "head": "2208cb681d319ba83d5cc2f2750da65115a3e10d",
+  "mode": "committed",
+  "fix_ref": "371b1567fb11f84ad4fd24a94fcf83a4466bc346",
+  "fix_paths": [
+    "apps/server/src/modules/call-simulator/application/callback-request.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "pnpm --filter @moin/server exec vitest run src/modules/call-simulator/application/callback-request.properties.test.ts -t 'category-only output'",
+  "started": "2026-10-18T23:30:14+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-10-18T23:30:16+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 0.77,
+    "tail": "     47|     expect([...CALLBACK_TITLES]).toStrictEqual(ALLOWED);\n       |                ^\n     48|   });\n     49|\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/3]\u23af\n\n FAIL  src/modules/call-simulator/application/callback-request.properties.test.ts > category-only output > a count and a day stated plainly inside the booking never reach the title\nAssertionError: Ich m\u00f6chte f\u00fcr 8 Personen am Freitag einen Tisch reservieren. Bitte um R\u00fcckruf.: expected [ 'R\u00fcckruf erbeten', \u2026(3) ] to include 'R\u00fcckruf: Reservierung f\u00fcr 8 Personen \u2026'\n \u276f src/modules/call-simulator/application/callback-request.properties.test.ts:65:36\n     63|       ]) {\n     64|         const title = titleOf(utterance);\n     65|         expect(ALLOWED, utterance).toContain(title);\n       |                                    ^\n     66|         expect(title, utterance).not.toMatch(DETAIL);\n     67|       }\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[2/3]\u23af\n\n FAIL  src/modules/call-simulator/application/callback-request.properties.test.ts > category-only output > the earlier count and date inputs give a constant title and no detail\nAssertionError: R\u00fcckruf bitte, Reservierung f\u00fcr 6 Personen am Freitag: expected [ 'R\u00fcckruf erbeten', \u2026(3) ] to include 'R\u00fcckruf: Reservierung f\u00fcr 6 Personen \u2026'\n \u276f src/modules/call-simulator/application/callback-request.properties.test.ts:167:34\n    165|       expect(result.kind, utterance).toBe('callback');\n    166|       const title = result.kind === 'callback' ? result.title : '';\n    167|       expect(ALLOWED, utterance).toContain(title);\n       |                                  ^\n    168|       expect(title, utterance).not.toMatch(DETAIL);\n    169|     }\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[3/3]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  3 failed | 4 passed | 2 skipped (9)\n   Start at  01:30:15\n   Duration  292ms (tests 50%, transform 26%, import 23%, worker 1%)\n\nundefined\n/home/adam/projects/business/moin/apps/server:\n\u2009ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL\u2009 Command failed with exit code 1: vitest run src/modules/call-simulator/application/callback-request.properties.test.ts -t category-only output"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 0.72,
+    "tail": ".                                        | \u2009WARN\u2009 Unsupported engine: wanted: {\"node\":\">=24.21.0 <25\"} (current: {\"node\":\"v26.10.0\",\"pnpm\":\"10.34.5\"})\n\n RUN  v5.0.2 /home/adam/projects/business/moin/apps/server\n\n\n Test Files  1 passed (1)\n      Tests  7 passed | 2 skipped (9)\n   Start at  01:30:16\n   Duration  282ms (tests 49%, transform 25%, import 24%, worker 2%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "673362f5472bd764cbabc3722e924d4ce1084de9",
+  "patch_file": "/home/adam/projects/business/moin/.git/claude-evidence/mutation/20261018T233014Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}

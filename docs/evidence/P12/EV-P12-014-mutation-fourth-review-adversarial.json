@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/home/adam/projects/business/moin",
+  "head": "373675e98550ed24f03abc6cb7bb1cbb9f12b631",
+  "mode": "committed",
+  "fix_ref": "373675e98550ed24f03abc6cb7bb1cbb9f12b631",
+  "fix_paths": [
+    "apps/server/src/modules/call-simulator/application/callback-request.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "pnpm exec vitest run apps/server/src/modules/call-simulator/application/callback-request.properties.test.ts -t 'adversarial pass'",
+  "started": "2026-10-18T20:35:50+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-10-18T20:35:52+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 0.98,
+    "tail": "     84|         result = original.apply(this, args);\n       |                           ^\n     85|       } catch (error) {\n     86|         record(name, error);\n \u276f apps/server/src/modules/call-simulator/application/callback-request.properties.test.ts:259:32\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[12/43]\u23af\n\n FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.properties.test.ts > adversarial pass, second round > an everyday positive request stays a callback: W\u00e4ren Sie so nett, mich zur\u00fcckzurufen? Es geht um eine Reservierung.\nError: not a callback: W\u00e4ren Sie so nett, mich zur\u00fcckzurufen? Es geht um eine Reservierung.\n \u276f titleOf apps/server/src/modules/call-simulator/application/callback-request.properties.test.ts:9:41\n      7| const titleOf = (utterance: string): string => {\n      8|   const result = interpretCall(utterance);\n      9|   if (result.kind !== 'callback') throw new Error(`not a callback: ${u\u2026\n       |                                         ^\n     10|   return result.title;\n     11| };\n \u276f apps/server/src/modules/call-simulator/application/callback-request.properties.test.ts:278:12\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[13/43]\u23af\n\n FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.properties.test.ts > adversarial pass, second round > an everyday positive request stays a callback: Kein R\u00fcckruf morgen fr\u00fch, danach gern.\nError: not a callback: Kein R\u00fcckruf morgen fr\u00fch, danach gern.\n \u276f titleOf apps/server/src/modules/call-simulator/application/callback-request.properties.test.ts:9:41\n      7| const titleOf = (utterance: string): string => {\n      8|   const result = interpretCall(utterance);\n      9|   if (result.kind !== 'callback') throw new Error(`not a callback: ${u\u2026\n       |                                         ^\n     10|   return result.title;\n     11| };\n \u276f apps/server/src/modules/call-simulator/application/callback-request.properties.test.ts:278:12\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[14/43]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  43 failed | 4 passed | 32 skipped (79)\n   Start at  22:35:50\n   Duration  453ms (transform 50%, setup 21%, tests 14%, import 13%, worker 1%)\n"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 0.92,
+    "tail": "\n RUN  v5.0.2 /home/adam/projects/business/moin\n\n \u2713 |unit| apps/server/src/modules/call-simulator/application/callback-request.properties.test.ts (79 tests | 32 skipped) 28ms\n\n Test Files  1 passed (1)\n      Tests  47 passed | 32 skipped (79)\n   Start at  22:35:51\n   Duration  369ms (transform 53%, setup 22%, import 14%, tests 10%, worker 1%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/home/adam/projects/business/moin/.git/claude-evidence/mutation/20261018T203550Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}

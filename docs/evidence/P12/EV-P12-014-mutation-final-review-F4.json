@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/home/adam/projects/business/moin",
+  "head": "a993cd751b0894123b0c2a6a0496da5ea78a539f",
+  "mode": "committed",
+  "fix_ref": "a993cd751b0894123b0c2a6a0496da5ea78a539f",
+  "fix_paths": [
+    "apps/server/src/modules/call-simulator/application/callback-request.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "pnpm exec vitest run apps/server/src/modules/call-simulator/application/callback-request.test.ts -t 'final review F4'",
+  "started": "2026-10-18T19:30:46+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-10-18T19:30:48+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 1.17,
+    "tail": " FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.test.ts > final review F4: explicit refusals, however they are worded, create no callback > is unsupported: R\u00fcckruf ist nicht erw\u00fcnscht.\n FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.test.ts > final review F4: explicit refusals, however they are worded, create no callback > is unsupported: R\u00fcckruf nicht erw\u00fcnscht.\n FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.test.ts > final review F4: explicit refusals, however they are worded, create no callback > is unsupported: Zur\u00fcckrufen ist nicht erw\u00fcnscht.\n FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.test.ts > final review F4: explicit refusals, however they are worded, create no callback > is unsupported: Rufen Sie mich nie zur\u00fcck.\n FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.test.ts > final review F4: explicit refusals, however they are worded, create no callback > is unsupported: Zur\u00fcckrufen bitte nicht.\n FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.test.ts > final review F4: explicit refusals, however they are worded, create no callback > is unsupported: R\u00fcckruf auf keinen Fall.\n FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.test.ts > final review F4: explicit refusals, however they are worded, create no callback > is unsupported: R\u00fcckruf lieber nicht.\n FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.test.ts > final review F4: explicit refusals, however they are worded, create no callback > is unsupported: Bitte nicht mehr anrufen. R\u00fcckruf er\u00fcbrigt sich.\n FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.test.ts > final review F4: explicit refusals, however they are worded, create no callback > is unsupported: Bitte rufen Sie mich zur\u00fcck. Bitte nicht mehr anrufen.\n FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.test.ts > final review F4: explicit refusals, however they are worded, create no callback > is unsupported: Vergessen Sie den R\u00fcckruf.\n FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.test.ts > final review F4: explicit refusals, however they are worded, create no callback > is unsupported: Der R\u00fcckruf hat sich erledigt.\n FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.test.ts > final review F4: explicit refusals, however they are worded, create no callback > is unsupported: Ich m\u00f6chte f\u00fcr sechs Personen reservieren. R\u00fcckruf bitte, aber keinesfalls zur\u00fcckrufen.\nAssertionError: expected { kind: 'callback', \u2026(1) } to strictly equal { kind: 'unsupported' }\n\n- Expected\n+ Received\n\n  {\n-   \"kind\": \"unsupported\",\n+   \"kind\": \"callback\",\n+   \"title\": \"R\u00fcckruf erbeten\",\n  }\n\n \u276f Proxy.toStrictEqual scripts/mutation-evidence-probe.ts:84:27\n     82|       let result: unknown;\n     83|       try {\n     84|         result = original.apply(this, args);\n       |                           ^\n     85|       } catch (error) {\n     86|         record(name, error);\n \u276f apps/server/src/modules/call-simulator/application/callback-request.test.ts:827:38\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/14]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  14 failed | 10 passed | 170 skipped (194)\n   Start at  21:30:46\n   Duration  606ms (transform 42%, setup 30%, import 18%, tests 9%, worker 1%)\n"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 1.12,
+    "tail": "\n RUN  v5.0.2 /home/adam/projects/business/moin\n\n \u2713 |unit| apps/server/src/modules/call-simulator/application/callback-request.test.ts (194 tests | 170 skipped) 22ms\n\n Test Files  1 passed (1)\n      Tests  24 passed | 170 skipped (194)\n   Start at  21:30:47\n   Duration  565ms (transform 46%, import 27%, setup 21%, tests 6%, worker 1%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/home/adam/projects/business/moin/.git/claude-evidence/mutation/20261018T193046Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}

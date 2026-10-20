@@ -14,7 +14,14 @@ import { Test } from '@nestjs/testing';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { createTestDatabase, evidenceTest, type TestDatabase } from '@moin/testing';
 import { fixedClock } from '@moin/kernel';
-import { completeTask, finaliseInteraction, ingestCall, setTaskStatus, withTenant } from '@moin/db';
+import {
+  captureCallbackRequest,
+  completeTask,
+  finaliseInteraction,
+  ingestCall,
+  setTaskStatus,
+  withTenant,
+} from '@moin/db';
 import {
   SIMULATED_CALL_PATH,
   TODAY_CONTRACT_HEADER,
@@ -324,7 +331,7 @@ describe('simulated callback call → persisted task (M1)', () => {
     const row = task.rows[0];
     expect(row).toMatchObject({
       organisation_id: restaurant,
-      title: 'Rückruf: Tischreservierung',
+      title: 'Rückruf: Reservierung',
       type: 'callback',
       status: 'open',
       priority: 'normal',
@@ -373,6 +380,74 @@ describe('simulated callback call → persisted task (M1)', () => {
     ]);
     expect(title.rows[0]?.title).toBe('Rückruf erbeten');
   });
+
+  evidenceTest(
+    "states the reason a caller gave without wegen, and stores none of the caller's words (PRODUCT-01)",
+    async () => {
+      const marker = `QX${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+      const response = await simulate(
+        call({
+          utterance: `Es geht um eine Geburtstagsfeier im Dezember, Referenz ${marker}. Bitte rufen Sie zurück.`,
+        }),
+      );
+      expect(response.statusCode).toBe(201);
+      const { taskId } = response.json<{ taskId: string }>();
+      const stored = await admin.query<{ title: string }>('select title from tasks where id = $1', [
+        taskId,
+      ]);
+      expect(stored.rows[0]?.title).toBe('Rückruf: Geburtstagsfeier');
+
+      // The owner's Today shows the same reason, through the shared contract.
+      const view = todayResponseSchema.parse((await today(await signIn(restaurantOwner))).json());
+      expect(view.tasks.find((t) => t.id === taskId)?.title).toBe('Rückruf: Geburtstagsfeier');
+
+      // No table of the database holds the utterance (INV-07, INV-12): the marker appears nowhere.
+      const holders = await admin.query<{ table_name: string }>(
+        `select table_name from (
+           select table_name,
+                  (xpath('/row/c/text()', query_to_xml(
+                     format('select count(*) as c from public.%I t where t::text like %L', table_name, $1::text),
+                     false, true, '')))[1]::text::int as n
+             from information_schema.tables
+            where table_schema = 'public' and table_type = 'BASE TABLE') counted
+          where n > 0`,
+        [`%${marker}%`],
+      );
+      expect(holders.rows).toStrictEqual([]);
+
+      // The scan can see what is stored: the same query finds the title in the tasks table.
+      const control = await admin.query<{ table_name: string }>(
+        `select table_name from (
+           select table_name,
+                  (xpath('/row/c/text()', query_to_xml(
+                     format('select count(*) as c from public.%I t where t::text like %L', table_name, $1::text),
+                     false, true, '')))[1]::text::int as n
+             from information_schema.tables
+            where table_schema = 'public' and table_type = 'BASE TABLE') counted
+          where n > 0`,
+        ['%Rückruf: Geburtstagsfeier%'],
+      );
+      expect(control.rows.map((row) => row.table_name)).toContain('tasks');
+    },
+  );
+
+  evidenceTest('a replayed call keeps the title it was first given (J2)', async () => {
+    const callSid = `SIM${randomUUID().replaceAll('-', '')}`;
+    const utterance = 'Ich möchte für sechs Personen reservieren. Bitte um Rückruf.';
+    const first = await simulate(call({ callSid, utterance }));
+    const replay = await simulate(call({ callSid, utterance }));
+    expect(first.statusCode).toBe(201);
+    expect(replay.json()).toStrictEqual({ ...first.json<object>(), replayed: true });
+    const { taskId } = first.json<{ taskId: string }>();
+    const rows = await admin.query<{ title: string; version: number }>(
+      'select title, version from tasks where id = $1',
+      [taskId],
+    );
+    expect(rows.rows[0]).toStrictEqual({
+      title: 'Rückruf: Reservierung',
+      version: 1,
+    });
+  });
 });
 
 describe('the owner reads the task on Today (M1)', () => {
@@ -389,7 +464,7 @@ describe('the owner reads the task on Today (M1)', () => {
     const body = todayResponseSchema.parse(response.json());
     const task = body.tasks.find((t) => t.id === taskId);
     expect(task).toMatchObject({
-      title: 'Rückruf: Tischreservierung',
+      title: 'Rückruf: Reservierung',
       type: 'callback',
       status: 'open',
       priority: 'normal',
@@ -698,7 +773,7 @@ describe('a closed fallback never absorbs a callback (M1 hotfix)', () => {
         // The owner's closed task is exactly as they left it (the call gains its outcome).
         expect((await snapshot(fallback)).task).toStrictEqual(before.task);
         const carrier = await taskRow(taskId);
-        expect(carrier).toMatchObject({ status: 'open', title: 'Rückruf: Tischreservierung' });
+        expect(carrier).toMatchObject({ status: 'open', title: 'Rückruf: Reservierung' });
         const view = todayResponseSchema.parse((await today(await signIn(restaurantOwner))).json());
         expect(view.tasks.find((t) => t.id === taskId)).toMatchObject({
           type: 'callback',
@@ -833,13 +908,13 @@ describe('F2: an accepted callback keeps what the owner needs to call back (M1 h
       );
       expect(callRow.rows[0]?.from_number).toBe(caller);
       expect(await taskRow(fallback)).toMatchObject({
-        title: 'Rückruf: Tischreservierung',
+        title: 'Rückruf: Reservierung',
         type: 'callback',
         status: 'open',
       });
       const view = todayResponseSchema.parse((await today(await signIn(restaurantOwner))).json());
       expect(view.tasks.find((t) => t.id === fallback)).toMatchObject({
-        title: 'Rückruf: Tischreservierung',
+        title: 'Rückruf: Reservierung',
         callerNumber: caller,
         type: 'callback',
       });
@@ -882,7 +957,7 @@ describe('F2: an accepted callback keeps what the owner needs to call back (M1 h
       expect(taskId).not.toBe(fallback);
       expect((await snapshot(fallback)).task).toStrictEqual(before);
       expect(await taskRow(taskId)).toMatchObject({
-        title: 'Rückruf: Tischreservierung',
+        title: 'Rückruf: Reservierung',
         status: 'open',
       });
     },
@@ -918,15 +993,295 @@ describe('Today never hides urgent work behind a long list (M1)', () => {
   });
 });
 
-describe('titles count characters as the database does (M1)', () => {
-  evidenceTest('an emoji topic is stored and served, not refused', async () => {
+describe("titles stay short and are never built from the caller's words (M1, PRODUCT-01 F1)", () => {
+  // This test used to send "Rückruf wegen" plus 100 emoji and expect a 72-character title copied from
+  // them. Copying caller words into a title is the defect PRODUCT-01 F1 removed; what is kept is that
+  // such a call is accepted and served, with the neutral title.
+  evidenceTest('an emoji-only topic is accepted and served with the neutral title', async () => {
     const response = await simulate(call({ utterance: `Rückruf wegen ${'🎂'.repeat(100)}` }));
     expect(response.statusCode).toBe(201);
     const { taskId } = response.json<{ taskId: string }>();
     const view = todayResponseSchema.parse((await today(await signIn(restaurantOwner))).json());
-    const task = view.tasks.find((t) => t.id === taskId);
-    expect(Array.from(task?.title ?? '')).toHaveLength(72);
+    expect(view.tasks.find((t) => t.id === taskId)?.title).toBe('Rückruf erbeten');
   });
+});
+
+/** Names of the public tables whose rows contain the text, in any column (catalogue scan, as owner). */
+async function tablesHolding(needle: string): Promise<string[]> {
+  const holders = await admin.query<{ table_name: string }>(
+    `select table_name from (
+       select table_name,
+              (xpath('/row/c/text()', query_to_xml(
+                 format('select count(*) as c from public.%I t where t::text like %L', table_name, $1::text),
+                 false, true, '')))[1]::text::int as n
+         from information_schema.tables
+        where table_schema = 'public' and table_type = 'BASE TABLE') counted
+      where n > 0`,
+    [`%${needle}%`],
+  );
+  return holders.rows.map((row) => row.table_name);
+}
+
+/** Row count of every public table, any tenant: a write anywhere shows as a difference. */
+async function rowCounts(): Promise<Record<string, number>> {
+  const counts = await admin.query<{ table_name: string; n: number }>(
+    `select table_name,
+            (xpath('/row/c/text()', query_to_xml(
+               format('select count(*) as c from public.%I', table_name), false, true, '')))[1]::text::int as n
+       from information_schema.tables
+      where table_schema = 'public' and table_type = 'BASE TABLE'
+      order by table_name`,
+  );
+  return Object.fromEntries(counts.rows.map((row) => [row.table_name, row.n]));
+}
+
+describe('PRODUCT-01 review findings: persisted titles, refusals and replays', () => {
+  // [name, utterance, short fragments that must not appear in the title or the response, the whole
+  // distinctive text that no table may hold]. Short or hex-like strings are not scanned across the
+  // database (they collide with generated ids and the fixtures' own addresses).
+  const SENSITIVE = [
+    [
+      'a PIN',
+      'Bitte Rückruf wegen einer Reservierung meine PIN lautet 4821.',
+      ['4821', 'PIN'],
+      'PIN lautet 4821',
+    ],
+    [
+      'a health disclosure',
+      'Bitte Rückruf wegen einer Reservierung ich bin HIV-positiv.',
+      ['HIV'],
+      'HIV-positiv',
+    ],
+    [
+      'a bank account',
+      'Rückruf wegen einer Reservierung IBAN DE02120300000000202051',
+      ['DE0212', 'IBAN'],
+      'DE02120300000000202051',
+    ],
+    [
+      'a password',
+      'Rückruf wegen einer Reservierung mein Passwort ist Sommer2026',
+      ['Sommer2026', 'Passwort'],
+      'Sommer2026',
+    ],
+    [
+      'a contact',
+      'Rückruf wegen einer Reservierung an anna.mueller@example.test oder 040 7654321',
+      ['anna.mueller', '7654321'],
+      'anna.mueller@example.test',
+    ],
+    [
+      'markup',
+      'Rückruf wegen einer Reservierung <script>alert(1)</script>',
+      ['<script', 'alert(1)'],
+      '<script>alert(1)</script>',
+    ],
+  ] as const;
+
+  for (const [name, utterance, fragments, scanned] of SENSITIVE) {
+    evidenceTest(
+      `${name} after "wegen" reaches neither the response, the task, nor Today`,
+      async () => {
+        const response = await simulate(call({ utterance }));
+        expect(response.statusCode).toBe(201);
+        const { taskId } = response.json<{ taskId: string }>();
+        const stored = await taskRow(taskId);
+        const view = todayResponseSchema.parse((await today(await signIn(restaurantOwner))).json());
+        const served = view.tasks.find((t) => t.id === taskId)?.title;
+        for (const fragment of fragments) {
+          expect(response.body, 'simulator response').not.toContain(fragment);
+          expect(stored.title, 'persisted task title').not.toContain(fragment);
+          expect(served, 'Today projection').not.toContain(fragment);
+        }
+        // Checked in every table, as the one channel this suite can inspect; it says nothing about logs.
+        expect(await tablesHolding(scanned), `tables holding "${scanned}"`).toStrictEqual([]);
+        // "oder" offers an alternative, so the category scope keeps that one generic.
+        const expected = utterance.includes(' oder ') ? 'Rückruf erbeten' : 'Rückruf: Reservierung';
+        expect(stored.title).toBe(expected);
+        expect(served).toBe(expected);
+      },
+    );
+  }
+
+  evidenceTest(
+    'only the four category titles are persisted and served, never a day or a count (category scope)',
+    async () => {
+      // Founder scope decision: counts and dates are no longer extracted. The reviewer counterexamples
+      // and a sentence that used to give "am Samstag" are persisted with the category title only.
+      const cases: [string, string][] = [
+        [
+          'Ich möchte am Freitag die Reservierung telefonisch besprechen. Bitte Rückruf.',
+          'Rückruf: Reservierung',
+        ],
+        [
+          'Bitte Rückruf. Reservierung für 20 Personen, es werden fünfzehn bis 20 Personen.',
+          'Rückruf: Reservierung',
+        ],
+        [
+          'Bitte Rückruf. Reservierung für 8 Personen, es werden null bis acht Personen.',
+          'Rückruf: Reservierung',
+        ],
+        [
+          'Ich möchte einen Tisch für Samstag reservieren. Bitte um Rückruf.',
+          'Rückruf: Reservierung',
+        ],
+        [
+          'Bitte um Rückruf wegen einer Tischreservierung für eine Geburtstagsfeier.',
+          'Rückruf: Reservierung für Geburtstagsfeier',
+        ],
+        ['Bitte um Rückruf denn die Onlinebuchung funktioniert nicht.', 'Rückruf erbeten'],
+      ];
+      for (const [utterance, expected] of cases) {
+        const response = await simulate(call({ utterance }));
+        expect(response.statusCode, utterance).toBe(201);
+        const { taskId } = response.json<{ taskId: string }>();
+        expect((await taskRow(taskId)).title, utterance).toBe(expected);
+        const view = todayResponseSchema.parse((await today(await signIn(restaurantOwner))).json());
+        expect(view.tasks.find((t) => t.id === taskId)?.title, utterance).toBe(expected);
+      }
+    },
+  );
+
+  evidenceTest('a refusal of the callback is 422 and writes nothing anywhere', async () => {
+    for (const utterance of [
+      'Bitte nicht zurückrufen, ich möchte nicht reservieren, meine PIN lautet 4821.',
+      'Ich möchte keinen Rückruf.',
+      'Rufen Sie mich nicht zurück.',
+      'Bitte nie zurückrufen.',
+      'Bitte auf keinen Fall zurückrufen.',
+      'Rückruf ist nicht erwünscht.',
+      'Bitte nicht zurückrufen.',
+      'Bitte nicht mehr zurückrufen.',
+      'Rufen Sie mich nie zurück. Ich möchte für sechs Personen reservieren.',
+      'Bitte zurückrufen, oder lieber doch nicht.',
+    ]) {
+      const before = await rowCounts();
+      // The counts cover every public table, these four included: no task, outcome, acceptance or audit row.
+      expect(Object.keys(before)).toEqual(
+        expect.arrayContaining([
+          'tasks',
+          'interaction_outcomes',
+          'callback_acceptances',
+          'audit_events',
+        ]),
+      );
+      const response = await simulate(call({ utterance }));
+      expect(response.statusCode, utterance).toBe(422);
+      expect(response.json()).toMatchObject({ type: '/problems/unsupported-request' });
+      expect(await rowCounts(), `row counts after: ${utterance}`).toStrictEqual(before);
+      expect(await tablesHolding('meine PIN lautet 4821')).toStrictEqual([]);
+    }
+  });
+
+  evidenceTest(
+    'the row-count comparison does see an accepted callback (positive control)',
+    async () => {
+      const before = await rowCounts();
+      expect((await simulate(call())).statusCode).toBe(201);
+      const after = await rowCounts();
+      expect(after['tasks']).toBe((before['tasks'] ?? 0) + 1);
+      expect(after['interaction_outcomes']).toBe((before['interaction_outcomes'] ?? 0) + 1);
+      expect(after['callback_acceptances']).toBe((before['callback_acceptances'] ?? 0) + 1);
+      expect(after['audit_events']).toBeGreaterThan(before['audit_events'] ?? 0);
+    },
+  );
+
+  evidenceTest(
+    'a positive request with an unrelated negation still creates the callback',
+    async () => {
+      for (const utterance of [
+        'Ich möchte nicht online buchen, bitte rufen Sie mich zurück',
+        'Bitte um Rückruf denn die Onlinebuchung funktioniert nicht.',
+        'Bitte zurückrufen, das Formular funktioniert nicht.',
+      ]) {
+        const response = await simulate(call({ utterance }));
+        expect(response.statusCode, utterance).toBe(201);
+        const { taskId } = response.json<{ taskId: string }>();
+        expect((await taskRow(taskId)).title, utterance).toBe('Rückruf erbeten');
+      }
+    },
+  );
+
+  evidenceTest(
+    'a completed callback replayed with the same words is not reopened (J2)',
+    async () => {
+      const body = call({
+        utterance: 'Es geht um eine Geburtstagsfeier im Dezember. Bitte rufen Sie zurück.',
+      });
+      const first = await simulate(body);
+      expect(first.statusCode).toBe(201);
+      const { taskId } = first.json<{ taskId: string }>();
+      expect((await taskRow(taskId)).title).toBe('Rückruf: Geburtstagsfeier');
+      await closeTask(taskId, 'done');
+      const completed = await taskRow(taskId);
+      const before = await rowCounts();
+      const replay = await simulate(body);
+      expect(replay.statusCode).toBe(200);
+      expect(replay.json()).toStrictEqual({ taskId, replayed: true });
+      expect(await taskRow(taskId)).toStrictEqual(completed);
+      expect(await rowCounts()).toStrictEqual(before);
+    },
+  );
+
+  evidenceTest(
+    'a call accepted under the earlier rules is refused, not duplicated, when its words now read differently',
+    async () => {
+      // The title takes part in the acceptance's request hash. A call stored by the rejected version
+      // with a copied title ("Rückruf: Gutscheins") and delivered again with the same words now
+      // interprets to the neutral title: a documented 409 (request differs), never a second task.
+      const callSid = `SIM${randomUUID().replaceAll('-', '')}`;
+      const stored = await withTenant(database.pool(), restaurant, (client) =>
+        captureCallbackRequest(client, {
+          providerCallSid: callSid,
+          fromNumber: CALLER,
+          toNumber: RESTAURANT_NUMBER,
+          title: 'Rückruf: Gutscheins',
+        }),
+      );
+      const taskId = stored.taskId ?? '';
+      const before = await rowCounts();
+      const replay = await simulate(
+        call({
+          callSid,
+          utterance: 'Können Sie mich zurückrufen? Es geht wegen meines Gutscheins',
+        }),
+      );
+      expect(replay.statusCode).toBe(409);
+      expect(replay.json()).toMatchObject({ type: '/problems/callback-conflict' });
+      expect(await rowCounts()).toStrictEqual(before);
+      expect((await taskRow(taskId)).title).toBe('Rückruf: Gutscheins');
+    },
+  );
+
+  evidenceTest(
+    'a call accepted with a detailed title is refused, not rewritten or duplicated, under the category scope',
+    async () => {
+      // Stored by the previous rules ("… für 6 Personen am Freitag"); the same words now give the
+      // category title, so the request hash differs: 409, the old title and the task stay as they were.
+      const callSid = `SIM${randomUUID().replaceAll('-', '')}`;
+      const stored = await withTenant(database.pool(), restaurant, (client) =>
+        captureCallbackRequest(client, {
+          providerCallSid: callSid,
+          fromNumber: CALLER,
+          toNumber: RESTAURANT_NUMBER,
+          title: 'Rückruf: Reservierung für 6 Personen am Freitag',
+        }),
+      );
+      const taskId = stored.taskId ?? '';
+      const before = await rowCounts();
+      const replay = await simulate(
+        call({
+          callSid,
+          utterance:
+            'Guten Tag, ich möchte für sechs Personen am Freitagabend reservieren. Bitte um Rückruf.',
+        }),
+      );
+      expect(replay.statusCode).toBe(409);
+      expect(replay.json()).toMatchObject({ type: '/problems/callback-conflict' });
+      expect(await rowCounts()).toStrictEqual(before);
+      expect((await taskRow(taskId)).title).toBe('Rückruf: Reservierung für 6 Personen am Freitag');
+    },
+  );
 });
 
 describe('restart (M1)', () => {

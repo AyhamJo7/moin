@@ -1646,3 +1646,68 @@ token (fail closed, never rotate), and refuses a real port conflict only when th
 running. `deploy/demo/tests/lifecycle.test.sh` (69 checks, in the unit gate); official mutation KILLED
 (`docs/evidence/P02/EV-P02-050-mutation-demo-lifecycle.json`). F2 (package-manager probe) and F3 (mutable
 binfmt image) stay open follow-ups. Nothing VERIFIED.
+
+Founder demo rehearsal (2026-10-18, local packaged demo from `db12ecd`; DEMO_READY_WITH_LIMITATIONS, not pilot-ready, nothing founder-VERIFIED).
+Founder-observed: real Keycloak sign-in; three leftover callbacks completed with Erledigt; a simulated callback
+arrived on Heute by itself and was completed; a browser refresh did not bring it back. Founder timing estimate
+for the arrival: about four seconds, informal and not instrumented (the automated suite measured about 15 s,
+EV-P13-016/017). Database-verified by the operator afterwards: 0 open and 10 done tasks; the new task `done`,
+version 4, three audit status events by the signed-in owner. Established only by earlier automated tests, not
+re-done in the rehearsal: API restart, stop/start, call replay, a second live session and a revoked session
+(`playwright.demo.config.ts`, EV-P02-050). Findings: (1) the card showed the generic "Rückruf erbeten" for a
+birthday request: addressed by PRODUCT-01 (PR for `feat/p12-callback-reason-titles`); (2) UX-01, deferred and
+not started: Heute looks browser-default. The only stylesheet is one inline `<style>` in `apps/web/app/layout.tsx`
+(page width, task card, Erledigt button, focus outlines); the screenshot shows that applied, so the hypothesis is
+missing styling work, not a missing asset; a browser console/network capture and the choice of a frontend design
+skill come first. The rehearsal screenshot lived only in an ephemeral scratchpad (the empty Heute state, no caller
+data) and is not kept in the repository; a permanent copy would belong under `docs/evidence/` as a reference with
+its SHA-256, after the founder decides.
+
+PRODUCT-01 (2026-10-18, branch `feat/p12-callback-reason-titles` from `db12ecd`): the simulator's task title now
+names the reason from a closed vocabulary (reservation, birthday celebration, guest count 1..99, one weekday or
+month), only when stated without hedging or contradiction, and never copies the caller's words; the M1 "wegen"
+behaviour is unchanged, negations stay generic, no schema, contract or UI change, the utterance is still never
+stored. Official mutation KILLED (`docs/evidence/P12/EV-P12-014-mutation-callback-reason.json`). P12.09.01 stays open.
+
+PRODUCT-01 remediation (2026-10-18, PR #242, independent review of `6123c52` returned REQUEST_CHANGES, four
+findings, fixed in `9cb135d`): F1 (P1) the "wegen" branch copied caller words into the persistent title (a PIN,
+a health remark): nothing is copied any more, the title is filled from a closed vocabulary and validated
+numbers only; F2 a callback date was reported as the booking date: a date now counts only inside the booking's
+own clause; F3 a conflicting or unsupported guest count was ignored: every count mention must be supported and
+agree; F4 an explicit refusal of the callback still created a task: it is now unsupported (HTTP 422, zero
+writes). Changed expectations: the M1 tests that required copying free text after "wegen" were replaced and
+explained in `docs/evidence/P12/EV-P12-014-callback-reason-titles.md`. Replay: the title is part of the
+acceptance hash, so a call accepted under the earlier rules and delivered again with the same words can be
+refused with 409, never duplicated or reopened (tested). Official mutation KILLED per finding
+(`EV-P12-014-mutation-review-*.json`). Nothing VERIFIED.
+
+PRODUCT-01 second review (2026-10-18, PR #242): the internal privacy/security review of `9cb135d` found no Critical or
+High issue and several Medium and Low ones (refusal patterns too loose or too narrow, callback or availability days
+read as the booking day, corrections and exceptions invisible to the date rule, head counts outside the booking
+clause, a birthday remark announced as a party); fixed in `f65fc16` with tests that failed first and official
+mutation KILLED for each group (`EV-P12-014-mutation-second-review-*.json`). Redelivery under changed rules: 422
+for newly unsupported words, 409 for a changed title, never a duplicate. Nothing VERIFIED.
+
+PRODUCT-01 third review (2026-10-18, PR #242, REQUEST_CHANGES at `ce3479e`: F2 callback dates, F3 count ranges, F4
+refusals; F1 closed and kept): dates now belong to the booking only inside an explicit phrase with the topic (a
+callback word beside them makes them the callback's), a number chain such as `6–8` or `bis`/`oder` is a range and
+voids the count, and the refusal list covers `nie`, `auf keinen Fall`, `nicht erwünscht`, `nicht mehr anrufen`.
+Fix `a993cd7`; tests written first (20 failures on the rejected code); official mutation KILLED for F2, F3, F4 and
+the real-PostgreSQL zero-write test (`EV-P12-014-mutation-final-review-*.json`). Nothing VERIFIED.
+
+PRODUCT-01 fourth review (2026-10-18, PR #242, REQUEST_CHANGES at `1608108`: F2 date after the noun
+"Reservierung", F3 ranges with unknown endpoints; F1 and F4 accepted): dates are the booking's only in two explicit
+constructions (noun phrase with date, or date before the verb "reservieren"), counts are classified as ranges before
+any value is chosen, and two rounds of independent adversarial probing (141 utterances) were fixed as classes. Fix
+`373675e`; official mutation KILLED for F2, F3, the metamorphic and adversarial groups and the real-PostgreSQL test
+(`EV-P12-014-mutation-fourth-review-*.json`). Nothing VERIFIED.
+
+PRODUCT-01 fifth review and founder scope reduction (2026-10-19, PR #242, REQUEST_CHANGES at `009b8ed`: F4 false
+refusal of "Bitte um Rückruf denn die Onlinebuchung funktioniert nicht."): callback titles are now one of four
+category constants (no guest count, weekday, month or caller words; detail extraction removed, deferred in
+EV-P12-015), and contact consent is denied unless every refusal word is explained by a closed harmless
+construction, after three independent adversarial rounds showed refusal phrase lists fail toward unwanted
+contact. Fixes `371b156` (category) and `c564c72` (consent), test `2208cb6`; official mutation KILLED for category
+recognition, category-only output, the false-refusal and missed-refusal groups and three real-PostgreSQL tests
+(`EV-P12-015-mutation-*.json`). Known residue: refusals phrased without any known refusal word. Nothing VERIFIED;
+the running demo keeps the earlier build until an approved rebuild.

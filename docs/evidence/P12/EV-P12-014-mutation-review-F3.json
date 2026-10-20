@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/home/adam/projects/business/moin",
+  "head": "9cb135dad7d5759d595d667323df14ff756dc012",
+  "mode": "committed",
+  "fix_ref": "9cb135dad7d5759d595d667323df14ff756dc012",
+  "fix_paths": [
+    "apps/server/src/modules/call-simulator/application/callback-request.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "pnpm exec vitest run apps/server/src/modules/call-simulator/application/callback-request.test.ts -t 'F3:'",
+  "started": "2026-10-18T09:24:27+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-10-18T09:24:29+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 0.82,
+    "tail": " FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.test.ts > F3: a guest count is stated only when every count mention supports it > an unknown number word\nAssertionError: expected 'R\u00fcckruf: Reservierung f\u00fcr 6 Personen' to be 'R\u00fcckruf: Reservierung' // Object.is equality\n\nExpected: \"R\u00fcckruf: Reservierung\"\nReceived: \"R\u00fcckruf: Reservierung f\u00fcr 6 Personen\"\n\n \u276f Proxy.toBe scripts/mutation-evidence-probe.ts:84:27\n     82|       let result: unknown;\n     83|       try {\n     84|         result = original.apply(this, args);\n       |                           ^\n     85|       } catch (error) {\n     86|         record(name, error);\n \u276f apps/server/src/modules/call-simulator/application/callback-request.test.ts:496:30\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/4]\u23af\n\n FAIL  |unit| apps/server/src/modules/call-simulator/application/callback-request.test.ts > F3: a guest count is stated only when every count mention supports it > five or six\nAssertionError: expected 'R\u00fcckruf erbeten' to be 'R\u00fcckruf: Reservierung' // Object.is equality\n\nExpected: \"R\u00fcckruf: Reservierung\"\nReceived: \"R\u00fcckruf erbeten\"\n\n \u276f Proxy.toBe scripts/mutation-evidence-probe.ts:84:27\n     82|       let result: unknown;\n     83|       try {\n     84|         result = original.apply(this, args);\n       |                           ^\n     85|       } catch (error) {\n     86|         record(name, error);\n \u276f apps/server/src/modules/call-simulator/application/callback-request.test.ts:496:30\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[2/4]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  4 failed | 9 passed | 95 skipped (108)\n   Start at  11:24:27\n   Duration  343ms (transform 64%, setup 18%, import 12%, tests 5%, worker 1%)\n"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 0.82,
+    "tail": "\n RUN  v5.0.2 /home/adam/projects/business/moin\n\n \u2713 |unit| apps/server/src/modules/call-simulator/application/callback-request.test.ts (108 tests | 95 skipped) 8ms\n\n Test Files  1 passed (1)\n      Tests  13 passed | 95 skipped (108)\n   Start at  11:24:28\n   Duration  341ms (transform 67%, setup 17%, import 13%, tests 3%, worker 1%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/home/adam/projects/business/moin/.git/claude-evidence/mutation/20261018T092427Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}

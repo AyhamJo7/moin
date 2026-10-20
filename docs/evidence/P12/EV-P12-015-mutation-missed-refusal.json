@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/home/adam/projects/business/moin",
+  "head": "c564c72384bbffd799e31bacee5d36d03e88cb60",
+  "mode": "committed",
+  "fix_ref": "c564c72384bbffd799e31bacee5d36d03e88cb60",
+  "fix_paths": [
+    "apps/server/src/modules/call-simulator/application/callback-request.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "pnpm --filter @moin/server exec vitest run src/modules/call-simulator/application/callback-request.test.ts -t 'adversarial round'",
+  "started": "2026-10-18T23:29:23+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-10-18T23:29:25+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 0.77,
+    "tail": "    569|     'R\u00fcckruf war ein Versehen, sorry.',\n    570|   ])('is unsupported: %s', (utterance) => {\n    571|     expect(interpretCall(utterance)).toStrictEqual({ kind: 'unsupporte\u2026\n       |                                      ^\n    572|   });\n    573|\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[2/55]\u23af\n\n FAIL  src/modules/call-simulator/application/callback-request.test.ts > third adversarial round: disguised and negation-free refusals create no callback > the founder positives and their variants stay callbacks: Bisher kein R\u00fcckruf. Bitte zur\u00fcckrufen.\nAssertionError: expected { kind: 'unsupported' } to strictly equal { kind: 'callback', \u2026(1) }\n\n- Expected\n+ Received\n\n  {\n-   \"kind\": \"callback\",\n-   \"title\": \"R\u00fcckruf erbeten\",\n+   \"kind\": \"unsupported\",\n  }\n\n \u276f src/modules/call-simulator/application/callback-request.test.ts:580:38\n    578|     'Bisher kein R\u00fcckruf. Bitte zur\u00fcckrufen.',\n    579|   ])('the founder positives and their variants stay callbacks: %s', (u\u2026\n    580|     expect(interpretCall(utterance)).toStrictEqual({ kind: 'callback',\u2026\n       |                                      ^\n    581|   });\n    582|\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[3/55]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  55 failed | 33 passed | 251 skipped (339)\n   Start at  01:29:24\n   Duration  289ms (tests 35%, import 34%, transform 30%, worker 2%)\n\nundefined\n/home/adam/projects/business/moin/apps/server:\n\u2009ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL\u2009 Command failed with exit code 1: vitest run src/modules/call-simulator/application/callback-request.test.ts -t adversarial round"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 0.67,
+    "tail": ".                                        | \u2009WARN\u2009 Unsupported engine: wanted: {\"node\":\">=24.21.0 <25\"} (current: {\"node\":\"v26.10.0\",\"pnpm\":\"10.34.5\"})\n\n RUN  v5.0.2 /home/adam/projects/business/moin/apps/server\n\n\n Test Files  1 passed (1)\n      Tests  88 passed | 251 skipped (339)\n   Start at  01:29:24\n   Duration  203ms (import 40%, transform 36%, tests 22%, worker 2%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "974496d459aa08e64b96d94ccbe1e989d7608c6d",
+  "patch_file": "/home/adam/projects/business/moin/.git/claude-evidence/mutation/20261018T232923Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}
