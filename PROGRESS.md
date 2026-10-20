@@ -1711,3 +1711,40 @@ contact. Fixes `371b156` (category) and `c564c72` (consent), test `2208cb6`; off
 recognition, category-only output, the false-refusal and missed-refusal groups and three real-PostgreSQL tests
 (`EV-P12-015-mutation-*.json`). Known residue: refusals phrased without any known refusal word. Nothing VERIFIED;
 the running demo keeps the earlier build until an approved rebuild.
+
+UX-01 Gate 0 documentation (2026-10-20, docs-only draft PR, branch `docs/p13-01-ux01-gate0-design` from `9995f2d`):
+proposed founder records for the owner-app design authority, all marked pending founder acceptance and none
+implemented: DG-10 (`docs/decisions/DG-10-owner-app-visual-language.md`, provisional: calm, premium, light,
+high-contrast; warm neutrals, blue `#1D5FA8`, system fonts, no decorative accent), ADR-0025
+(`docs/adr/0025-frontend-architecture.md`, PROPOSED: Tailwind 4.3.3 build-time, local `@moin/ui`, lucide-react;
+TanStack Query/SSE, next-intl, overlay primitives and dark mode DEFERRED with triggers), `docs/design/DESIGN.md`,
+the screenshot-baseline plan (13 images, CI never writes baselines) and the tooling decisions (read-only pinned
+references; Chrome DevTools MCP pin and hardening as a founder action). The review package
+(`docs/design/review/`) contains static mock-ups only, labelled as proposals; no before screenshot of the
+application exists yet (gate 2a). P13.01.04 stays IN_PROGRESS; nothing VERIFIED.
+
+UX-01 Gate 0 remediation (2026-10-20, same draft PR #243, docs only, from rejected head `a98d7b4`): independent review
+REQUEST_CHANGES with two P2 and one P3 findings; design direction and architecture were accepted and are unchanged.
+P2-F1: `docs/design/DESIGN.md` §6.1 now specifies refresh health as proposed future behaviour. A client-side failure
+clock runs only while the page is visible and attended, and any successful read, unchanged or not, resets it.
+"Aktualisierung verzögert" appears after more than 2 minutes of real failures, never for hidden, idle, unchanged or
+no-new-work cases. The current poller exposes none of this state; a separate gate RH with eight acceptance proofs
+covers it. P2-F2: the DG-10 record now separates provisional direction, accepted planning guidance and evidence
+complete; the owner usability test is NOT_STARTED, DG-10 stays PROVISIONAL, P13.01 stays blocked, and four
+founder decisions are listed. PLAN names that evidence EV-P13-003, but that ID is already taken by another record.
+P3: the "Bedienrahmen" swatch label goes from white (3.70:1) to `#1C1B19` (4.65:1). A text-contrast audit of all
+mock-ups found no other failures, and three images were regenerated from source; the other five re-render byte for
+byte. ADR-0025 D2 now documents the Tailwind entry, export and `@source` registration of `@moin/ui`, with proofs
+required on the standalone image. Nothing implemented, nothing VERIFIED.
+
+UX-01 Gate 0, Direction B (2026-10-20, same draft PR #243, docs only, from `b309e3a`): the founder selected the
+work-queue layout (Direction B) as the preferred direction, provisionally and subject to the owner usability test;
+Direction A (cards) was explored outside the repository and not adopted. DESIGN.md now specifies one panel per
+section and one row per task in the API's order (fixed columns from 1100 px, two lines from 768 px, full-width
+blocks on phones). Statuses are neutral chips, the call link is a link, and "Erledigt" is outlined, pending the
+owner test's criterion C5 (filled variant as fallback). A new §9 lists what the implementation must still prove,
+including the existing pending-state label mismatch (WCAG 2.5.3, UNVERIFIED). The review package was re-rendered
+as 11 images from 5 Heute pages plus foundations; the 7 card-layout images were removed. The committed
+`render-mockups.mjs` checks overflow, contrast, targets, preserved contracts and axe, and renders byte-identically.
+`owner-usability-test.md` plans a 20–30-minute moderated session with 11 tasks, marked static or interactive.
+No participant has been tested, DG-10 stays PROVISIONAL, P13.01 stays blocked, nothing implemented, nothing VERIFIED.

@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Heute ohne Aufgaben – Entwurf</title>
+    <link rel="stylesheet" href="proposal.css" />
+  </head>
+  <body>
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <symbol id="i-check" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" /></symbol>
+      <symbol id="i-alert" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9" />
+        <line x1="12" y1="7.5" x2="12" y2="12.5" />
+        <line x1="12" y1="16" x2="12.01" y2="16" />
+      </symbol>
+      <symbol id="i-warn" viewBox="0 0 24 24">
+        <path d="M12 3.5 2.5 20h19L12 3.5z" />
+        <line x1="12" y1="10" x2="12" y2="14" />
+        <line x1="12" y1="17" x2="12.01" y2="17" />
+      </symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9" />
+        <polyline points="12 7 12 12 15.5 14" />
+      </symbol>
+      <symbol id="i-phone" viewBox="0 0 24 24">
+        <path
+          d="M5 4h3.5l2 5-2.4 1.5a11 11 0 0 0 5.4 5.4L15 13.5l5 2V19a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"
+        />
+      </symbol>
+      <symbol id="i-done" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9" />
+        <polyline points="8 12.5 11 15.5 16.5 9.5" />
+      </symbol>
+    </svg>
+    <a class="skip-link" href="#inhalt">Zum Inhalt springen</a>
+    <p class="proposal-label">
+      Entwurf zur Gestaltung (UX-01 Gate 0, Richtung B „Arbeitsliste“) – keine implementierte
+      Ansicht. Alle Daten sind synthetisch.
+    </p>
+    <header class="topbar">
+      <div class="frame topbar-inner">
+        <span class="brand">KlarDesk</span>
+        <nav aria-label="Hauptbereiche">
+          <ul>
+            <li><a href="#" aria-current="page">Heute</a></li>
+          </ul>
+        </nav>
+      </div>
+    </header>
+    <main id="inhalt" class="frame">
+      <div class="page-head">
+        <div>
+          <h1>Heute</h1>
+          <p class="page-date">Dienstag, 20. Oktober 2026</p>
+        </div>
+        <div class="page-tools">
+          <span class="status-line"
+            ><svg class="icon" aria-hidden="true"><use href="#i-clock" /></svg>Stand 09:42</span
+          ><a class="btn btn-secondary" href="#">Aktualisieren</a>
+        </div>
+      </div>
+      <div class="sections">
+        <div class="quiet panel">
+          <section aria-labelledby="s-urgent">
+            <h2 id="s-urgent">Dringend</h2>
+            <p class="empty-line">
+              <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>Alles erledigt.
+            </p>
+          </section>
+          <section aria-labelledby="s-callbacks">
+            <h2 id="s-callbacks">Rückrufe</h2>
+            <p class="empty-line">
+              <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>Alles erledigt.
+            </p>
+          </section>
+          <section aria-labelledby="s-requests">
+            <h2 id="s-requests">Neue Anfragen</h2>
+            <p class="empty-line">
+              <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>Alles erledigt.
+            </p>
+          </section>
+          <section aria-labelledby="s-appointments">
+            <h2 id="s-appointments">Termine/Reservierungen zu bestätigen</h2>
+            <p class="empty-line">
+              <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>Alles erledigt.
+            </p>
+          </section>
+          <section aria-labelledby="s-questions">
+            <h2 id="s-questions">Offene Kundenfragen</h2>
+            <p class="empty-line">
+              <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>Alles erledigt.
+            </p>
+          </section>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>

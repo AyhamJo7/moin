@@ -1,0 +1,780 @@
+/*
+ * UX-01 Gate 0 proposal mock-ups, Direction B ("Arbeitsliste"). Static illustration of
+ * docs/design/DESIGN.md, not application code: nothing here is imported by apps/web or packages/ui.
+ * Token values mirror DESIGN.md section 3.
+ */
+
+:root {
+  --color-canvas: #f6f5f2;
+  --color-surface: #ffffff;
+  --color-surface-sunken: #efede9;
+  --color-text: #1c1b19;
+  --color-text-muted: #57534e;
+  --color-border: #ddd9d2;
+  --color-border-control: #8a847c;
+  --color-primary: #1d5fa8;
+  --color-primary-hover: #174c86;
+  --color-primary-pressed: #123d6c;
+  --color-on-primary: #ffffff;
+  --color-info-bg: #eaf1fa;
+  --color-urgent: #b42318;
+  --color-urgent-bg: #fdf1ef;
+  --color-success: #1e6b3a;
+  --color-success-bg: #edf6ef;
+  --color-warning: #8a5300;
+  --color-warning-bg: #fdf5e4;
+  --font-sans:
+    system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', 'Helvetica Neue', Arial, sans-serif;
+  --radius-control: 6px;
+  --radius-card: 10px;
+  --frame: 72rem;
+  --gutter: 16px;
+}
+
+@media (min-width: 768px) {
+  :root {
+    --gutter: 24px;
+  }
+}
+
+@media (min-width: 1280px) {
+  :root {
+    --gutter: 32px;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-canvas);
+  color: var(--color-text);
+  font: 400 1rem / 1.5 var(--font-sans);
+  overflow-wrap: break-word;
+  hyphens: auto;
+}
+
+h1,
+h2,
+h3,
+p,
+dl,
+dd,
+ul {
+  margin: 0;
+}
+
+ul {
+  padding: 0;
+  list-style: none;
+}
+
+time,
+.phone,
+.count {
+  font-variant-numeric: tabular-nums;
+}
+
+.frame {
+  width: min(100% - 2 * var(--gutter), var(--frame));
+  margin-inline: auto;
+}
+
+/* Marks every mock-up as a proposal. Not part of the design. */
+.proposal-label {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  border-bottom: 2px dashed var(--color-warning);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  padding: 6px 16px;
+  text-align: center;
+}
+
+/* Explains a mock-up state. Not part of the design. */
+.state-label {
+  margin: 32px 0 8px;
+  padding: 4px 8px;
+  border: 1px dashed var(--color-warning);
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  border-radius: 4px;
+  width: fit-content;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.icon {
+  width: 1.125rem;
+  height: 1.125rem;
+  flex: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.skip-link {
+  position: absolute;
+  left: 8px;
+  top: -60px;
+  z-index: 1;
+  min-height: 44px;
+  padding: 10px 14px;
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.skip-link:focus-visible {
+  top: 8px;
+}
+
+a:focus-visible,
+button:focus-visible,
+.is-focus {
+  outline: 3px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Page header (shared by both directions) */
+
+.page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px 24px;
+  padding-block: 28px 24px;
+}
+
+h1 {
+  font-size: 1.625rem;
+  line-height: 1.2;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+@media (min-width: 768px) {
+  h1 {
+    font-size: 1.875rem;
+  }
+}
+
+.page-date {
+  margin-top: 4px;
+  color: var(--color-text-muted);
+}
+
+.page-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+
+.status-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-muted);
+  font-size: 0.9375rem;
+}
+
+/* Controls */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  font: 600 1rem / 1.2 var(--font-sans);
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  flex: none;
+}
+
+.btn-primary {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.btn-primary:hover,
+.btn-primary.is-hover {
+  background: var(--color-primary-hover);
+}
+
+.btn-primary:active,
+.btn-primary.is-pressed {
+  background: var(--color-primary-pressed);
+}
+
+.btn-secondary {
+  background: var(--color-surface);
+  color: var(--color-text);
+  border-color: var(--color-border-control);
+}
+
+.btn-secondary:hover,
+.btn-secondary.is-hover {
+  background: var(--color-surface-sunken);
+}
+
+.btn[aria-busy='true'] {
+  cursor: progress;
+}
+
+/* The caller number: a call link, not a button. Blue + underline + icon, so not colour alone. */
+.phone {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 8px;
+  margin-inline-start: -8px;
+  border-radius: var(--radius-control);
+  color: var(--color-primary);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+  white-space: nowrap;
+}
+
+.phone:hover,
+.phone.is-hover {
+  color: var(--color-primary-hover);
+  background: var(--color-info-bg);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  flex: none;
+}
+
+.badge .icon {
+  width: 0.875rem;
+  height: 0.875rem;
+}
+
+.badge--neutral {
+  background: var(--color-surface-sunken);
+  color: var(--color-text-muted);
+}
+
+.badge--urgent {
+  background: var(--color-urgent-bg);
+  color: var(--color-urgent);
+}
+
+.count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--color-surface-sunken);
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.empty-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-muted);
+}
+
+.empty-line .icon {
+  color: var(--color-success);
+}
+
+.unavailable {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  color: var(--color-warning);
+  font-size: 0.9375rem;
+  line-height: 1.45;
+}
+
+.alert {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 14px 16px;
+  border-radius: var(--radius-card);
+  border: 1px solid;
+  margin-bottom: 24px;
+}
+
+.alert--success {
+  background: var(--color-success-bg);
+  border-color: #b9d8c2;
+  color: var(--color-success);
+}
+
+.alert--success p {
+  color: var(--color-text);
+}
+
+.sections > .state-label:first-of-type {
+  margin-top: 0;
+}
+
+/*
+ * Work queue (Direction B). One panel per section, one row per task in fixed
+ * columns (task, status, caller, received, action). Rows become two-line blocks on tablet and
+ * three-line full-width blocks on phones. "Erledigt" is outlined so a long queue is not a column
+ * of filled blocks; it stays in the same place on every row.
+ */
+
+.topbar {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.topbar-inner {
+  display: flex;
+  align-items: stretch;
+  gap: 32px;
+  height: 56px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  font-size: 1.125rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.topbar nav ul {
+  display: flex;
+  gap: 24px;
+  height: 100%;
+}
+
+.topbar nav a {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  min-height: 44px;
+  min-width: 44px;
+  justify-content: center;
+  color: var(--color-text-muted);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.topbar nav a[aria-current='page'] {
+  color: var(--color-text);
+  box-shadow: inset 0 -2px 0 var(--color-primary);
+}
+
+.sections {
+  display: grid;
+  gap: 20px;
+  padding-bottom: 48px;
+}
+
+.panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+}
+
+@media (max-width: 767px) {
+  .panel {
+    margin-inline: calc(-1 * var(--gutter));
+    border-radius: 0;
+    border-inline: 0;
+  }
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+}
+
+@media (min-width: 768px) {
+  .panel-head {
+    padding: 14px 20px;
+  }
+}
+
+.panel-head .icon {
+  color: var(--color-urgent);
+}
+
+h2 {
+  font-size: 1.125rem;
+  line-height: 1.3;
+  font-weight: 600;
+}
+
+/* Column labels: visual only (aria-hidden); each cell carries its own dt for assistive tech. */
+.colhead {
+  display: none;
+}
+
+.tasks > li {
+  border-top: 1px solid var(--color-border);
+}
+
+.task {
+  position: relative;
+}
+
+.task--urgent {
+  box-shadow: inset 4px 0 0 var(--color-urgent);
+}
+
+.task > article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'title title'
+    'status time'
+    'phone action';
+  align-items: center;
+  gap: 6px 12px;
+  padding: 14px 16px 12px;
+}
+
+.cell-title {
+  grid-area: title;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+
+.cell-title h3 {
+  font-size: 1rem;
+  line-height: 1.35;
+  font-weight: 600;
+}
+
+.cell-status {
+  grid-area: status;
+  justify-self: start;
+}
+
+.cell-phone {
+  grid-area: phone;
+  justify-self: start;
+}
+
+.cell-time {
+  grid-area: time;
+  justify-self: end;
+  color: var(--color-text-muted);
+  font-size: 0.9375rem;
+  white-space: nowrap;
+}
+
+.cell-action {
+  grid-area: action;
+  justify-self: end;
+}
+
+@media (min-width: 768px) {
+  .task > article {
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      'title title phone action'
+      'status time phone action';
+    column-gap: 20px;
+    padding: 12px 20px;
+  }
+
+  .cell-time {
+    justify-self: start;
+  }
+}
+
+@media (min-width: 1100px) {
+  .colhead,
+  .task > article {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 6.5rem 12.5rem 10.5rem 9.5rem;
+    column-gap: 24px;
+    padding-inline: 20px;
+  }
+
+  .colhead {
+    padding-block: 8px;
+    border-top: 1px solid var(--color-border);
+    color: var(--color-text-muted);
+    font-size: 0.8125rem;
+    line-height: 1.4;
+  }
+
+  .task > article {
+    grid-template-areas: 'title status phone time action';
+    min-height: 56px;
+    padding-block: 6px;
+  }
+
+  .cell-action {
+    justify-self: stretch;
+  }
+
+  .cell-action .btn {
+    width: 100%;
+  }
+}
+
+.btn-outline {
+  background: var(--color-surface);
+  color: var(--color-primary);
+  border: 1.5px solid var(--color-primary);
+}
+
+.btn-outline:hover,
+.btn-outline.is-hover {
+  background: var(--color-info-bg);
+  color: var(--color-primary-hover);
+  border-color: var(--color-primary-hover);
+}
+
+.btn-outline:active,
+.btn-outline.is-pressed {
+  background: var(--color-primary-pressed);
+  border-color: var(--color-primary-pressed);
+  color: var(--color-on-primary);
+}
+
+.cell-action .unavailable {
+  max-width: 22rem;
+}
+
+/* Empty sections: one quiet panel, a row per section. */
+.quiet > section {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 24px;
+  min-height: 52px;
+  padding: 12px 20px;
+}
+
+.quiet > section + section {
+  border-top: 1px solid var(--color-border);
+}
+
+.quiet h2 {
+  flex: 0 0 20rem;
+  font-size: 1rem;
+  line-height: 1.4;
+}
+
+@media (max-width: 767px) {
+  .quiet > section {
+    padding: 12px 16px;
+  }
+
+  .quiet h2 {
+    flex-basis: 100%;
+  }
+}
+
+/* An unavailable completion takes its own full-width line under the row. */
+.task > article > .cell-action--unavailable {
+  grid-column: 1 / -1;
+  grid-row: auto;
+  grid-area: auto / 1 / auto / -1;
+  justify-self: start;
+}
+
+.cell-time {
+  display: flex;
+  gap: 6px;
+}
+
+@media (min-width: 1100px) {
+  .cell-time dt {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+}
+
+/* Page states */
+
+.status-line--warning {
+  color: var(--color-warning);
+}
+
+.alert--warning {
+  background: var(--color-warning-bg);
+  border-color: #e9cf9c;
+  color: var(--color-warning);
+}
+
+.alert--warning p {
+  color: var(--color-text);
+}
+
+.alert-actions {
+  margin-top: 10px;
+}
+
+.note {
+  margin-bottom: 20px;
+  color: var(--color-text-muted);
+  font-size: 0.9375rem;
+}
+
+.skeleton {
+  background: var(--color-surface-sunken);
+  border-radius: 6px;
+  height: 14px;
+}
+
+.skeleton-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 9.5rem;
+  gap: 8px 24px;
+  align-items: center;
+  padding: 16px 20px;
+  border-top: 1px solid var(--color-border);
+}
+
+/* Foundations sheet */
+
+.sheet {
+  padding-block: 28px 48px;
+}
+
+.sheet h2 {
+  margin-bottom: 12px;
+}
+
+.sheet section + section {
+  margin-top: 40px;
+}
+
+.swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: 12px;
+}
+
+.swatch {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+}
+
+.swatch-chip {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  padding-inline: 12px;
+  font-weight: 600;
+}
+
+.swatch-meta {
+  padding: 8px 12px;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.swatch-meta strong {
+  display: block;
+  font-size: 0.875rem;
+}
+
+.type-row {
+  display: grid;
+  grid-template-columns: 12rem 1fr;
+  gap: 16px;
+  align-items: baseline;
+  padding-block: 10px;
+  border-top: 1px solid var(--color-border);
+}
+
+.type-row span:first-child {
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+}
+
+.caption {
+  display: block;
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+  margin-top: 6px;
+}
+
+.spaces {
+  display: flex;
+  gap: 16px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.space {
+  background: var(--color-info-bg);
+  border: 1px solid var(--color-primary);
+}
+
+@media (max-width: 767px) {
+  .type-row {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0s !important;
+    animation-duration: 0s !important;
+  }
+}

@@ -51,6 +51,7 @@ names an enforcement.
 | [0018](0018-retention-and-deletion.md)              | Retention and deletion              | PROPOSED                | P03 → P16 |
 | [0019](0019-turn-logs-and-transcripts.md)           | Turn logs and transcripts           | PROPOSED (needs EXT-02) | P03 → P16 |
 | [0020](0020-integration-credential-storage.md)      | Integration credential storage      | ACCEPTED                | P03       |
+| [0025](0025-frontend-architecture.md)               | Frontend architecture               | PROPOSED (needs DG-10)  | P13       |
 | [0034](0034-naming-and-brand-decoupling.md)         | Naming and brand decoupling         | ACCEPTED                | P02       |
 | [0044](0044-local-s3-emulator.md)                   | Local S3 emulator                   | ACCEPTED                | P02       |
 | [0045](0045-local-oidc-provider.md)                 | Local OIDC provider                 | ACCEPTED                | P02       |
