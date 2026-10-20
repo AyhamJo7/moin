@@ -1,7 +1,7 @@
 # UX-01 visual regression and screenshot evidence plan
 
 - **Status:** PROPOSED: pending founder acceptance (UX-01 Gate 0). Nothing here is implemented.
-- **Governs:** UX-01 gates 2a–5 ([ADR-0025](../adr/0025-frontend-architecture.md) D6).
+- **Governs:** UX-01 gates 2a–5 ([ADR-0025](../adr/0025-frontend-architecture.md) D6), for the selected work-queue layout (Direction B, [DESIGN.md](DESIGN.md) §4).
 
 Screenshots are a tripwire against unintended visual change. They never replace the business assertions of the vertical-slice, packaged-demo and smoke suites, which stay the acceptance evidence.
 
@@ -33,44 +33,44 @@ No production data, no personal data and no real phone numbers are used, ever.
 
 ## 3. Synthetic data set
 
-| Card | Title                                      | Priority | Caller (synthetic, E.164) |
+| Task | Title                                      | Priority | Caller (synthetic, E.164) |
 | ---- | ------------------------------------------ | -------- | ------------------------- |
 | 1    | Rückruf erbeten                            | urgent   | `+493000000101`           |
 | 2    | Rückruf: Reservierung                      | normal   | `+493000000102`           |
 | 3    | Rückruf: Geburtstagsfeier                  | normal   | `+493000000103`           |
 | 4    | Rückruf: Reservierung für Geburtstagsfeier | normal   | `+493000000104`           |
 
-The `+49 30 0000…` numbers aren't valid Berlin subscriber numbers and are used only as synthetic fixtures. How the urgent card is produced is decided in gate 2a from what the simulated-call path actually supports. If it can't produce an urgent task, the Dringend state is captured from a fixture-seeded task through the test helpers already used by the slice suite, and the evidence says so.
+The `+49 30 0000…` numbers aren't valid Berlin subscriber numbers and are used only as synthetic fixtures. How the urgent task is produced is decided in gate 2a from what the simulated-call path actually supports. If it can't produce an urgent task, the Dringend state is captured from a fixture-seeded task through the test helpers already used by the slice suite, and the evidence says so.
 
 A separate long-title case for overflow checks uses a functional assertion, not a screenshot.
 
 ## 4. Viewports
 
-| Width × height | Source                       | Screenshots     | Functional checks                                |
-| -------------- | ---------------------------- | --------------- | ------------------------------------------------ |
-| 320 × 640      | WCAG 1.4.10 reflow           | —               | no horizontal overflow; 72-character title wraps |
-| 360 × 740      | PLAN P13.11.02               | —               | overflow, touch targets, axe                     |
-| **390 × 844**  | founder's mobile reference   | yes             | overflow, touch targets, axe, keyboard           |
-| **768 × 1024** | PLAN P13.11.02 (grid starts) | yes (populated) | overflow, axe                                    |
-| 1280 × 800     | PLAN P13.11.02               | —               | overflow, axe                                    |
-| **1440 × 900** | desktop                      | yes             | overflow, axe, keyboard, focus visibility        |
-| 1920 × 1080    | wide                         | —               | the frame stays at 72rem; no overflow            |
+| Width × height | Source                               | Screenshots     | Functional checks                                |
+| -------------- | ------------------------------------ | --------------- | ------------------------------------------------ |
+| 320 × 640      | WCAG 1.4.10 reflow                   | —               | no horizontal overflow; 72-character title wraps |
+| 360 × 740      | PLAN P13.11.02                       | —               | overflow, touch targets, axe                     |
+| **390 × 844**  | founder's mobile reference           | yes             | overflow, touch targets, axe, keyboard           |
+| **768 × 1024** | PLAN P13.11.02 (two-line rows start) | yes (populated) | overflow, axe                                    |
+| 1280 × 800     | PLAN P13.11.02                       | —               | overflow, axe                                    |
+| **1440 × 900** | desktop                              | yes             | overflow, axe, keyboard, focus visibility        |
+| 1920 × 1080    | wide                                 | —               | the frame stays at 72rem; no overflow            |
 
-PLAN's 360, 768 and 1280 stay mandatory functional widths. Screenshots go where they carry independent value: mobile, the grid breakpoint, and desktop.
+PLAN's 360, 768 and 1280 stay mandatory functional widths. Screenshots go where they carry independent value: mobile, the two-line-row breakpoint, and desktop.
 
 ## 5. Baseline matrix: 13 images, reduced from the earlier proposal of 26
 
-| #   | State                                                        | Width(s)       | Capture                                   | Independent value                                        |
-| --- | ------------------------------------------------------------ | -------------- | ----------------------------------------- | -------------------------------------------------------- |
-| 1–2 | Signed out                                                   | 390, 1440      | full page                                 | the first screen an owner sees; shell and type           |
-| 3–4 | Empty (all sections "Alles erledigt.")                       | 390, 1440      | full page                                 | the most common morning state; empty-section rhythm      |
-| 5–7 | Populated (§3)                                               | 390, 768, 1440 | full page                                 | the main screen; one-column, grid start, desktop grid    |
-| 8   | Loading skeleton                                             | 390            | full page (API response held)             | skeleton layout; nothing else shows it                   |
-| 9   | Read failed (API 503)                                        | 1440           | full page                                 | the error alert                                          |
-| 10  | Truncated list (101 synthetic tasks, `TODAY_TASK_LIMIT` + 1) | 1440           | full page                                 | proves no counts and the truncation note                 |
-| 11  | Action unavailable (legacy contract)                         | 390            | element: the card                         | the degraded card treatment                              |
-| 12  | After "Erledigt"                                             | 390            | element: notice plus the Rückrufe section | outcome notice and focus placement                       |
-| 13  | Keyboard focus on "Erledigt"                                 | 1440           | element: the card                         | the focus ring, which a regression could silently remove |
+| #   | State                                                        | Width(s)       | Capture                                   | Independent value                                                               |
+| --- | ------------------------------------------------------------ | -------------- | ----------------------------------------- | ------------------------------------------------------------------------------- |
+| 1–2 | Signed out                                                   | 390, 1440      | full page                                 | the first screen an owner sees; shell and type                                  |
+| 3–4 | Empty (all sections "Alles erledigt.")                       | 390, 1440      | full page                                 | the most common morning state; empty-section rhythm                             |
+| 5–7 | Populated (§3)                                               | 390, 768, 1440 | full page                                 | the main screen; phone blocks, two-line rows, desktop columns                   |
+| 8   | Loading skeleton                                             | 390            | full page (API response held)             | skeleton layout; nothing else shows it                                          |
+| 9   | Read failed (API 503)                                        | 1440           | full page                                 | the error alert                                                                 |
+| 10  | Truncated list (101 synthetic tasks, `TODAY_TASK_LIMIT` + 1) | 1440           | full page                                 | proves no counts and the truncation note                                        |
+| 11  | Action unavailable (legacy contract)                         | 390            | element: the task row                     | the degraded row treatment                                                      |
+| 12  | After "Erledigt"                                             | 390            | element: notice plus the Rückrufe section | outcome notice and focus placement                                              |
+| 13  | Keyboard focus on "Erledigt"                                 | 1440           | element: the task row                     | the focus ring on the outlined action, which a regression could silently remove |
 
 **Dropped from the earlier 26:**
 

@@ -3,26 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Heute – Entwurf (Zustände)</title>
+    <title>Seitenzustände – Entwurf</title>
     <link rel="stylesheet" href="proposal.css" />
-    <style>
-      .state-label {
-        margin: 40px 0 12px;
-        padding: 4px 10px;
-        display: inline-block;
-        border: 1px dashed var(--color-warning);
-        color: var(--color-warning);
-        font-size: 0.8125rem;
-        border-radius: 4px;
-      }
-      .state-label:first-of-type {
-        margin-top: 0;
-      }
-      .state {
-        border-bottom: 1px dashed var(--color-border-control);
-        padding-bottom: 24px;
-      }
-    </style>
   </head>
   <body>
     <svg width="0" height="0" style="position: absolute" aria-hidden="true">
@@ -46,196 +28,246 @@
           d="M5 4h3.5l2 5-2.4 1.5a11 11 0 0 0 5.4 5.4L15 13.5l5 2V19a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"
         />
       </symbol>
+      <symbol id="i-done" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9" />
+        <polyline points="8 12.5 11 15.5 16.5 9.5" />
+      </symbol>
     </svg>
+    <a class="skip-link" href="#inhalt">Zum Inhalt springen</a>
     <p class="proposal-label">
-      Entwurf zur Gestaltung (UX-01 Gate 0) – keine implementierte Ansicht. Zustände untereinander
-      zum Vergleich; synthetische Daten.
+      Entwurf zur Gestaltung (UX-01 Gate 0, Richtung B „Arbeitsliste“) – keine implementierte
+      Ansicht. Zustände untereinander zum Vergleich; alle Daten sind synthetisch.
     </p>
-    <header class="bar">
-      <div class="frame">
+    <header class="topbar">
+      <div class="frame topbar-inner">
         <span class="brand">KlarDesk</span>
         <nav aria-label="Hauptbereiche">
-          <ul class="nav">
+          <ul>
             <li><a href="#" aria-current="page">Heute</a></li>
           </ul>
         </nav>
       </div>
     </header>
-    <main class="frame">
+    <main id="inhalt" class="frame">
       <p class="state-label">Zustand: abgemeldet</p>
-      <div class="state">
-        <h1>Heute</h1>
-        <p>Bitte melden Sie sich an, um Ihre Aufgaben für heute zu sehen.</p>
-        <a class="btn btn-primary" href="#">Anmelden</a>
+      <div class="page-head">
+        <div><h1>Heute</h1></div>
       </div>
-
+      <p>Bitte melden Sie sich an, um Ihre Aufgaben für heute zu sehen.</p>
+      <p style="margin-top: 16px"><a class="btn btn-primary" href="#">Anmelden</a></p>
       <p class="state-label">Zustand: wird geladen</p>
-      <div class="state">
-        <h1>Heute</h1>
-        <p class="status-line" role="status">Aufgaben werden geladen …</p>
-        <ul class="cards" style="margin-top: 16px" aria-hidden="true">
-          <li class="card">
-            <div class="skeleton" style="width: 55%; height: 18px"></div>
-            <div class="skeleton" style="width: 80%; margin-top: 16px"></div>
-            <div class="skeleton" style="width: 60%; margin-top: 10px"></div>
-            <div class="skeleton" style="width: 9rem; height: 44px; margin: 20px 0 0 auto"></div>
-          </li>
-          <li class="card">
-            <div class="skeleton" style="width: 45%; height: 18px"></div>
-            <div class="skeleton" style="width: 75%; margin-top: 16px"></div>
-            <div class="skeleton" style="width: 55%; margin-top: 10px"></div>
-            <div class="skeleton" style="width: 9rem; height: 44px; margin: 20px 0 0 auto"></div>
-          </li>
-        </ul>
-      </div>
-
-      <p class="state-label">Zustand: Laden fehlgeschlagen</p>
-      <div class="state">
-        <h1>Heute</h1>
-        <div class="alert alert--warning" role="alert" style="margin-top: 16px">
-          <svg class="icon" aria-hidden="true"><use href="#i-warn" /></svg>
-          <div>
-            <p>
-              Die Aufgaben konnten gerade nicht geladen werden. Bitte versuchen Sie es gleich noch
-              einmal.
-            </p>
-            <div class="alert-actions"><a class="btn btn-secondary" href="#">Neu laden</a></div>
-          </div>
+      <div class="page-head">
+        <div>
+          <h1>Heute</h1>
+          <p class="page-date">Dienstag, 20. Oktober 2026</p>
         </div>
       </div>
-
+      <p class="status-line" role="status">Aufgaben werden geladen …</p>
+      <div class="panel" aria-hidden="true" style="margin-top: 16px">
+        <div class="panel-head"><div class="skeleton" style="width: 8rem; height: 18px"></div></div>
+        <div class="skeleton-row">
+          <div>
+            <div class="skeleton" style="width: 45%; height: 16px"></div>
+            <div class="skeleton" style="width: 40%; margin-top: 10px"></div>
+          </div>
+          <div class="skeleton" style="height: 44px"></div>
+        </div>
+        <div class="skeleton-row">
+          <div>
+            <div class="skeleton" style="width: 60%; height: 16px"></div>
+            <div class="skeleton" style="width: 40%; margin-top: 10px"></div>
+          </div>
+          <div class="skeleton" style="height: 44px"></div>
+        </div>
+        <div class="skeleton-row">
+          <div>
+            <div class="skeleton" style="width: 38%; height: 16px"></div>
+            <div class="skeleton" style="width: 40%; margin-top: 10px"></div>
+          </div>
+          <div class="skeleton" style="height: 44px"></div>
+        </div>
+      </div>
+      <p class="state-label">Zustand: Laden fehlgeschlagen</p>
+      <div class="page-head">
+        <div>
+          <h1>Heute</h1>
+          <p class="page-date">Dienstag, 20. Oktober 2026</p>
+        </div>
+      </div>
+      <div class="alert alert--warning" role="alert">
+        <svg class="icon" aria-hidden="true"><use href="#i-warn" /></svg>
+        <div>
+          <p>
+            Die Aufgaben konnten gerade nicht geladen werden. Bitte versuchen Sie es gleich noch
+            einmal.
+          </p>
+          <div class="alert-actions"><a class="btn btn-secondary" href="#">Neu laden</a></div>
+        </div>
+      </div>
       <p class="state-label">
         Zustand: Aktualisierung verzögert (sichtbare, aktive Seite; Abrufe seit über 2 Minuten
         fehlgeschlagen; Liste bleibt sichtbar)
       </p>
-      <div class="state">
-        <div class="page-head">
-          <div>
-            <h1>Heute</h1>
-            <p class="page-date">Dienstag, 20. Oktober 2026</p>
-          </div>
-          <div class="page-tools">
-            <span class="status-line status-line--warning"
-              ><svg class="icon" aria-hidden="true"><use href="#i-warn" /></svg>Stand 09:42</span
-            >
-            <a class="btn btn-secondary" href="#">Aktualisieren</a>
-          </div>
+      <div class="page-head">
+        <div>
+          <h1>Heute</h1>
+          <p class="page-date">Dienstag, 20. Oktober 2026</p>
         </div>
-        <div class="alert alert--warning" role="status" style="margin-top: 16px">
-          <svg class="icon" aria-hidden="true"><use href="#i-warn" /></svg>
-          <div>
-            <p><strong>Aktualisierung verzögert</strong></p>
-            <p>
-              Die angezeigten Aufgaben sind möglicherweise nicht auf dem neuesten Stand. Bitte
-              aktualisieren Sie die Seite.
-            </p>
-          </div>
+        <div class="page-tools">
+          <span class="status-line status-line--warning"
+            ><svg class="icon" aria-hidden="true"><use href="#i-warn" /></svg>Stand 09:42</span
+          ><a class="btn btn-secondary" href="#">Aktualisieren</a>
         </div>
-        <p class="state-label" style="margin: 0">
-          Anmerkung zum Entwurf: künftiges Verhalten, noch nicht umgesetzt (DESIGN.md §6.1). Kurze
-          Fehlversuche, ein verborgener Tab oder eine Pause ohne Eingabe zeigen diesen Hinweis
-          nicht. Wortlaut und Schwelle (2 Minuten, P13.10.02) sind Vorschläge.
-        </p>
       </div>
-
-      <p class="state-label">Zustand: Erledigt gerade nicht möglich (ältere API)</p>
-      <div class="state">
-        <ul class="cards">
-          <li class="card">
-            <article>
-              <div class="card-head">
-                <h3>Rückruf: Reservierung</h3>
-                <span class="badge badge--open"
-                  ><span class="visually-hidden">Status: </span>Offen</span
-                >
-              </div>
-              <dl class="facts">
-                <dt>Anrufer</dt>
-                <dd>
-                  <a class="phone" href="tel:+493000000102"
-                    ><svg class="icon" aria-hidden="true"><use href="#i-phone" /></svg
-                    >+493000000102</a
+      <div class="alert alert--warning" role="status">
+        <svg class="icon" aria-hidden="true"><use href="#i-warn" /></svg>
+        <div>
+          <p><strong>Aktualisierung verzögert</strong></p>
+          <p>
+            Die angezeigten Aufgaben sind möglicherweise nicht auf dem neuesten Stand. Bitte
+            aktualisieren Sie die Seite.
+          </p>
+        </div>
+      </div>
+      <p class="state-label">
+        Anmerkung zum Entwurf: künftiges Verhalten, noch nicht umgesetzt (DESIGN.md §6.1). Kurze
+        Fehlversuche, ein verborgener Tab oder eine Pause ohne Eingabe zeigen diesen Hinweis nicht.
+        Wortlaut und Schwelle (2 Minuten, P13.10.02) sind Vorschläge.
+      </p>
+      <p class="state-label">Zustand: Liste gekürzt (die API meldet truncated: true)</p>
+      <div class="page-head">
+        <div>
+          <h1>Heute</h1>
+          <p class="page-date">Dienstag, 20. Oktober 2026</p>
+        </div>
+        <div class="page-tools">
+          <span class="status-line"
+            ><svg class="icon" aria-hidden="true"><use href="#i-clock" /></svg>Stand 09:42</span
+          ><a class="btn btn-secondary" href="#">Aktualisieren</a>
+        </div>
+      </div>
+      <p class="note" role="note">
+        Es gibt mehr offene Aufgaben, als hier Platz haben. Angezeigt werden zuerst die dringenden,
+        dann die neuesten.
+      </p>
+      <div class="sections">
+        <section class="panel" aria-labelledby="s-urgent-tr">
+          <div class="panel-head">
+            <svg class="icon" aria-hidden="true"><use href="#i-alert" /></svg>
+            <h2 id="s-urgent-tr">Dringend</h2>
+          </div>
+          <div class="colhead" aria-hidden="true">
+            <span>Aufgabe</span><span>Status</span><span>Anrufer</span><span>Eingegangen</span
+            ><span></span>
+          </div>
+          <ul class="tasks">
+            <li class="task task--urgent" data-task-id="t101">
+              <article aria-labelledby="t101-tr-t">
+                <div class="cell-title">
+                  <span class="badge badge--urgent"
+                    ><svg class="icon" aria-hidden="true"><use href="#i-alert" /></svg
+                    >Dringend</span
                   >
-                </dd>
-                <dt>Eingegangen</dt>
-                <dd><time>20.10.2026, 08:58</time></dd>
-              </dl>
-              <div class="card-actions" style="justify-content: flex-start">
-                <p class="unavailable">
-                  <svg class="icon" aria-hidden="true"><use href="#i-warn" /></svg>Erledigt ist
-                  gerade nicht möglich. Bitte laden Sie die Ansicht in einigen Minuten neu.
-                </p>
-              </div>
-            </article>
-          </li>
-        </ul>
-      </div>
-
-      <p class="state-label">Zustand: Liste gekürzt (mehr als 100 offene Aufgaben)</p>
-      <div class="state">
-        <h1>Heute</h1>
-        <p class="note" role="note" style="margin-top: 12px">
-          Es gibt mehr offene Aufgaben, als hier Platz haben. Angezeigt werden zuerst die
-          dringenden, dann die neuesten.
-        </p>
-        <div class="section-head">
-          <h2>Rückrufe</h2>
+                  <h3 id="t101-tr-t">Rückruf erbeten</h3>
+                </div>
+                <dl class="cell-status">
+                  <dt class="visually-hidden">Status</dt>
+                  <dd><span class="badge badge--neutral">Offen</span></dd>
+                </dl>
+                <dl class="cell-phone">
+                  <dt class="visually-hidden">Anrufer</dt>
+                  <dd>
+                    <a class="phone" href="tel:+493000000101"
+                      ><svg class="icon" aria-hidden="true"><use href="#i-phone" /></svg
+                      >+493000000101</a
+                    >
+                  </dd>
+                </dl>
+                <dl class="cell-time">
+                  <dt>Eingegangen</dt>
+                  <dd><time datetime="2026-10-20T07:14:00Z">20.10.2026, 09:14</time></dd>
+                </dl>
+                <div class="cell-action">
+                  <button
+                    class="btn btn-outline"
+                    type="button"
+                    aria-label="Erledigt: Rückruf erbeten"
+                  >
+                    <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>Erledigt
+                  </button>
+                </div>
+              </article>
+            </li>
+          </ul>
+        </section>
+        <section class="panel" aria-labelledby="s-callbacks-tr">
+          <div class="panel-head"><h2 id="s-callbacks-tr">Rückrufe</h2></div>
+          <div class="colhead" aria-hidden="true">
+            <span>Aufgabe</span><span>Status</span><span>Anrufer</span><span>Eingegangen</span
+            ><span></span>
+          </div>
+          <ul class="tasks">
+            <li class="task" data-task-id="t102">
+              <article aria-labelledby="t102-tr-t">
+                <div class="cell-title"><h3 id="t102-tr-t">Rückruf: Reservierung</h3></div>
+                <dl class="cell-status">
+                  <dt class="visually-hidden">Status</dt>
+                  <dd><span class="badge badge--neutral">Offen</span></dd>
+                </dl>
+                <dl class="cell-phone">
+                  <dt class="visually-hidden">Anrufer</dt>
+                  <dd>
+                    <a class="phone" href="tel:+493000000102"
+                      ><svg class="icon" aria-hidden="true"><use href="#i-phone" /></svg
+                      >+493000000102</a
+                    >
+                  </dd>
+                </dl>
+                <dl class="cell-time">
+                  <dt>Eingegangen</dt>
+                  <dd><time datetime="2026-10-20T06:58:00Z">20.10.2026, 08:58</time></dd>
+                </dl>
+                <div class="cell-action">
+                  <button
+                    class="btn btn-outline"
+                    type="button"
+                    aria-label="Erledigt: Rückruf: Reservierung"
+                  >
+                    <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>Erledigt
+                  </button>
+                </div>
+              </article>
+            </li>
+          </ul>
+        </section>
+        <div class="quiet panel">
+          <section aria-labelledby="s-requests-tr">
+            <h2 id="s-requests-tr">Neue Anfragen</h2>
+            <p class="empty-line">
+              <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>In dieser Auswahl
+              keine.
+            </p>
+          </section>
+          <section aria-labelledby="s-appointments-tr">
+            <h2 id="s-appointments-tr">Termine/Reservierungen zu bestätigen</h2>
+            <p class="empty-line">
+              <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>In dieser Auswahl
+              keine.
+            </p>
+          </section>
+          <section aria-labelledby="s-questions-tr">
+            <h2 id="s-questions-tr">Offene Kundenfragen</h2>
+            <p class="empty-line">
+              <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>In dieser Auswahl
+              keine.
+            </p>
+          </section>
         </div>
-        <p class="state-label" style="margin: 0">
-          Anmerkung zum Entwurf: keine Abschnittszahl, solange die API eine gekürzte Liste meldet.
-        </p>
       </div>
-
-      <p class="state-label">Zustand: nach „Erledigt“</p>
-      <div class="state">
-        <div class="alert alert--success" role="status" tabindex="-1">
-          <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>
-          <p>Der Rückruf ist als erledigt markiert.</p>
-        </div>
-        <div class="section-head">
-          <h2>Rückrufe</h2>
-          <span class="count"><span class="visually-hidden">Aufgaben: </span>2</span>
-        </div>
-        <p class="state-label" style="margin: 0">
-          Anmerkung zum Entwurf: Die Karte verschwindet erst nach dem erneuten Lesen vom Server; der
-          Fokus liegt auf der Meldung.
-        </p>
-      </div>
-
-      <p class="state-label">Zustand: Tastaturfokus auf „Erledigt“</p>
-      <ul class="cards">
-        <li class="card card--urgent">
-          <article>
-            <div class="card-head">
-              <h3>Rückruf erbeten</h3>
-              <div class="badges">
-                <span class="badge badge--urgent"
-                  ><svg class="icon" aria-hidden="true"><use href="#i-alert" /></svg>Dringend</span
-                >
-                <span class="badge badge--open"
-                  ><span class="visually-hidden">Status: </span>Offen</span
-                >
-              </div>
-            </div>
-            <dl class="facts">
-              <dt>Anrufer</dt>
-              <dd>
-                <a class="phone" href="tel:+493000000101"
-                  ><svg class="icon" aria-hidden="true"><use href="#i-phone" /></svg
-                  >+493000000101</a
-                >
-              </dd>
-              <dt>Eingegangen</dt>
-              <dd><time>20.10.2026, 09:14</time></dd>
-            </dl>
-            <div class="card-actions">
-              <button class="btn btn-primary is-focus" type="button">
-                <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>Erledigt
-              </button>
-            </div>
-          </article>
-        </li>
-      </ul>
+      <p class="state-label">
+        Anmerkung zum Entwurf: keine Abschnittszahlen, solange die Liste gekürzt ist; leere
+        Abschnitte sagen „In dieser Auswahl keine.“
+      </p>
     </main>
   </body>
 </html>

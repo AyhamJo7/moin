@@ -1736,3 +1736,15 @@ P3: the "Bedienrahmen" swatch label goes from white (3.70:1) to `#1C1B19` (4.65:
 mock-ups found no other failures, and three images were regenerated from source; the other five re-render byte for
 byte. ADR-0025 D2 now documents the Tailwind entry, export and `@source` registration of `@moin/ui`, with proofs
 required on the standalone image. Nothing implemented, nothing VERIFIED.
+
+UX-01 Gate 0, Direction B (2026-10-20, same draft PR #243, docs only, from `b309e3a`): the founder selected the
+work-queue layout (Direction B) as the preferred direction, provisionally and subject to the owner usability test;
+Direction A (cards) was explored outside the repository and not adopted. DESIGN.md now specifies one panel per
+section and one row per task in the API's order (fixed columns from 1100 px, two lines from 768 px, full-width
+blocks on phones). Statuses are neutral chips, the call link is a link, and "Erledigt" is outlined, pending the
+owner test's criterion C5 (filled variant as fallback). A new §9 lists what the implementation must still prove,
+including the existing pending-state label mismatch (WCAG 2.5.3, UNVERIFIED). The review package was re-rendered
+as 11 images from 5 Heute pages plus foundations; the 7 card-layout images were removed. The committed
+`render-mockups.mjs` checks overflow, contrast, targets, preserved contracts and axe, and renders byte-identically.
+`owner-usability-test.md` plans a 20–30-minute moderated session with 11 tasks, marked static or interactive.
+No participant has been tested, DG-10 stays PROVISIONAL, P13.01 stays blocked, nothing implemented, nothing VERIFIED.

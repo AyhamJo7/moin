@@ -44,17 +44,19 @@ A **calm, premium, light, high-contrast operational SaaS design** for German res
 
 **Content rules:** no screen invents business data. In particular there is no completed-task history, no "automatisch erledigt" counts and no error correlation ids until the backend supplies them. Counts never pose as total workload when the list is truncated. Nothing claims a real telephony connection. The Keycloak sign-in theme is out of scope.
 
+**Layout (provisional):** the founder selected the work-queue layout (Direction B) on 2026-10-20 as the preferred direction: one panel per section, one row per task in the API's order, and an outlined "Erledigt". The selection is subject to the owner usability test below. In particular, criterion C5 of the [test plan](../design/owner-usability-test.md) requires that owners find "Erledigt" without prompting.
+
 Tokens, components and states are specified in [DESIGN.md](../design/DESIGN.md).
 
 ## Status and what remains open
 
 Three things are kept apart:
 
-|     | What                                                                                   | State                                          |
-| --- | -------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| A   | The founder provisionally chooses the direction                                        | done (provisional, UX-01 Gate 0)               |
-| B   | The founder accepts this record, ADR-0025 and DESIGN.md as planning guidance for UX-01 | pending founder review of the Gate 0 PR        |
-| C   | DG-10's PLAN evidence exists: an owner usability test, recorded as an evidence record  | **NOT_STARTED**: no owner test has taken place |
+|     | What                                                                                   | State                                                                                                                    |
+| --- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| A   | The founder provisionally chooses the direction                                        | done (provisional, UX-01 Gate 0)                                                                                         |
+| B   | The founder accepts this record, ADR-0025 and DESIGN.md as planning guidance for UX-01 | pending founder review of the Gate 0 PR                                                                                  |
+| C   | DG-10's PLAN evidence exists: an owner usability test, recorded as an evidence record  | **NOT_STARTED**: no owner test has taken place; the plan is [owner-usability-test.md](../design/owner-usability-test.md) |
 
 A and B don't imply C. Viewing the mock-ups, whether by the founder or anyone else, is not an owner usability test. This record contains no usability observations.
 
