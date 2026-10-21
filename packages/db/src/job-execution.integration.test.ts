@@ -375,13 +375,13 @@ describe('executeJob', () => {
       const gate = new Promise<void>((resolve) => {
         release = resolve;
       });
-      let holding = false;
+      const state: { holding: boolean } = { holding: false };
       const holder = withTenant(app, ORG_A, async (client) => {
         await client.query(`select 1 from job_runs where id = $1 for update`, [held.jobId]);
-        holding = true;
+        state.holding = true;
         await gate;
       });
-      while (!holding) await new Promise((resolve) => setTimeout(resolve, 20));
+      while (!state.holding) await new Promise((resolve) => setTimeout(resolve, 20));
       expect(await abandonJob(app, ORG_A, held.jobId, 'max-receive-exceeded')).toBe(false);
       release();
       await holder;
