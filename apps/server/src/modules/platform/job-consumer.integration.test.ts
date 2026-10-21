@@ -233,10 +233,11 @@ describe('job consumer over SQS and PostgreSQL', () => {
       await until(async () => (await ledger(job.envelope.jobId))?.error_code === 'handler-error');
       expect(await ledger(job.envelope.jobId)).toMatchObject({ status: 'queued', attempt: 1 });
       expect(await effects(job.envelope.jobId)).toBe(0);
-      // Backoff for the first retry is 30 s (jitter fixed at the midpoint): the message is not visible.
+      // Backoff for the first retry is 30 s (jitter fixed at the midpoint): the message was not
+      // deleted, it is leased out for the backoff, and nothing went to the DLQ.
       await sleep(VISIBILITY_S * 1000 + 1000);
-      expect(await queues.queues.jobs.receive({ max: 1, waitSeconds: 0 })).toHaveLength(0);
-      expect(await queues.queues.deadLetter.receive({ max: 1, waitSeconds: 0 })).toHaveLength(0);
+      expect(await queues.counts('jobs')).toEqual({ visible: 0, leased: 1 });
+      expect(await queues.counts('deadLetter')).toEqual({ visible: 0, leased: 0 });
     },
   );
 
@@ -529,4 +530,40 @@ describe('job consumer over SQS and PostgreSQL', () => {
     expect(text).not.toContain(SENTINEL);
     expect(text).not.toContain(job.envelope.payload['taskId']);
   });
+  evidenceTest(
+    'a job another worker is running right now is left on the queue, and survives that worker dying',
+    async () => {
+      const job = await seed();
+      await queues.queues.jobs.send(job.body);
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let holding = false;
+      // A competing worker holds the job row lock, then dies without finishing.
+      const rival = withTenant(app, ORG_A, async (client) => {
+        await client.query(`select 1 from job_runs where id = $1 for update`, [job.envelope.jobId]);
+        holding = true;
+        await gate;
+        throw new Error('rival worker crashed');
+      }).catch(() => undefined);
+      await until(() => Promise.resolve(holding));
+      let runs = 0;
+      makeConsumer(
+        registry(async (ctx) => {
+          runs += 1;
+          await writeEffect(ctx);
+        }),
+      ).start();
+      await sleep(1500);
+      expect(runs).toBe(0);
+      expect(await queues.counts('jobs')).toMatchObject({ visible: 0 });
+      expect((await queues.counts('jobs')).visible + (await queues.counts('jobs')).leased).toBe(1);
+      release();
+      await rival;
+      await until(async () => (await ledger(job.envelope.jobId))?.status === 'succeeded');
+      expect(runs).toBe(1);
+      expect(await effects(job.envelope.jobId)).toBe(1);
+    },
+  );
 });

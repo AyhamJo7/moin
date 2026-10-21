@@ -6,6 +6,7 @@
 import {
   CreateQueueCommand,
   DeleteQueueCommand,
+  GetQueueAttributesCommand,
   GetQueueUrlCommand,
   SQSClient,
 } from '@aws-sdk/client-sqs';
@@ -17,6 +18,8 @@ export interface TestQueues {
   readonly name: string;
   readonly endpoint: string;
   readonly queues: SqsQueues;
+  /** Messages waiting and messages leased to a consumer, as the queue itself counts them. */
+  counts(which: 'jobs' | 'deadLetter'): Promise<{ visible: number; leased: number }>;
   drop(): Promise<void>;
 }
 
@@ -45,6 +48,18 @@ export async function createTestQueues(
     name,
     endpoint,
     queues,
+    counts: async (which) => {
+      const url = await admin.send(
+        new GetQueueUrlCommand({ QueueName: which === 'jobs' ? name : `${name}-dlq` }),
+      );
+      const out = await admin.send(
+        new GetQueueAttributesCommand({ QueueUrl: url.QueueUrl, AttributeNames: ['All'] }),
+      );
+      return {
+        visible: Number(out.Attributes?.ApproximateNumberOfMessages ?? '0'),
+        leased: Number(out.Attributes?.ApproximateNumberOfMessagesNotVisible ?? '0'),
+      };
+    },
     drop: async () => {
       queues.close();
       for (const queueName of [name, `${name}-dlq`]) {
