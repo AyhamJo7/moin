@@ -1,0 +1,36 @@
+diff --git a/docs/design/owner-test/prototype/prototype.js b/docs/design/owner-test/prototype/prototype.js
+index 8094a50..ecccd31 100644
+--- a/docs/design/owner-test/prototype/prototype.js
++++ b/docs/design/owner-test/prototype/prototype.js
+@@ -407,11 +407,19 @@
+   /**
+    * The simulated server read: the scenario's tasks minus the ones completed in this tab, with
+    * pending tasks drawn from `pending`. Focus is put back on the control it was on, matched by its
+-   * key, because the re-render replaces every node. Returns false when the focused control no
+-   * longer exists (its task left the list) or nothing in the page had focus.
++   * key, because the re-render replaces every node. Focus outside the re-rendered regions is
++   * untouched. Returns false when the focused control no longer exists (its task left the list) or
++   * nothing in the page had focus.
+    */
+   function renderList() {
+-    const focusKey = document.activeElement?.dataset?.focusKey ?? null;
++    const active = document.activeElement;
++    const focusKey = active?.dataset?.focusKey ?? null;
++    // Navigation, the skip link and the like sit outside the re-rendered regions: they survive.
++    const outside =
++      active !== null &&
++      active !== document.body &&
++      !head.contains(active) &&
++      !content.contains(active);
+     const completed = new Set(done());
+     const open = scenario.tasks.filter((t) => !completed.has(t.id));
+     const groups = {
+@@ -440,7 +448,7 @@
+         ? null
+         : document.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`);
+     again?.focus();
+-    return again !== null;
++    return outside || again !== null;
+   }
+ 
+   function renderLoading() {

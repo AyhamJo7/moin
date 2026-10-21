@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; form-action 'none'; base-uri 'none'"
+    />
+    <meta name="robots" content="noindex" />
+    <title>Heute – Prototyp für einen Nutzertest</title>
+    <link rel="stylesheet" href="../../review/mockups/proposal.css" />
+    <link rel="stylesheet" href="prototype.css" />
+    <script src="prototype.js" defer></script>
+  </head>
+  <body>
+    <svg class="sprite" aria-hidden="true">
+      <symbol id="i-check" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" /></symbol>
+      <symbol id="i-alert" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9" />
+        <line x1="12" y1="7.5" x2="12" y2="12.5" />
+        <line x1="12" y1="16" x2="12.01" y2="16" />
+      </symbol>
+      <symbol id="i-warn" viewBox="0 0 24 24">
+        <path d="M12 3.5 2.5 20h19L12 3.5z" />
+        <line x1="12" y1="10" x2="12" y2="14" />
+        <line x1="12" y1="17" x2="12.01" y2="17" />
+      </symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9" />
+        <polyline points="12 7 12 12 15.5 14" />
+      </symbol>
+      <symbol id="i-phone" viewBox="0 0 24 24">
+        <path
+          d="M5 4h3.5l2 5-2.4 1.5a11 11 0 0 0 5.4 5.4L15 13.5l5 2V19a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"
+        />
+      </symbol>
+      <symbol id="i-done" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9" />
+        <polyline points="8 12.5 11 15.5 16.5 9.5" />
+      </symbol>
+    </svg>
+    <a class="skip-link" href="#inhalt">Zum Inhalt springen</a>
+    <p class="proposal-label">
+      Prototyp für einen Nutzertest – alle Aufgaben und Nummern sind erfunden. Ihre Eingaben gehen
+      an keinen Dienst; der Browser merkt sie sich nur in diesem Fenster.
+    </p>
+    <header class="topbar">
+      <div class="frame topbar-inner">
+        <span class="brand">KlarDesk</span>
+        <nav aria-label="Hauptbereiche">
+          <ul>
+            <li><a href="?szenario=morgen" aria-current="page">Heute</a></li>
+          </ul>
+        </nav>
+      </div>
+    </header>
+    <main id="inhalt" class="frame">
+      <div id="kopf"></div>
+      <div
+        id="meldung"
+        class="alert alert--success"
+        role="status"
+        tabindex="-1"
+        data-testid="action-notice"
+        hidden
+      >
+        <svg class="icon" aria-hidden="true"><use href="#i-done" /></svg>
+        <p id="meldung-text"></p>
+      </div>
+      <div id="aufgaben"></div>
+    </main>
+  </body>
+</html>

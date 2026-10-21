@@ -1,0 +1,109 @@
+/*
+ * DG-10 owner-test prototype: only what the shared mock-up stylesheet
+ * (../../review/mockups/proposal.css) lacks. Classes instead of inline styles, so the page's CSP
+ * can forbid inline styles.
+ */
+
+.sprite {
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+#meldung:focus-visible,
+#meldung:focus {
+  outline: 3px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.skeleton-panel {
+  margin-top: 16px;
+}
+
+.skeleton--heading {
+  width: 8rem;
+  height: 18px;
+}
+
+.skeleton--title {
+  height: 16px;
+}
+
+.skeleton--line {
+  width: 40%;
+  margin-top: 10px;
+}
+
+.skeleton--action {
+  height: 44px;
+}
+
+.w-38 {
+  width: 38%;
+}
+
+.w-45 {
+  width: 45%;
+}
+
+.w-60 {
+  width: 60%;
+}
+
+/* Moderator page */
+
+.moderator {
+  padding-block: 28px 48px;
+  max-width: 48rem;
+}
+
+.moderator h1 {
+  margin-bottom: 8px;
+}
+
+.moderator h2 {
+  margin: 28px 0 8px;
+  font-size: 1.125rem;
+}
+
+.moderator p,
+.moderator li {
+  margin-bottom: 8px;
+}
+
+.moderator ul {
+  list-style: disc;
+  padding-inline-start: 1.25rem;
+}
+
+.scenarios {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.scenario {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 12px 16px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+}
+
+.scenario p {
+  margin: 0;
+}
+
+.scenario small {
+  display: block;
+  color: var(--color-text-muted);
+  font-size: 0.9375rem;
+}

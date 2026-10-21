@@ -1,0 +1,132 @@
+diff --git a/docs/design/review/mockups/heute-actions.html b/docs/design/review/mockups/heute-actions.html
+index 75cb76d..aae8172 100644
+--- a/docs/design/review/mockups/heute-actions.html
++++ b/docs/design/review/mockups/heute-actions.html
+@@ -325,7 +325,7 @@
+                   <button
+                     class="btn btn-outline"
+                     type="button"
+-                    aria-label="Erledigt: Rückruf: Reservierung"
++                    aria-label="Wird gespeichert …: Rückruf: Reservierung"
+                     aria-busy="true"
+                     aria-disabled="true"
+                   >
+diff --git a/docs/design/review/mockups/proposal.css b/docs/design/review/mockups/proposal.css
+index 075f4ae..6c59742 100644
+--- a/docs/design/review/mockups/proposal.css
++++ b/docs/design/review/mockups/proposal.css
+@@ -464,20 +464,45 @@ h2 {
+   box-shadow: inset 4px 0 0 var(--color-urgent);
+ }
+ 
++/* Phone: a wrapping line layout, not a grid. Status and time share a line, then the call link and
++   the action; when a line runs out of room the next item wraps instead of overlapping (the
++   18-character pending label overlapped the number at 320 and 360 px in a two-column grid). */
+ .task > article {
+-  display: grid;
+-  grid-template-columns: minmax(0, 1fr) auto;
+-  grid-template-areas:
+-    'title title'
+-    'status time'
+-    'phone action';
++  display: flex;
++  flex-wrap: wrap;
+   align-items: center;
+-  gap: 6px 12px;
++  gap: 8px 12px;
+   padding: 14px 16px 12px;
+ }
+ 
++/* Line order as in the grid layouts: title; status and time; call link and action. Only
++   non-focusable facts move, so the tab order (call link, then action) is unchanged. */
++.cell-status {
++  order: 1;
++}
++
++.cell-time {
++  order: 2;
++}
++
++.task > article::before {
++  content: '';
++  order: 3;
++  flex-basis: 100%;
++  margin-top: -8px;
++}
++
++.cell-phone {
++  order: 4;
++}
++
++.cell-action {
++  order: 5;
++}
++
+ .cell-title {
+   grid-area: title;
++  flex: 1 0 100%;
+   display: flex;
+   flex-wrap: wrap;
+   align-items: center;
+@@ -503,26 +528,42 @@ h2 {
+ .cell-time {
+   grid-area: time;
+   justify-self: end;
++  margin-inline-start: auto;
+   color: var(--color-text-muted);
+   font-size: 0.9375rem;
++}
++
++.cell-time dd {
+   white-space: nowrap;
+ }
+ 
+ .cell-action {
+   grid-area: action;
+   justify-self: end;
++  margin-inline-start: auto;
+ }
+ 
+ @media (min-width: 768px) {
+   .task > article {
++    display: grid;
+     grid-template-columns: auto minmax(0, 1fr) auto auto;
+     grid-template-areas:
+       'title title phone action'
+       'status time phone action';
+-    column-gap: 20px;
++    gap: 6px 20px;
+     padding: 12px 20px;
+   }
+ 
++  /* In the grid, alignment comes from justify-self; the phone layout's auto margins would fight it. */
++  .cell-time,
++  .cell-action {
++    margin-inline-start: 0;
++  }
++
++  .task > article::before {
++    display: none;
++  }
++
+   .cell-time {
+     justify-self: start;
+   }
+@@ -624,7 +665,16 @@ h2 {
+ 
+ .cell-time {
+   display: flex;
+-  gap: 6px;
++  flex-wrap: wrap;
++  justify-content: flex-end;
++  gap: 0 6px;
++}
++
++@media (max-width: 767px) {
++  .cell-action .btn {
++    white-space: normal;
++    text-align: center;
++  }
+ }
+ 
+ @media (min-width: 1100px) {
