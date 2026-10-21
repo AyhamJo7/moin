@@ -84,6 +84,23 @@ const baseSchema = z.object({
   DATABASE_URL: secret('DATABASE_URL', z.url({ protocol: /^postgres(ql)?$/ })),
 
   /**
+   * Job queue (P08.05, ADR-0008). Read only by the worker role, which refuses to build its consumer
+   * without a region and a queue name. Credentials are never configuration: the SDK's default chain
+   * (the task role in AWS; test values against the emulator) supplies them. `SQS_ENDPOINT` points at
+   * ElasticMQ locally and stays unset in AWS. The dead-letter queue is `<SQS_QUEUE_JOBS>-dlq`.
+   */
+  SQS_REGION: z.string().min(1).optional(),
+  SQS_ENDPOINT: z.url({ protocol: /^https?$/ }).optional(),
+  SQS_QUEUE_JOBS: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{1,75}$/, 'must be a queue name of letters, digits, - and _')
+    .optional(),
+  JOB_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(4),
+  /** The jobs queue's visibility timeout; the consumer's heartbeat re-hides for this long. */
+  JOB_VISIBILITY_SECONDS: z.coerce.number().int().min(10).max(43_200).default(60),
+  JOB_POLL_WAIT_SECONDS: z.coerce.number().int().min(0).max(20).default(20),
+
+  /**
    * The api role's second pool: `moin_identity`, the only role that may execute the sign-in and
    * session functions (P06.06, ADR-0003). It exists so that `moin_app` — which voice and worker
    * hold too — can mint no session. So it is refused for every other role here; an api that signs
