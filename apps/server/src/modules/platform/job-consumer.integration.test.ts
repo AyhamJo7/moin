@@ -11,7 +11,7 @@ import type { Logger } from '@moin/observability';
 import { createTestDatabase, evidenceTest, type TestDatabase } from '@moin/testing';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect } from 'vitest';
 import { JobConsumer, JobHandlerRegistry, type JobConsumerOptions } from './job-consumer.ts';
-import { createTestQueues, type TestQueues } from './test-support/sqs-queues.ts';
+import { createTestQueues, type TestQueues } from './__fixtures__/sqs-queues.ts';
 
 const ORG_A = '11111111-1111-4111-8111-111111111111';
 const ORG_B = '22222222-2222-4222-8222-222222222222';

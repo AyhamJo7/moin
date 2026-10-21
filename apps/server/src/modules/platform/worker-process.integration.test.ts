@@ -17,14 +17,10 @@ import { enqueueJob, withTenant } from '@moin/db';
 import { uuidv7, type JobEnvelope } from '@moin/kernel';
 import { createTestDatabase, evidenceTest, type TestDatabase } from '@moin/testing';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect } from 'vitest';
-import {
-  createTestQueues,
-  TEST_REGION,
-  type TestQueues,
-} from './modules/platform/test-support/sqs-queues.ts';
+import { createTestQueues, TEST_REGION, type TestQueues } from './__fixtures__/sqs-queues.ts';
 
 const ORG = '11111111-1111-4111-8111-111111111111';
-const ENTRY = path.resolve(import.meta.dirname, '../dist/main-worker.js');
+const ENTRY = path.resolve(import.meta.dirname, '../../../dist/main-worker.js');
 
 let database: TestDatabase;
 let admin: Pool;
