@@ -1778,3 +1778,17 @@ REQUEST_CHANGES with two blocking P2 findings.
   Phone access is a separate proposal headed NOT AUTHORIZED, for the founder. The consent covers possible address
   logging, and a boundary check was added (negative control KILLED). No server was started and no network test run.
   Phone tasks remain untested until the founder decides. No owner session, nothing VERIFIED, DG-10 PROVISIONAL.
+
+ASYNC-1A (2026-10-21, branch `feat/p08-05-worker-runtime` from 6e0f156, draft PR): the worker role runs a real SQS
+job consumer. A delivery executes under the `job_runs` row lock in one tenant transaction, the queue message is deleted
+only after the commit, and retry, DLQ, visibility heartbeat, receive ceiling, handler deadline and SIGTERM drain have
+executable proof against real PostgreSQL, ElasticMQ and the compiled entrypoint. No production job type has a handler
+yet and nothing publishes to the queue (ASYNC-1B). Full gates 14/14 local at `8c75461`; three internal reviews, findings
+and open items in EV-P08-012. P08.05.01–.04 stay open; nothing is VERIFIED.
+
+| Item      | Status      | Commit  | Evidence   | Note                                                                                          |
+| --------- | ----------- | ------- | ---------- | --------------------------------------------------------------------------------------------- |
+| P08.05.01 | IN_PROGRESS | 8c75461 | EV-P08-012 | Consumer, heartbeat, drain; no production handler, no publisher, one physical queue           |
+| P08.05.02 | IN_PROGRESS | 8c75461 | EV-P08-012 | Retry through ChangeMessageVisibility, per-type policy from the kernel; real queue and ledger |
+| P08.05.03 | IN_PROGRESS | 8c75461 | EV-P08-012 | Schema-invalid and unknown-tenant messages dead-lettered without a handler                    |
+| P08.05.04 | IN_PROGRESS | 8c75461 | EV-P08-012 | Tests exist on the real consumer; the older in-memory Worker evidence (EV-P08-005) remains    |
