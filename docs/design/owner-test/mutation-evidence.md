@@ -1,6 +1,6 @@
 # Mutation evidence for the DG-10 prototype fixes
 
-Both fixes on this branch were proven with the repository's official mutation check. For each one, the tool:
+The three fixes on this branch were proven with the repository's official mutation check. For each one, the tool:
 
 1. reverts exactly the fix commit's files;
 2. runs the regression test, which must **fail**;
@@ -93,3 +93,31 @@ FAIL kit: consent covers possible address logging
 ```
 
 The boundary check reads files only. It starts no server, and **no network test was run**.
+
+## 4. Focus kept on surviving elements (independent review finding I.1)
+
+I.1 is a code fix. The regression test, `check-focus.mjs`, was committed first (`7bbe900`) and is red on its own against the reviewed code: navigation, skip link and overlapping-completion cases lose focus to the notice.
+
+| Field                                          | Value                                                                                                                                                                |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Fix commit                                     | `ab6105d54530d07410a6f88a407f1581d657c22d` (`fix(p13): keep focus on elements that survive a completion`)                                                            |
+| Invocation                                     | `python3 .claude/bin/mutation_check.py --test "node docs/design/owner-test/check-focus.mjs" --fix-paths docs/design/owner-test/prototype/prototype.js --timeout 600` |
+| Run                                            | 2026-10-21 14:01:40 to 14:01:43 UTC                                                                                                                                  |
+| Without / with the fix                         | exit 1 (5 of 33 failing) / exit 0 (33 of 33)                                                                                                                         |
+| Restored byte-identical; tree changed by tests | yes; no                                                                                                                                                              |
+| Verdict                                        | **KILLED**                                                                                                                                                           |
+| Reversal patch                                 | [mutation/20261021T140143Z-focus.patch](mutation/20261021T140143Z-focus.patch), SHA-256 `999e815547d95a842ca4d1b6a30970a26996f36738d481cf62779be7a069d371`           |
+| JSON record (local)                            | `.git/claude-evidence/mutation/20261021T140140Z.json`, SHA-256 `cf6bf6f10fcb0f0b4e265e94e3aa4e25163fd0b1a932fc97a94eb0dab9df6bbd`                                    |
+
+Failing assertions without the fix:
+
+```
+FAIL 1: "Heute": focus stayed on the same node (before: A "Heute"; after: DIV#meldung)
+FAIL 1: "Heute": the notice did not take focus
+FAIL 2: skip link: focus stayed on the same node (before: A "Zum Inhalt springen"; after: DIV#meldung)
+FAIL 2: skip link: the notice did not take focus
+FAIL 6a: "Heute": focus unchanged through three completions
+33 focus checks, 5 failure(s)
+```
+
+The cases that already passed without the fix (3, 4, 5, 6b, 6c) pin the behaviour the fix must not change: other tasks' controls and "Aktualisieren" keep focus, and the completed row's own control hands focus to the notice.
