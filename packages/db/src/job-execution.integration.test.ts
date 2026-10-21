@@ -6,7 +6,7 @@
 import { JobFailure, uuidv7 } from '@moin/kernel';
 import { createTestDatabase, evidenceTest, type TestDatabase } from '@moin/testing';
 import { afterAll, beforeAll, describe, expect } from 'vitest';
-import { executeJob, MAX_DEFER_SECONDS, type JobHandler } from './job-execution.ts';
+import { abandonJob, executeJob, MAX_DEFER_SECONDS, type JobHandler } from './job-execution.ts';
 import { enqueueJob } from './jobs.ts';
 import { createPool, type Pool } from './pool.ts';
 import { TenantContextError, withTenant } from './tenant.ts';
@@ -332,4 +332,60 @@ describe('executeJob', () => {
     expect(await effects(job.jobId)).toBe(0);
     expect((await ledger(job.jobId))?.attempt).toBe(0);
   });
+  evidenceTest(
+    'an upper-case correlation id in the envelope still matches the ledger',
+    async () => {
+      const job = await newJob();
+      const result = await executeJob(app, {
+        ...request(job, writeEffect),
+        correlationId: job.correlationId.toUpperCase(),
+      });
+      expect(result).toEqual({ kind: 'succeeded' });
+    },
+  );
+
+  evidenceTest('a success clears the error code an earlier failed attempt left', async () => {
+    const job = await newJob();
+    await executeJob(
+      app,
+      request(job, () => Promise.reject(new Error('first try fails'))),
+    );
+    expect((await ledger(job.jobId))?.error_code).toBe('handler-error');
+    await admin.query(`update job_runs set not_before = null where id = $1`, [job.jobId]);
+    expect(await executeJob(app, request(job, writeEffect))).toEqual({ kind: 'succeeded' });
+    expect((await ledger(job.jobId))?.error_code).toBeNull();
+  });
+
+  evidenceTest(
+    'abandonJob ends an open job, spares a finished one and skips a locked one',
+    async () => {
+      const open = await newJob();
+      expect(await abandonJob(app, ORG_A, open.jobId, 'max-receive-exceeded')).toBe(true);
+      expect(await ledger(open.jobId)).toMatchObject({
+        status: 'dead',
+        error_code: 'max-receive-exceeded',
+      });
+      const done = await newJob();
+      await executeJob(app, request(done, writeEffect));
+      expect(await abandonJob(app, ORG_A, done.jobId, 'max-receive-exceeded')).toBe(false);
+      expect((await ledger(done.jobId))?.status).toBe('succeeded');
+      expect(await abandonJob(app, ORG_B, open.jobId, 'max-receive-exceeded')).toBe(false);
+      const held = await newJob();
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let holding = false;
+      const holder = withTenant(app, ORG_A, async (client) => {
+        await client.query(`select 1 from job_runs where id = $1 for update`, [held.jobId]);
+        holding = true;
+        await gate;
+      });
+      while (!holding) await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(await abandonJob(app, ORG_A, held.jobId, 'max-receive-exceeded')).toBe(false);
+      release();
+      await holder;
+      expect((await ledger(held.jobId))?.status).toBe('queued');
+    },
+  );
 });

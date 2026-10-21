@@ -42,6 +42,8 @@ export interface QueueMessage {
 export interface ReceiveOptions {
   readonly max: number;
   readonly waitSeconds: number;
+  /** Visibility timeout for the received messages, so the lease matches the consumer's heartbeat. */
+  readonly visibilitySeconds?: number | undefined;
   readonly signal?: AbortSignal | undefined;
 }
 
@@ -79,6 +81,9 @@ class SqsJobQueue implements JobQueue {
         WaitTimeSeconds: Math.min(Math.max(options.waitSeconds, 0), SQS_MAX_WAIT_SECONDS),
         MessageSystemAttributeNames: ['ApproximateReceiveCount'],
         MessageAttributeNames: ['All'],
+        ...(options.visibilitySeconds === undefined
+          ? {}
+          : { VisibilityTimeout: options.visibilitySeconds }),
       }),
       options.signal === undefined ? undefined : { abortSignal: options.signal },
     );

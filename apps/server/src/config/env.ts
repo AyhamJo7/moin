@@ -99,6 +99,8 @@ const baseSchema = z.object({
   /** The jobs queue's visibility timeout; the consumer's heartbeat re-hides for this long. */
   JOB_VISIBILITY_SECONDS: z.coerce.number().int().min(10).max(43_200).default(60),
   JOB_POLL_WAIT_SECONDS: z.coerce.number().int().min(0).max(20).default(20),
+  /** Cap on one handler run; below the database's idle-in-transaction timeout (60 s). */
+  JOB_HANDLER_DEADLINE_SECONDS: z.coerce.number().int().min(1).max(55).default(45),
 
   /**
    * The api role's second pool: `moin_identity`, the only role that may execute the sign-in and
@@ -435,6 +437,31 @@ const schema = baseSchema.superRefine((value, ctx) => {
         message: 'must be HTTPS outside local development (loopback http is for dev/test only)',
       });
     }
+  }
+
+  if (value.SERVER_ROLE === 'worker') {
+    for (const key of ['SQS_REGION', 'SQS_QUEUE_JOBS'] as const) {
+      if (value[key] === undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [key],
+          message: 'is required for the worker role, which has nothing to consume without it',
+        });
+      }
+    }
+  }
+  if (
+    value.SQS_ENDPOINT !== undefined &&
+    value.NODE_ENV !== 'development' &&
+    value.NODE_ENV !== 'test'
+  ) {
+    // An endpoint override points the SDK at an emulator. Deployed environments use the AWS
+    // endpoint for their region; a stray override would send signed requests elsewhere.
+    ctx.addIssue({
+      code: 'custom',
+      path: ['SQS_ENDPOINT'],
+      message: 'is for the local emulator and is refused outside development and test',
+    });
   }
 
   if (value.SERVER_ROLE === 'voice') {

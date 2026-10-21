@@ -3,8 +3,8 @@
  * against real PostgreSQL and a real SQS-compatible emulator (P08.05, INV-17, INV-19).
  *
  * No production job type has a handler yet, so the processing proof is the unregistered-handler
- * path: the process receives a contracted job through the queue, resolves the tenant, claims the
- * job in the ledger and records a transient failure. That proves the worker infrastructure, not a
+ * path: the process receives a contracted job through the queue, resolves its tenant and finds no
+ * handler, so it leaves the job unclaimed on the queue. That proves the worker infrastructure, not a
  * production callback-to-outbox pipeline. Needs the compiled output (`pnpm turbo run build
  * --filter=@moin/server...`); a missing build fails the test rather than skipping it.
  */
@@ -141,22 +141,19 @@ async function seedJob(): Promise<JobEnvelope> {
 
 describe('worker process', () => {
   evidenceTest(
-    'receives a contracted job through SQS, claims it in the ledger and records the outcome',
+    'receives a contracted job through SQS and leaves it unclaimed when no handler exists',
     async () => {
       const envelope = await seedJob();
       await startWorker();
       await queues.queues.jobs.send(JSON.stringify(envelope));
-      await until(async () => {
-        const row = await admin.query<{ error_code: string | null }>(
-          `select error_code from job_runs where id = $1`,
-          [envelope.jobId],
-        );
-        return row.rows[0]?.error_code === 'handler-unavailable';
-      });
+      // No production job type has a handler yet: the process receives the job and resolves its
+      // tenant, finds no handler and leaves the message on the queue, claiming nothing.
+      await until(() => output.includes('handler-unavailable'));
       const row = await admin.query(`select status, attempt from job_runs where id = $1`, [
         envelope.jobId,
       ]);
-      expect(row.rows[0]).toMatchObject({ status: 'queued', attempt: 1 });
+      expect(row.rows[0]).toMatchObject({ status: 'queued', attempt: 0 });
+      expect(await queues.counts('jobs')).toEqual({ visible: 0, leased: 1 });
       expect(output).toContain(envelope.jobId);
     },
   );

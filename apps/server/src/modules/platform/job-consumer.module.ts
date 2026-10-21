@@ -66,6 +66,7 @@ class JobConsumerService implements OnApplicationBootstrap, OnModuleDestroy {
         concurrency: config.JOB_CONCURRENCY,
         visibilitySeconds: config.JOB_VISIBILITY_SECONDS,
         waitSeconds: config.JOB_POLL_WAIT_SECONDS,
+        handlerDeadlineSeconds: config.JOB_HANDLER_DEADLINE_SECONDS,
         drainTimeoutMs: Math.max(config.SHUTDOWN_GRACE_MS - GRACE_RESERVE_MS, 0),
       },
     });
@@ -116,10 +117,9 @@ class WorkerResources implements OnApplicationShutdown {
       provide: JOB_QUEUES,
       inject: [CONFIG],
       useFactory: async (config: Config): Promise<SqsQueues> => {
+        // Presence is enforced by the configuration loader for the worker role.
         if (config.SQS_REGION === undefined || config.SQS_QUEUE_JOBS === undefined) {
-          throw new ConfigurationError([
-            'SQS_REGION and SQS_QUEUE_JOBS are required for the worker role, which has nothing to consume without them',
-          ]);
+          throw new ConfigurationError(['SQS_REGION and SQS_QUEUE_JOBS are required']);
         }
         return connectSqsQueues({
           region: config.SQS_REGION,

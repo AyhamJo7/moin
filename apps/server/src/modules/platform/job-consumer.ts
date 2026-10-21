@@ -23,8 +23,8 @@
  * returns to the queue when its visibility lapses.
  */
 
-import { lintEnvelope, type JobEnvelope, type JobType, JobFailure } from '@moin/kernel';
-import { executeJob, type JobHandler, type JobExecutionResult } from '@moin/db';
+import { MAX_ATTEMPTS, lintEnvelope, type JobEnvelope, type JobType } from '@moin/kernel';
+import { abandonJob, executeJob, type JobHandler, type JobExecutionResult } from '@moin/db';
 import type { Pool } from '@moin/db/pool';
 import type { JobQueue, QueueMessage } from '@moin/integrations';
 import type { Logger } from '@moin/observability';
@@ -53,6 +53,18 @@ export interface JobConsumerOptions {
   readonly drainTimeoutMs: number;
   /** Re-hide delay for a job another worker is running right now. */
   readonly busyRetrySeconds?: number | undefined;
+  /**
+   * Hard cap on one handler run, seconds. Handlers do short, database-only work inside the lease;
+   * a provider call belongs behind the outbox or an idempotency key, not inside this transaction.
+   * On expiry the delivery stops extending its message and releases its slot without
+   * acknowledging; the database ends the transaction through `idle_in_transaction_session_timeout`.
+   */
+  readonly handlerDeadlineSeconds: number;
+  /**
+   * A message delivered more than `MAX_ATTEMPTS[type] × factor` times is dead-lettered whatever
+   * the ledger says. It bounds a job whose transaction dies before the attempt counter commits.
+   */
+  readonly receiveCeilingFactor?: number | undefined;
   readonly random?: (() => number) | undefined;
 }
 
@@ -73,6 +85,9 @@ export interface StopReport {
 }
 
 const DEFAULT_BUSY_RETRY_S = 5;
+const DEFAULT_RECEIVE_CEILING_FACTOR = 3;
+const UNREGISTERED_HANDLER_RETRY_S = 30;
+const DEFAULT_MAX_ATTEMPTS = 3;
 const HEARTBEAT_DIVISOR = 3;
 const RECEIVE_FAILURE_BACKOFF_MS = [1_000, 2_000, 5_000, 15_000, 30_000] as const;
 
@@ -85,6 +100,8 @@ export class JobConsumer {
   readonly #poll = new AbortController();
   #stopping = false;
   #abandoned = false;
+  readonly #stopped: Promise<void>;
+  #signalStopped: () => void = () => undefined;
   #loop: Promise<void> | undefined;
 
   public constructor(deps: JobConsumerDeps) {
@@ -92,6 +109,9 @@ export class JobConsumer {
       throw new RangeError('concurrency must be a positive integer');
     }
     this.#deps = deps;
+    this.#stopped = new Promise<void>((resolve) => {
+      this.#signalStopped = resolve;
+    });
   }
 
   public start(): void {
@@ -102,6 +122,7 @@ export class JobConsumer {
   public async stop(): Promise<StopReport> {
     this.#stopping = true;
     this.#poll.abort();
+    this.#signalStopped();
     await this.#loop;
     const drained = await Promise.race([
       Promise.allSettled([...this.#inFlight]).then(() => true),
@@ -130,7 +151,8 @@ export class JobConsumer {
     let failures = 0;
     while (!this.#halted()) {
       while (this.#inFlight.size >= options.concurrency && !this.#halted()) {
-        await Promise.race(this.#inFlight);
+        // Also wakes on stop(): a full pool of long handlers must not keep shutdown from draining.
+        await Promise.race([...this.#inFlight, this.#stopped]);
       }
       if (this.#halted()) break;
       let batch: readonly QueueMessage[];
@@ -138,6 +160,7 @@ export class JobConsumer {
         batch = await queue.receive({
           max: options.concurrency - this.#inFlight.size,
           waitSeconds: options.waitSeconds,
+          visibilitySeconds: options.visibilitySeconds,
           signal: this.#poll.signal,
         });
         failures = 0;
@@ -194,9 +217,28 @@ export class JobConsumer {
       organisationId,
       correlationId: envelope.correlationId,
     };
-    const handler =
-      handlers.get(envelope.type, envelope.version) ??
-      (() => Promise.reject(new JobFailure('handler-unavailable')));
+    const ceiling =
+      (MAX_ATTEMPTS[envelope.type] ?? DEFAULT_MAX_ATTEMPTS) *
+      (options.receiveCeilingFactor ?? DEFAULT_RECEIVE_CEILING_FACTOR);
+    if (message.receiveCount > ceiling) {
+      // The ledger never saw these failures (the transaction died before the counter committed).
+      await abandonJob(pool, organisationId, envelope.jobId, 'max-receive-exceeded');
+      logger.error({ ...fields, outcome: 'max-receive-exceeded' }, 'delivery ceiling exceeded');
+      return this.#deadLetter(message, 'max-receive-exceeded');
+    }
+    const handler = handlers.get(envelope.type, envelope.version);
+    if (handler === undefined) {
+      // Typically a rolling release: this worker predates the job's type or version. Nothing is
+      // claimed and no attempt is spent; the receive ceiling bounds it if it never resolves.
+      logger.warn(
+        { ...fields, outcome: 'handler-unavailable' },
+        'no handler for job; left on queue',
+      );
+      return this.#settle(
+        this.#deps.queue.hide(message, UNREGISTERED_HANDLER_RETRY_S),
+        'hide unhandled job',
+      );
+    }
 
     const beat = setInterval(
       () => {
@@ -211,9 +253,10 @@ export class JobConsumer {
       Math.max((options.visibilitySeconds * 1000) / HEARTBEAT_DIVISOR, 50),
     );
     beat.unref();
-    let result: JobExecutionResult;
+    let result: JobExecutionResult | 'deadline';
+    let deadlineTimer: NodeJS.Timeout | undefined;
     try {
-      result = await executeJob(pool, {
+      const execution = executeJob(pool, {
         jobId: envelope.jobId,
         organisationId,
         type: envelope.type,
@@ -222,8 +265,24 @@ export class JobConsumer {
         handler,
         random: options.random,
       });
+      // The transaction cannot be cancelled from here; if the deadline wins, its outcome is
+      // ignored when (if ever) it settles.
+      execution.catch(() => undefined);
+      result = await Promise.race([
+        execution,
+        new Promise<'deadline'>((resolve) => {
+          deadlineTimer = setTimeout(() => {
+            resolve('deadline');
+          }, options.handlerDeadlineSeconds * 1000);
+        }),
+      ]);
     } finally {
       clearInterval(beat);
+      clearTimeout(deadlineTimer);
+    }
+    if (result === 'deadline') {
+      logger.error({ ...fields, outcome: 'handler deadline' }, 'handler exceeded its deadline');
+      return;
     }
     logger.info({ ...fields, outcome: result.kind, attempt: envelope.attempt }, 'job delivery');
     // Past the drain budget the process is on its way out: acknowledge nothing, let the queue

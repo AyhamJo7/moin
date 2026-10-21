@@ -116,7 +116,7 @@ export async function executeJob(
       if (
         row.type !== request.type ||
         row.version !== request.version ||
-        row.correlation_id !== request.correlationId
+        row.correlation_id !== request.correlationId.toLowerCase()
       ) {
         return { kind: 'mismatch' };
       }
@@ -182,4 +182,28 @@ async function recordFailure(
     notBefore: new Date(Date.now() + decision.delaySeconds * 1000),
   });
   return { kind: 'retry', delaySeconds: decision.delaySeconds, errorCode: failure.code };
+}
+
+/**
+ * Ends a job whose deliveries keep failing without ever reaching the retry policy (a handler that
+ * kills its own transaction rolls the attempt counter back with it). Takes no lock it would have
+ * to wait for: a row a live transaction holds is left to that transaction.
+ */
+export async function abandonJob(
+  pool: Pool,
+  organisationId: string,
+  jobId: string,
+  errorCode: string,
+): Promise<boolean> {
+  return withTenant(pool, organisationId, async (client) => {
+    const done = await client.query<{ id: string }>(
+      `update job_runs set status = 'dead', error_code = $2::text, finished_at = now()
+       where id = (select id from job_runs
+                   where id = $1::uuid and status in ('queued', 'claimed', 'failed')
+                   for update skip locked)
+       returning id::text`,
+      [jobId, errorCode],
+    );
+    return done.rows.length > 0;
+  });
 }

@@ -158,6 +158,7 @@ function makeConsumer(
       visibilitySeconds: VISIBILITY_S,
       waitSeconds: 1,
       drainTimeoutMs: 5_000,
+      handlerDeadlineSeconds: 30,
       busyRetrySeconds: 1,
       random: () => 0.5,
       ...overrides,
@@ -508,16 +509,85 @@ describe('job consumer over SQS and PostgreSQL', () => {
   });
 
   evidenceTest(
-    'a job type with no handler is retried, never acknowledged as processed',
+    'a job type with no handler is left on the queue unclaimed, never acknowledged as processed',
     async () => {
       const job = await seed();
       await queues.queues.jobs.send(job.body);
       makeConsumer(new JobHandlerRegistry()).start();
-      await until(
-        async () => (await ledger(job.envelope.jobId))?.error_code === 'handler-unavailable',
+      await until(() => Promise.resolve(logLines.some((l) => l.includes('handler-unavailable'))));
+      await sleep(300);
+      expect(await ledger(job.envelope.jobId)).toMatchObject({ status: 'queued', attempt: 0 });
+      expect(await queues.counts('jobs')).toEqual({ visible: 0, leased: 1 });
+    },
+  );
+
+  evidenceTest(
+    'shutdown with every slot busy still drains inside its budget instead of waiting for a handler',
+    async () => {
+      const jobs = [await seed(), await seed()];
+      for (const job of jobs) await queues.queues.jobs.send(job.body);
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let started = 0;
+      const consumer = makeConsumer(
+        registry(async (ctx) => {
+          started += 1;
+          await gate;
+          await writeEffect(ctx);
+        }),
+        { concurrency: 2, drainTimeoutMs: 300 },
       );
-      expect(await ledger(job.envelope.jobId)).toMatchObject({ status: 'queued', attempt: 1 });
-      expect(await effects(job.envelope.jobId)).toBe(0);
+      consumer.start();
+      await until(() => Promise.resolve(started === 2));
+      const begun = Date.now();
+      expect(await consumer.stop()).toEqual({ abandoned: 2 });
+      expect(Date.now() - begun).toBeLessThan(3_000);
+      release();
+    },
+  );
+
+  evidenceTest('a handler past its deadline frees its slot and is never acknowledged', async () => {
+    const stuck = await seed();
+    const next = await seed();
+    await queues.queues.jobs.send(stuck.body);
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    makeConsumer(
+      registry(async (ctx) => {
+        if (ctx.job.id === stuck.envelope.jobId) await gate;
+        await writeEffect(ctx);
+      }),
+      { concurrency: 1, handlerDeadlineSeconds: 1 },
+    ).start();
+    await until(() => Promise.resolve(logLines.some((l) => l.includes('handler deadline'))));
+    // The only slot is free again: a second job runs while the first transaction is still open.
+    await queues.queues.jobs.send(next.body);
+    await until(async () => (await ledger(next.envelope.jobId))?.status === 'succeeded');
+    expect((await queues.counts('jobs')).visible + (await queues.counts('jobs')).leased).toBe(1);
+    release();
+  });
+
+  evidenceTest(
+    'a job whose transaction keeps dying is dead-lettered by the receive ceiling',
+    async () => {
+      const job = await seed();
+      await queues.queues.jobs.send(job.body);
+      makeConsumer(
+        registry(async (ctx) => {
+          await ctx.client.query('select pg_terminate_backend(pg_backend_pid())');
+        }),
+        { receiveCeilingFactor: 1 },
+      ).start();
+      const dead = await receiveOne(queues.queues.deadLetter, 30);
+      expect(dead?.attributes['reason']).toBe('max-receive-exceeded');
+      expect(await ledger(job.envelope.jobId)).toMatchObject({
+        status: 'dead',
+        error_code: 'max-receive-exceeded',
+      });
     },
   );
 
