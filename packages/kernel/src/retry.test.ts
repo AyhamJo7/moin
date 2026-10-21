@@ -2,7 +2,7 @@
  * Worker retry arithmetic (P08.05.02–.03). Pure unit tests, jitter pinned.
  */
 import { describe, expect, it } from 'vitest';
-import { backoffSeconds, decideRetry, isPoison } from './retry.ts';
+import { JobFailure, backoffSeconds, classifyFailure, decideRetry, isPoison } from './retry.ts';
 
 describe('retry', () => {
   it('backs off exponentially with bounded jitter', () => {
@@ -27,5 +27,35 @@ describe('retry', () => {
     expect(isPoison(new RangeError('schema'))).toBe(true);
     expect(isPoison(new Error('db down'))).toBe(false);
     expect(isPoison('string')).toBe(false);
+  });
+});
+
+describe('classifyFailure (P08.05.02/.03)', () => {
+  it('keeps a safe JobFailure code and its retry class', () => {
+    expect(classifyFailure(new JobFailure('provider-timeout'))).toEqual({
+      code: 'provider-timeout',
+      permanent: false,
+    });
+    expect(classifyFailure(new JobFailure('unsupported-shape', true))).toEqual({
+      code: 'unsupported-shape',
+      permanent: true,
+    });
+  });
+
+  it('never lets an arbitrary error message reach the code', () => {
+    const secret = 'caller +4930123456 said hello';
+    expect(classifyFailure(new Error(secret))).toEqual({ code: 'handler-error', permanent: false });
+    expect(classifyFailure(new JobFailure(secret))).toEqual({
+      code: 'handler-error',
+      permanent: false,
+    });
+    expect(JSON.stringify(classifyFailure('plain string'))).not.toContain('plain');
+  });
+
+  it('treats a RangeError as a permanent schema failure', () => {
+    expect(classifyFailure(new RangeError('bad payload'))).toEqual({
+      code: 'payload-invalid',
+      permanent: true,
+    });
   });
 });

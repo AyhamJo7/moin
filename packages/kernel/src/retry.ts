@@ -60,3 +60,42 @@ export function decideRetry(
   if (attempt + 1 >= max) return { delaySeconds: 0, toDlq: true };
   return { delaySeconds: backoffSeconds(attempt, random), toDlq: false };
 }
+
+const SAFE_FAILURE_CODE = /^[a-z][a-z0-9-]{0,59}$/u;
+
+/**
+ * A handler failure with a stable, content-free code (P08.05.02/.03).
+ *
+ * The code is what the ledger, the DLQ attributes and the logs carry. The message is the code and
+ * nothing else, so no handler can leak payload or personal data through an error string (INV-12).
+ * `permanent` failures skip the retry schedule and go to the DLQ at once.
+ */
+export class JobFailure extends Error {
+  public override readonly name = 'JobFailure';
+
+  public readonly code: string;
+  public readonly permanent: boolean;
+
+  public constructor(code: string, permanent = false) {
+    super(code);
+    this.code = code;
+    this.permanent = permanent;
+  }
+}
+
+export interface FailureClass {
+  readonly code: string;
+  readonly permanent: boolean;
+}
+
+/**
+ * Maps whatever a handler threw to a safe code and a retry class. Unknown errors are transient
+ * under the generic `handler-error` code: their message and stack never reach the ledger.
+ */
+export function classifyFailure(error: unknown): FailureClass {
+  if (error instanceof JobFailure && SAFE_FAILURE_CODE.test(error.code)) {
+    return { code: error.code, permanent: error.permanent };
+  }
+  if (isPoison(error)) return { code: 'payload-invalid', permanent: true };
+  return { code: 'handler-error', permanent: false };
+}
