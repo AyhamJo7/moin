@@ -186,7 +186,7 @@ describe('job consumer over SQS and PostgreSQL', () => {
       await until(async () => (await ledger(job.envelope.jobId))?.status === 'succeeded');
       expect(await effects(job.envelope.jobId)).toBe(1);
       await sleep(VISIBILITY_S * 1000 + 500);
-      expect(await queues.queues.jobs.receive({ max: 1, waitSeconds: 0 })).toHaveLength(0);
+      expect(await queues.counts('jobs')).toEqual({ visible: 0, leased: 0 });
     },
   );
 
@@ -375,6 +375,8 @@ describe('job consumer over SQS and PostgreSQL', () => {
         await sleep(500);
         expect(await queues.queues.jobs.receive({ max: 1, waitSeconds: 0 })).toHaveLength(0);
       }
+      // A lapsed lease would have redelivered the message to this consumer, which reports it busy.
+      expect(logLines.filter((line) => line.includes('"busy"'))).toEqual([]);
       release();
       await until(async () => (await ledger(job.envelope.jobId))?.status === 'succeeded');
       expect(await effects(job.envelope.jobId)).toBe(1);
