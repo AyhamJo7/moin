@@ -137,6 +137,22 @@ for (const name of ['index', 'moderator']) {
   expect(!csp.includes('unsafe-inline'), `${name}: CSP allows no inline code`);
 }
 
+// 5b. Approved, access-restricted evidence storage is a mandatory prerequisite, and nothing in the
+// material invents a provider, retention period or controller.
+const kit = flat(files.kit);
+for (const needle of [
+  'Evidence storage approved. Currently NOT APPROVED.',
+  'storage location outside the repository',
+  'authorised people only',
+  'responsible controller and operator',
+  'retention period and how deletion is carried out and confirmed',
+  'consent forms, recordings and other participant evidence',
+  'no identifiable data is collected',
+  'the session does not start',
+]) {
+  expect(kit.includes(needle), `kit: storage prerequisite states "${needle}"`);
+}
+
 // 6. The reversal patches kept as mutation evidence still contain the old wording by design; they
 //    are labelled as never to be applied.
 expect(

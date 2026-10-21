@@ -8,6 +8,7 @@
 
 - [ ] **Session authorised.** The founder has authorised this session (date, place, participant) in writing.
 - [ ] **Participant qualifies.** The participant is a restaurant **owner** who handles callbacks themselves (test plan §1.3). If the session is also P13's acceptance session, it is the Gurlitt owner.
+- [ ] **Evidence storage approved. Currently NOT APPROVED.** Before any consent form is signed or anything is recorded, the founder has approved and written down: the storage location outside the repository; who may access it (authorised people only); the responsible controller and operator; the retention period and how deletion is carried out and confirmed; and how consent forms, recordings and other participant evidence are protected. No storage provider, retention period or controller is decided yet: they stay _(vom Gründer festzulegen)_, and until they are set no session with a real participant takes place and no identifiable data is collected.
 - [ ] **Consent text approved.** The founder has approved the consent text (§3), including the data-protection details marked "vom Gründer festzulegen". There are two printed copies.
 - [ ] **Checks passed.** `node docs/design/owner-test/check-prototype.mjs` and `node docs/design/owner-test/check-concurrency.mjs` report 0 failures on the commit being tested. The commit SHA and file digest are entered on the observation sheet.
 - [ ] **Laptop ready:** Chrome or Edge, German locale, zoom 100%, the moderator page open, notifications off.
@@ -62,7 +63,7 @@ The founder adapts the parts marked "vom Gründer festzulegen" before the first 
 >
 > Ort, Datum, Unterschrift: ______________________
 
-- **Storage:** signed forms and any recordings stay out of the repository. The evidence record refers to them only by location, SHA-256 and date (observation sheet §5).
+- **Storage:** signed forms and any recordings stay out of the repository, and only in the storage approved in the §1 checklist ("Evidence storage approved"). Without that approval there is nowhere to put them, so the session does not start. The evidence record refers to them only by location, SHA-256 and date (observation sheet §6).
 
 ## 4. Moderator script (German, read verbatim)
 

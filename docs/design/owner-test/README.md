@@ -53,7 +53,7 @@ The check below asserts that every request the page makes is a local file. It ca
 
 ## 4. Before every session
 
-1. On the commit to be tested, run `node docs/design/owner-test/check-prototype.mjs` and `node docs/design/owner-test/check-concurrency.mjs` from the repository root. Both must report 0 failures; the concurrency check covers overlapping completions, resets and focus. It covers:
+1. On the commit to be tested, run `node docs/design/owner-test/check-prototype.mjs`, `node docs/design/owner-test/check-concurrency.mjs` and `node docs/design/owner-test/check-focus.mjs` from the repository root. All must report 0 failures; the concurrency check covers overlapping completions, resets and focus. It covers:
    - every scenario at 320, 360, 390, 640, 720, 768, 1280 and 1440 px (640 and 720 are a 1280 and 1440 px window at 200% zoom), plus 200% phone text size: no horizontal scroll, contrast, 44 px targets 8 px apart, labels inside names, no overlap in a row, the Heute contracts, and axe;
    - keyboard order and visible focus;
    - completing a task, state across "Aktualisieren", reset, all done;
