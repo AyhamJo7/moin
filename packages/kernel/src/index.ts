@@ -44,5 +44,13 @@ export {
   queueFor,
 } from './envelope.ts';
 export type { EnvelopeLint, JobEnvelope, JobType } from './envelope.ts';
-export { MAX_ATTEMPTS, backoffSeconds, decideRetry, isPoison } from './retry.ts';
+export {
+  JobFailure,
+  MAX_ATTEMPTS,
+  backoffSeconds,
+  classifyFailure,
+  decideRetry,
+  isPoison,
+  type FailureClass,
+} from './retry.ts';
 export type { RetryDecision } from './retry.ts';

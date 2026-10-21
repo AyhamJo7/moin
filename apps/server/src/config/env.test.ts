@@ -198,9 +198,48 @@ describe('configuration loader (P02.03.03)', () => {
   });
 
   it('does not require telephony configuration for the other roles', () => {
-    for (const role of ['api', 'worker', 'migrate'] as const) {
+    for (const role of ['api', 'migrate'] as const) {
       expect(loadConfig({ ...VALID, SERVER_ROLE: role }).SERVER_ROLE).toBe(role);
     }
+  });
+
+  describe('job queue configuration (P08.05)', () => {
+    const QUEUE = { SQS_REGION: 'eu-central-1', SQS_QUEUE_JOBS: 'moin-jobs' };
+
+    it('requires a region and a queue name for the worker role, and names them', () => {
+      let problems: readonly string[] = [];
+      try {
+        loadConfig({ ...VALID, SERVER_ROLE: 'worker' });
+      } catch (error) {
+        problems = error instanceof ConfigurationError ? error.problems : [];
+      }
+      expect(problems.join('\n')).toContain('SQS_REGION');
+      expect(problems.join('\n')).toContain('SQS_QUEUE_JOBS');
+      expect(loadConfig({ ...VALID, SERVER_ROLE: 'worker', ...QUEUE }).JOB_CONCURRENCY).toBe(4);
+    });
+
+    it('refuses an endpoint override in staging and production', () => {
+      for (const NODE_ENV of ['staging', 'production']) {
+        expect(() =>
+          loadConfig({
+            ...VALID,
+            NODE_ENV,
+            APP_ORIGIN: 'https://app.example.de',
+            SERVER_ROLE: 'worker',
+            ...QUEUE,
+            SQS_ENDPOINT: 'http://127.0.0.1:9324',
+          }),
+        ).toThrow(ConfigurationError);
+      }
+      expect(
+        loadConfig({
+          ...VALID,
+          SERVER_ROLE: 'worker',
+          ...QUEUE,
+          SQS_ENDPOINT: 'http://127.0.0.1:9324',
+        }).SQS_ENDPOINT,
+      ).toBe('http://127.0.0.1:9324');
+    });
   });
 
   it.each([

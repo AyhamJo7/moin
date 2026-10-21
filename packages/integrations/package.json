@@ -13,8 +13,11 @@
     "build": "tsc -p tsconfig.build.json"
   },
   "devDependencies": {
+    "@types/node": "24.19.0",
     "typescript": "6.0.3",
-    "vitest": "5.0.2",
-    "@types/node": "24.19.0"
+    "vitest": "5.0.2"
+  },
+  "dependencies": {
+    "@aws-sdk/client-sqs": "3.1129.0"
   }
 }

@@ -13,3 +13,16 @@ export {
   retryDelayMs,
 } from './webhooks.ts';
 export type { Subscription } from './webhooks.ts';
+export {
+  SQS_MAX_BATCH,
+  SQS_MAX_VISIBILITY_SECONDS,
+  SQS_MAX_WAIT_SECONDS,
+  connectSqsQueues,
+} from './queue/sqs-queue.ts';
+export type {
+  JobQueue,
+  QueueMessage,
+  ReceiveOptions,
+  SqsQueueConfig,
+  SqsQueues,
+} from './queue/sqs-queue.ts';

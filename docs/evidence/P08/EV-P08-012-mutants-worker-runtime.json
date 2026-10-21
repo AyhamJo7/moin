@@ -1,0 +1,348 @@
+[
+ {
+  "mutant": "D1 busy reported as unknown",
+  "file": "packages/db/src/job-execution.ts",
+  "exit_code": 1,
+  "tests_run": 14,
+  "passed": 13,
+  "failed": [
+   {
+    "test": "workers racing on one job produce one effect; the rest see busy or duplicate",
+    "message": "AssertionError: expected false to be true // Object.is equality"
+   }
+  ],
+  "verdict": "KILLED"
+ },
+ {
+  "mutant": "D2 duplicate delivery re-runs the handler",
+  "file": "packages/db/src/job-execution.ts",
+  "exit_code": 1,
+  "tests_run": 14,
+  "passed": 12,
+  "failed": [
+   {
+    "test": "a duplicate delivery does not repeat the effect",
+    "message": "AssertionError: expected { kind: 'succeeded' } to deeply equal { kind: 'duplicate' }"
+   },
+   {
+    "test": "workers racing on one job produce one effect; the rest see busy or duplicate",
+    "message": "AssertionError: expected { kind: 'retry', \u2026(2) } to deeply equal { kind: 'duplicate' }"
+   }
+  ],
+  "verdict": "KILLED"
+ },
+ {
+  "mutant": "D3 ledger/envelope mismatch ignored",
+  "file": "packages/db/src/job-execution.ts",
+  "exit_code": 1,
+  "tests_run": 14,
+  "passed": 13,
+  "failed": [
+   {
+    "test": "tenant context fails closed: bad id, other tenant, forged envelope fields",
+    "message": "AssertionError: expected { kind: 'succeeded' } to deeply equal { kind: 'mismatch' }"
+   }
+  ],
+  "verdict": "KILLED"
+ },
+ {
+  "mutant": "D4 permanent failure retried",
+  "file": "packages/db/src/job-execution.ts",
+  "exit_code": 1,
+  "tests_run": 14,
+  "passed": 13,
+  "failed": [
+   {
+    "test": "a permanent failure and a schema error go dead at once",
+    "message": "AssertionError: expected { kind: 'retry', \u2026(2) } to deeply equal { kind: 'dead', \u2026(2) }"
+   }
+  ],
+  "verdict": "KILLED"
+ },
+ {
+  "mutant": "D5 handler writes survive a failure (no rollback to savepoint)",
+  "file": "packages/db/src/job-execution.ts",
+  "exit_code": 1,
+  "tests_run": 14,
+  "passed": 13,
+  "failed": [
+   {
+    "test": "a transient failure rolls back the handler, keeps the claim and schedules a retry",
+    "message": "AssertionError: expected 1 to be +0 // Object.is equality"
+   }
+  ],
+  "verdict": "KILLED"
+ },
+ {
+  "mutant": "D6 attempt not counted on claim",
+  "file": "packages/db/src/job-execution.ts",
+  "exit_code": 1,
+  "tests_run": 14,
+  "passed": 9,
+  "failed": [
+   {
+    "test": "a valid job runs the handler once and commits effect and success together",
+    "message": "AssertionError: expected { status: 'succeeded', \u2026(4) } to match object { status: 'succeeded', attempt: 1 }"
+   },
+   {
+    "test": "a duplicate delivery does not repeat the effect",
+    "message": "AssertionError: expected +0 to be 1 // Object.is equality"
+   },
+   {
+    "test": "a transient failure rolls back the handler, keeps the claim and schedules a retry",
+    "message": "AssertionError: expected { status: 'queued', attempt: +0, \u2026(3) } to match object { status: 'queued', attempt: 1, \u2026(1) }"
+   },
+   {
+    "test": "transient failures exhaust the attempts and end dead, with a safe code",
+    "message": "AssertionError: expected [ 'retry', 'retry', 'retry' ] to deeply equal [ 'retry', 'retry', 'dead' ]"
+   },
+   {
+    "test": "a worker that dies mid-job leaves a claimable row, never a stuck one",
+    "message": "AssertionError: expected { status: 'succeeded', \u2026(4) } to match object { status: 'succeeded', attempt: 2 }"
+   }
+  ],
+  "verdict": "KILLED"
+ },
+ {
+  "mutant": "D7 deferred job executed early",
+  "file": "packages/db/src/job-execution.ts",
+  "exit_code": 1,
+  "tests_run": 14,
+  "passed": 12,
+  "failed": [
+   {
+    "test": "a transient failure rolls back the handler, keeps the claim and schedules a retry",
+    "message": "AssertionError: expected 'succeeded' to be 'deferred' // Object.is equality"
+   },
+   {
+    "test": "a job scheduled for later is deferred, not run",
+    "message": "AssertionError: expected 'succeeded' to be 'deferred' // Object.is equality"
+   }
+  ],
+  "verdict": "KILLED"
+ },
+ {
+  "mutant": "D8 dead job redelivery runs the handler again",
+  "file": "packages/db/src/job-execution.ts",
+  "exit_code": 1,
+  "tests_run": 14,
+  "passed": 13,
+  "failed": [
+   {
+    "test": "a permanent failure and a schema error go dead at once",
+    "message": "AssertionError: expected { kind: 'succeeded' } to deeply equal { kind: 'dead', \u2026(2) }"
+   }
+  ],
+  "verdict": "KILLED"
+ },
+ {
+  "mutant": "C1 retry deletes the message",
+  "file": "apps/server/src/modules/platform/job-consumer.ts",
+  "exit_code": 1,
+  "tests_run": 21,
+  "passed": 0,
+  "failed": [
+   {
+    "test": "a transient failure is retried under the policy and the message is hidden for the backoff",
+    "message": "AssertionError: expected { visible: +0, leased: +0 } to deeply equal { visible: +0, leased: 1 }"
+   }
+  ],
+  "verdict": "KILLED"
+ },
+ {
+  "mutant": "C2 no visibility heartbeat",
+  "file": "apps/server/src/modules/platform/job-consumer.ts",
+  "exit_code": 1,
+  "tests_run": 21,
+  "passed": 0,
+  "failed": [
+   {
+    "test": "visibility is extended while a long job runs, so no second delivery happens",
+    "message": "AssertionError: expected [ \u2026(5) ] to deeply equal []"
+   }
+  ],
+  "verdict": "KILLED"
+ },
+ {
+  "mutant": "C3 original deleted although the DLQ send failed",
+  "file": "apps/server/src/modules/platform/job-consumer.ts",
+  "exit_code": 1,
+  "tests_run": 21,
+  "passed": 0,
+  "failed": [
+   {
+    "test": "a failed DLQ send keeps the original; the redelivery completes the dead-lettering",
+    "message": "AssertionError: expected undefined to be 'already-dead' // Object.is equality"
+   }
+  ],
+  "verdict": "KILLED"
+ },
+ {
+  "mutant": "C4 abandoned delivery still acknowledges",
+  "file": "apps/server/src/modules/platform/job-consumer.ts",
+  "exit_code": 1,
+  "tests_run": 21,
+  "passed": 0,
+  "failed": [
+   {
+    "test": "shutdown past the drain budget acknowledges nothing; a restarted worker completes it once",
+    "message": "AssertionError: expected undefined to be defined"
+   }
+  ],
+  "verdict": "KILLED"
+ },
+ {
+  "mutant": "C5 envelope not linted",
+  "file": "apps/server/src/modules/platform/job-consumer.ts",
+  "exit_code": 1,
+  "tests_run": 21,
+  "passed": 0,
+  "failed": [
+   {
+    "test": "schema-invalid messages are dead-lettered without invoking any handler",
+    "message": "AssertionError: expected [ 'envelope-invalid', 'none', \u2026(2) ] to deeply equal [ 'envelope-invalid', \u2026(3) ]"
+   }
+  ],
+  "verdict": "KILLED"
+ },
+ {
+  "mutant": "C6 message deleted before the work commits",
+  "file": "apps/server/src/modules/platform/job-consumer.ts",
+  "exit_code": 1,
+  "tests_run": 21,
+  "passed": 0,
+  "failed": [
+   {
+    "test": "a crash before the commit leaves the message for redelivery and no effect behind",
+    "message": "Error: condition not reached in time"
+   }
+  ],
+  "verdict": "KILLED"
+ },
+ {
+  "mutant": "C7 shutdown flag ignored",
+  "file": "apps/server/src/modules/platform/job-consumer.ts",
+  "exit_code": 1,
+  "tests_run": 21,
+  "passed": 0,
+  "failed": [
+   {
+    "test": "a process shutting down takes no new work",
+    "message": "AssertionError: expected { status: 'succeeded', \u2026(2) } to match object { status: 'queued', attempt: +0 }"
+   }
+  ],
+  "verdict": "KILLED"
+ },
+ {
+  "mutant": "C8 unknown tenant job acknowledged",
+  "file": "apps/server/src/modules/platform/job-consumer.ts",
+  "exit_code": 1,
+  "tests_run": 21,
+  "passed": 0,
+  "failed": [
+   {
+    "test": "a job claimed for the wrong tenant fails closed and runs nothing",
+    "message": "AssertionError: expected undefined to be 'job-unknown' // Object.is equality"
+   }
+  ],
+  "verdict": "KILLED"
+ },
+ {
+  "mutant": "C9 busy job deleted",
+  "file": "apps/server/src/modules/platform/job-consumer.ts",
+  "exit_code": 1,
+  "tests_run": 21,
+  "passed": 0,
+  "failed": [
+   {
+    "test": "a job another worker is running right now is left on the queue, and survives that worker dying",
+    "message": "AssertionError: expected +0 to be 1 // Object.is equality"
+   }
+  ],
+  "verdict": "KILLED"
+ },
+ {
+  "mutant": "C10 success deleted without waiting for commit result (delete on duplicate dropped, delete on success dropped)",
+  "file": "apps/server/src/modules/platform/job-consumer.ts",
+  "exit_code": 1,
+  "tests_run": 21,
+  "passed": 0,
+  "failed": [
+   {
+    "test": "a valid message executes one durable effect and is deleted after commit",
+    "message": "AssertionError: expected { visible: +0, leased: 1 } to deeply equal { visible: +0, leased: +0 }"
+   }
+  ],
+  "verdict": "KILLED"
+ },
+ {
+  "mutant": "D9 upper-case correlation id rejected",
+  "file": "packages/db/src/job-execution.ts",
+  "exit_code": 1,
+  "tests_run": 14,
+  "passed": 13,
+  "failed": [
+   {
+    "test": "an upper-case correlation id in the envelope still matches the ledger",
+    "message": "AssertionError: expected { kind: 'mismatch' } to deeply equal { kind: 'succeeded' }"
+   }
+  ],
+  "verdict": "KILLED"
+ },
+ {
+  "mutant": "C11 shutdown waits for a busy slot",
+  "file": "apps/server/src/modules/platform/job-consumer.ts",
+  "exit_code": 1,
+  "tests_run": 21,
+  "passed": 0,
+  "failed": [
+   {
+    "test": "shutdown with every slot busy still drains inside its budget instead of waiting for a handler",
+    "message": "Error: Test timed out in 30000ms."
+   }
+  ],
+  "verdict": "KILLED"
+ },
+ {
+  "mutant": "C12 no handler deadline",
+  "file": "apps/server/src/modules/platform/job-consumer.ts",
+  "exit_code": 1,
+  "tests_run": 21,
+  "passed": 0,
+  "failed": [
+   {
+    "test": "a handler past its deadline frees its slot and is never acknowledged",
+    "message": "Error: condition not reached in time"
+   }
+  ],
+  "verdict": "KILLED"
+ },
+ {
+  "mutant": "C13 no receive ceiling",
+  "file": "apps/server/src/modules/platform/job-consumer.ts",
+  "exit_code": 1,
+  "tests_run": 21,
+  "passed": 0,
+  "failed": [
+   {
+    "test": "a job whose transaction keeps dying is dead-lettered by the receive ceiling",
+    "message": "AssertionError: expected undefined to be 'max-receive-exceeded' // Object.is equality"
+   }
+  ],
+  "verdict": "KILLED"
+ },
+ {
+  "mutant": "C14 missing handler claims and spends attempts",
+  "file": "apps/server/src/modules/platform/job-consumer.ts",
+  "exit_code": 1,
+  "tests_run": 21,
+  "passed": 0,
+  "failed": [
+   {
+    "test": "a job type with no handler is left on the queue unclaimed, never acknowledged as processed",
+    "message": "Error: condition not reached in time"
+   }
+  ],
+  "verdict": "KILLED"
+ }
+]

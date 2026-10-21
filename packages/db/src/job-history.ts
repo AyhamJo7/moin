@@ -139,7 +139,7 @@ export async function finishJob(
   const job = checkId(id);
   if (outcome.state === 'succeeded') {
     const done = await client.query<{ id: string }>(
-      `update job_runs set status = 'succeeded', finished_at = now()
+      `update job_runs set status = 'succeeded', finished_at = now(), error_code = null
        where id = $1::uuid and status = 'claimed' returning id::text`,
       [job],
     );
