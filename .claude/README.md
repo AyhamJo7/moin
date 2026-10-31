@@ -20,7 +20,7 @@ Background, decisions and live evidence: `docs/control-plane/`.
 | `bin/plan_section.py` | slices PLAN.md by phase anchor, checklist ID, heading or ID row | moin |
 | `bin/evidence.py` | creates and audits `EV-Pxx-nnn` records and `docs/evidence/INDEX.md` | moin |
 | `bin/control_plane_check.py` | drift/tamper check of this directory (first gate) | moin |
-| `bin/merge_gate.py` · `policy/merge-gate.json` | the only session merge path: squash-merges when CI is VERIFIED on the head SHA and the Codex CLI review the script runs on that SHA approves; founder paths excluded | moin |
+| `bin/merge_gate.py` · `policy/merge-gate.json` | the only session merge path: squash-merges when CI is VERIFIED on the head SHA and the Codex CLI review the script runs on an isolated snapshot of that SHA approves; founder paths excluded; tools pinned by absolute path, scrubbed child environment. A procedural control against mistakes and drift, not a security boundary against a session that deliberately subverts it; GitHub enforces only the status checks | moin |
 | `gates.json` | gate list; **stub until P02.02.02** (see below) | moin |
 | `policy/no-ai-mentions.json` | A-22 patterns + executable examples; shared with P02.01.03's CI check | moin |
 | `policy/secret-paths.json` | secret-bearing file names and credential directories | moin |
