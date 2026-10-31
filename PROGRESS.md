@@ -1789,3 +1789,9 @@ reviewer identity + ruleset with one required approval): `docs/control-plane/pat
 Evidence: `gates.py fast` PASS 7/7 at `6e0f156` on the branch; patch checked in a scratch clone (95 control-plane
 tests OK, ruff/mypy clean, two mutants killed). No checklist item ticked, no ledger status changed.
 Next (founder): create the reviewer identity, apply patch 0008, update ruleset 24193962.
+
+Autonomy change, revision (2026-11-01, same branch): founder chose Codex CLI as reviewer with no second GitHub
+account. The merge gate now runs `codex exec --sandbox read-only` itself on the exact head SHA and merges only on
+`VERDICT: APPROVE`; the reviewer identity and ruleset steps are dropped. Patch 0008 re-checked in a scratch clone (96
+tests OK, ruff/mypy clean, four mutants killed); a real Codex call is not yet exercised.
+Next (founder): apply patch 0008, then dry-run the gate on a small PR.

@@ -121,12 +121,12 @@ Ledger, Invariants, the target phase, and the IDs that phase references.
   domain terms like "AI disclosure" and `feat(ai)` are fine.
 - Push freely to your own branch with the plain form `git push -u origin <branch>`. Blocked: pushes to
   `main`/`master`, force pushes, branch deletion, and hidden forms (`git -C`, `-c`, `sh -c`).
-- PRs are opened as drafts (`gh pr create --draft`). The review loop runs on the PR: the independent
-  reviewer (a separate GitHub identity) reviews, the implementer fixes, until the reviewer approves the
-  head SHA with no HIGH/CRITICAL open. Then the session merges with
+- PRs are opened as drafts (`gh pr create --draft`). The review loop runs on the PR: Codex reviews,
+  the implementer fixes, until no HIGH/CRITICAL is open. Then the session merges with
   `python3 .claude/bin/merge_gate.py <pr>` (once control-plane patch 0008 is applied): it checks
-  `verify-head --ci` and that approval on the exact head SHA, marks the PR ready and squash-merges it
-  pinned to that SHA. Raw `gh pr ready`/`gh pr merge` and merging through `gh api` stay blocked.
+  `verify-head --ci`, runs a final Codex CLI review itself on the exact head SHA, and only on
+  `VERDICT: APPROVE` marks the PR ready and squash-merges it pinned to that SHA. Raw `gh pr ready`/
+  `gh pr merge` and merging through `gh api` stay blocked.
   PRs touching `.github/`, `.claude/`, gate scripts, `lefthook.yml` or `infrastructure/` are always
   founder-merged; migrations, identity-access, billing, usage-ledger, tool-guard and webhook paths
   are founder-merged during the trial (until 2026-11-29, `.claude/policy/merge-gate.json`).
