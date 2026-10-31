@@ -23,10 +23,12 @@ and accepting an approval on an older SHA.
 
 1. **Reviewer identity.** Create a GitHub machine user (e.g. `moin-review-bot`), invite it to
    `AyhamJo7/moin` with **Write** (approvals only count from users with write access), and give it a
-   fine-grained token scoped to this repository: Pull requests read/write, Contents read, Metadata read.
-   Keep the token in your password manager. Export it only in the reviewer pane
-   (`export GH_TOKEN=…`), so the reviewer approves with `gh pr review <n> --approve --body "…"` only
-   when it has no open HIGH/CRITICAL finding, and requests changes otherwise.
+   **classic** token with only the `public_repo` scope. Fine-grained tokens cannot act on another
+   user's personal repository as a collaborator; `public_repo` is enough because moin is public.
+   Log the bot in under its own gh config (`GH_CONFIG_DIR=~/.config/gh-reviewbot gh auth login`) and
+   set that variable only in the reviewer pane. The reviewer approves with
+   `gh pr review <n> --approve --body "…"` only when it has no open HIGH/CRITICAL finding, and
+   requests changes otherwise.
 2. **Apply the patch** in a maintenance session (protected files):
    ```bash
    ! git am docs/control-plane/patches/0008-autonomous-merge-gate.patch
