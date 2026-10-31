@@ -1,0 +1,22 @@
+{
+  "_doc": "Autonomous merge policy for .claude/bin/merge_gate.py (CLAUDE.md §8). A session may squash-merge a PR only through that script, which requires: the PR targets `base`; verify-head --ci says VERIFIED for the head SHA; no AI-tool mentions in title/body; no changed file matches `founder_paths`, nor `founder_paths_trial` up to and including `trial_until`; and, last, a Codex CLI review that the script runs itself on the exact head SHA ends in `VERDICT: APPROVE`. Founder-path PRs stay founder-merged. Patterns are fnmatch globs on repository paths (`*` also matches `/`). founder_paths are permanent: they define the checks and guards that gate this very merge, so an agent must never be able to merge a change to them. founder_paths_trial cover the control paths the founder reviews during the autonomy trial; extend it by moving trial_until.",
+  "base": "main",
+  "founder_paths": [
+    ".claude/*",
+    ".github/*",
+    "lefthook.yml",
+    "scripts/check-*",
+    "scripts/policy-regex.ts",
+    "infrastructure/*",
+    "BLUEPRINT.md"
+  ],
+  "founder_paths_trial": [
+    "packages/db/migrations/*",
+    "apps/server/src/modules/identity-access/*",
+    "*billing*",
+    "*usage-ledger*",
+    "*tool-guard*",
+    "*webhook*"
+  ],
+  "trial_until": "2026-11-29"
+}

@@ -165,7 +165,6 @@ GH_BLOCKED = frozenset(
         ("repo", "edit"),
         ("repo", "archive"),
         ("repo", "rename"),
-        ("workflow", "run"),
         ("workflow", "enable"),
         ("workflow", "disable"),
     }
@@ -1457,7 +1456,8 @@ def check_gh(ctx: Context, cmd: SimpleCommand, cwd: Path) -> None:
         return
     if (group, action) == ("pr", "create") and not {"--draft", "-d"} & set(words[3:]):
         ctx.block(
-            "`gh pr create` must open a draft (`--draft`); the founder marks PRs ready and merges."
+            "`gh pr create` must open a draft (`--draft`); `.claude/bin/merge_gate.py` marks it ready "
+            "and merges once CI and the independent review pass."
         )
     if group == "api":
         check_gh_api(ctx, words[2:])

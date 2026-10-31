@@ -179,7 +179,6 @@
       "Bash(npm exec *)",
       "Bash(gh pr ready *)",
       "Bash(gh release *)",
-      "Bash(gh workflow run *)",
       "Bash(gh variable *)",
       "Bash(ssh *)",
       "Bash(scp *)",
