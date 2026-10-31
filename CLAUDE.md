@@ -31,11 +31,13 @@ Ledger, Invariants, the target phase, and the IDs that phase references.
 
 ## 3. Starting a session
 
-1. The founder names one phase and tier: `/phase P02` (or `/phase P06 PILOT`). No phase named → ask.
+1. The founder names a phase and tier (`/phase P02`, `/phase P06 PILOT`). No phase named → take the
+   next one from the Status Ledger: open `[G:PILOT]` work first, dependency order (P08 before P10).
 2. `/phase` checks the tier-scoped dependencies (`P08@PILOT` = every `[G:PILOT]` section of P08
-   VERIFIED) against the Status Ledger, writes `docs/phases/Pxx-plan.md`, and stops for approval.
-3. Execute only the approved plan. `PROGRESS.md` (from P02.01.04) and the SessionStart context show
-   where the last session stopped.
+   VERIFIED) against the Status Ledger, writes `docs/phases/Pxx-plan.md`, and proceeds. It stops only
+   for an unmet dependency, an ambiguity in PLAN.md, or a DG/EXT item without a usable default (§7).
+3. Execute the plan. `PROGRESS.md` (from P02.01.04) and the SessionStart context show where the last
+   session stopped; the founder reads the plan and `PROGRESS.md` as a digest, not as a gate.
 
 ## 4. Status and evidence (PLAN vocabulary)
 
@@ -49,16 +51,23 @@ Ledger, Invariants, the target phase, and the IDs that phase references.
 - Evidence records: `python3 .claude/bin/evidence.py new --phase P02 --item P02.05.06 --slug … --summary …
 --from-gates full` → `docs/evidence/P02/EV-P02-nnn-<slug>.md` + INDEX row. Audit: `evidence.py check`.
   Sensitive evidence is stored by reference only (location, SHA-256, date, counterparty).
-- A session raises a phase tier to at most `READY_FOR_REVIEW`. `VERIFIED`/`COMPLETE` of a tier are the
-  founder's call. Tightening a gate never needs approval; loosening always does.
+- A session may raise a phase tier to `VERIFIED` when every item of the tier is ticked with its EV ID,
+  `gates.py full` passes on the head SHA, `/gate-ready` leaves no HIGH/CRITICAL finding open, and the
+  independent reviewer concurs on that same SHA (recorded in the gate-review evidence). `COMPLETE`
+  (deployed to the target environment) stays the founder's call. Tightening a gate never needs
+  approval; loosening always does.
 
 ## 5. Claims
 
 - VERIFIED = command + exit code + HEAD SHA from this session. Otherwise say UNVERIFIED or BLOCKED.
 - Before any "done/green/fixed" wording: `python3 .claude/bin/gates.py full` must pass on the current
   tree. The Stop hook blocks the claim otherwise. Until P02 wires real gates, `full` fails by design.
-- A bug fix counts only with a regression test that `python3 .claude/bin/mutation_check.py --test "<cmd>"`
-  reports KILLED. Never revert a fix by hand with `git checkout`/`git restore` (the git guard blocks it).
+- A bug fix counts only with a regression test that fails without the fix. On control paths (auth,
+  sessions, RLS/roles, `SECURITY DEFINER`, tool guard, idempotency, usage ledger, billing, state
+  machines) `python3 .claude/bin/mutation_check.py --test "<cmd>"` must report KILLED; elsewhere (UI,
+  copy, docs tooling) a normal regression test is enough. `gates.py stress` runs for concurrency,
+  queue and flaky-prone suites, not for every fix. Never revert a fix by hand with
+  `git checkout`/`git restore` (the git guard blocks it).
 - After green gates the wording is "ready for review", never "complete".
 
 ## 6. Invariants (full text: `plan_section.py --invariants`)
@@ -89,14 +98,22 @@ Ledger, Invariants, the target phase, and the IDs that phase references.
 - An item needs an account, credential, contract, provider console, DNS, production change or a
   lawyer (EXT-nn / DG-nn): record `WAITING_FOR_EXTERNAL` with the four fields, continue with independent
   items, and tell the founder exactly what is needed. Never stub or simulate it as done.
+  The AI prepares everything around them (drafts, briefs, checklists, emails, meeting agendas) so the
+  founder only signs, sends or attends.
+- A founder decision gate whose PLAN row has a recommended default and is engineering-shaped (DG-04,
+  DG-12, DG-13, DG-14 shortlist): when it blocks work, adopt the default in an ADR headed "Default
+  adopted; founder may override" and continue. Money, brand, legal and strategy gates (DG-00, DG-03,
+  DG-05, DG-09, DG-11) are never adopted by a session.
 - PLAN.md is ambiguous or contradicts itself or BLUEPRINT.md → ask; don't reinterpret.
 - A change would weaken an INV or loosen a gate or threshold → stop.
-- The same failure twice (including provider 429/quota) → write a BLOCKER entry and stop the loop.
+- A failure gets up to three attempts, each testing a different hypothesis. The same failure after
+  that, or the same provider 429/quota twice → write a BLOCKER entry and stop that item (other
+  independent items may continue). Several blockers per session are fine; commit after each one.
 
 ## 8. Git and pull requests
 
 - Trunk-based: `main` is protected; work on short-lived branches `<type>/pNN-<section>-<slug>`
-  (e.g. `feat/p02-03-skeleton`), one checklist section or smaller. PRs are squash-merged **by the founder**.
+  (e.g. `feat/p02-03-skeleton`), one checklist section or smaller. PRs are squash-merged.
 - Conventional Commits; the message says why. PR body fields (P02.01.02): what/why, risk, tests,
   EV IDs, docs, migration/rollback, privacy impact.
 - A-22: no AI-tool mentions or attribution in commits, tags, PR titles or bodies (no tool names,
@@ -104,8 +121,17 @@ Ledger, Invariants, the target phase, and the IDs that phase references.
   domain terms like "AI disclosure" and `feat(ai)` are fine.
 - Push freely to your own branch with the plain form `git push -u origin <branch>`. Blocked: pushes to
   `main`/`master`, force pushes, branch deletion, and hidden forms (`git -C`, `-c`, `sh -c`).
-- PRs are opened as drafts only (`gh pr create --draft`); `gh pr ready`, `gh pr merge` and merging
-  through `gh api` are founder-only.
+- PRs are opened as drafts (`gh pr create --draft`). The review loop runs on the PR: the independent
+  reviewer (a separate GitHub identity) reviews, the implementer fixes, until the reviewer approves the
+  head SHA with no HIGH/CRITICAL open. Then the session merges with
+  `python3 .claude/bin/merge_gate.py <pr>` (once control-plane patch 0008 is applied): it checks
+  `verify-head --ci` and that approval on the exact head SHA, marks the PR ready and squash-merges it
+  pinned to that SHA. Raw `gh pr ready`/`gh pr merge` and merging through `gh api` stay blocked.
+  PRs touching `.github/`, `.claude/`, gate scripts, `lefthook.yml` or `infrastructure/` are always
+  founder-merged; migrations, identity-access, billing, usage-ledger, tool-guard and webhook paths
+  are founder-merged during the trial (until 2026-11-29, `.claude/policy/merge-gate.json`).
+- `gh workflow run` and `gh run rerun` are allowed for CI workflows (after patch 0008). A future
+  deploy workflow must use a GitHub environment that requires founder approval for production.
 
 ## 9. Commands
 
@@ -125,7 +151,8 @@ Changes to auth, sessions, RLS/roles, `SECURITY DEFINER`, the tool guard, webhoo
 billing or privacy handlers need `/gate-ready`: it runs the `security-reviewer` and
 `architecture-reviewer` agents on the diff, plus `invariant-reviewer` when a control path changed
 (auth, RLS, tool guard, idempotency, usage ledger, state machines). HIGH/CRITICAL findings are fixed
-with a mutation-proven test or stay open and block review.
+with a mutation-proven test or stay open and block review. The independent reviewer re-verifies each
+fix; the founder is asked only when implementer and reviewer still disagree after two rounds (tie-break).
 
 ## 11. Parallel phases
 
@@ -142,13 +169,15 @@ and ask.
 - The cloud VM clones the pushed branch: push before `claude --cloud`; bring work back with
   `claude --teleport`. Cloud sessions get no provider credentials; anything needing them is local
   and founder-driven.
-- Founder-only, in every environment: accounts, credentials, provider consoles, `terraform apply`,
-  merges to `main`, rulesets, DNS, contracts.
+- Founder-only, in every environment: accounts, credentials, provider consoles, production
+  `terraform apply` and promotion, rulesets, DNS, contracts, the first real caller (PG-3), and merges
+  that `merge_gate.py` refuses. Once a dev/staging environment exists, merges to `main` deploy there
+  through CI without founder action.
 - **Unattended runs** use `--dangerously-skip-permissions`: nothing prompts, so every rule is allow or
   deny. Network: `curl`/`wget` GET only, to `.claude/policy/network.json` hosts, never piped into a
   shell. No `terraform plan`, `aws`, `npx`/`pnpm dlx`, `ssh`, or nested `claude` sessions. A long run
   keeps `PROGRESS.md` at `mode: autonomous`, `status: active`. Two no-change iterations make the
-  stall hook stop the loop: write a BLOCKER row and end the turn. Never retry the same failure.
+  stall hook stop the loop: write a BLOCKER row and end the turn. Retry rules: §7.
 
 ## 13. Control plane
 

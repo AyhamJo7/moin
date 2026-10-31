@@ -26,7 +26,7 @@ Run `git status --short --branch`, `git log --oneline -5` and `python3 .claude/b
    the front matter `status`, `updated` (UTC) and `next` (one concrete action), and add a log row:
    what was done, commits, EV IDs, what is blocked and on whom (`BLOCKED` = internal with owner,
    `WAITING_FOR_EXTERNAL` = third party with counterparty, request date, expected date, fallback).
-2. **Status Ledger.** If a tier status changed this session (at most `READY_FOR_REVIEW`), make sure the
+2. **Status Ledger.** If a tier status changed this session (at most `VERIFIED`, CLAUDE.md §4), make sure the
    Status Ledger row was updated first and the phase header second. If not already done, say so.
 3. **Commit** with a Conventional Commit (no AI-tool mentions; the hook checks).
 4. **Resume prompt.** Always print it, even when the push below still waits for approval. Print one paragraph the founder can paste into the next session (local or cloud):

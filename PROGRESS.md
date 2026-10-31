@@ -1778,3 +1778,14 @@ REQUEST_CHANGES with two blocking P2 findings.
   Phone access is a separate proposal headed NOT AUTHORIZED, for the founder. The consent covers possible address
   logging, and a boundary check was added (negative control KILLED). No server was started and no network test run.
   Phone tasks remain untested until the founder decides. No owner session, nothing VERIFIED, DG-10 PROVISIONAL.
+
+## Process: autonomy change (2026-11-01)
+
+Founder-approved loosening of the session process, branch `chore/control-plane-autonomy` (draft PR). Sessions may
+set a tier to VERIFIED with reviewer concurrence (COMPLETE stays founder-only), proceed after `/phase` planning, adopt
+engineering-shaped DG defaults by ADR, retry a failure up to three times with different hypotheses, and need mutation
+proof on control paths only. Merging by a session needs control-plane patch 0008 (founder-applied; merge gate +
+reviewer identity + ruleset with one required approval): `docs/control-plane/patches/0008-autonomous-merge-gate.md`.
+Evidence: `gates.py fast` PASS 7/7 at `6e0f156` on the branch; patch checked in a scratch clone (95 control-plane
+tests OK, ruff/mypy clean, two mutants killed). No checklist item ticked, no ledger status changed.
+Next (founder): create the reviewer identity, apply patch 0008, update ruleset 24193962.

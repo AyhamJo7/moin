@@ -1,0 +1,586 @@
+From f13478f9bde369ac19be0360fff3140dbb1ed907 Mon Sep 17 00:00:00 2001
+From: AyhamJo7 <ayhamjumran7@gmail.com>
+Date: Sun, 1 Nov 2026 00:05:23 +0100
+Subject: [PATCH] feat(control-plane): let sessions merge through a
+ review-and-CI gate
+
+Founder-approved autonomy change: a session may squash-merge a PR once CI is verified on the head SHA and a separate reviewer identity approved that same SHA. Control-plane, CI and gate-script paths stay founder-merged permanently; migrations, identity-access, billing, usage-ledger, tool-guard and webhook paths stay founder-merged until 2026-11-29. Also narrows the attribution pattern so repository paths are no longer refused, and allows dispatching CI workflows.
+---
+ .claude/README.md                  |   1 +
+ .claude/bin/merge_gate.py          | 212 +++++++++++++++++++++++++++++
+ .claude/hooks/policy_guard.py      |   4 +-
+ .claude/policy/merge-gate.json     |  23 ++++
+ .claude/policy/no-ai-mentions.json |  11 +-
+ .claude/settings.json              |   1 -
+ .claude/tests/test_merge_gate.py   | 206 ++++++++++++++++++++++++++++
+ .claude/tests/test_unattended.py   |   4 +-
+ 8 files changed, 455 insertions(+), 7 deletions(-)
+ create mode 100644 .claude/bin/merge_gate.py
+ create mode 100644 .claude/policy/merge-gate.json
+ create mode 100644 .claude/tests/test_merge_gate.py
+
+diff --git a/.claude/README.md b/.claude/README.md
+index b2226b8..b8e0df7 100644
+--- a/.claude/README.md
++++ b/.claude/README.md
+@@ -20,6 +20,7 @@ Background, decisions and live evidence: `docs/control-plane/`.
+ | `bin/plan_section.py` | slices PLAN.md by phase anchor, checklist ID, heading or ID row | moin |
+ | `bin/evidence.py` | creates and audits `EV-Pxx-nnn` records and `docs/evidence/INDEX.md` | moin |
+ | `bin/control_plane_check.py` | drift/tamper check of this directory (first gate) | moin |
++| `bin/merge_gate.py` · `policy/merge-gate.json` | the only session merge path: squash-merges when CI is VERIFIED on the head SHA and the separate reviewer identity approved that SHA; founder paths excluded | moin |
+ | `gates.json` | gate list; **stub until P02.02.02** (see below) | moin |
+ | `policy/no-ai-mentions.json` | A-22 patterns + executable examples; shared with P02.01.03's CI check | moin |
+ | `policy/secret-paths.json` | secret-bearing file names and credential directories | moin |
+diff --git a/.claude/bin/merge_gate.py b/.claude/bin/merge_gate.py
+new file mode 100644
+index 0000000..7079641
+--- /dev/null
++++ b/.claude/bin/merge_gate.py
+@@ -0,0 +1,212 @@
++#!/usr/bin/env python3
++"""merge-gate: squash-merge a pull request when the autonomy conditions hold (CLAUDE.md §8).
++
++Every condition is checked against the PR's current head SHA:
++  ci      `verify-head --pr N --ci --local none --json` says VERIFIED (all required and
++          expected checks passed on that SHA)
++  review  the independent reviewer (policy/merge-gate.json `reviewer`, a GitHub identity other
++          than the PR author) approved exactly that SHA, and that approval is its latest
++          decisive review
++  text    title and body carry no AI-tool mentions (A-22, policy/no-ai-mentions.json)
++  paths   no changed file matches `founder_paths`, nor `founder_paths_trial` until
++          `trial_until`; those PRs stay founder-merged
++  shape   the PR is open and targets `base`
++Then `gh pr ready` (if draft) and `gh pr merge --squash --match-head-commit <sha>`, so a push
++after the check cannot slip in. GitHub's ruleset on main re-checks review and status server-side.
++
++Usage: merge_gate.py <pr-number> [--dry-run]
++Exit: 0 merged (or would merge), 1 refused, 2 usage or tool error.
++"""
++
++from __future__ import annotations
++
++import argparse
++import datetime as dt
++import fnmatch
++import json
++import re
++import shutil
++import subprocess
++import sys
++from collections.abc import Sequence
++from dataclasses import dataclass
++from pathlib import Path
++from typing import Any
++
++EXIT_OK, EXIT_REFUSED, EXIT_ERROR = 0, 1, 2
++POLICY_DIR = Path(__file__).resolve().parents[1] / "policy"
++DECISIVE_STATES = frozenset({"APPROVED", "CHANGES_REQUESTED", "DISMISSED"})
++SHOWN_PATHS = 5
++SHA_SHOWN = 10
++GH_TIMEOUT_S = 120
++VERIFY_TIMEOUT_S = 300
++
++
++@dataclass(frozen=True)
++class Policy:
++    reviewer: str
++    base: str
++    founder_paths: tuple[str, ...]
++    founder_paths_trial: tuple[str, ...]
++    trial_until: dt.date
++    ai_patterns: tuple[re.Pattern[str], ...]
++
++
++@dataclass(frozen=True)
++class Review:
++    login: str
++    state: str
++    commit: str
++
++
++class ToolError(Exception):
++    pass
++
++
++def load_policy(directory: Path = POLICY_DIR) -> Policy:
++    gate = json.loads((directory / "merge-gate.json").read_text(encoding="utf-8"))
++    ai = json.loads((directory / "no-ai-mentions.json").read_text(encoding="utf-8"))
++    return Policy(
++        reviewer=str(gate["reviewer"]).strip(),
++        base=str(gate["base"]),
++        founder_paths=tuple(str(g) for g in gate["founder_paths"]),
++        founder_paths_trial=tuple(str(g) for g in gate["founder_paths_trial"]),
++        trial_until=dt.date.fromisoformat(str(gate["trial_until"])),
++        ai_patterns=tuple(re.compile(str(p["regex"])) for p in ai["patterns"]),
++    )
++
++
++def refusals(
++    policy: Policy,
++    pr: dict[str, Any],
++    reviews: Sequence[Review],
++    files: Sequence[str],
++    ci_verdict: str,
++    today: dt.date,
++) -> list[str]:
++    """Every reason the PR may not be merged by a session; empty means it may."""
++    head = str(pr["headRefOid"])
++    author = str((pr.get("author") or {}).get("login", ""))
++    reviewer = policy.reviewer.lower()
++    reasons: list[str] = []
++    if not reviewer:
++        reasons.append("no reviewer identity configured (policy/merge-gate.json `reviewer`)")
++    elif reviewer == author.lower():
++        reasons.append("the PR author is the configured reviewer, so the review is not independent")
++    if pr.get("state") != "OPEN":
++        reasons.append(f"the PR is {pr.get('state')}, not OPEN")
++    if pr.get("baseRefName") != policy.base:
++        reasons.append(f"the PR targets {pr.get('baseRefName')}, not {policy.base}")
++    if ci_verdict != "VERIFIED":
++        reasons.append(f"CI on {head[:SHA_SHOWN]} is {ci_verdict}, not VERIFIED")
++    decisive = [r for r in reviews if r.login.lower() == reviewer and r.state in DECISIVE_STATES]
++    latest = decisive[-1] if decisive else None
++    if reviewer and (latest is None or latest.state != "APPROVED"):
++        state = latest.state if latest else "no review"
++        reasons.append(f"the reviewer's latest decision is {state}, not APPROVED")
++    elif latest is not None and latest.commit != head:
++        reasons.append(
++            f"the reviewer approved {latest.commit[:SHA_SHOWN]}, not the head {head[:SHA_SHOWN]}"
++        )
++    text = f"{pr.get('title') or ''}\n\n{pr.get('body') or ''}"
++    if any(p.search(text) for p in policy.ai_patterns):
++        reasons.append("the title or body mentions an AI tool (A-22)")
++    globs = policy.founder_paths
++    if today <= policy.trial_until:
++        globs += policy.founder_paths_trial
++    held = sorted({f for f in files if any(fnmatch.fnmatchcase(f, g) for g in globs)})
++    if held:
++        more = f" (+{len(held) - SHOWN_PATHS} more)" if len(held) > SHOWN_PATHS else ""
++        reasons.append(f"founder-merged paths changed: {', '.join(held[:SHOWN_PATHS])}{more}")
++    return reasons
++
++
++def run(cmd: Sequence[str], timeout: int = GH_TIMEOUT_S) -> str:
++    proc = subprocess.run(list(cmd), capture_output=True, text=True, timeout=timeout, check=False)
++    if proc.returncode != 0:
++        detail = (proc.stderr or proc.stdout).strip().splitlines()
++        raise ToolError(
++            f"`{' '.join(cmd[:3])}` failed: {detail[-1] if detail else proc.returncode}"
++        )
++    return proc.stdout
++
++
++def fetch_reviews(number: int) -> list[Review]:
++    out = run(
++        [
++            "gh", "api", "--paginate", f"repos/{{owner}}/{{repo}}/pulls/{number}/reviews",
++            "--jq", '.[] | [(.user.login // ""), .state, (.commit_id // "")] | @tsv',
++        ]
++    )  # fmt: skip
++    return [Review(*line.split("\t")) for line in out.splitlines() if line.count("\t") == 2]
++
++
++def fetch_files(number: int) -> list[str]:
++    out = run(
++        [
++            "gh", "api", "--paginate", f"repos/{{owner}}/{{repo}}/pulls/{number}/files",
++            "--jq", ".[] | .filename, (.previous_filename // empty)",
++        ]
++    )  # fmt: skip
++    return [line for line in out.splitlines() if line]
++
++
++def ci_verdict(number: int) -> str:
++    out = run(
++        ["verify-head", "--pr", str(number), "--ci", "--local", "none", "--json"],
++        VERIFY_TIMEOUT_S,
++    )
++    try:
++        return str(json.loads(out)["verdict"])
++    except (ValueError, KeyError) as exc:
++        raise ToolError(f"verify-head returned no verdict: {exc}") from exc
++
++
++def main(argv: Sequence[str] | None = None) -> int:
++    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
++    parser.add_argument("pr", type=int)
++    parser.add_argument("--dry-run", action="store_true", help="check only; never merge")
++    args = parser.parse_args(argv)
++    for tool in ("gh", "verify-head"):
++        if shutil.which(tool) is None:
++            print(f"merge-gate: BLOCKED, `{tool}` is not on PATH", file=sys.stderr)
++            return EXIT_ERROR
++    try:
++        policy = load_policy()
++        pr = json.loads(
++            run(
++                [
++                    "gh", "pr", "view", str(args.pr), "--json",
++                    "number,state,isDraft,baseRefName,headRefOid,title,body,author",
++                ]
++            )
++        )  # fmt: skip
++        head = str(pr["headRefOid"])
++        reasons = refusals(
++            policy,
++            pr,
++            fetch_reviews(args.pr),
++            fetch_files(args.pr),
++            ci_verdict(args.pr),
++            dt.datetime.now(dt.UTC).date(),
++        )
++        if reasons:
++            print(f"merge-gate: REFUSED #{args.pr} @ {head[:SHA_SHOWN]}")
++            for reason in reasons:
++                print(f"  - {reason}")
++            return EXIT_REFUSED
++        if args.dry_run:
++            print(f"merge-gate: would merge #{args.pr} @ {head[:SHA_SHOWN]} (dry run)")
++            return EXIT_OK
++        if pr.get("isDraft"):
++            run(["gh", "pr", "ready", str(args.pr)])
++        run(["gh", "pr", "merge", str(args.pr), "--squash", "--match-head-commit", head])
++    except (ToolError, subprocess.TimeoutExpired, OSError, ValueError, KeyError) as exc:
++        print(f"merge-gate: ERROR {exc}", file=sys.stderr)
++        return EXIT_ERROR
++    print(f"merge-gate: MERGED #{args.pr} @ {head[:SHA_SHOWN]} (squash)")
++    return EXIT_OK
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff --git a/.claude/hooks/policy_guard.py b/.claude/hooks/policy_guard.py
+index 8f359b5..15cb2b9 100755
+--- a/.claude/hooks/policy_guard.py
++++ b/.claude/hooks/policy_guard.py
+@@ -165,7 +165,6 @@ GH_BLOCKED = frozenset(
+         ("repo", "edit"),
+         ("repo", "archive"),
+         ("repo", "rename"),
+-        ("workflow", "run"),
+         ("workflow", "enable"),
+         ("workflow", "disable"),
+     }
+@@ -1457,7 +1456,8 @@ def check_gh(ctx: Context, cmd: SimpleCommand, cwd: Path) -> None:
+         return
+     if (group, action) == ("pr", "create") and not {"--draft", "-d"} & set(words[3:]):
+         ctx.block(
+-            "`gh pr create` must open a draft (`--draft`); the founder marks PRs ready and merges."
++            "`gh pr create` must open a draft (`--draft`); `.claude/bin/merge_gate.py` marks it ready "
++            "and merges once CI and the independent review pass."
+         )
+     if group == "api":
+         check_gh_api(ctx, words[2:])
+diff --git a/.claude/policy/merge-gate.json b/.claude/policy/merge-gate.json
+new file mode 100644
+index 0000000..96c251b
+--- /dev/null
++++ b/.claude/policy/merge-gate.json
+@@ -0,0 +1,23 @@
++{
++  "_doc": "Autonomous merge policy for .claude/bin/merge_gate.py (CLAUDE.md §8). A session may squash-merge a PR only through that script, which requires: the PR targets `base`; verify-head --ci says VERIFIED for the head SHA; `reviewer` (a GitHub identity separate from the PR author) approved exactly that SHA; no AI-tool mentions in title/body; and no changed file matches `founder_paths`, nor `founder_paths_trial` up to and including `trial_until`. Those PRs stay founder-merged. `reviewer` empty = the gate refuses everything. Patterns are fnmatch globs on repository paths (`*` also matches `/`). founder_paths are permanent: they define the checks and guards that gate this very merge, so an agent must never be able to merge a change to them. founder_paths_trial cover the control paths the founder reviews during the autonomy trial; extend or empty them by editing trial_until.",
++  "reviewer": "",
++  "base": "main",
++  "founder_paths": [
++    ".claude/*",
++    ".github/*",
++    "lefthook.yml",
++    "scripts/check-*",
++    "scripts/policy-regex.ts",
++    "infrastructure/*",
++    "BLUEPRINT.md"
++  ],
++  "founder_paths_trial": [
++    "packages/db/migrations/*",
++    "apps/server/src/modules/identity-access/*",
++    "*billing*",
++    "*usage-ledger*",
++    "*tool-guard*",
++    "*webhook*"
++  ],
++  "trial_until": "2026-11-29"
++}
+diff --git a/.claude/policy/no-ai-mentions.json b/.claude/policy/no-ai-mentions.json
+index 953a5ad..0216d6f 100644
+--- a/.claude/policy/no-ai-mentions.json
++++ b/.claude/policy/no-ai-mentions.json
+@@ -1,7 +1,7 @@
+ {
+   "_doc": "A-22 / P02.01.03: commit messages, tag messages and PR/issue text never mention AI coding tools or carry tool attribution. This file is the single source for policy_guard.py (agent commands, GitHub MCP tools) and for P02.01.03's CI check. Scope is tools and attribution, NOT the product domain: 'feat(ai): ...', 'AI disclosure (INV-03)' and the provider name 'OpenAI' are allowed. Patterns are Python `re` syntax, matched with re.search. The examples are executable: tests assert every block example is blocked and every allow example passes.",
+   "patterns": [
+-    {"id": "tool-claude", "regex": "(?i)(?<![A-Za-z0-9])claude(?![A-Za-z0-9])", "why": "names the tool; also covers Claude-Session trailers, claude.ai links, Claude Code"},
++    {"id": "tool-claude", "regex": "(?i)(?<![A-Za-z0-9.])claude(?![A-Za-z0-9]|\\.md\\b|-evidence\\b)", "why": "names the tool; also covers Claude-Session trailers, claude.ai links, Claude Code. Repository paths are not attribution: .claude/..., CLAUDE.md and claude-evidence pass"},
+     {"id": "vendor-anthropic", "regex": "(?i)(?<![A-Za-z0-9])anthropic(?![A-Za-z0-9])", "why": "names the vendor"},
+     {"id": "session-trailer", "regex": "(?im)^[ \\t]*claude-session[ \\t]*:", "why": "cloud-session commit trailer"},
+     {"id": "session-link", "regex": "(?i)claude\\.ai/(?:code|chat|share|artifact)", "why": "cloud-session link in PR text"},
+@@ -22,7 +22,9 @@
+     "chore: reviewed by codex",
+     "Anthropic model routing notes",
+     "co-authored-by: someone <a@example.com>",
+-    "feat: written by an AI assistant"
++    "feat: written by an AI assistant",
++    "fix: tidy retry loop, thanks Claude.",
++    "see github.com/anthropics/claude-code"
+   ],
+   "allow_examples": [
+     "feat(ai): add model gateway with EU routing",
+@@ -31,6 +33,9 @@
+     "test(api): cover cursor pagination edge cases",
+     "chore(tooling): port repository guard hooks",
+     "docs(plan): add master execution plan baseline",
+-    "feat(telephony): negotiate the opus audio codec at 48 kHz"
++    "feat(telephony): negotiate the opus audio codec at 48 kHz",
++    "docs(control-plane): describe .claude/bin/merge_gate.py",
++    "docs: shorten CLAUDE.md section 8",
++    "chore: keep gate records in .git/claude-evidence"
+   ]
+ }
+diff --git a/.claude/settings.json b/.claude/settings.json
+index b28dc5c..b63de9b 100644
+--- a/.claude/settings.json
++++ b/.claude/settings.json
+@@ -179,7 +179,6 @@
+       "Bash(npm exec *)",
+       "Bash(gh pr ready *)",
+       "Bash(gh release *)",
+-      "Bash(gh workflow run *)",
+       "Bash(gh variable *)",
+       "Bash(ssh *)",
+       "Bash(scp *)",
+diff --git a/.claude/tests/test_merge_gate.py b/.claude/tests/test_merge_gate.py
+new file mode 100644
+index 0000000..4af193d
+--- /dev/null
++++ b/.claude/tests/test_merge_gate.py
+@@ -0,0 +1,206 @@
++"""merge_gate.py: the decision rules, the shipped policy, and the gh / verify-head plumbing."""
++
++from __future__ import annotations
++
++import dataclasses
++import datetime as dt
++import json
++import os
++import shutil
++import stat
++import sys
++import unittest
++from pathlib import Path
++from typing import Any
++
++from helpers import BIN, CLAUDE_DIR, base_env, run, temp_dir, write
++
++sys.path.insert(0, str(BIN))
++import merge_gate
++from merge_gate import Review
++
++HEAD = "a" * 40
++OLD = "b" * 40
++BOT = "moin-review-bot"
++TODAY = dt.date(2026, 11, 2)
++
++
++def policy(**changes: Any) -> merge_gate.Policy:
++    base = dataclasses.replace(merge_gate.load_policy(), reviewer=BOT, trial_until=TODAY)
++    return dataclasses.replace(base, **changes)
++
++
++def pr(**changes: Any) -> dict[str, Any]:
++    data: dict[str, Any] = {
++        "number": 7,
++        "state": "OPEN",
++        "isDraft": True,
++        "baseRefName": "main",
++        "headRefOid": HEAD,
++        "title": "feat(p13): show the callback reason",
++        "body": "Adds the reason to the card.",
++        "author": {"login": "AyhamJo7"},
++    }
++    data.update(changes)
++    return data
++
++
++APPROVED = [Review(BOT, "APPROVED", HEAD)]
++FILES = ["apps/web/src/today/card.tsx"]
++
++
++class RefusalsTest(unittest.TestCase):
++    def check(self, **kw: Any) -> list[str]:
++        args: dict[str, Any] = {
++            "policy": policy(),
++            "pr": pr(),
++            "reviews": APPROVED,
++            "files": FILES,
++            "ci_verdict": "VERIFIED",
++            "today": TODAY,
++        }
++        args.update(kw)
++        return merge_gate.refusals(**args)
++
++    def assert_refused(self, fragment: str, **kw: Any) -> None:
++        reasons = self.check(**kw)
++        self.assertTrue(any(fragment in r for r in reasons), reasons)
++
++    def test_all_conditions_met_merges(self) -> None:
++        self.assertEqual(self.check(), [])
++
++    def test_ci_not_verified(self) -> None:
++        for verdict in ("FAILED", "PENDING"):
++            self.assert_refused("not VERIFIED", ci_verdict=verdict)
++
++    def test_no_reviewer_configured_refuses_everything(self) -> None:
++        self.assert_refused("no reviewer identity", policy=policy(reviewer=""))
++
++    def test_author_cannot_be_the_reviewer(self) -> None:
++        self.assert_refused("not independent", pr=pr(author={"login": BOT.upper()}))
++
++    def test_missing_or_stale_or_superseded_approval(self) -> None:
++        self.assert_refused("no review", reviews=[])
++        self.assert_refused("no review", reviews=[Review("someone-else", "APPROVED", HEAD)])
++        self.assert_refused("not the head", reviews=[Review(BOT, "APPROVED", OLD)])
++        later = [*APPROVED, Review(BOT, "CHANGES_REQUESTED", HEAD)]
++        self.assert_refused("CHANGES_REQUESTED", reviews=later)
++        self.assert_refused("DISMISSED", reviews=[*APPROVED, Review(BOT, "DISMISSED", HEAD)])
++
++    def test_comments_after_approval_do_not_revoke_it(self) -> None:
++        self.assertEqual(self.check(reviews=[*APPROVED, Review(BOT, "COMMENTED", HEAD)]), [])
++
++    def test_shape(self) -> None:
++        self.assert_refused("not OPEN", pr=pr(state="MERGED"))
++        self.assert_refused("not main", pr=pr(baseRefName="release"))
++
++    def test_ai_mention_in_text(self) -> None:
++        self.assert_refused("A-22", pr=pr(body="Co-Authored-By: x <x@example.com>"))
++
++    def test_permanent_founder_paths(self) -> None:
++        later = dt.date(2030, 1, 1)
++        for path in (
++            ".github/workflows/verify.yml",
++            ".claude/policy/merge-gate.json",
++            "scripts/check-rls-catalog.ts",
++            "lefthook.yml",
++            "infrastructure/envs/prod/main.tf",
++        ):
++            with self.subTest(path=path):
++                self.assert_refused("founder-merged", files=[*FILES, path], today=later)
++
++    def test_trial_paths_until_the_date(self) -> None:
++        path = "packages/db/migrations/0040_roles.sql"
++        self.assert_refused("founder-merged", files=[path], today=TODAY)
++        self.assertEqual(self.check(files=[path], today=TODAY + dt.timedelta(days=1)), [])
++
++
++class ShippedPolicyTest(unittest.TestCase):
++    def test_policy_loads_and_ships_closed(self) -> None:
++        shipped = merge_gate.load_policy()
++        self.assertEqual(shipped.base, "main")
++        self.assertIn(".github/*", shipped.founder_paths)
++        self.assertIn(".claude/*", shipped.founder_paths)
++        self.assertTrue(shipped.ai_patterns)
++
++
++FAKE_GH = """#!/usr/bin/env python3
++import json, os, sys
++from pathlib import Path
++state = Path(os.environ["FAKE_TOOL_DIR"])
++args = sys.argv[1:]
++with (state / "calls.log").open("a") as f:
++    f.write(json.dumps(args) + "\\n")
++fx = json.loads((state / "fixture.json").read_text())
++if args[:2] == ["pr", "view"]:
++    print(json.dumps(fx["pr"]))
++elif args[:1] == ["api"] and args[2].endswith("/reviews"):
++    print("\\n".join("\\t".join(r) for r in fx["reviews"]))
++elif args[:1] == ["api"] and args[2].endswith("/files"):
++    print("\\n".join(fx["files"]))
++elif args[:2] not in (["pr", "ready"], ["pr", "merge"]):
++    sys.exit(1)
++"""
++FAKE_VERIFY = """#!/usr/bin/env python3
++import json, os
++from pathlib import Path
++fx = json.loads((Path(os.environ["FAKE_TOOL_DIR"]) / "fixture.json").read_text())
++print(json.dumps({"verdict": fx["ci"]}))
++"""
++
++
++class CommandLineTest(unittest.TestCase):
++    """Runs a copy of the script (its policy beside it) against fake gh and verify-head."""
++
++    def invoke(self, fixture: dict[str, Any], *extra: str) -> tuple[int, str, list[list[str]]]:
++        with temp_dir() as tmp:
++            root = Path(tmp)
++            shutil.copy(BIN / "merge_gate.py", write(root, ".claude/bin/merge_gate.py", ""))
++            gate = json.loads((CLAUDE_DIR / "policy/merge-gate.json").read_text(encoding="utf-8"))
++            gate.update(reviewer=BOT, trial_until="2000-01-01")
++            write(root, ".claude/policy/merge-gate.json", json.dumps(gate))
++            shutil.copy(CLAUDE_DIR / "policy/no-ai-mentions.json", root / ".claude/policy")
++            for name, body in (("gh", FAKE_GH), ("verify-head", FAKE_VERIFY)):
++                tool = write(root, f"bin/{name}", body)
++                tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
++            write(root, "fixture.json", json.dumps(fixture))
++            env = base_env(
++                FAKE_TOOL_DIR=str(root), PATH=f"{root / 'bin'}{os.pathsep}{os.environ['PATH']}"
++            )
++            proc = run(root / ".claude/bin/merge_gate.py", ["7", *extra], env=env)
++            log = root / "calls.log"
++            calls = [json.loads(x) for x in log.read_text().splitlines()] if log.exists() else []
++            return proc.returncode, proc.stdout + proc.stderr, calls
++
++    @staticmethod
++    def fixture(**changes: Any) -> dict[str, Any]:
++        data: dict[str, Any] = {
++            "pr": pr(),
++            "reviews": [[BOT, "APPROVED", HEAD]],
++            "files": FILES,
++            "ci": "VERIFIED",
++        }
++        data.update(changes)
++        return data
++
++    def test_merges_the_checked_head_only(self) -> None:
++        code, out, calls = self.invoke(self.fixture())
++        self.assertEqual(code, merge_gate.EXIT_OK, out)
++        self.assertIn(["pr", "ready", "7"], calls)
++        self.assertEqual(calls[-1], ["pr", "merge", "7", "--squash", "--match-head-commit", HEAD])
++
++    def test_refusal_never_merges(self) -> None:
++        code, out, calls = self.invoke(self.fixture(ci="FAILED"))
++        self.assertEqual(code, merge_gate.EXIT_REFUSED, out)
++        self.assertIn("not VERIFIED", out)
++        self.assertFalse([c for c in calls if c[:2] in (["pr", "merge"], ["pr", "ready"])])
++
++    def test_dry_run_never_merges(self) -> None:
++        code, out, calls = self.invoke(self.fixture(), "--dry-run")
++        self.assertEqual(code, merge_gate.EXIT_OK, out)
++        self.assertIn("would merge", out)
++        self.assertFalse([c for c in calls if c[:2] == ["pr", "merge"]])
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/.claude/tests/test_unattended.py b/.claude/tests/test_unattended.py
+index 11c0582..ef84061 100644
+--- a/.claude/tests/test_unattended.py
++++ b/.claude/tests/test_unattended.py
+@@ -283,7 +283,6 @@ class PermissionTableTest(GuardCase):
+             "gh pr merge 2",
+             "gh pr ready 2",
+             "gh release create v1.0.0",
+-            "gh workflow run ci.yml",
+             "gh api -X PUT repos/o/r/pulls/2/merge",
+             "gh api -X DELETE repos/o/r/git/refs/heads/x",
+             "gh api repos/o/r/pulls -f title=x -f head=b -f base=main",
+@@ -324,6 +323,9 @@ class PermissionTableTest(GuardCase):
+             "gh pr create --draft --title 'feat: x' --body 'Adds x.'",
+             "gh pr edit 2 --body 'Updated.'",
+             "gh pr comment 2 --body 'Rebased.'",
++            "gh workflow run verify.yml --ref feat/p02-01-example",
++            "gh run rerun 123 --failed",
++            "python3 .claude/bin/merge_gate.py 2 --dry-run",
+             "gh api repos/o/r/pulls/2",
+             "gh api -X PATCH repos/o/r/pulls/2 -f body=ok",
+             "gh api repos/o/r/issues/2/comments -f body=ok",
+-- 
+2.43.0
+
