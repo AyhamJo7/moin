@@ -1900,6 +1900,12 @@ Source: `/tmp/moin-review/sec-g02.md`, independent acceptance review of group 2 
 | P06.14    | IN_PROGRESS | bd1b930 | EV-P06-014 | Section tick removed because two children are unticked.                                                                                                                                                  |
 | P06.03.06 | IN_PROGRESS | bd1b930 | EV-P06-013 | Unticked, PARTIAL. Holds: logger tenant enrichment and redaction. Missing: tracer or span enrichment across concurrent tenants (depends on P15.01.01).                                                   |
 
+## Security acceptance group 6 fix (2026-11-01, branch `fix/p06-06-disable-step-up`)
+
+| Item      | Status           | Commit  | Evidence   | Note                                                                                                                                                                                                                              |
+| --------- | ---------------- | ------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P06.06.04 | READY_FOR_REVIEW | 0949e93 | EV-P06-092 | F1: member disable requires a fresh step-up (was the only unguarded sensitive identity-access route); real-HTTP tests and a step-up classification of every route in the real-route matrix; KILLED. Independent re-review pending |
+
 ## Document acceptance C-READ (2026-11-01, branch `docs/p02-p04-document-acceptance`)
 
 Independent acceptance read by Codex of 36 P02, P03 and P04 document items on main `c714573` (source `docs/audits/2026-11-01-document-acceptance-read.md`): 19 CONFIRMED, 13 PARTIAL, 1 NOT CONFIRMED, 3 EXTERNAL. CONFIRMED means the documentary requirement is supported, not that its implementation, CI, legal conclusion or gate passed. Order followed: Status Ledger rows (P02, P03), phase headers and detail paragraphs, then this section. No tier is raised. Nothing is VERIFIED.
