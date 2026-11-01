@@ -73,7 +73,7 @@ export async function listDeadJobs(
     `select id::text, type, attempt, error_code, correlation_id::text,
             finished_at::text
      from job_runs where status = 'dead'
-     order by finished_at desc nulls last, id limit $1::integer`,
+     order by job_runs.finished_at desc nulls last, job_runs.id limit $1::integer`,
     [limit],
   );
   return found.rows.map((r) => ({
