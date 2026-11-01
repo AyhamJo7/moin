@@ -2063,3 +2063,17 @@ On 2026-11-01 the founder confirmed the 2026-11-15 expected date and delegated t
 | P02.02.09 | READY_FOR_REVIEW | 3510fea | EV-P02-096 | ADR-0002 and ADR-0034 accepted under the founder's delegation 2026-11-01 (decided by the orchestrating session; founder may override).                                                 |
 | P03.05.03 | READY_FOR_REVIEW | 3510fea | EV-P03-028 | Threat model review disposition accepted under delegation 2026-11-01, on the recorded independent BLOCK-MERGE review and its remediation (EV-P03-024). P03.05.01 and .02 stay PARTIAL. |
 | P03.01.02 | READY_FOR_REVIEW | 3510fea | EV-P03-029 | Eleven core ADRs accepted under delegation 2026-11-01 after ADR-0036 was written from the code on main; ticked.                                                                        |
+
+## C-RERUN P04 re-proof (2026-11-01, branch `docs/p04-rerun-evidence`)
+
+Stale evidence re-run on main `be4591d` in a clean clone: 7 items re-proved, 0 PARTIAL and unticked. Details: `docs/audits/2026-11-01-c-rerun-p04.md`. Full gates 14/14 on the clone at `be4591d`; gates on this branch's head are recorded in the PR. Independent re-review pending; nothing is VERIFIED.
+
+| Item      | Status           | Commit  | Evidence   | Note                                                                                               |
+| --------- | ---------------- | ------- | ---------- | -------------------------------------------------------------------------------------------------- |
+| P04.04.01 | READY_FOR_REVIEW | be4591d | EV-P04-009 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P04-001 |
+| P04.04.02 | READY_FOR_REVIEW | be4591d | EV-P04-010 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P04-002 |
+| P04.04.03 | READY_FOR_REVIEW | be4591d | EV-P04-011 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P04-003 |
+| P04.04.04 | READY_FOR_REVIEW | be4591d | EV-P04-012 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P04-004 |
+| P04.04.05 | READY_FOR_REVIEW | be4591d | EV-P04-013 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P04-005 |
+| P04.07.04 | READY_FOR_REVIEW | be4591d | EV-P04-014 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P04-007 |
+| P04.10.04 | READY_FOR_REVIEW | be4591d | EV-P04-015 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P04-008 |
