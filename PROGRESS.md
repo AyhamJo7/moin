@@ -1889,6 +1889,17 @@ third. Tier statuses are unchanged.
 | --------- | ---------------- | ------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | P06.14.01 | READY_FOR_REVIEW | 71a4551 | EV-P06-090 | F1: withSystemWork claim shares withTenant connection handling; child-process test fails before, passes after; KILLED. F2 (claim leases) and F3 (tracing) stay open as status corrections. Independent re-review pending |
 
+## P06 system-work status correction P06-G02-STATUS (2026-11-01, branch `docs/p06-system-work-status`)
+
+Source: `/tmp/moin-review/sec-g02.md`, independent acceptance review of group 2 at `be4591d` (MEDIUM F2 and F3). Docs only. Order followed: Status Ledger row first, P06 detail paragraph and item lines second, this row third. Every existing evidence ID stays attached.
+
+| Item      | Status      | Commit  | Evidence   | Note                                                                                                                                                                                                     |
+| --------- | ----------- | ------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P06.14.01 | IN_PROGRESS | bd1b930 | EV-P06-014 | Unticked. Holds: wrapper, identifier-only enumeration, per-item tenant transactions, connection-loss handling (EV-P06-090). Missing: a SKIP LOCKED claim template with lease expiry, or a PLAN decision. |
+| P06.14.02 | IN_PROGRESS | bd1b930 | EV-P06-015 | Unticked, PARTIAL. Holds: the cross-tenant envelope test, per-item rollback. Missing: a concurrent-claim exclusivity test and an expired-lease reclaim test (need P06.14.01).                            |
+| P06.14    | IN_PROGRESS | bd1b930 | EV-P06-014 | Section tick removed because two children are unticked.                                                                                                                                                  |
+| P06.03.06 | IN_PROGRESS | bd1b930 | EV-P06-013 | Unticked, PARTIAL. Holds: logger tenant enrichment and redaction. Missing: tracer or span enrichment across concurrent tenants (depends on P15.01.01).                                                   |
+
 ## Security acceptance group 1 fixes (2026-11-01, branch `fix/p06-02-rls-catalog-gaps`)
 
 Fixes for the independent acceptance review of P06.01 and P06.02 at `be4591d` (three HIGH, two MEDIUM,
