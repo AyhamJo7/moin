@@ -130,11 +130,12 @@ Ledger, Invariants, the target phase, and the IDs that phase references.
   against mistakes and drift, not a security boundary. Raw `gh pr ready`/`gh pr merge` and merging
   through `gh api` stay blocked.
   Always founder-merged: `.claude/`, `.github/`, `scripts/`, `infrastructure/`, `deploy/`, `docker/`,
-  Dockerfiles and compose files, `lefthook.yml`, `packages/config/`, `.semgrep/`, every `package.json`,
+  Dockerfiles and compose files, `lefthook.yml`, `packages/config/`, every `package.json`,
   `pnpm-workspace.yaml`, `pnpm-lock.yaml`, `turbo.json`, the vitest/eslint/playwright configs,
   `tsconfig*.json`, `next.config.*`, `.nvmrc`, `renovate.json`, `.gitattributes`,
-  `.dependency-cruiser.cjs`, the prettier, editorconfig, gitignore, gitleaks, dockerignore, tflint and
-  terraform-version files, `.env.example`, every `CLAUDE.md` and `AGENTS*.md`, `BLUEPRINT.md`.
+  `.dependency-cruiser.cjs`, the prettier, editorconfig, tflint and terraform-version files,
+  `.env.example`, every ignore file (`*ignore`), anything named for semgrep, trivy, gitleaks, hadolint,
+  codeql or osv-scanner, `.npmrc`, `.yarnrc*`, every `CLAUDE.md` and `AGENTS*.md`, `BLUEPRINT.md`.
   Founder-merged during the trial (until 2026-11-29): migrations, and identity, auth, session, RLS,
   definer, tool-guard, webhook, integrations, billing, usage, privacy, erasure, retention and deletion
   code. The globs in `.claude/policy/merge-gate.json` are authoritative.
