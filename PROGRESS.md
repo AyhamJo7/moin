@@ -1904,41 +1904,41 @@ Source: `/tmp/moin-review/sec-g02.md`, independent acceptance review of group 2 
 
 Independent acceptance read by Codex of 36 P02, P03 and P04 document items on main `c714573` (source `docs/audits/2026-11-01-document-acceptance-codex.md`): 19 CONFIRMED, 13 PARTIAL, 1 NOT CONFIRMED, 3 EXTERNAL. CONFIRMED means the documentary requirement is supported, not that its implementation, CI, legal conclusion or gate passed. Order followed: Status Ledger rows (P02, P03), phase headers and detail paragraphs, then this section. No tier is raised. Nothing is VERIFIED.
 
-| Item | Status | Commit | Evidence | Note |
-| ---- | ------ | ------ | -------- | ---- |
-| P02.01.04 | READY_FOR_REVIEW | c714573 | EV-P02-095 | Document read CONFIRMED by Codex. |
-| P02.01.05 | IN_PROGRESS | c714573 | EV-P02-095 | PARTIAL: EV-P02-006: purpose, quickstart, contribution rules and PLAN/ARCHITECTURE/SECURITY links exist. Full reason in the phase detail. |
-| P02.01.06 | READY_FOR_REVIEW | c714573 | EV-P02-095 | Document read CONFIRMED by Codex. |
-| P02.02.09 | WAITING_FOR_EXTERNAL | c714573 | EV-P02-095 | Counterparty: founder. Requested 2026-11-01. Expected: founder to confirm. Fallback: ADR-0002 and ADR-0034 stay Accepted by their author, treated as binding but unconfirmed. Owner: founder. |
-| P02.07.01 | READY_FOR_REVIEW | c714573 | EV-P02-095 | Document read CONFIRMED by Codex. |
-| P02.07.02 | READY_FOR_REVIEW | c714573 | EV-P02-095 | Document read CONFIRMED by Codex. |
-| P03.01.01 | READY_FOR_REVIEW | c714573 | EV-P03-027 | Document read CONFIRMED by Codex. |
-| P03.01.02 | WAITING_FOR_EXTERNAL | c714573 | EV-P03-027 | Counterparty: founder. Requested 2026-11-01. Expected: founder to confirm. Fallback: the ten Accepted ADRs stay usable, ADR-0036 stays deferred to P07. Owner: founder. |
-| P03.01.03 | READY_FOR_REVIEW | c714573 | EV-P03-027 | Document read CONFIRMED by Codex. |
-| P03.01.04 | READY_FOR_REVIEW | c714573 | EV-P03-027 | Document read CONFIRMED by Codex. |
-| P03.01.05 | IN_PROGRESS | c714573 | EV-P03-027 | PARTIAL: The literal checklist says no invariant lacks an ADR. Full reason in the phase detail. |
-| P03.02.01 | READY_FOR_REVIEW | c714573 | EV-P03-027 | Document read CONFIRMED by Codex. |
-| P03.02.02 | IN_PROGRESS | c714573 | EV-P03-027 | PARTIAL: EV-P03-007 claims every module, but the model has sections for only 12 of PLAN’s 18 modules. Full reason in the phase detail. |
-| P03.02.03 | READY_FOR_REVIEW | c714573 | EV-P03-027 | Document read CONFIRMED by Codex. |
-| P03.02.04 | READY_FOR_REVIEW | c714573 | EV-P03-027 | Document read CONFIRMED by Codex. |
-| P03.02.05 | READY_FOR_REVIEW | c714573 | EV-P03-027 | Document read CONFIRMED by Codex. |
-| P03.02.06 | READY_FOR_REVIEW | c714573 | EV-P03-027 | Document read CONFIRMED by Codex. |
-| P03.03.01 | READY_FOR_REVIEW | c714573 | EV-P03-027 | Document read CONFIRMED by Codex. |
-| P03.03.02 | IN_PROGRESS | c714573 | EV-P03-027 | PARTIAL: EV-P03-012: the 60 s sweep, 120 s orphan threshold, idempotency and alert are specified. Full reason in the phase detail. |
-| P03.03.03 | READY_FOR_REVIEW | c714573 | EV-P03-027 | Document read CONFIRMED by Codex. |
-| P03.03.04 | READY_FOR_REVIEW | c714573 | EV-P03-027 | Document read CONFIRMED by Codex. |
-| P03.04.01 | READY_FOR_REVIEW | c714573 | EV-P03-027 | Document read CONFIRMED by Codex. |
-| P03.04.02 | IN_PROGRESS | c714573 | EV-P03-027 | PARTIAL: EV-P03-018: trust zones and twelve classified flows exist. Full reason in the phase detail. |
-| P03.04.03 | IN_PROGRESS | c714573 | EV-P03-027 | PARTIAL: EV-P03-019 establishes category/guard presence, not complete party coverage. Full reason in the phase detail. |
-| P03.05.01 | IN_PROGRESS | c714573 | EV-P03-027 | PARTIAL: STRIDE/component sections and eleven residual risks exist, but not every mitigation is mapped: the voice repudiation row at line 32 (structured facts/. Full reason in the phase detail. |
-| P03.05.02 | IN_PROGRESS | c714573 | EV-P03-027 | PARTIAL: The named abuse cases, bot/toll traffic and tenant-as-attacker analysis are present. Full reason in the phase detail. |
-| P03.05.03 | WAITING_FOR_EXTERNAL | c714573 | EV-P03-027 | Counterparty: founder. Requested 2026-11-01. Expected: founder to confirm. Fallback: the threat model stays as the independent reviewer left it, no PILOT exit relies on it. Owner: founder. |
-| P03.06.01 | IN_PROGRESS | c714573 | EV-P03-027 | PARTIAL: There is extensive field/category/role/retention/method/exposure material, but no field-level processing-purpose mapping; the roles’ general purposes . Full reason in the phase detail. |
-| P03.06.02 | IN_PROGRESS | c714573 | EV-P03-027 | PARTIAL: EV-P03-014 describes aligned defaults, but later inventory rows classify actual calls.from_number/to_number and interaction_outcomes.facts as Contact . Full reason in the phase detail. |
-| P03.06.03 | IN_PROGRESS | c714573 | EV-P03-027 | PARTIAL: The evidence supplies a hand-maintained inventory checker and says it will later read Drizzle definitions. Full reason in the phase detail. |
-| P03.06.04 | IN_PROGRESS | c714573 | EV-P03-027 | NOT CONFIRMED: The cited verification explicitly covers the original five-column schema, not the current MVP, and supplies no generated schema-diff artefact. Full reason in the phase detail. |
-| P03.07.01 | IN_PROGRESS | c714573 | EV-P03-027 | PARTIAL: EV-P03-020: product/roles, audio/turn-log position, retention, regions, questions and German disclosure/emergency/allergen drafts exist. Full reason in the phase detail. |
-| P03.07.02 | READY_FOR_REVIEW | c714573 | EV-P03-027 | Document read CONFIRMED by Codex. |
-| P03.08.01 | READY_FOR_REVIEW | c714573 | EV-P03-027 | Document read CONFIRMED by Codex. |
-| P03.08.02 | IN_PROGRESS | c714573 | EV-P03-027 | PARTIAL: The register accounts for twenty invariants, but the EV explicitly concedes that nineteen automated mechanisms are named rather than all existing/runn. Full reason in the phase detail. |
-| P04.06.01 | READY_FOR_REVIEW | c714573 | EV-P04-016 | Document read CONFIRMED by Codex. |
+| Item      | Status               | Commit  | Evidence   | Note                                                                                                                                                                                              |
+| --------- | -------------------- | ------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P02.01.04 | READY_FOR_REVIEW     | c714573 | EV-P02-095 | Document read CONFIRMED by Codex.                                                                                                                                                                 |
+| P02.01.05 | IN_PROGRESS          | c714573 | EV-P02-095 | PARTIAL: EV-P02-006: purpose, quickstart, contribution rules and PLAN/ARCHITECTURE/SECURITY links exist. Full reason in the phase detail.                                                         |
+| P02.01.06 | READY_FOR_REVIEW     | c714573 | EV-P02-095 | Document read CONFIRMED by Codex.                                                                                                                                                                 |
+| P02.02.09 | WAITING_FOR_EXTERNAL | c714573 | EV-P02-095 | Counterparty: founder. Requested 2026-11-01. Expected: founder to confirm. Fallback: ADR-0002 and ADR-0034 stay Accepted by their author, treated as binding but unconfirmed. Owner: founder.     |
+| P02.07.01 | READY_FOR_REVIEW     | c714573 | EV-P02-095 | Document read CONFIRMED by Codex.                                                                                                                                                                 |
+| P02.07.02 | READY_FOR_REVIEW     | c714573 | EV-P02-095 | Document read CONFIRMED by Codex.                                                                                                                                                                 |
+| P03.01.01 | READY_FOR_REVIEW     | c714573 | EV-P03-027 | Document read CONFIRMED by Codex.                                                                                                                                                                 |
+| P03.01.02 | WAITING_FOR_EXTERNAL | c714573 | EV-P03-027 | Counterparty: founder. Requested 2026-11-01. Expected: founder to confirm. Fallback: the ten Accepted ADRs stay usable, ADR-0036 stays deferred to P07. Owner: founder.                           |
+| P03.01.03 | READY_FOR_REVIEW     | c714573 | EV-P03-027 | Document read CONFIRMED by Codex.                                                                                                                                                                 |
+| P03.01.04 | READY_FOR_REVIEW     | c714573 | EV-P03-027 | Document read CONFIRMED by Codex.                                                                                                                                                                 |
+| P03.01.05 | IN_PROGRESS          | c714573 | EV-P03-027 | PARTIAL: The literal checklist says no invariant lacks an ADR. Full reason in the phase detail.                                                                                                   |
+| P03.02.01 | READY_FOR_REVIEW     | c714573 | EV-P03-027 | Document read CONFIRMED by Codex.                                                                                                                                                                 |
+| P03.02.02 | IN_PROGRESS          | c714573 | EV-P03-027 | PARTIAL: EV-P03-007 claims every module, but the model has sections for only 12 of PLAN’s 18 modules. Full reason in the phase detail.                                                            |
+| P03.02.03 | READY_FOR_REVIEW     | c714573 | EV-P03-027 | Document read CONFIRMED by Codex.                                                                                                                                                                 |
+| P03.02.04 | READY_FOR_REVIEW     | c714573 | EV-P03-027 | Document read CONFIRMED by Codex.                                                                                                                                                                 |
+| P03.02.05 | READY_FOR_REVIEW     | c714573 | EV-P03-027 | Document read CONFIRMED by Codex.                                                                                                                                                                 |
+| P03.02.06 | READY_FOR_REVIEW     | c714573 | EV-P03-027 | Document read CONFIRMED by Codex.                                                                                                                                                                 |
+| P03.03.01 | READY_FOR_REVIEW     | c714573 | EV-P03-027 | Document read CONFIRMED by Codex.                                                                                                                                                                 |
+| P03.03.02 | IN_PROGRESS          | c714573 | EV-P03-027 | PARTIAL: EV-P03-012: the 60 s sweep, 120 s orphan threshold, idempotency and alert are specified. Full reason in the phase detail.                                                                |
+| P03.03.03 | READY_FOR_REVIEW     | c714573 | EV-P03-027 | Document read CONFIRMED by Codex.                                                                                                                                                                 |
+| P03.03.04 | READY_FOR_REVIEW     | c714573 | EV-P03-027 | Document read CONFIRMED by Codex.                                                                                                                                                                 |
+| P03.04.01 | READY_FOR_REVIEW     | c714573 | EV-P03-027 | Document read CONFIRMED by Codex.                                                                                                                                                                 |
+| P03.04.02 | IN_PROGRESS          | c714573 | EV-P03-027 | PARTIAL: EV-P03-018: trust zones and twelve classified flows exist. Full reason in the phase detail.                                                                                              |
+| P03.04.03 | IN_PROGRESS          | c714573 | EV-P03-027 | PARTIAL: EV-P03-019 establishes category/guard presence, not complete party coverage. Full reason in the phase detail.                                                                            |
+| P03.05.01 | IN_PROGRESS          | c714573 | EV-P03-027 | PARTIAL: STRIDE/component sections and eleven residual risks exist, but not every mitigation is mapped: the voice repudiation row at line 32 (structured facts/. Full reason in the phase detail. |
+| P03.05.02 | IN_PROGRESS          | c714573 | EV-P03-027 | PARTIAL: The named abuse cases, bot/toll traffic and tenant-as-attacker analysis are present. Full reason in the phase detail.                                                                    |
+| P03.05.03 | WAITING_FOR_EXTERNAL | c714573 | EV-P03-027 | Counterparty: founder. Requested 2026-11-01. Expected: founder to confirm. Fallback: the threat model stays as the independent reviewer left it, no PILOT exit relies on it. Owner: founder.      |
+| P03.06.01 | IN_PROGRESS          | c714573 | EV-P03-027 | PARTIAL: There is extensive field/category/role/retention/method/exposure material, but no field-level processing-purpose mapping; the roles’ general purposes . Full reason in the phase detail. |
+| P03.06.02 | IN_PROGRESS          | c714573 | EV-P03-027 | PARTIAL: EV-P03-014 describes aligned defaults, but later inventory rows classify actual calls.from_number/to_number and interaction_outcomes.facts as Contact . Full reason in the phase detail. |
+| P03.06.03 | IN_PROGRESS          | c714573 | EV-P03-027 | PARTIAL: The evidence supplies a hand-maintained inventory checker and says it will later read Drizzle definitions. Full reason in the phase detail.                                              |
+| P03.06.04 | IN_PROGRESS          | c714573 | EV-P03-027 | NOT CONFIRMED: The cited verification explicitly covers the original five-column schema, not the current MVP, and supplies no generated schema-diff artefact. Full reason in the phase detail.    |
+| P03.07.01 | IN_PROGRESS          | c714573 | EV-P03-027 | PARTIAL: EV-P03-020: product/roles, audio/turn-log position, retention, regions, questions and German disclosure/emergency/allergen drafts exist. Full reason in the phase detail.                |
+| P03.07.02 | READY_FOR_REVIEW     | c714573 | EV-P03-027 | Document read CONFIRMED by Codex.                                                                                                                                                                 |
+| P03.08.01 | READY_FOR_REVIEW     | c714573 | EV-P03-027 | Document read CONFIRMED by Codex.                                                                                                                                                                 |
+| P03.08.02 | IN_PROGRESS          | c714573 | EV-P03-027 | PARTIAL: The register accounts for twenty invariants, but the EV explicitly concedes that nineteen automated mechanisms are named rather than all existing/runn. Full reason in the phase detail. |
+| P04.06.01 | READY_FOR_REVIEW     | c714573 | EV-P04-016 | Document read CONFIRMED by Codex.                                                                                                                                                                 |
