@@ -1,0 +1,36 @@
+{
+  "verdict": "KILLED",
+  "repo": "/tmp/moin-xsuite",
+  "head": "b9f51a87652f821828e221472af9762e4d36f85e",
+  "mode": "committed",
+  "fix_ref": "b9f51a87652f821828e221472af9762e4d36f85e",
+  "fix_paths": [
+    "apps/server/src/modules/xsuite/cross-tenant.integration.test.ts",
+    "apps/server/src/modules/xsuite/production-roots.ts",
+    "apps/server/src/modules/xsuite/root-routes.test.ts",
+    "apps/server/src/modules/xsuite/root-routes.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "/tmp/moin-review/xsuite-mutation.sh a",
+  "started": "2026-11-01T12:24:00+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-11-01T12:24:08+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 3.53,
+    "tail": "mutation a NOT detected (vitest exit 0)"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 3.66,
+    "tail": "mutation a detected (vitest exit 1)"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/tmp/moin-xsuite/.git/claude-evidence/mutation/20261101T122400Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}

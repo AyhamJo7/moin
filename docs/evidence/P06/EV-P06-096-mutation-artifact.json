@@ -1,0 +1,36 @@
+{
+  "verdict": "KILLED",
+  "repo": "/tmp/moin-xsuite",
+  "head": "644bc77abc93e63e87605a53d4cbd999022fb37f",
+  "mode": "committed",
+  "fix_ref": "644bc77abc93e63e87605a53d4cbd999022fb37f",
+  "fix_paths": [
+    ".github/workflows/verify.yml",
+    "apps/server/src/modules/xsuite/coverage-artifact.test.ts",
+    "apps/server/src/modules/xsuite/cross-tenant.integration.test.ts",
+    "apps/server/src/modules/xsuite/probe-ledger.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "pnpm exec vitest run --project unit apps/server/src/modules/xsuite/coverage-artifact.test.ts",
+  "started": "2026-11-01T12:27:23+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-11-01T12:27:24+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 0.47,
+    "tail": "\n RUN  v5.0.2 /tmp/moin-xsuite\n\nNo test files found, exiting with code 1\n\nfilter: apps/server/src/modules/xsuite/coverage-artifact.test.ts\nprojects: unit\n\n|unit| \n\ninclude: {apps,packages,scripts}/**/*.test.ts, {apps,packages}/**/*.test.tsx\nexclude:  **/node_modules/**, **/dist/**, **/.next/**, **/*.integration.test.ts, **/e2e/**\n"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 0.72,
+    "tail": "\n RUN  v5.0.2 /tmp/moin-xsuite\n\n \u2713 |unit| apps/server/src/modules/xsuite/coverage-artifact.test.ts (2 tests) 4ms\n\n Test Files  1 passed (1)\n      Tests  2 passed (2)\n   Start at  13:27:24\n   Duration  234ms (transform 65%, setup 30%, tests 2%, import 2%, worker 1%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/tmp/moin-xsuite/.git/claude-evidence/mutation/20261101T122723Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}

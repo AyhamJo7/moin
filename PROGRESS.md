@@ -2063,3 +2063,15 @@ On 2026-11-01 the founder confirmed the 2026-11-15 expected date and delegated t
 | P02.02.09 | READY_FOR_REVIEW | 3510fea | EV-P02-096 | ADR-0002 and ADR-0034 accepted under the founder's delegation 2026-11-01 (decided by the orchestrating session; founder may override).                                                 |
 | P03.05.03 | READY_FOR_REVIEW | 3510fea | EV-P03-028 | Threat model review disposition accepted under delegation 2026-11-01, on the recorded independent BLOCK-MERGE review and its remediation (EV-P03-024). P03.05.01 and .02 stay PARTIAL. |
 | P03.01.02 | READY_FOR_REVIEW | 3510fea | EV-P03-029 | Eleven core ADRs accepted under delegation 2026-11-01 after ADR-0036 was written from the code on main; ticked.                                                                        |
+
+## Security acceptance group 12 fix (2026-11-01, branch `fix/p06-13-route-coverage-production-app`)
+
+Fixes for the independent acceptance review of P06.13 at `3ac126e` (one HIGH, one MEDIUM on P06.13.01, one MEDIUM on P06.13.05). Four fix commits, each mutation-killed. Full gates 14/14 at `b445b9a`. Independent re-review pending; nothing is VERIFIED.
+
+| Item      | Status           | Commit  | Evidence   | Note                                                                                                                                                                       |
+| --------- | ---------------- | ------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P06.13.02 | READY_FOR_REVIEW | b9f51a8 | EV-P06-095 | H1: coverage is measured against ApiRootModule and VoiceRootModule, not the test-assembled app; mutation A fails; KILLED.                                                  |
+| P06.13.02 | READY_FOR_REVIEW | 95d6ae4 | EV-P06-095 | H1: coverage counts probes that were called (23 of 23); a list route with a row and no call fails (mutation C2); the two session routes get probes; KILLED.                |
+| P06.13.05 | READY_FOR_REVIEW | 644bc77 | EV-P06-096 | M2: the CI artifact holds the per-route report and the figure; uploaded also when the suite fails; KILLED.                                                                 |
+| P06.13.01 | IN_PROGRESS      | b445b9a | EV-P06-097 | M1: 8 of 55 FORCE-RLS tables are seeded and 47 are registered with a reason; a new unseeded table fails the suite; KILLED. The item is not closed until the 47 are seeded. |
+| P06.13.02 | IN_PROGRESS      | 64cd636 | EV-P06-105 | Round 1 of PR 259: inherited handlers are now scanned (KILLED); EV-P06-096 mutation was invalid, real ones recorded. Not verified.                                         |

@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/tmp/moin-xsuite",
+  "head": "64cd63689f276c81f6b915fc6b2495b32ab7be93",
+  "mode": "committed",
+  "fix_ref": "644bc77abc93e63e87605a53d4cbd999022fb37f",
+  "fix_paths": [
+    ".github/workflows/verify.yml"
+  ],
+  "untracked_fix_files": [],
+  "test": "pnpm exec vitest run --project unit apps/server/src/modules/xsuite/coverage-artifact.test.ts",
+  "started": "2026-11-01T17:08:07+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-11-01T17:08:09+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 0.73,
+    "tail": "+\n+   verify:\n+     name: verify\n+     runs-on: ubuntu-24.04\n+     needs: [static, unit, integration, build, e2e, e2e-slice, rls-catalog, openapi-drift]\n+     if: always()\n+     steps:\n+       # One required check to configure in the ruleset, and it cannot pass while any job failed,\n+       # was cancelled or was skipped. `needs.*.result` rather than `success()` because a skipped\n+       # required job would otherwise be read as success.\n+       - name: All checks passed\n+         run: |\n+           results='${{ join(needs.*.result, ' ') }}'\n+           echo \"job results: $results\"\n+           for result in $results; do\n+             if [ \"$result\" != \"success\" ]; then\n+               echo \"a required job did not succeed: $result\" >&2\n+               exit 1\n+             fi\n+           done\n+\n\n \u276f Proxy.toContain scripts/mutation-evidence-probe.ts:84:27\n     82|       let result: unknown;\n     83|       try {\n     84|         result = original.apply(this, args);\n       |                           ^\n     85|       } catch (error) {\n     86|         record(name, error);\n \u276f apps/server/src/modules/xsuite/coverage-artifact.test.ts:38:24\n \u276f evidenceBody packages/testing/src/mutation/evidence-state.ts:277:13\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/1]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  1 failed | 1 passed (2)\n   Start at  18:08:08\n   Duration  265ms (transform 61%, setup 31%, tests 5%, import 2%, worker 1%)\n"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 0.73,
+    "tail": "\n RUN  v5.0.2 /tmp/moin-xsuite\n\n \u2713 |unit| apps/server/src/modules/xsuite/coverage-artifact.test.ts (2 tests) 4ms\n\n Test Files  1 passed (1)\n      Tests  2 passed (2)\n   Start at  18:08:08\n   Duration  244ms (transform 68%, setup 27%, tests 2%, import 2%, worker 1%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/tmp/moin-xsuite/.git/claude-evidence/mutation/20261101T170807Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}
