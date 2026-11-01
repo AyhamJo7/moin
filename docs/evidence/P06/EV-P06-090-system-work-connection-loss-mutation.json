@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/tmp/moin-sec02",
+  "head": "71a45511bdd71196de0a3ce1ef3bfd4d56cc0644",
+  "mode": "committed",
+  "fix_ref": "71a45511bdd71196de0a3ce1ef3bfd4d56cc0644",
+  "fix_paths": [
+    "packages/db/src/tenant.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "node ./node_modules/vitest/vitest.mjs run --project integration packages/db/src/system-work-connection-loss.integration.test.ts",
+  "started": "2026-11-01T04:09:02+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-11-01T04:09:05+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 2.07,
+    "tail": "    throw er; // Unhandled 'error' event\n    ^\n\nError: Connection terminated unexpectedly\n    at Connection.<anonymous> (/tmp/moin-sec02/node_modules/.pnpm/pg@8.23.0/node_modules/pg/lib/client.js:204:73)\n    at Connection.wrapper (node:events:639:12)\n    at Connection.emit (node:events:514:28)\n    at Socket.<anonymous> (/tmp/moin-sec02/node_modules/.pnpm/pg@8.23.0/node_modules/pg/lib/connection.js:64:12)\n    at Socket.emit (node:events:514:28)\n    at TCP.<anonymous> (node:net:362:12)\nEmitted 'error' event on Client instance at:\n    at Client._handleErrorEvent (/tmp/moin-sec02/node_modules/.pnpm/pg@8.23.0/node_modules/pg/lib/client.js:422:10)\n    at Connection.<anonymous> (/tmp/moin-sec02/node_modules/.pnpm/pg@8.23.0/node_modules/pg/lib/client.js:222:16)\n    at Connection.wrapper (node:events:639:12)\n    at Connection.emit (node:events:514:28)\n    at Socket.<anonymous> (/tmp/moin-sec02/node_modules/.pnpm/pg@8.23.0/node_modules/pg/lib/connection.js:64:12)\n    at Socket.emit (node:events:514:28)\n    at TCP.<anonymous> (node:net:362:12)\n\nNode.js v24.21.0\n\"\n\n \u276f Proxy.toMatch scripts/mutation-evidence-probe.ts:84:27\n     82|       let result: unknown;\n     83|       try {\n     84|         result = original.apply(this, args);\n       |                           ^\n     85|       } catch (error) {\n     86|         record(name, error);\n \u276f packages/db/src/system-work-connection-loss.integration.test.ts:38:32\n \u276f evidenceBody packages/testing/src/mutation/evidence-state.ts:277:13\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/1]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  1 failed (1)\n   Start at  05:09:02\n   Duration  1.78s (tests 88%, transform 8%, setup 4%)\n"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 2.37,
+    "tail": "\n RUN  v5.0.2 /tmp/moin-sec02\n\n \u2713 |integration| packages/db/src/system-work-connection-loss.integration.test.ts (1 test) 1288ms\n   \u2713 withSystemWork when the claim connection dies (1)\n     \u2713 rejects the claim, raises nothing uncaught, discards the connection and the process exits 0 345ms\n\n Test Files  1 passed (1)\n      Tests  1 passed (1)\n   Start at  05:09:05\n   Duration  2.05s (tests 90%, transform 6%, setup 3%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/tmp/moin-sec02/.git/claude-evidence/mutation/20261101T040902Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}
