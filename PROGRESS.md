@@ -1900,6 +1900,43 @@ Source: `/tmp/moin-review/sec-g02.md`, independent acceptance review of group 2 
 | P06.14    | IN_PROGRESS | bd1b930 | EV-P06-014 | Section tick removed because two children are unticked.                                                                                                                                                  |
 | P06.03.06 | IN_PROGRESS | bd1b930 | EV-P06-013 | Unticked, PARTIAL. Holds: logger tenant enrichment and redaction. Missing: tracer or span enrichment across concurrent tenants (depends on P15.01.01).                                                   |
 
+## Security acceptance group 6 fix (2026-11-01, branch `fix/p06-06-disable-step-up`)
+
+| Item      | Status           | Commit  | Evidence   | Note                                                                                                                                                                                                                              |
+| --------- | ---------------- | ------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P06.06.04 | READY_FOR_REVIEW | 0949e93 | EV-P06-092 | F1: member disable requires a fresh step-up (was the only unguarded sensitive identity-access route); real-HTTP tests and a step-up classification of every route in the real-route matrix; KILLED. Independent re-review pending |
+
+## Security acceptance group 1 fixes (2026-11-01, branch `fix/p06-02-rls-catalog-gaps`)
+
+Fixes for the independent acceptance review of P06.01 and P06.02 at `be4591d` (three HIGH, two MEDIUM,
+one LOW; all false negatives of the guard or gaps in its proof, no leak in the existing policies). Full
+gates 14/14 at `93418b0`. Independent re-review pending; nothing is VERIFIED.
+
+| Item      | Status           | Commit  | Evidence   | Note                                                                                                          |
+| --------- | ---------------- | ------- | ---------- | ------------------------------------------------------------------------------------------------------------- |
+| P06.02.04 | READY_FOR_REVIEW | eb56697 | EV-P06-087 | F1 permissive-policy predicates, F2 FK column pairs, F3 every schema, partitioned table and view; each KILLED |
+| P06.02.03 | READY_FOR_REVIEW | d8e3dbe | EV-P06-087 | F2: a key that maps organisation_id to the target id is a finding; the exploit is shown as moin_app           |
+| P06.01.02 | READY_FOR_REVIEW | 90902a2 | EV-P06-088 | F4: migration 0078, no PUBLIC EXECUTE on new functions; catalog finding; KILLED                               |
+| P06.02.06 | READY_FOR_REVIEW | c7f4a4d | EV-P06-089 | F5: write matrix generated from the live catalog (55 tables, audit_events registered); mutants killed         |
+| P06.02.02 | READY_FOR_REVIEW | 863901f | EV-P06-089 | F6: migration lint requires the helper for new tenant RLS; 12 older migrations (14 tables) grandfathered      |
+
+## Security acceptance group 1 fix, review round 1 (2026-11-01, branch `fix/p06-02-rls-catalog-gaps`)
+
+Independent review of #250 at `d94e2d1` (REQUEST_CHANGES, one HIGH). Merged main `c714573` first (`cc5b9a3`), then one fix commit. Full gates 14/14 at `98e0f2f`. Independent re-review pending; nothing is VERIFIED.
+
+| Item      | Status           | Commit  | Evidence   | Note                                                                                                                                                                                                  |
+| --------- | ---------------- | ------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P06.02.03 | READY_FOR_REVIEW | 98e0f2f | EV-P06-093 | HIGH F1: the foreign-key query uses the same schema scope as the table inventory; swapped and missing-column keys on a child table in another schema are findings and the CLI exits non-zero; KILLED. |
+| P06.02.04 | READY_FOR_REVIEW | 98e0f2f | EV-P06-093 | The F3 inventory now reaches the keys of tenant tables outside public; the bound-key control passes and the CLI exits 0.                                                                              |
+
+## Security acceptance group 1 fix, review round 2 (2026-11-01, branch `fix/p06-02-rls-catalog-gaps`)
+
+Independent review of #250 at `d7c0d9d` (REQUEST_CHANGES, one HIGH). One fix commit on top. Full gates 14/14 at `29df927`. Independent re-review pending; nothing is VERIFIED.
+
+| Item      | Status           | Commit  | Evidence   | Note                                                                                                                                                                                                       |
+| --------- | ---------------- | ------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P06.02.03 | READY_FOR_REVIEW | 29df927 | EV-P06-094 | HIGH F1: the foreign-key tenant-pair exemption names public.organisations and the organisation_id to id mapping only; single-column and swapped keys to another-schema organisations fail the CLI; KILLED. |
+
 ## C-RERUN P02 re-proof (2026-11-01, branch `docs/p02-rerun-evidence`)
 
 Stale evidence re-run on main `be4591d` in a clean clone: 38 items re-proved, 7 PARTIAL and unticked. Details: `docs/audits/2026-11-01-c-rerun-p02.md`. Full gates 14/14 on the clone at `be4591d`; gates on this branch's head are recorded in the PR. Independent re-review pending; nothing is VERIFIED.

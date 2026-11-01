@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { checkDirectory, checkSql } from './check-migrations.ts';
+import { HAND_WRITTEN_RLS_GRANDFATHERED, checkDirectory, checkSql } from './check-migrations.ts';
 
 const FIXTURES = resolve(dirname(fileURLToPath(import.meta.url)), '__fixtures__', 'migrations');
 
@@ -88,5 +88,66 @@ describe('migration safety check (QG-08, INV-17)', () => {
     expect(
       checkDirectory(resolve(FIXTURES, '..', '..', '..', 'packages', 'db', 'migrations')),
     ).toStrictEqual([]);
+  });
+});
+
+describe('tenant row-level security goes through app.apply_tenant_rls (F6)', () => {
+  const HAND_WRITTEN = `CREATE TABLE widgets (
+  organisation_id uuid NOT NULL REFERENCES organisations (id),
+  id uuid NOT NULL PRIMARY KEY,
+  UNIQUE (organisation_id, id)
+);
+ALTER TABLE widgets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE widgets FORCE ROW LEVEL SECURITY;
+CREATE POLICY widgets_tenant ON widgets USING (organisation_id = app.current_org());`;
+
+  const WITH_HELPER = `CREATE TABLE widgets (
+  organisation_id uuid NOT NULL REFERENCES organisations (id),
+  id uuid NOT NULL PRIMARY KEY,
+  UNIQUE (organisation_id, id)
+);
+SELECT app.apply_tenant_rls('widgets');`;
+
+  it('rejects a new migration that writes the policy by hand', () => {
+    expect(checkSql('0100_widgets.sql', HAND_WRITTEN).map((f) => f.rule)).toStrictEqual([
+      'tenant-rls-not-via-helper',
+    ]);
+  });
+
+  it('rejects a tenant table that never reaches the helper', () => {
+    const forgotten = WITH_HELPER.replace("SELECT app.apply_tenant_rls('widgets');", 'SELECT 1;');
+    const findings = checkSql('0100_widgets.sql', forgotten);
+    expect(findings.map((f) => f.rule)).toStrictEqual(['tenant-rls-not-via-helper']);
+    expect(findings[0]?.detail).toContain('widgets');
+  });
+
+  it('accepts the helper, a table with no tenant column, and a reasoned opt-out', () => {
+    expect(checkSql('0100_widgets.sql', WITH_HELPER)).toStrictEqual([]);
+    expect(checkSql('0100_plain.sql', 'CREATE TABLE plain (id uuid PRIMARY KEY);')).toStrictEqual(
+      [],
+    );
+    const reasoned = `-- migration-check: allow tenant-rls-not-via-helper because the policy joins a second table\n${HAND_WRITTEN}`;
+    expect(checkSql('0100_widgets.sql', reasoned)).toStrictEqual([]);
+  });
+
+  it('does not fire on a comment, a foreign-key column list or a NO FORCE toggle', () => {
+    const toggle = `-- ENABLE ROW LEVEL SECURITY is done by the helper
+CREATE TABLE gadgets (
+  organisation_id uuid NOT NULL REFERENCES organisations (id),
+  id uuid NOT NULL PRIMARY KEY,
+  FOREIGN KEY (organisation_id, id) REFERENCES widgets (organisation_id, id)
+);
+SELECT app.apply_tenant_rls('gadgets');
+ALTER TABLE gadgets NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE gadgets FORCE ROW LEVEL SECURITY;`;
+    expect(checkSql('0100_gadgets.sql', toggle)).toStrictEqual([]);
+  });
+
+  it('grandfathers exactly the twelve older migrations that cover fourteen tables, by name', () => {
+    expect(Object.keys(HAND_WRITTEN_RLS_GRANDFATHERED)).toHaveLength(12);
+    expect(Object.values(HAND_WRITTEN_RLS_GRANDFATHERED).flat()).toHaveLength(14);
+    // The same text under a grandfathered name passes; under any other name it is a finding.
+    expect(checkSql('0062_job_envelope.sql', HAND_WRITTEN)).toStrictEqual([]);
+    expect(checkSql('0079_job_envelope.sql', HAND_WRITTEN)).toHaveLength(1);
   });
 });

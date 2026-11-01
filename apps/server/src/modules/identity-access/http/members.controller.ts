@@ -174,6 +174,7 @@ export class MembersController {
 
   @Post('disable')
   @Require('users:manage')
+  @UseGuards(RequireStepUpGuard)
   @HttpCode(200)
   async disable(@Body() raw: unknown, @Res({ passthrough: true }) reply: FastifyReply) {
     const parsed = memberBody.safeParse(raw);

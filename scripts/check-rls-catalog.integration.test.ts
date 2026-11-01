@@ -9,6 +9,7 @@
 
 import { createTestDatabase, type TestDatabase } from '@moin/testing';
 import { createPool } from '@moin/db/pool';
+import { withTenant } from '@moin/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { randomBytes } from 'node:crypto';
 import {
@@ -17,9 +18,10 @@ import {
   allowlistedDefiners,
   type Finding,
 } from './check-rls-catalog.ts';
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { evidenceTest } from '@moin/testing';
 
 let database: TestDatabase;
@@ -56,6 +58,513 @@ afterAll(async () => {
 describe('the migrated schema', () => {
   it('has no findings', async () => {
     expect(await findings()).toStrictEqual([]);
+  });
+});
+
+const ORG_A = '11111111-1111-4111-8111-111111111111';
+const ORG_B = '22222222-2222-4222-8222-222222222222';
+const LOCATION_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const LOCATION_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+
+/** Runs one statement as the migration role with parameters (fixtures only). */
+async function fixture(sql: string, params: readonly unknown[] = []): Promise<void> {
+  await database.fixturePool().query(sql, [...params]);
+}
+
+/** Two tenants with one location each: the minimum to tell "my rows" from "someone else's". */
+async function seedTwoTenants(): Promise<void> {
+  await fixture(
+    `INSERT INTO organisations (id, slug, name) VALUES ($1, 'sec-a', 'Alpha'), ($2, 'sec-b', 'Beta')
+     ON CONFLICT DO NOTHING`,
+    [ORG_A, ORG_B],
+  );
+  await fixture(
+    `INSERT INTO locations (organisation_id, id, name) VALUES ($1, $2, 'A site'), ($3, $4, 'B site')
+     ON CONFLICT DO NOTHING`,
+    [ORG_A, LOCATION_A, ORG_B, LOCATION_B],
+  );
+}
+
+/** What tenant A can read from `locations` through the application role. */
+async function locationsVisibleToA(): Promise<number> {
+  return withTenant(database.pool(), ORG_A, async (client) => {
+    const rows = await client.query(`SELECT id FROM locations`);
+    return rows.rows.length;
+  });
+}
+
+describe('permissive policies beyond the reviewed predicate (F1)', () => {
+  evidenceTest(
+    'an allow-all policy beside the reviewed policy is reported, and it really leaks',
+    async () => {
+      await seedTwoTenants();
+      expect(await locationsVisibleToA()).toBe(1);
+      expect(rulesFor(await findings(), 'locations')).toStrictEqual([]);
+
+      await ddl(`CREATE POLICY sec01_allow_all ON locations USING (true) WITH CHECK (true)`);
+      try {
+        // The unsafe fixture: RLS is enabled and forced, every command is covered, a WITH CHECK
+        // exists. Only the predicate differs, and tenant A now reads tenant B's location.
+        expect(await locationsVisibleToA()).toBe(2);
+        expect(rulesFor(await findings(), 'locations')).toStrictEqual([
+          'policy-unreviewed-permissive',
+        ]);
+      } finally {
+        await ddl(`DROP POLICY sec01_allow_all ON locations`);
+      }
+      expect(rulesFor(await findings(), 'locations')).toStrictEqual([]);
+    },
+  );
+
+  evidenceTest(
+    'a policy bound to some roles, or with a different predicate, is reported',
+    async () => {
+      await ddl(`CREATE POLICY sec01_other ON locations FOR SELECT TO moin_app
+      USING (organisation_id IS NOT NULL)`);
+      try {
+        expect(rulesFor(await findings(), 'locations')).toContain('policy-unreviewed-permissive');
+      } finally {
+        await ddl(`DROP POLICY sec01_other ON locations`);
+      }
+      // A RESTRICTIVE policy only narrows what is visible, so it is not a widening.
+      await ddl(`CREATE POLICY sec01_restrict ON locations AS RESTRICTIVE FOR SELECT
+      USING (organisation_id IS NOT NULL)`);
+      try {
+        expect(rulesFor(await findings(), 'locations')).toStrictEqual([]);
+      } finally {
+        await ddl(`DROP POLICY sec01_restrict ON locations`);
+      }
+    },
+  );
+
+  evidenceTest('a registered exception passes only for the table and text it names', async () => {
+    // memberships carries the reviewed request-lookup policies and the migrated schema is clean.
+    expect(rulesFor(await findings(), 'memberships')).toStrictEqual([]);
+    await ddl(`CREATE POLICY sec01_members_all ON memberships FOR SELECT USING (true)`);
+    try {
+      expect(rulesFor(await findings(), 'memberships')).toStrictEqual([
+        'policy-unreviewed-permissive',
+      ]);
+    } finally {
+      await ddl(`DROP POLICY sec01_members_all ON memberships`);
+    }
+  });
+});
+
+describe('a composite foreign key must bind tenant to tenant (F2)', () => {
+  const FIXTURE_CHILD = `
+    CREATE TABLE sec02_child (
+      organisation_id uuid NOT NULL REFERENCES organisations (id),
+      id uuid NOT NULL PRIMARY KEY,
+      location_id uuid NOT NULL,
+      UNIQUE (organisation_id, id),
+      CONSTRAINT FKPAIR
+    );
+    SELECT app.apply_tenant_rls('sec02_child');
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE sec02_child TO moin_app;`;
+
+  async function insertChildAsA(): Promise<void> {
+    await withTenant(database.pool(), ORG_A, async (client) => {
+      await client.query(
+        `INSERT INTO sec02_child (organisation_id, id, location_id) VALUES ($1, gen_random_uuid(), $2)`,
+        [ORG_A, ORG_B],
+      );
+    });
+  }
+
+  evidenceTest(
+    'a key that holds organisation_id but binds it to the target id is reported, and it really links tenants',
+    async () => {
+      await seedTwoTenants();
+      // Tenant B's location whose id equals tenant A's organisation id: the swapped key matches
+      // the child's (organisation_id, location_id) = (A, B) against the parent's (id, organisation_id).
+      await fixture(
+        `INSERT INTO locations (organisation_id, id, name) VALUES ($1, $2, 'B decoy')`,
+        [ORG_B, ORG_A],
+      );
+      await ddl(
+        FIXTURE_CHILD.replace(
+          'CONSTRAINT FKPAIR',
+          'CONSTRAINT sec02_swapped FOREIGN KEY (organisation_id, location_id) REFERENCES locations (id, organisation_id)',
+        ),
+      );
+      try {
+        // The database accepts a tenant-A row that points at tenant B's row.
+        await insertChildAsA();
+        const found = (await findings()).filter((f) => f.subject === 'sec02_child.sec02_swapped');
+        expect(found.map((f) => f.rule)).toStrictEqual(['foreign-key-tenant-mismapped']);
+      } finally {
+        await ddl(`DROP TABLE sec02_child`);
+        await fixture(`DELETE FROM locations WHERE id = $1`, [ORG_A]);
+      }
+    },
+  );
+
+  evidenceTest('the properly bound key passes and refuses the same reference', async () => {
+    await seedTwoTenants();
+    await ddl(
+      FIXTURE_CHILD.replace(
+        'CONSTRAINT FKPAIR',
+        'CONSTRAINT sec02_bound FOREIGN KEY (organisation_id, location_id) REFERENCES locations (organisation_id, id)',
+      ),
+    );
+    try {
+      expect((await findings()).filter((f) => f.subject.startsWith('sec02_child'))).toStrictEqual(
+        [],
+      );
+      await expect(insertChildAsA()).rejects.toMatchObject({ code: '23503' });
+    } finally {
+      await ddl(`DROP TABLE sec02_child`);
+    }
+  });
+
+  evidenceTest('a key that leaves organisation_id out is still reported', async () => {
+    await ddl(
+      FIXTURE_CHILD.replace(
+        'CONSTRAINT FKPAIR',
+        'CONSTRAINT sec02_omitted FOREIGN KEY (location_id) REFERENCES locations (id)',
+      ),
+    );
+    try {
+      expect(
+        (await findings())
+          .filter((f) => f.subject === 'sec02_child.sec02_omitted')
+          .map((f) => f.rule),
+      ).toStrictEqual(['foreign-key-not-composite']);
+    } finally {
+      await ddl(`DROP TABLE sec02_child`);
+    }
+  });
+});
+
+describe('the foreign keys of a tenant table outside public are checked too (R1-F1)', () => {
+  // The inventory reads every application schema; the foreign-key mapping has to read the same
+  // ones, or a tenant table in another schema passes its policy checks while its keys are never
+  // looked at. The child is created by the migration role, as a migration would create it.
+  const CHILD = `
+    CREATE SCHEMA r1fk;
+    GRANT USAGE ON SCHEMA r1fk TO moin_app;
+    CREATE TABLE r1fk.child (
+      organisation_id uuid NOT NULL REFERENCES public.organisations (id),
+      id uuid NOT NULL PRIMARY KEY,
+      location_id uuid NOT NULL,
+      UNIQUE (organisation_id, id),
+      CONSTRAINT FKPAIR
+    );
+    SELECT app.apply_tenant_rls('r1fk.child');
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE r1fk.child TO moin_app;`;
+
+  /** Tenant A inserts a row whose location is tenant B's organisation id, through moin_app. */
+  async function insertChildAsA(): Promise<void> {
+    await withTenant(database.pool(), ORG_A, async (client) => {
+      await client.query(
+        `INSERT INTO r1fk.child (organisation_id, id, location_id) VALUES ($1, gen_random_uuid(), $2)`,
+        [ORG_A, ORG_B],
+      );
+    });
+  }
+
+  /** The catalog check exactly as CI runs it: the command line, against this database. */
+  function runCli(): { status: number | null; stderr: string } {
+    const run = spawnSync(
+      process.execPath,
+      ['scripts/check-rls-catalog.ts', '--url', database.migrationUrl],
+      { cwd: resolve(import.meta.dirname, '..'), encoding: 'utf8' },
+    );
+    return { status: run.status, stderr: run.stderr };
+  }
+
+  async function inOtherSchema(constraint: string, body: () => Promise<void>): Promise<void> {
+    await seedTwoTenants();
+    await ddl(CHILD.replace('CONSTRAINT FKPAIR', constraint));
+    try {
+      await body();
+    } finally {
+      await ddl(`DROP SCHEMA r1fk CASCADE`);
+      await fixture(`DELETE FROM locations WHERE id = $1`, [ORG_A]);
+    }
+  }
+
+  evidenceTest(
+    'a swapped key on a table in another schema is reported, links tenants through moin_app, and fails the CLI',
+    async () => {
+      // Tenant B's location whose id equals tenant A's organisation id, as in the public case.
+      await seedTwoTenants();
+      await fixture(
+        `INSERT INTO locations (organisation_id, id, name) VALUES ($1, $2, 'B decoy')`,
+        [ORG_B, ORG_A],
+      );
+      await inOtherSchema(
+        'CONSTRAINT r1_swapped FOREIGN KEY (organisation_id, location_id) REFERENCES public.locations (id, organisation_id)',
+        async () => {
+          // The real application role writes a tenant-A row that references tenant B's row.
+          await insertChildAsA();
+          const found = (await findings()).filter((f) => f.subject.startsWith('r1fk.child'));
+          expect(found.map((f) => `${f.rule} ${f.subject}`)).toStrictEqual([
+            'foreign-key-tenant-mismapped r1fk.child.r1_swapped',
+          ]);
+          const cli = runCli();
+          expect(cli.status).not.toBe(0);
+          expect(cli.stderr).toContain('[foreign-key-tenant-mismapped] r1fk.child.r1_swapped');
+        },
+      );
+    },
+  );
+
+  evidenceTest(
+    'a key without organisation_id on a table in another schema is reported',
+    async () => {
+      await inOtherSchema(
+        'CONSTRAINT r1_omitted FOREIGN KEY (location_id) REFERENCES public.locations (id)',
+        async () => {
+          expect(
+            (await findings())
+              .filter((f) => f.subject.startsWith('r1fk.child'))
+              .map((f) => `${f.rule} ${f.subject}`),
+          ).toStrictEqual(['foreign-key-not-composite r1fk.child.r1_omitted']);
+          expect(runCli().status).not.toBe(0);
+        },
+      );
+    },
+  );
+
+  evidenceTest(
+    'the correctly bound key on a table in another schema passes, refuses the reference, and the CLI exits 0',
+    async () => {
+      await inOtherSchema(
+        'CONSTRAINT r1_bound FOREIGN KEY (organisation_id, location_id) REFERENCES public.locations (organisation_id, id)',
+        async () => {
+          expect(
+            (await findings()).filter((f) => f.subject.startsWith('r1fk.child')),
+          ).toStrictEqual([]);
+          await expect(insertChildAsA()).rejects.toMatchObject({ code: '23503' });
+          expect(runCli().status).toBe(0);
+        },
+      );
+    },
+  );
+
+  describe('a table named organisations in another schema is not the tenant root (R2-F1)', () => {
+    // Only public.organisations is its own tenant. An ordinary tenant table that happens to be
+    // called organisations gets the normal tenant-pair validation for every key into it.
+    const PARENT_AND_CHILD = `
+      CREATE SCHEMA r2org;
+      GRANT USAGE ON SCHEMA r2org TO moin_app;
+      CREATE TABLE r2org.organisations (
+        organisation_id uuid NOT NULL,
+        id uuid NOT NULL PRIMARY KEY,
+        UNIQUE (organisation_id, id)
+      );
+      CREATE TABLE r2org.child (
+        organisation_id uuid NOT NULL REFERENCES public.organisations (id),
+        id uuid NOT NULL PRIMARY KEY,
+        parent_id uuid NOT NULL,
+        UNIQUE (organisation_id, id),
+        CONSTRAINT FKPAIR
+      );
+      SELECT app.apply_tenant_rls('r2org.organisations');
+      SELECT app.apply_tenant_rls('r2org.child');
+      GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE r2org.organisations, r2org.child TO moin_app;`;
+    const PARENT_OF_B = '33333333-3333-4333-8333-333333333333';
+
+    async function insertChildOfBsParentAsA(): Promise<void> {
+      await withTenant(database.pool(), ORG_A, async (client) => {
+        await client.query(
+          `INSERT INTO r2org.child (organisation_id, id, parent_id) VALUES ($1, gen_random_uuid(), $2)`,
+          [ORG_A, PARENT_OF_B],
+        );
+      });
+    }
+
+    async function underNamedParent(constraint: string, body: () => Promise<void>): Promise<void> {
+      await seedTwoTenants();
+      await ddl(PARENT_AND_CHILD.replace('CONSTRAINT FKPAIR', constraint));
+      try {
+        await fixture(`INSERT INTO r2org.organisations (organisation_id, id) VALUES ($1, $2)`, [
+          ORG_B,
+          PARENT_OF_B,
+        ]);
+        await body();
+      } finally {
+        await ddl(`DROP SCHEMA r2org CASCADE`);
+      }
+    }
+
+    function childFindings(list: readonly Finding[]): string[] {
+      return list
+        .filter((f) => f.subject.startsWith('r2org.child'))
+        .map((f) => `${f.rule} ${f.subject}`);
+    }
+
+    evidenceTest(
+      'a single-column key to it is reported, links tenants through moin_app, and fails the CLI',
+      async () => {
+        await underNamedParent(
+          'CONSTRAINT r2_single FOREIGN KEY (parent_id) REFERENCES r2org.organisations (id)',
+          async () => {
+            // Tenant A's row points at tenant B's parent and the database accepts it.
+            await insertChildOfBsParentAsA();
+            expect(childFindings(await findings())).toStrictEqual([
+              'foreign-key-not-composite r2org.child.r2_single',
+            ]);
+            expect(runCli().status).toBe(1);
+          },
+        );
+      },
+    );
+
+    evidenceTest('a swapped composite key to it is reported and fails the CLI', async () => {
+      await underNamedParent(
+        'CONSTRAINT r2_swapped FOREIGN KEY (organisation_id, parent_id) REFERENCES r2org.organisations (id, organisation_id)',
+        async () => {
+          expect(childFindings(await findings())).toStrictEqual([
+            'foreign-key-tenant-mismapped r2org.child.r2_swapped',
+          ]);
+          expect(runCli().status).toBe(1);
+        },
+      );
+    });
+
+    evidenceTest(
+      'the correctly bound composite key to it passes, refuses the reference, and the CLI exits 0',
+      async () => {
+        await underNamedParent(
+          'CONSTRAINT r2_bound FOREIGN KEY (organisation_id, parent_id) REFERENCES r2org.organisations (organisation_id, id)',
+          async () => {
+            // The child's own organisation_id -> public.organisations(id) key is the tenant root
+            // mapping and stays exempt.
+            expect(childFindings(await findings())).toStrictEqual([]);
+            await expect(insertChildOfBsParentAsA()).rejects.toMatchObject({ code: '23503' });
+            expect(runCli().status).toBe(0);
+          },
+        );
+      },
+    );
+  });
+});
+
+describe('the inventory covers every reachable schema and relation kind (F3)', () => {
+  evidenceTest(
+    'a tenant table in an unregistered schema is reported, and its foreign row is readable',
+    async () => {
+      await seedTwoTenants();
+      await ddl(`CREATE SCHEMA sec03;
+        CREATE TABLE sec03.tenant_t (organisation_id uuid NOT NULL, id uuid PRIMARY KEY, note text);
+        CREATE TABLE sec03.plain_t (id uuid PRIMARY KEY);
+        GRANT USAGE ON SCHEMA sec03 TO moin_app;
+        GRANT SELECT ON sec03.tenant_t, sec03.plain_t TO moin_app;`);
+      try {
+        await fixture(
+          `INSERT INTO sec03.tenant_t (organisation_id, id, note) VALUES ($1, gen_random_uuid(), 'B secret')`,
+          [ORG_B],
+        );
+        // No policy, no RLS: tenant A reads tenant B's row.
+        const seen = await withTenant(
+          database.pool(),
+          ORG_A,
+          async (client) => (await client.query(`SELECT note FROM sec03.tenant_t`)).rows.length,
+        );
+        expect(seen).toBe(1);
+        const list = await findings();
+        expect(rulesFor(list, 'sec03.tenant_t')).toStrictEqual([
+          'no-composite-unique',
+          'no-policy',
+          'rls-not-enabled',
+          'rls-not-forced',
+        ]);
+        expect(rulesFor(list, 'sec03.plain_t')).toStrictEqual(['unregistered-global-table']);
+      } finally {
+        await ddl(`DROP SCHEMA sec03 CASCADE`);
+      }
+      expect((await findings()).filter((f) => f.subject.startsWith('sec03'))).toStrictEqual([]);
+    },
+  );
+
+  evidenceTest('a partitioned tenant table without RLS is reported', async () => {
+    await ddl(`CREATE TABLE sec03_part (organisation_id uuid NOT NULL, id uuid NOT NULL)
+      PARTITION BY HASH (organisation_id)`);
+    try {
+      expect(rulesFor(await findings(), 'sec03_part')).toContain('rls-not-enabled');
+    } finally {
+      await ddl(`DROP TABLE sec03_part`);
+    }
+  });
+
+  evidenceTest(
+    'a definer-style view over a tenant table is reported, and it really leaks',
+    async () => {
+      await seedTwoTenants();
+      // The view's owner is the migration/owner role, whose privileges ignore the policies.
+      await ddl(`CREATE VIEW sec03_locations AS SELECT * FROM locations;
+        GRANT SELECT ON sec03_locations TO moin_app;`);
+      const readThroughView = async (): Promise<number> =>
+        withTenant(
+          database.pool(),
+          ORG_A,
+          async (client) => (await client.query(`SELECT id FROM sec03_locations`)).rows.length,
+        );
+      try {
+        expect(await readThroughView()).toBe(2);
+        expect(rulesFor(await findings(), 'sec03_locations')).toStrictEqual([
+          'view-bypasses-tenant-policy',
+        ]);
+        // security_invoker makes the view obey the policies of the caller, and the finding goes.
+        await ddl(`ALTER VIEW sec03_locations SET (security_invoker = true)`);
+        expect(await readThroughView()).toBe(1);
+        expect(rulesFor(await findings(), 'sec03_locations')).toStrictEqual([]);
+      } finally {
+        await ddl(`DROP VIEW sec03_locations`);
+      }
+    },
+  );
+
+  evidenceTest('a materialised view over a tenant table is reported', async () => {
+    await ddl(`CREATE MATERIALIZED VIEW sec03_mat AS SELECT id, organisation_id FROM locations`);
+    try {
+      expect(rulesFor(await findings(), 'sec03_mat')).toStrictEqual([
+        'view-bypasses-tenant-policy',
+      ]);
+    } finally {
+      await ddl(`DROP MATERIALIZED VIEW sec03_mat`);
+    }
+  });
+
+  evidenceTest('a view that reads no tenant data is not reported', async () => {
+    await ddl(`CREATE VIEW sec03_plain_view AS SELECT 1 AS one`);
+    try {
+      expect(rulesFor(await findings(), 'sec03_plain_view')).toStrictEqual([]);
+    } finally {
+      await ddl(`DROP VIEW sec03_plain_view`);
+    }
+  });
+});
+
+describe('no function is callable by PUBLIC (F4)', () => {
+  evidenceTest('a function granted to PUBLIC is reported, and a revoke clears it', async () => {
+    // Created by the local owner, whose default privileges are PostgreSQL's: PUBLIC may execute.
+    await ddl(
+      `CREATE FUNCTION public.sec04_public_fn() RETURNS integer LANGUAGE sql AS 'SELECT 1'`,
+    );
+    try {
+      expect(rulesFor(await findings(), 'public.sec04_public_fn()')).toStrictEqual([
+        'function-public-execute',
+      ]);
+      await ddl(`REVOKE EXECUTE ON FUNCTION public.sec04_public_fn() FROM PUBLIC`);
+      expect(rulesFor(await findings(), 'public.sec04_public_fn()')).toStrictEqual([]);
+    } finally {
+      await ddl(`DROP FUNCTION public.sec04_public_fn()`);
+    }
+  });
+
+  evidenceTest('app.current_org() is no longer executable through PUBLIC', async () => {
+    const rows = await database.fixturePool().query<{ grantee: string }>(
+      `SELECT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee) END AS grantee
+       FROM pg_proc p, aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a
+       WHERE p.oid = 'app.current_org()'::regprocedure AND a.privilege_type = 'EXECUTE'`,
+    );
+    const grantees = rows.rows.map((row) => row.grantee);
+    expect(grantees).not.toContain('PUBLIC');
+    expect(grantees).toContain('moin_app');
   });
 });
 
