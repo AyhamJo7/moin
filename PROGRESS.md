@@ -1906,6 +1906,111 @@ Source: `/tmp/moin-review/sec-g02.md`, independent acceptance review of group 2 
 | --------- | ---------------- | ------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | P06.06.04 | READY_FOR_REVIEW | 0949e93 | EV-P06-092 | F1: member disable requires a fresh step-up (was the only unguarded sensitive identity-access route); real-HTTP tests and a step-up classification of every route in the real-route matrix; KILLED. Independent re-review pending |
 
+## Security acceptance group 1 fixes (2026-11-01, branch `fix/p06-02-rls-catalog-gaps`)
+
+Fixes for the independent acceptance review of P06.01 and P06.02 at `be4591d` (three HIGH, two MEDIUM,
+one LOW; all false negatives of the guard or gaps in its proof, no leak in the existing policies). Full
+gates 14/14 at `93418b0`. Independent re-review pending; nothing is VERIFIED.
+
+| Item      | Status           | Commit  | Evidence   | Note                                                                                                          |
+| --------- | ---------------- | ------- | ---------- | ------------------------------------------------------------------------------------------------------------- |
+| P06.02.04 | READY_FOR_REVIEW | eb56697 | EV-P06-087 | F1 permissive-policy predicates, F2 FK column pairs, F3 every schema, partitioned table and view; each KILLED |
+| P06.02.03 | READY_FOR_REVIEW | d8e3dbe | EV-P06-087 | F2: a key that maps organisation_id to the target id is a finding; the exploit is shown as moin_app           |
+| P06.01.02 | READY_FOR_REVIEW | 90902a2 | EV-P06-088 | F4: migration 0078, no PUBLIC EXECUTE on new functions; catalog finding; KILLED                               |
+| P06.02.06 | READY_FOR_REVIEW | c7f4a4d | EV-P06-089 | F5: write matrix generated from the live catalog (55 tables, audit_events registered); mutants killed         |
+| P06.02.02 | READY_FOR_REVIEW | 863901f | EV-P06-089 | F6: migration lint requires the helper for new tenant RLS; 12 older migrations (14 tables) grandfathered      |
+
+## Security acceptance group 1 fix, review round 1 (2026-11-01, branch `fix/p06-02-rls-catalog-gaps`)
+
+Independent review of #250 at `d94e2d1` (REQUEST_CHANGES, one HIGH). Merged main `c714573` first (`cc5b9a3`), then one fix commit. Full gates 14/14 at `98e0f2f`. Independent re-review pending; nothing is VERIFIED.
+
+| Item      | Status           | Commit  | Evidence   | Note                                                                                                                                                                                                  |
+| --------- | ---------------- | ------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P06.02.03 | READY_FOR_REVIEW | 98e0f2f | EV-P06-093 | HIGH F1: the foreign-key query uses the same schema scope as the table inventory; swapped and missing-column keys on a child table in another schema are findings and the CLI exits non-zero; KILLED. |
+| P06.02.04 | READY_FOR_REVIEW | 98e0f2f | EV-P06-093 | The F3 inventory now reaches the keys of tenant tables outside public; the bound-key control passes and the CLI exits 0.                                                                              |
+
+## Security acceptance group 1 fix, review round 2 (2026-11-01, branch `fix/p06-02-rls-catalog-gaps`)
+
+Independent review of #250 at `d7c0d9d` (REQUEST_CHANGES, one HIGH). One fix commit on top. Full gates 14/14 at `29df927`. Independent re-review pending; nothing is VERIFIED.
+
+| Item      | Status           | Commit  | Evidence   | Note                                                                                                                                                                                                       |
+| --------- | ---------------- | ------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P06.02.03 | READY_FOR_REVIEW | 29df927 | EV-P06-094 | HIGH F1: the foreign-key tenant-pair exemption names public.organisations and the organisation_id to id mapping only; single-column and swapped keys to another-schema organisations fail the CLI; KILLED. |
+
+## C-RERUN P02 re-proof (2026-11-01, branch `docs/p02-rerun-evidence`)
+
+Stale evidence re-run on main `be4591d` in a clean clone: 38 items re-proved, 7 PARTIAL and unticked. Details: `docs/audits/2026-11-01-c-rerun-p02.md`. Full gates 14/14 on the clone at `be4591d`; gates on this branch's head are recorded in the PR. Independent re-review pending; nothing is VERIFIED.
+
+| Item      | Status           | Commit  | Evidence   | Note                                                                                                                                                  |
+| --------- | ---------------- | ------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P02.01.01 | READY_FOR_REVIEW | be4591d | EV-P02-051 | Re-proved; supersedes EV-P02-047                                                                                                                      |
+| P02.01.02 | READY_FOR_REVIEW | be4591d | EV-P02-052 | Re-proved; supersedes EV-P02-003                                                                                                                      |
+| P02.01.03 | READY_FOR_REVIEW | be4591d | EV-P02-053 | Re-proved; supersedes EV-P02-004                                                                                                                      |
+| P02.01.07 | READY_FOR_REVIEW | be4591d | EV-P02-054 | Re-proved; supersedes EV-P02-048                                                                                                                      |
+| P02.02.01 | READY_FOR_REVIEW | be4591d | EV-P02-055 | Re-proved; supersedes EV-P02-002                                                                                                                      |
+| P02.02.02 | IN_PROGRESS      | be4591d | EV-P02-091 | PARTIAL: turbo.json defines build, typecheck, lint and dev; the tasks `test` and `test:integration` are absent (removed in 1867d75). Needs the tasks, |
+| P02.02.03 | READY_FOR_REVIEW | be4591d | EV-P02-056 | Re-proved; supersedes EV-P02-009, EV-P02-019                                                                                                          |
+| P02.02.04 | READY_FOR_REVIEW | be4591d | EV-P02-057 | Re-proved; supersedes EV-P02-001                                                                                                                      |
+| P02.02.05 | READY_FOR_REVIEW | be4591d | EV-P02-058 | Re-proved; supersedes EV-P02-001                                                                                                                      |
+| P02.02.06 | READY_FOR_REVIEW | be4591d | EV-P02-059 | Re-proved; supersedes EV-P02-010                                                                                                                      |
+| P02.02.07 | READY_FOR_REVIEW | be4591d | EV-P02-060 | Re-proved; supersedes EV-P02-011, EV-P02-020                                                                                                          |
+| P02.02.08 | READY_FOR_REVIEW | be4591d | EV-P02-061 | Re-proved; supersedes EV-P02-002                                                                                                                      |
+| P02.02.10 | READY_FOR_REVIEW | be4591d | EV-P02-062 | Re-proved; supersedes EV-P02-001                                                                                                                      |
+| P02.03    | READY_FOR_REVIEW | be4591d | EV-P02-021 | Re-proved; supersedes EV-P02-021                                                                                                                      |
+| P02.03.01 | READY_FOR_REVIEW | be4591d | EV-P02-064 | Re-proved; supersedes EV-P02-012                                                                                                                      |
+| P02.03.02 | IN_PROGRESS      | be4591d | EV-P02-092 | PARTIAL: all four roles boot from dist, but the server image cannot start voice or worker (ERR_MODULE_NOT_FOUND for @moin/telephony and @moin/integra |
+| P02.03.03 | READY_FOR_REVIEW | be4591d | EV-P02-065 | Re-proved; supersedes EV-P02-014                                                                                                                      |
+| P02.03.04 | READY_FOR_REVIEW | be4591d | EV-P02-066 | Re-proved; supersedes EV-P02-015                                                                                                                      |
+| P02.03.05 | READY_FOR_REVIEW | be4591d | EV-P02-067 | Re-proved; supersedes EV-P02-016                                                                                                                      |
+| P02.03.06 | READY_FOR_REVIEW | be4591d | EV-P02-068 | Re-proved; supersedes EV-P02-017                                                                                                                      |
+| P02.03.07 | IN_PROGRESS      | be4591d | EV-P02-093 | PARTIAL: the image builds and the api role answers /healthz 200 read-only; voice and worker do not start (ERR_MODULE_NOT_FOUND); size 467.7 MB on amd |
+| P02.04.01 | READY_FOR_REVIEW | be4591d | EV-P02-069 | Re-proved; supersedes EV-P02-024                                                                                                                      |
+| P02.04.02 | IN_PROGRESS      | be4591d | EV-P02-070 | PARTIAL: the commands work from a fresh clone; `db:seed` applies 0 rows, so Musterrestaurant and Musterbetrieb SHK do not exist (seeding lands with P |
+| P02.04.03 | READY_FOR_REVIEW | be4591d | EV-P02-071 | Re-proved; supersedes EV-P02-026                                                                                                                      |
+| P02.04.04 | READY_FOR_REVIEW | be4591d | EV-P02-072 | Re-proved; supersedes EV-P02-027                                                                                                                      |
+| P02.04.05 | READY_FOR_REVIEW | be4591d | EV-P02-073 | Re-proved; supersedes EV-P02-023                                                                                                                      |
+| P02.04.06 | IN_PROGRESS      | be4591d | EV-P02-074 | PARTIAL: warm run about 23 s; a cold run with image pulls, seed data and the documented copy of the environment example are not shown (EV-P02-074)    |
+| P02.05.01 | READY_FOR_REVIEW | be4591d | EV-P02-075 | Re-proved; supersedes EV-P02-028                                                                                                                      |
+| P02.05.02 | READY_FOR_REVIEW | be4591d | EV-P02-076 | Re-proved; supersedes EV-P02-029                                                                                                                      |
+| P02.05.03 | READY_FOR_REVIEW | be4591d | EV-P02-077 | Re-proved; supersedes EV-P02-030                                                                                                                      |
+| P02.05.04 | READY_FOR_REVIEW | be4591d | EV-P02-078 | Re-proved; supersedes EV-P02-032                                                                                                                      |
+| P02.05.05 | READY_FOR_REVIEW | be4591d | EV-P02-079 | Re-proved; supersedes EV-P02-031                                                                                                                      |
+| P02.05.06 | READY_FOR_REVIEW | be4591d | EV-P02-080 | Re-proved; supersedes EV-P02-033                                                                                                                      |
+| P02.06.01 | READY_FOR_REVIEW | be4591d | EV-P02-081 | Re-proved; supersedes EV-P02-043                                                                                                                      |
+| P02.06.02 | READY_FOR_REVIEW | be4591d | EV-P02-082 | Re-proved; supersedes EV-P02-044                                                                                                                      |
+| P02.06.03 | READY_FOR_REVIEW | be4591d | EV-P02-083 | Re-proved; supersedes EV-P02-045                                                                                                                      |
+| P02.06.04 | READY_FOR_REVIEW | be4591d | EV-P02-084 | Re-proved; supersedes EV-P02-034                                                                                                                      |
+| P02.06.05 | READY_FOR_REVIEW | be4591d | EV-P02-085 | Re-proved; supersedes EV-P02-040                                                                                                                      |
+| P02.06.06 | READY_FOR_REVIEW | be4591d | EV-P02-086 | Re-proved; supersedes EV-P02-039                                                                                                                      |
+| P02.06.07 | READY_FOR_REVIEW | be4591d | EV-P02-087 | Re-proved; supersedes EV-P02-049                                                                                                                      |
+| P02.07.03 | IN_PROGRESS      | be4591d | EV-P02-046 | PARTIAL: not re-run: a fresh-session walkthrough is an event, not a check. Needs a new walkthrough on current main                                    |
+| P02.08.01 | IN_PROGRESS      | be4591d | EV-P02-094 | PARTIAL: the configuration passes; Renovate has never opened a pull request. Needs the GitHub App installed, a founder action (EV-P02-094)            |
+| P02.08.02 | READY_FOR_REVIEW | be4591d | EV-P02-088 | Re-proved; supersedes EV-P02-035                                                                                                                      |
+| P02.08.03 | READY_FOR_REVIEW | be4591d | EV-P02-089 | Re-proved; supersedes EV-P02-038                                                                                                                      |
+| P02.08.04 | READY_FOR_REVIEW | be4591d | EV-P02-090 | Re-proved; supersedes EV-P02-036                                                                                                                      |
+
+## C-RERUN P08 re-proof (2026-11-01, branch `docs/p08-p13-rerun-evidence`)
+
+Stale evidence re-run on main `be4591d` in a clean clone: 14 items re-proved, 1 PARTIAL and unticked. Details: `docs/audits/2026-11-01-c-rerun-p08.md`. Full gates 14/14 on the clone at `be4591d`; gates on this branch's head are recorded in the PR. Independent re-review pending; nothing is VERIFIED.
+
+| Item      | Status           | Commit  | Evidence   | Note                                                                                                                                                  |
+| --------- | ---------------- | ------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P08.03.01 | IN_PROGRESS      | be4591d | EV-P08-013 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P08-003                                                    |
+| P08.05.03 | IN_PROGRESS      | be4591d | EV-P08-014 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P08-005                                                    |
+| P08.07.01 | IN_PROGRESS      | be4591d | EV-P08-015 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P08-007                                                    |
+| P08.10.02 | IN_PROGRESS      | be4591d | EV-P08-016 | PARTIAL: only ai_answering has a test; the other five global kill switches (faq_answering, llm_wording, transfers, sms, booking_execution) are define |
+| P09.10.02 | READY_FOR_REVIEW | be4591d | EV-P09-016 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P09-012                                                    |
+| P09.11.01 | READY_FOR_REVIEW | be4591d | EV-P09-017 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P09-013                                                    |
+| P09.11.02 | READY_FOR_REVIEW | be4591d | EV-P09-018 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P09-013                                                    |
+| P10.03.03 | IN_PROGRESS      | be4591d | EV-P10-016 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P10-002                                                    |
+| P10.05.01 | IN_PROGRESS      | be4591d | EV-P10-017 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P10-004                                                    |
+| P10.13.05 | IN_PROGRESS      | be4591d | EV-P10-018 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P10-012                                                    |
+| P11.01.01 | READY_FOR_REVIEW | be4591d | EV-P11-018 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P11-001                                                    |
+| P11.03.01 | READY_FOR_REVIEW | be4591d | EV-P11-019 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P11-003                                                    |
+| P12.06.03 | IN_PROGRESS      | be4591d | EV-P12-016 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P12-003                                                    |
+| P12.12.02 | IN_PROGRESS      | be4591d | EV-P12-017 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P12-009                                                    |
+| P13.02.03 | READY_FOR_REVIEW | be4591d | EV-P13-019 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P13-014                                                    |
+
 ## Document acceptance C-READ (2026-11-01, branch `docs/p02-p04-document-acceptance`)
 
 Independent acceptance read by Codex of 36 P02, P03 and P04 document items on main `c714573` (source `docs/audits/2026-11-01-document-acceptance-read.md`): 19 CONFIRMED, 13 PARTIAL, 1 NOT CONFIRMED, 3 EXTERNAL. CONFIRMED means the documentary requirement is supported, not that its implementation, CI, legal conclusion or gate passed. Order followed: Status Ledger rows (P02, P03), phase headers and detail paragraphs, then this section. No tier is raised. Nothing is VERIFIED.
