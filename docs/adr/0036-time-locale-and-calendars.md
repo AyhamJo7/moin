@@ -65,8 +65,13 @@ named. It does not describe behaviour that does not exist.
    `vacation` for a location. It is never written to the global holiday file.
 
 7. **Owner-visible and spoken dates are formatted by one module.** `packages/kernel/src/format-de.ts`
-   builds on `Intl` `de-DE` (for example "Samstag, 3. Oktober" and "19:30 Uhr") and never uses
-   hand-rolled month tables. The locale is German; no other locale is implemented.
+   renders German dates and times (for example "Samstag, 3. Oktober" and "19:30 Uhr"). `Intl`
+   supplies the zoned numeric fields (day, month, weekday index, hour, minute, through
+   `zonedFields` in `tenant-time.ts`) and the German number format; the German date words come
+   from two fixed arrays in the module, `WEEKDAYS_DE` and `MONTHS_DE`. The module's header
+   comment says it never uses hand-rolled month tables; that comment is out of date and is not
+   what the code does. Moving the date words to `Intl` `de-DE` is a possible later change, not
+   an existing fact. The locale is German; no other locale is implemented.
 
 ### Not implemented yet, and where it lands
 
