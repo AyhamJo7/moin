@@ -294,13 +294,8 @@ async function seed(table: TenantTable, org: string): Promise<string | undefined
 }
 
 async function countAsOwner(table: TenantTable, org: string): Promise<number> {
-  // eslint-disable-next-line no-restricted-syntax -- identifier from pg_catalog.
-  const res = await database
-    .fixturePool()
-    .query<{ n: number }>(
-      `SELECT count(*)::int AS n FROM ${table.qualified} WHERE ${table.tenantColumn} = $1`,
-      [org],
-    );
+  const sql = `SELECT count(*)::int AS n FROM ${table.qualified} WHERE ${table.tenantColumn} = $1`; // eslint-disable-line no-restricted-syntax -- identifiers from pg_catalog, never input.
+  const res = await database.fixturePool().query<{ n: number }>(sql, [org]);
   return res.rows[0]?.n ?? 0;
 }
 
@@ -439,7 +434,9 @@ describe('the matrix kills a weakened table', () => {
 
   async function violationsOf(table: TenantTable): Promise<string[]> {
     // A clean slate of one visible row per tenant for every control.
-    await ddl(`DELETE FROM locations WHERE organisation_id IN ('${ORG_A}', '${ORG_B}')`);
+    await database
+      .fixturePool()
+      .query(`DELETE FROM locations WHERE organisation_id = ANY($1::uuid[])`, [[ORG_A, ORG_B]]);
     expect(await seed(table, ORG_A)).toBeUndefined();
     expect(await seed(table, ORG_B)).toBeUndefined();
     return runMatrix(table, true);

@@ -166,7 +166,7 @@ function createTables(sql: string): { name: string; body: string }[] {
   const tables: { name: string; body: string }[] = [];
   const head = /\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:\w+\.)?"?(\w+)"?\s*\(/gi;
   for (const match of sql.matchAll(head)) {
-    const start = (match.index ?? 0) + match[0].length;
+    const start = match.index + match[0].length;
     let depth = 1;
     let end = start;
     while (end < sql.length && depth > 0) {
