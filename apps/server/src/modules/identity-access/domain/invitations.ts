@@ -17,6 +17,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { TenantClient } from '@moin/db';
+import { mayConfer } from './roles.ts';
 import { digestOf, isSecretValue, randomSecret } from './secret-values.ts';
 
 export const INVITATION_TTL_DAYS = 7;
@@ -39,6 +40,8 @@ export interface IssueInvitationInput {
   readonly role: string;
   readonly permissions?: readonly string[] | undefined;
   readonly createdBy?: string | undefined;
+  /** The inviter's own role and permissions: an invitation cannot confer more than they hold. */
+  readonly grantor: { readonly role: string; readonly permissions: readonly string[] };
 }
 
 export interface IssuedInvitation {
@@ -111,6 +114,9 @@ export async function issueInvitation(
   const email = normalisedEmail(input.email);
   const role = checkedRole(input.role);
   const permissions = checkedPermissions(input.permissions);
+  if (!mayConfer(input.grantor.role, input.grantor.permissions, permissions)) {
+    throw new InvitationError('the inviter cannot confer these permissions');
+  }
   const token = randomSecret();
   const invitationId = randomUUID();
   const result = await client.query<{ expires_at: Date }>(

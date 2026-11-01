@@ -595,6 +595,100 @@ describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
     });
     expect(response.statusCode).toBe(404);
   });
+
+  describe('conferring an additive permission is bounded by holding it (G09 M1)', () => {
+    const countInvitations = async (org: string): Promise<number> =>
+      (
+        (
+          await admin.query(
+            'select count(*)::int as n from invitations where organisation_id = $1',
+            [org],
+          )
+        ).rows[0] as { n: number }
+      ).n;
+
+    async function adminPair(org: string, permissions: readonly string[]) {
+      const adminUser = await person();
+      await member(adminUser.id, 'admin', 'active', org);
+      if (permissions.length > 0) {
+        await admin.query(
+          'update memberships set permissions = $2::text[] where organisation_id = $1 and user_id = $3',
+          [org, permissions, adminUser.id],
+        );
+      }
+      const pair = await signInPair(adminUser);
+      contexts().clearCache();
+      return pair;
+    }
+
+    evidenceTest(
+      'an admin cannot invite a billing_admin or an integration_admin: 403, no row',
+      async () => {
+        const { org } = await ownerPair();
+        const pair = await adminPair(org, []);
+        const before = await countInvitations(org);
+        for (const permissions of [
+          ['billing_admin'],
+          ['integration_admin'],
+          ['billing_admin', 'integration_admin'],
+        ]) {
+          for (const role of ['admin', 'staff']) {
+            const response = await postAs(pair, '/api/members/invite', {
+              email: `confer-${permissions.length}-${role}@example.test`,
+              role,
+              permissions,
+            });
+            expect(response.statusCode, `${role} ${permissions.join('+')}: ${response.body}`).toBe(
+              403,
+            );
+          }
+        }
+        expect(await countInvitations(org)).toBe(before);
+        // The same admin can still invite without conferring a permission.
+        const plain = await postAs(pair, '/api/members/invite', {
+          email: 'plain-staff@example.test',
+          role: 'staff',
+        });
+        expect(plain.statusCode, plain.body).toBe(201);
+        expect(await countInvitations(org)).toBe(before + 1);
+      },
+    );
+
+    evidenceTest('an admin holding billing_admin confers only billing_admin', async () => {
+      const { org } = await ownerPair();
+      const pair = await adminPair(org, ['billing_admin']);
+      const ok = await postAs(pair, '/api/members/invite', {
+        email: 'bill@example.test',
+        role: 'staff',
+        permissions: ['billing_admin'],
+      });
+      expect(ok.statusCode, ok.body).toBe(201);
+      const refused = await postAs(pair, '/api/members/invite', {
+        email: 'integ@example.test',
+        role: 'staff',
+        permissions: ['integration_admin'],
+      });
+      expect(refused.statusCode).toBe(403);
+      const both = await postAs(pair, '/api/members/invite', {
+        email: 'both@example.test',
+        role: 'staff',
+        permissions: ['billing_admin', 'integration_admin'],
+      });
+      expect(both.statusCode).toBe(403);
+    });
+
+    evidenceTest('an owner confers both permissions', async () => {
+      const { pair, org } = await ownerPair();
+      const before = await countInvitations(org);
+      const response = await postAs(pair, '/api/members/invite', {
+        email: 'both-owner@example.test',
+        role: 'admin',
+        permissions: ['billing_admin', 'integration_admin'],
+      });
+      expect(response.statusCode, response.body).toBe(201);
+      expect(await countInvitations(org)).toBe(before + 1);
+    });
+  });
 });
 
 describe('membership lifecycle (P06.08.03, P06.08.04)', () => {
