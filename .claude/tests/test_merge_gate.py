@@ -53,7 +53,32 @@ PERMANENT_FOUNDER_PATHS = (
     "docker-compose.yml",
     "CLAUDE.md",
     "AGENTS.md",
+    # Instruction files Codex reads, and attributes that can hide content from a reviewer.
+    "AGENTS.override.md",
+    "apps/web/AGENTS.override.md",
+    ".gitattributes",
+    "apps/web/.gitattributes",
+    # What the gates in gates.json, lefthook.yml and the workflows read beyond the entry points.
+    "packages/config/src/eslint/index.ts",
+    "packages/config/tsconfig/base.json",
+    "tsconfig.json",
+    "apps/web/tsconfig.json",
+    "packages/db/tsconfig.build.json",
+    ".dependency-cruiser.cjs",
+    ".prettierrc.json",
+    ".prettierignore",
+    ".editorconfig",
+    ".gitignore",
+    ".gitleaks.toml",
+    ".dockerignore",
+    ".tflint.hcl",
+    ".terraform-version",
+    ".env.example",
+    ".semgrep/moin.yml",
+    "apps/web/next.config.ts",
 )
+ATTRIBUTES = "PLAN.md -diff export-ignore\napps/web/src/today/card.tsx -diff export-ignore\n"
+MARKER = "GATE-LOOSENED-MARKER"
 TRIAL_FOUNDER_PATHS = (
     "packages/db/migrations/0040_roles.sql",
     "packages/db/src/identity-store.ts",
@@ -174,6 +199,9 @@ class VerdictTest(unittest.TestCase):
             "CRITICAL a.ts:1 secret in log",
             "- **High** a.ts:1 missing check",
             "  critical: a.ts:1 bypass",
+            "1. HIGH a.ts:1 tenant leak",
+            "1) **CRITICAL** a.ts:1 secret in log",
+            "12. > _High_ a.ts:1 missing check",
         ):
             with self.subTest(finding=finding):
                 self.assertIsNone(merge_gate.parse_verdict(f"{finding}\nVERDICT: APPROVE"))
@@ -261,7 +289,10 @@ tree = Path(args[args.index("--cd") + 1])
     "args": args,
     "stdin": sys.stdin.read(),
     "env": dict(os.environ),
-    "tree": sorted(str(p.relative_to(tree)) for p in tree.rglob("*") if p.is_file()),
+    "tree": {
+        str(p.relative_to(tree)): p.read_text(errors="replace")
+        for p in tree.rglob("*") if p.is_file()
+    },
 }))
 fx = json.loads((state / "fixture.json").read_text())
 Path(args[args.index("--output-last-message") + 1]).write_text(fx["review"])
@@ -287,6 +318,8 @@ def make_origin(root: Path, fx: dict[str, Any]) -> str:
     git(origin, "config", "commit.gpgsign", "false")
     for path in [*fx["base_files"], "README.md"]:
         write(origin, path, "base\n")
+    for path, text in fx["base_contents"].items():
+        write(origin, path, text)
     git(origin, "add", "-A")
     git(origin, "commit", "-q", "-m", "chore: base")
     git(origin, "switch", "-q", "-c", "pr")
@@ -294,7 +327,9 @@ def make_origin(root: Path, fx: dict[str, Any]) -> str:
         (origin / new).parent.mkdir(parents=True, exist_ok=True)
         git(origin, "mv", old, new)
     for path in fx["files"]:
-        write(origin, path, fx["content"])
+        write(origin, path, fx["contents"].get(path, fx["content"]))
+    if fx.get("symlink_to"):
+        (origin / "link").symlink_to(fx["symlink_to"])
     git(origin, "add", "-A")
     git(origin, "commit", "-q", "-m", "feat: change")
     head = git(origin, "rev-parse", "HEAD").strip()
@@ -349,6 +384,8 @@ class CommandLineTest(unittest.TestCase):
             write(checkout, "fixture.json", json.dumps(fixture))
             if fixture.get("dirty"):
                 write(checkout, "dirty.txt", "uncommitted\n")
+            if fixture.get("checkout_attributes"):
+                write(checkout, ".gitattributes", fixture["checkout_attributes"])
             path = f"{bindir / 'rogue'}:/usr/bin:/bin" if rogue_codex else "/usr/bin:/bin"
             env = base_env(PATH=path, **(env_extra or {}))
             proc = run(checkout / ".claude/bin/merge_gate.py", ["7", *extra], env=env)
@@ -365,7 +402,9 @@ class CommandLineTest(unittest.TestCase):
             "files": FILES,
             "base_files": [],
             "moves": [],
+            "base_contents": {},
             "content": "change\n",
+            "contents": {},
             "ci": "VERIFIED",
             "review": APPROVE,
         }
@@ -399,6 +438,38 @@ class CommandLineTest(unittest.TestCase):
         self.assertNotIn("dirty.txt", codex["tree"])
         self.assertNotIn(".claude/bin/merge_gate.py", codex["tree"])
 
+    def test_candidate_attributes_are_refused_by_path(self) -> None:
+        candidate = self.fixture(
+            files=[*FILES, "PLAN.md", ".gitattributes"],
+            contents={".gitattributes": ATTRIBUTES},
+        )
+        code, out, calls, codex = self.invoke(candidate)
+        self.assert_never_merges(code, out, calls, merge_gate.EXIT_REFUSED)
+        self.assertIn("founder-merged paths changed: .gitattributes", out)
+        self.assertIsNone(codex)
+
+    def test_base_attributes_cannot_hide_changed_content_from_the_reviewer(self) -> None:
+        # export-ignore and -diff are already in the base, and in the checkout the diff runs in.
+        hidden = self.fixture(
+            files=[*FILES, "PLAN.md"],
+            base_files=[*FILES, "PLAN.md"],
+            base_contents={".gitattributes": ATTRIBUTES},
+            checkout_attributes=ATTRIBUTES,
+            content=f"{MARKER}\n",
+        )
+        code, out, _, codex = self.invoke(hidden)
+        self.assertEqual(code, merge_gate.EXIT_OK, out)
+        self.assertEqual(codex["stdin"].count(f"+{MARKER}"), 2, codex["stdin"])
+        self.assertNotIn("Binary files", codex["stdin"])
+        for path in (*FILES, "PLAN.md"):
+            self.assertEqual(codex["tree"][path], f"{MARKER}\n")
+
+    def test_a_symlink_out_of_the_snapshot_is_an_error(self) -> None:
+        code, out, calls, codex = self.invoke(self.fixture(symlink_to="/etc/hostname"))
+        self.assert_never_merges(code, out, calls, merge_gate.EXIT_ERROR)
+        self.assertIn("symlink", out)
+        self.assertIsNone(codex)
+
     def test_children_run_with_a_scrubbed_environment(self) -> None:
         rogue = {
             "CODEX_HOME": "/rogue",
@@ -419,7 +490,13 @@ class CommandLineTest(unittest.TestCase):
                 self.assert_never_merges(code, out, calls, merge_gate.EXIT_REFUSED)
 
     def test_approval_with_an_open_high_finding_never_merges(self) -> None:
-        for review in ("HIGH a.ts:1 tenant leak\nVERDICT: APPROVE", "CRITICAL x\nVERDICT: APPROVE"):
+        for finding in (
+            "HIGH a.ts:1 tenant leak",
+            "CRITICAL x",
+            "1. HIGH a.ts:1 tenant leak",
+            "1) **CRITICAL** a.ts:1 secret in log",
+        ):
+            review = f"{finding}\nVERDICT: APPROVE"
             with self.subTest(review=review):
                 code, out, calls, _ = self.invoke(self.fixture(review=review))
                 self.assert_never_merges(code, out, calls, merge_gate.EXIT_REFUSED)
