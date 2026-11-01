@@ -230,11 +230,32 @@ export class JobConsumer {
         correlationId: envelope.correlationId,
         errorCode: 'max-receive-exceeded',
       });
-      // The message does not describe this ledger row: nothing was changed, so reject it.
-      if (abandoned.kind === 'mismatch') return this.#reject(message, 'job-mismatch');
-      if (abandoned.kind === 'unknown') return this.#reject(message, 'job-unknown');
-      logger.error({ ...fields, outcome: 'max-receive-exceeded' }, 'delivery ceiling exceeded');
-      return this.#deadLetter(message, 'max-receive-exceeded');
+      // Only a committed terminal state, or a validated rejection, authorises removing the source
+      // message. A row another transaction holds is not abandoned: if that transaction rolls back
+      // the job is still open and this message is the only thing that will redeliver it.
+      switch (abandoned.kind) {
+        case 'abandoned':
+          logger.error({ ...fields, outcome: 'max-receive-exceeded' }, 'delivery ceiling exceeded');
+          return this.#deadLetter(message, 'max-receive-exceeded');
+        case 'already-terminal':
+          logger.info({ ...fields, outcome: abandoned.status }, 'delivery ceiling on finished job');
+          return abandoned.status === 'succeeded'
+            ? this.#settle(this.#deps.queue.remove(message), 'delete after commit')
+            : this.#deadLetter(message, 'already-dead');
+        case 'busy':
+          logger.warn(
+            { ...fields, outcome: 'max-receive-busy' },
+            'delivery ceiling crossed while the job is running; left on queue',
+          );
+          return this.#settle(
+            this.#deps.queue.hide(message, options.busyRetrySeconds ?? DEFAULT_BUSY_RETRY_S),
+            'hide busy job',
+          );
+        case 'unknown':
+          return this.#reject(message, 'job-unknown');
+        case 'mismatch':
+          return this.#reject(message, 'job-mismatch');
+      }
     }
     const handler = handlers.get(envelope.type, envelope.version);
     if (handler === undefined) {

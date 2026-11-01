@@ -636,6 +636,77 @@ describe('job consumer over SQS and PostgreSQL', () => {
     );
   }
 
+  evidenceTest(
+    'a delivery past the receive ceiling for a row another transaction holds is kept, then settles',
+    async () => {
+      const job = await seed();
+      await queues.queues.jobs.send(job.body);
+      // Three receives put the next delivery above the ceiling of 3 (sweep-run × factor 1).
+      for (let i = 0; i < 3; i += 1) {
+        const message = await receiveOne(queues.queues.jobs);
+        if (message === undefined) throw new Error('priming delivery missing');
+        await queues.queues.jobs.hide(message, 0);
+      }
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let holding = false;
+      // A live transaction holds the row and then rolls back: the job is still open afterwards.
+      const holder = withTenant(app, ORG_A, async (client) => {
+        await client.query(`select 1 from job_runs where id = $1 for update`, [job.envelope.jobId]);
+        holding = true;
+        await gate;
+        throw new Error('holder rolls back');
+      }).catch(() => undefined);
+      await until(() => Promise.resolve(holding));
+      makeConsumer(registry(writeEffect), { receiveCeilingFactor: 1 }).start();
+      await until(() => Promise.resolve(logLines.some((l) => l.includes('max-receive-busy'))));
+      // Several redeliveries cross the ceiling while the lock is held; none may be acknowledged.
+      await sleep(VISIBILITY_S * 1000);
+      expect(await queues.counts('deadLetter')).toEqual({ visible: 0, leased: 0 });
+      const held = await queues.counts('jobs');
+      expect(held.visible + held.leased).toBe(1);
+      expect(await ledger(job.envelope.jobId)).toMatchObject({ status: 'queued', attempt: 0 });
+
+      release();
+      await holder;
+      const dead = await receiveOne(queues.queues.deadLetter, 30);
+      expect(dead?.attributes['reason']).toBe('max-receive-exceeded');
+      expect(await ledger(job.envelope.jobId)).toMatchObject({
+        status: 'dead',
+        error_code: 'max-receive-exceeded',
+      });
+      await sleep(VISIBILITY_S * 1000 + 500);
+      expect(await queues.counts('jobs')).toEqual({ visible: 0, leased: 0 });
+    },
+  );
+
+  evidenceTest(
+    'a delivery past the receive ceiling for a job that already succeeded is deleted, not dead-lettered',
+    async () => {
+      const job = await seed();
+      await admin.query(
+        `update job_runs set status = 'succeeded', attempt = 1, finished_at = now() where id = $1`,
+        [job.envelope.jobId],
+      );
+      await queues.queues.jobs.send(job.body);
+      for (let i = 0; i < 3; i += 1) {
+        const message = await receiveOne(queues.queues.jobs);
+        if (message === undefined) throw new Error('priming delivery missing');
+        await queues.queues.jobs.hide(message, 0);
+      }
+      makeConsumer(registry(writeEffect), { receiveCeilingFactor: 1 }).start();
+      await until(async () => {
+        const counts = await queues.counts('jobs');
+        return counts.visible + counts.leased === 0;
+      });
+      expect(await queues.counts('deadLetter')).toEqual({ visible: 0, leased: 0 });
+      expect(await ledger(job.envelope.jobId)).toMatchObject({ status: 'succeeded', attempt: 1 });
+      expect(await effects(job.envelope.jobId)).toBe(0);
+    },
+  );
+
   evidenceTest('logs and ledger carry ids and codes, never payload or error text', async () => {
     const job = await seed();
     await queues.queues.jobs.send(job.body);
