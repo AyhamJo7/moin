@@ -16,3 +16,7 @@
 | QG-09 status | NOT re-run at this SHA. Required before READY_FOR_REVIEW. |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).
+
+## Correction note (2026-11-01, group 9 review M3)
+
+Mutants B1 and B2 change `app.reject_last_owner_loss` in `0017_last_owner_protection.sql`, a body that `0029_owner_invariant.sql` later replaces with `CREATE OR REPLACE`. On current main they are equivalent and survive: the killing test passes with them applied (reviewer's log, exit 0), and B1 and B2 are the same find/replace (`docs/verification/session-mutation-manifest.json`). The protection itself is proven by B1' and B2' on 0029 and B5 on 0030, all KILLED in the reviewer's run. Retargeting the recorded mutants to 0029 and adding a 0030 mutant is follow-up work. The results above are unchanged. Source: `docs/audits/2026-11-01-security-acceptance-g09.md`.

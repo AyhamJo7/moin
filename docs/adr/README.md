@@ -56,5 +56,6 @@ names an enforcement.
 | [0036](0036-time-locale-and-calendars.md)           | Time, locale and calendars          | ACCEPTED (default adopted under founder delegation 2026-11-01) | P07       |
 | [0044](0044-local-s3-emulator.md)                   | Local S3 emulator                   | ACCEPTED                                                       | P02       |
 | [0045](0045-local-oidc-provider.md)                 | Local OIDC provider                 | ACCEPTED                                                       | P02       |
+| [0046](0046-invitation-acceptance-entry-path.md)    | Invitation acceptance entry path    | ACCEPTED (default adopted under founder delegation 2026-11-01) | P06       |
 
 The remaining numbers in the register belong to later phases and have no file yet.

@@ -15,3 +15,7 @@
 | QG-09 status | NOT re-run at this SHA. Required before READY_FOR_REVIEW. |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).
+
+## Correction note (2026-11-01, group 7 review L5)
+
+The statement of 5/5 C variants double-counts: `C1-missing-token-accepted` and `C2-forged-token-accepted` in `docs/verification/session-mutation-manifest.json` are the same find/replace. There are three distinct CSRF mutants plus the guard-skip mutant. The 4/4 kill result reproduces on main. The results above are unchanged. Source: `docs/audits/2026-11-01-security-acceptance-g07.md`.
