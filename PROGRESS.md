@@ -1795,3 +1795,12 @@ account. The merge gate now runs `codex exec --sandbox read-only` itself on the 
 `VERDICT: APPROVE`; the reviewer identity and ruleset steps are dropped. Patch 0008 re-checked in a scratch clone (96
 tests OK, ruff/mypy clean, four mutants killed); a real Codex call is not yet exercised.
 Next (founder): apply patch 0008, then dry-run the gate on a small PR.
+
+Autonomy change, revised after independent review (2026-11-01, same branch, PR #246): the duplicate merge-gate patch
+`0008-autonomous-merge-gate` is removed; PR #247 is the single source of truth for the gate and its path lists, so
+the "patch 0008" references in CLAUDE.md and PLAN.md now say PR #247 (the rows above are history and stay).
+CLAUDE.md §8 states the gate's actual behaviour, the permanent and trial founder-merged paths, and that it is a
+procedural control, not a security boundary. QG-09's founder concurrence is amended with founder approval on
+2026-11-01 (founder-merged until 2026-11-29; afterwards the agent reviews plus the independent Codex review, founder
+tie-break after two rounds); the PLAN.md QG-09 row, CLAUDE.md §10 and the v1.1.0 change-log row say so, and no
+invariant, threshold, scope or tier changed. Not verified: PR #247 is not merged, so session merging is not active.

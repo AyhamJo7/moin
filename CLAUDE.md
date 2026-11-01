@@ -122,15 +122,23 @@ Ledger, Invariants, the target phase, and the IDs that phase references.
 - Push freely to your own branch with the plain form `git push -u origin <branch>`. Blocked: pushes to
   `main`/`master`, force pushes, branch deletion, and hidden forms (`git -C`, `-c`, `sh -c`).
 - PRs are opened as drafts (`gh pr create --draft`). The review loop runs on the PR: Codex reviews,
-  the implementer fixes, until no HIGH/CRITICAL is open. Then the session merges with
-  `python3 .claude/bin/merge_gate.py <pr>` (once control-plane patch 0008 is applied): it checks
-  `verify-head --ci`, runs a final Codex CLI review itself on the exact head SHA, and only on
-  `VERDICT: APPROVE` marks the PR ready and squash-merges it pinned to that SHA. Raw `gh pr ready`/
-  `gh pr merge` and merging through `gh api` stay blocked.
-  PRs touching `.github/`, `.claude/`, gate scripts, `lefthook.yml` or `infrastructure/` are always
-  founder-merged; migrations, identity-access, billing, usage-ledger, tool-guard and webhook paths
-  are founder-merged during the trial (until 2026-11-29, `.claude/policy/merge-gate.json`).
-- `gh workflow run` and `gh run rerun` are allowed for CI workflows (after patch 0008). A future
+  the implementer fixes, until no HIGH/CRITICAL is open. Session merging activates once PR #247 is
+  merged, and only through `python3 .claude/bin/merge_gate.py <pr>`. The gate checks `verify-head` on
+  the exact head SHA, derives files and diff from immutable git objects, runs Codex on an isolated
+  snapshot of that SHA, refuses on any CRITICAL/HIGH line or a missing or contradictory verdict,
+  re-checks state, base and head, and squash-merges pinned to that SHA. It is a procedural control
+  against mistakes and drift, not a security boundary. Raw `gh pr ready`/`gh pr merge` and merging
+  through `gh api` stay blocked.
+  Always founder-merged: `.claude/`, `.github/`, `scripts/`, `infrastructure/`, `deploy/`, `docker/`,
+  Dockerfiles and compose files, `lefthook.yml`, `packages/config/`, `.semgrep/`, every `package.json`,
+  `pnpm-workspace.yaml`, `pnpm-lock.yaml`, `turbo.json`, the vitest/eslint/playwright configs,
+  `tsconfig*.json`, `next.config.*`, `.nvmrc`, `renovate.json`, `.gitattributes`,
+  `.dependency-cruiser.cjs`, the prettier, editorconfig, gitignore, gitleaks, dockerignore, tflint and
+  terraform-version files, `.env.example`, every `CLAUDE.md` and `AGENTS*.md`, `BLUEPRINT.md`.
+  Founder-merged during the trial (until 2026-11-29): migrations, and identity, auth, session, RLS,
+  definer, tool-guard, webhook, integrations, billing, usage, privacy, erasure, retention and deletion
+  code. The globs in `.claude/policy/merge-gate.json` are authoritative.
+- `gh workflow run` and `gh run rerun` are allowed for CI workflows (once PR #247 is merged). A future
   deploy workflow must use a GitHub environment that requires founder approval for production.
 
 ## 9. Commands
@@ -151,8 +159,10 @@ Changes to auth, sessions, RLS/roles, `SECURITY DEFINER`, the tool guard, webhoo
 billing or privacy handlers need `/gate-ready`: it runs the `security-reviewer` and
 `architecture-reviewer` agents on the diff, plus `invariant-reviewer` when a control path changed
 (auth, RLS, tool guard, idempotency, usage ledger, state machines). HIGH/CRITICAL findings are fixed
-with a mutation-proven test or stay open and block review. The independent reviewer re-verifies each
-fix; the founder is asked only when implementer and reviewer still disagree after two rounds (tie-break).
+with a mutation-proven test or stay open and block review. QG-09 founder concurrence (amended with
+founder approval on 2026-11-01): until 2026-11-29 these PRs are founder-merged; afterwards the three
+agent reviews plus the independent Codex review replace it. The independent reviewer re-verifies each
+fix; the founder breaks a tie when implementer and reviewer still disagree after two rounds.
 
 ## 11. Parallel phases
 
