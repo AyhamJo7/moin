@@ -1779,6 +1779,32 @@ REQUEST_CHANGES with two blocking P2 findings.
   logging, and a boundary check was added (negative control KILLED). No server was started and no network test run.
   Phone tasks remain untested until the founder decides. No owner session, nothing VERIFIED, DG-10 PROVISIONAL.
 
+## Process: autonomy change (2026-11-01)
+
+Founder-approved loosening of the session process, branch `chore/control-plane-autonomy` (draft PR). Sessions may
+set a tier to VERIFIED with reviewer concurrence (COMPLETE stays founder-only), proceed after `/phase` planning, adopt
+engineering-shaped DG defaults by ADR, retry a failure up to three times with different hypotheses, and need mutation
+proof on control paths only. Merging by a session needs control-plane patch 0008 (founder-applied; merge gate +
+reviewer identity + ruleset with one required approval): `docs/control-plane/patches/0008-autonomous-merge-gate.md`.
+Evidence: `gates.py fast` PASS 7/7 at `6e0f156` on the branch; patch checked in a scratch clone (95 control-plane
+tests OK, ruff/mypy clean, two mutants killed). No checklist item ticked, no ledger status changed.
+Next (founder): create the reviewer identity, apply patch 0008, update ruleset 24193962.
+
+Autonomy change, revision (2026-11-01, same branch): founder chose Codex CLI as reviewer with no second GitHub
+account. The merge gate now runs `codex exec --sandbox read-only` itself on the exact head SHA and merges only on
+`VERDICT: APPROVE`; the reviewer identity and ruleset steps are dropped. Patch 0008 re-checked in a scratch clone (96
+tests OK, ruff/mypy clean, four mutants killed); a real Codex call is not yet exercised.
+Next (founder): apply patch 0008, then dry-run the gate on a small PR.
+
+Autonomy change, revised after independent review (2026-11-01, same branch, PR #246): the duplicate merge-gate patch
+`0008-autonomous-merge-gate` is removed; PR #247 is the single source of truth for the gate and its path lists, so
+the "patch 0008" references in CLAUDE.md and PLAN.md now say PR #247 (the rows above are history and stay).
+CLAUDE.md §8 states the gate's actual behaviour, the permanent and trial founder-merged paths, and that it is a
+procedural control, not a security boundary. QG-09's founder concurrence is amended with founder approval on
+2026-11-01 (founder-merged until 2026-11-29; afterwards the agent reviews plus the independent Codex review, founder
+tie-break after two rounds); the PLAN.md QG-09 row, CLAUDE.md §10 and the v1.1.0 change-log row say so, and no
+invariant, threshold, scope or tier changed. Not verified: PR #247 is not merged, so session merging is not active.
+
 ASYNC-1A (2026-10-21, branch `feat/p08-05-worker-runtime` from 6e0f156, draft PR): the worker role runs a real SQS
 job consumer. A delivery executes under the `job_runs` row lock in one tenant transaction, the queue message is deleted
 only after the commit, and retry, DLQ, visibility heartbeat, receive ceiling, handler deadline and SIGTERM drain have
