@@ -1902,7 +1902,7 @@ Source: `/tmp/moin-review/sec-g02.md`, independent acceptance review of group 2 
 
 ## Document acceptance C-READ (2026-11-01, branch `docs/p02-p04-document-acceptance`)
 
-Independent acceptance read by Codex of 36 P02, P03 and P04 document items on main `c714573` (source `docs/audits/2026-11-01-document-acceptance-codex.md`): 19 CONFIRMED, 13 PARTIAL, 1 NOT CONFIRMED, 3 EXTERNAL. CONFIRMED means the documentary requirement is supported, not that its implementation, CI, legal conclusion or gate passed. Order followed: Status Ledger rows (P02, P03), phase headers and detail paragraphs, then this section. No tier is raised. Nothing is VERIFIED.
+Independent acceptance read by Codex of 36 P02, P03 and P04 document items on main `c714573` (source `docs/audits/2026-11-01-document-acceptance-read.md`): 19 CONFIRMED, 13 PARTIAL, 1 NOT CONFIRMED, 3 EXTERNAL. CONFIRMED means the documentary requirement is supported, not that its implementation, CI, legal conclusion or gate passed. Order followed: Status Ledger rows (P02, P03), phase headers and detail paragraphs, then this section. No tier is raised. Nothing is VERIFIED.
 
 | Item      | Status               | Commit  | Evidence   | Note                                                                                                                                                                                              |
 | --------- | -------------------- | ------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

@@ -7,7 +7,7 @@
 | Date (UTC) | 2026-11-01 11:28 UTC |
 | Commit | `3ac126e316c9ee1679bb6e637b2ab387443d0e38` (the record was written while only docs/evidence/INDEX.md and earlier records of this batch differed from this commit; the reviewed state is main c714573) |
 | Environment | independent read on main c714573 (2026-11-01); recorded from /tmp/moin-cread |
-| Command / procedure | Read-only acceptance read by Codex (independent reviewer) of each literal PLAN item, its cited evidence record and the underlying documents, on main c714573, via git show into an external snapshot; no checkout, tests or commands. Verdicts: docs/audits/2026-11-01-document-acceptance-codex.md (source /tmp/moin-review/c-read-verdicts.md). This session ran only evidence.py to record them. |
+| Command / procedure | Read-only acceptance read by Codex (independent reviewer) of each literal PLAN item, its cited evidence record and the underlying documents, on main c714573, via git show into an external snapshot; no checkout, tests or commands. Verdicts: docs/audits/2026-11-01-document-acceptance-read.md (source /tmp/moin-review/c-read-verdicts.md). This session ran only evidence.py to record them. |
 | Result | CONFIRMED means the documentary requirement is supported, not that its implementation, CI, legal conclusion or future gate passed. Confirmed items: P03.01.01, P03.01.03, P03.01.04, P03.02.01, P03.02.03, P03.02.04, P03.02.05, P03.02.06, P03.03.01, P03.03.03, P03.03.04, P03.04.01, P03.07.02, P03.08.01. Nothing is VERIFIED. |
 | CI run / artifact | pending |
 | Reviewer | Codex (independent reviewer), document read on main c714573, 2026-11-01 |
