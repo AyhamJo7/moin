@@ -9,6 +9,7 @@
 
 import { createTestDatabase, type TestDatabase } from '@moin/testing';
 import { createPool } from '@moin/db/pool';
+import { withTenant } from '@moin/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { randomBytes } from 'node:crypto';
 import {
@@ -56,6 +57,96 @@ afterAll(async () => {
 describe('the migrated schema', () => {
   it('has no findings', async () => {
     expect(await findings()).toStrictEqual([]);
+  });
+});
+
+const ORG_A = '11111111-1111-4111-8111-111111111111';
+const ORG_B = '22222222-2222-4222-8222-222222222222';
+const LOCATION_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const LOCATION_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+
+/** Runs one statement as the migration role with parameters (fixtures only). */
+async function fixture(sql: string, params: readonly unknown[] = []): Promise<void> {
+  await database.fixturePool().query(sql, [...params]);
+}
+
+/** Two tenants with one location each: the minimum to tell "my rows" from "someone else's". */
+async function seedTwoTenants(): Promise<void> {
+  await fixture(
+    `INSERT INTO organisations (id, slug, name) VALUES ($1, 'sec-a', 'Alpha'), ($2, 'sec-b', 'Beta')
+     ON CONFLICT DO NOTHING`,
+    [ORG_A, ORG_B],
+  );
+  await fixture(
+    `INSERT INTO locations (organisation_id, id, name) VALUES ($1, $2, 'A site'), ($3, $4, 'B site')
+     ON CONFLICT DO NOTHING`,
+    [ORG_A, LOCATION_A, ORG_B, LOCATION_B],
+  );
+}
+
+/** What tenant A can read from `locations` through the application role. */
+async function locationsVisibleToA(): Promise<number> {
+  return withTenant(database.pool(), ORG_A, async (client) => {
+    const rows = await client.query(`SELECT id FROM locations`);
+    return rows.rows.length;
+  });
+}
+
+describe('permissive policies beyond the reviewed predicate (F1)', () => {
+  evidenceTest(
+    'an allow-all policy beside the reviewed policy is reported, and it really leaks',
+    async () => {
+      await seedTwoTenants();
+      expect(await locationsVisibleToA()).toBe(1);
+      expect(rulesFor(await findings(), 'locations')).toStrictEqual([]);
+
+      await ddl(`CREATE POLICY sec01_allow_all ON locations USING (true) WITH CHECK (true)`);
+      try {
+        // The unsafe fixture: RLS is enabled and forced, every command is covered, a WITH CHECK
+        // exists. Only the predicate differs, and tenant A now reads tenant B's location.
+        expect(await locationsVisibleToA()).toBe(2);
+        expect(rulesFor(await findings(), 'locations')).toStrictEqual([
+          'policy-unreviewed-permissive',
+        ]);
+      } finally {
+        await ddl(`DROP POLICY sec01_allow_all ON locations`);
+      }
+      expect(rulesFor(await findings(), 'locations')).toStrictEqual([]);
+    },
+  );
+
+  evidenceTest(
+    'a policy bound to some roles, or with a different predicate, is reported',
+    async () => {
+      await ddl(`CREATE POLICY sec01_other ON locations FOR SELECT TO moin_app
+      USING (organisation_id IS NOT NULL)`);
+      try {
+        expect(rulesFor(await findings(), 'locations')).toContain('policy-unreviewed-permissive');
+      } finally {
+        await ddl(`DROP POLICY sec01_other ON locations`);
+      }
+      // A RESTRICTIVE policy only narrows what is visible, so it is not a widening.
+      await ddl(`CREATE POLICY sec01_restrict ON locations AS RESTRICTIVE FOR SELECT
+      USING (organisation_id IS NOT NULL)`);
+      try {
+        expect(rulesFor(await findings(), 'locations')).toStrictEqual([]);
+      } finally {
+        await ddl(`DROP POLICY sec01_restrict ON locations`);
+      }
+    },
+  );
+
+  evidenceTest('a registered exception passes only for the table and text it names', async () => {
+    // memberships carries the reviewed request-lookup policies and the migrated schema is clean.
+    expect(rulesFor(await findings(), 'memberships')).toStrictEqual([]);
+    await ddl(`CREATE POLICY sec01_members_all ON memberships FOR SELECT USING (true)`);
+    try {
+      expect(rulesFor(await findings(), 'memberships')).toStrictEqual([
+        'policy-unreviewed-permissive',
+      ]);
+    } finally {
+      await ddl(`DROP POLICY sec01_members_all ON memberships`);
+    }
   });
 });
 

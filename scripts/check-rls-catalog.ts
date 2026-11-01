@@ -17,6 +17,10 @@
  *    table's owner, and the owner is who runs migrations, backfills and admin connections.
  * 2. **Its policy covers every command.** A policy with `USING` and no `WITH CHECK` reads
  *    correctly and permits writing a row into another tenant.
+ *    **And every permissive policy is the reviewed one.** Policies of a table are ORed, so a
+ *    `USING (true)` beside the reviewed policy shows every tenant's rows while all of the above
+ *    still holds. Each permissive policy must be exactly `organisation_id = app.current_org()` for
+ *    its command, for PUBLIC, or be registered with a reason in `REVIEWED_POLICY_EXCEPTIONS`.
  * 3. **`UNIQUE (organisation_id, id)`**, because a child's composite foreign key has nothing to
  *    reference without it.
  * 4. **Every foreign key out of a tenant table is composite**, carrying `organisation_id`. RLS
@@ -66,7 +70,20 @@ interface TableRow {
   readonly policy_count: number;
   readonly commands: string[];
   readonly policies_without_check: string[];
+  readonly policies: PolicyRow[];
   readonly has_composite_unique: boolean;
+}
+
+/** One row-level-security policy as the catalog stores it, expressions rendered by PostgreSQL. */
+interface PolicyRow {
+  readonly name: string;
+  /** r, a, w, d or * */
+  readonly cmd: string;
+  readonly permissive: boolean;
+  /** Role names the policy applies to; PUBLIC when it names none. */
+  readonly roles: string[];
+  readonly using: string | null;
+  readonly check: string | null;
 }
 
 interface ForeignKeyRow {
@@ -471,6 +488,17 @@ const TABLE_QUERY = `
            FROM pg_policy p
            WHERE p.polrelid = c.oid AND p.polcmd IN ('*', 'a', 'w') AND p.polwithcheck IS NULL
          ), '{}') AS policies_without_check,
+         COALESCE((
+           SELECT json_agg(json_build_object(
+             'name', p.polname::text,
+             'cmd', p.polcmd::text,
+             'permissive', p.polpermissive,
+             'roles', COALESCE((SELECT array_agg((CASE WHEN r = 0 THEN 'PUBLIC' ELSE pg_get_userbyid(r) END)::text ORDER BY r)
+                                FROM unnest(p.polroles) r), ARRAY['PUBLIC']),
+             'using', pg_get_expr(p.polqual, p.polrelid),
+             'check', pg_get_expr(p.polwithcheck, p.polrelid)) ORDER BY p.polname)
+           FROM pg_policy p WHERE p.polrelid = c.oid
+         ), '[]'::json) AS policies,
          EXISTS (
            SELECT 1 FROM pg_constraint u
            WHERE u.conrelid = c.oid AND u.contype IN ('u', 'p')
@@ -498,6 +526,105 @@ const FK_QUERY = `
   JOIN pg_namespace n ON n.oid = c.relnamespace
   WHERE con.contype = 'f' AND n.nspname = 'public'
 `;
+
+/**
+ * The only predicate a tenant policy may use (INV-01, INV-02): the row's tenant equals the
+ * transaction's tenant, and a transaction with no tenant matches nothing.
+ */
+const TENANT_PREDICATE = 'organisation_id=app.current_org()';
+
+/**
+ * A policy expression as PostgreSQL renders it, reduced to a form two spellings of the same text
+ * share: no whitespace, no redundant outer parentheses, lower case. It is a comparison of text,
+ * not of meaning, on purpose: a policy whose text differs from the reviewed one is a finding to be
+ * reviewed, never a pass.
+ */
+export function normalisePredicate(expression: string | null): string | null {
+  if (expression === null) return null;
+  let text = expression.replace(/\s+/g, '').toLowerCase();
+  while (text.startsWith('(') && text.endsWith(')')) {
+    let depth = 0;
+    let wraps = true;
+    for (let i = 0; i < text.length; i += 1) {
+      if (text[i] === '(') depth += 1;
+      else if (text[i] === ')') depth -= 1;
+      if (depth === 0 && i < text.length - 1) {
+        wraps = false;
+        break;
+      }
+    }
+    if (!wraps) break;
+    text = text.slice(1, -1);
+  }
+  return text;
+}
+
+function isTenantPredicate(expression: string | null): boolean {
+  const text = normalisePredicate(expression);
+  return text === TENANT_PREDICATE || text === 'app.current_org()=organisation_id';
+}
+
+/** A permissive policy that is exactly the reviewed tenant policy for its command. */
+function isCanonicalPolicy(policy: PolicyRow): boolean {
+  if (!policy.permissive || policy.roles.join(',') !== 'PUBLIC') return false;
+  switch (policy.cmd) {
+    case '*':
+    case 'w':
+      return isTenantPredicate(policy.using) && isTenantPredicate(policy.check);
+    case 'r':
+    case 'd':
+      return isTenantPredicate(policy.using) && policy.check === null;
+    case 'a':
+      return policy.using === null && isTenantPredicate(policy.check);
+    default:
+      return false;
+  }
+}
+
+/**
+ * Permissive policies other than the canonical one, each reviewed and given a reason. Policies of
+ * one table are ORed, so every entry here widens what the table shows; a new one is a decision
+ * for a reviewer, not a side effect of a migration. Expressions are compared through
+ * `normalisePredicate`.
+ */
+export interface ReviewedPolicy {
+  readonly cmd: string;
+  readonly using: string | null;
+  readonly check: string | null;
+  readonly reason: string;
+}
+
+const REQUEST_LOOKUP_USING =
+  "((organisation_id = app.current_org()) OR ((current_setting('app.request_lookup'::text, true) = 'resolve_request_context'::text) AND (CURRENT_USER = ANY (ARRAY['moin_migrator'::name, 'moin_owner'::name]))))";
+
+export const REVIEWED_POLICY_EXCEPTIONS: Readonly<Record<string, readonly ReviewedPolicy[]>> = {
+  // resolve_request_context (P06.06.03) reads the caller's memberships before a tenant is known.
+  // The lookup branch is open only to the definer's owner and only inside that function.
+  memberships: [
+    {
+      cmd: 'r',
+      using: REQUEST_LOOKUP_USING,
+      check: null,
+      reason: 'per-request membership lookup before the tenant is known (P06.06.03)',
+    },
+    {
+      cmd: 'w',
+      using: REQUEST_LOOKUP_USING,
+      check: '(organisation_id = app.current_org())',
+      reason: 'same lookup branch on the UPDATE command, writes still bound to the tenant',
+    },
+  ],
+};
+
+function isReviewedPolicy(table: string, policy: PolicyRow): boolean {
+  if (!policy.permissive || policy.roles.join(',') !== 'PUBLIC') return false;
+  return (REVIEWED_POLICY_EXCEPTIONS[table] ?? []).some(
+    (reviewed) =>
+      reviewed.cmd === policy.cmd &&
+      normalisePredicate(reviewed.using) === normalisePredicate(policy.using) &&
+      normalisePredicate(reviewed.check) === normalisePredicate(policy.check),
+  );
+}
 
 const FUNCTION_QUERY = `
   SELECT (n.nspname || '.' || p.proname)::text AS function_name,
@@ -934,6 +1061,31 @@ export async function inspect(
           detail:
             `policy ${table.policies_without_check.join(', ')} permits writes with no WITH CHECK, ` +
             'so a row can be written into another tenant.',
+        });
+      }
+      // The commands above only say that *some* policy exists. What it lets through is the
+      // predicate, and policies of a table are ORed: one `USING (true)` beside the reviewed policy
+      // opens every row of every tenant while every flag and every command still look right.
+      for (const policy of table.policies) {
+        if (!policy.permissive) continue; // RESTRICTIVE policies only narrow what is visible.
+        if (isCanonicalPolicy(policy) || isReviewedPolicy(table.table_name, policy)) continue;
+        // The right predicate with no WITH CHECK is already reported as policy-without-with-check.
+        if (
+          ['*', 'a', 'w'].includes(policy.cmd) &&
+          policy.check === null &&
+          isTenantPredicate(policy.using)
+        ) {
+          continue;
+        }
+        findings.push({
+          rule: 'policy-unreviewed-permissive',
+          subject: table.table_name,
+          detail:
+            `policy ${policy.name} (command ${policy.cmd}, roles ${policy.roles.join(', ')}, ` +
+            `USING ${policy.using ?? 'none'}, WITH CHECK ${policy.check ?? 'none'}) is not the ` +
+            'reviewed tenant predicate organisation_id = app.current_org() and is not registered ' +
+            'in REVIEWED_POLICY_EXCEPTIONS. A permissive policy is ORed with the others and can ' +
+            'show or accept another tenant’s rows.',
         });
       }
       if (!table.has_composite_unique) {
