@@ -1,0 +1,27 @@
+{
+ "note": "F5 changes no source, so the official mutation_check.py (which reverts a fix commit) does not apply. Two manual one-line mutants of the policy installer app.apply_tenant_rls (migration 0004) were applied, the matrix run, and the file restored byte-identical (sha256 checked, git status clean).",
+ "test": "packages/db/src/tenant-write-matrix.integration.test.ts -t 'every tenant table'",
+ "head": "c7f4a4d",
+ "mutants": [
+  {
+   "id": "M1",
+   "edit": "WITH CHECK (organisation_id = app.current_org()) -> WITH CHECK (true)",
+   "verdict": "KILLED",
+   "violations": 34,
+   "log": "sec-f5-mutant-m1.log"
+  },
+  {
+   "id": "M2",
+   "edit": "USING (organisation_id = app.current_org()) -> USING (true)",
+   "verdict": "KILLED",
+   "violations": 99,
+   "log": "sec-f5-mutant-m2.log"
+  }
+ ],
+ "in_suite_controls": [
+  "WITH CHECK true",
+  "USING true",
+  "row-level security disabled"
+ ],
+ "in_suite_control_verdict": "each rejected by the matrix (4 tests green)"
+}
