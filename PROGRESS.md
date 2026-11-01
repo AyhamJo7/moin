@@ -1948,3 +1948,13 @@ Independent acceptance read by Codex of 36 P02, P03 and P04 document items on ma
 | P03.08.01 | READY_FOR_REVIEW     | c714573 | EV-P03-027 | Document read CONFIRMED by Codex.                                                                                                                                                                 |
 | P03.08.02 | IN_PROGRESS          | c714573 | EV-P03-027 | PARTIAL: The register accounts for twenty invariants, but the EV explicitly concedes that nineteen automated mechanisms are named rather than all existing/runn. Full reason in the phase detail. |
 | P04.06.01 | READY_FOR_REVIEW     | c714573 | EV-P04-016 | Document read CONFIRMED by Codex.                                                                                                                                                                 |
+
+## Founder-delegated decisions folded into the document acceptance (2026-11-01)
+
+On 2026-11-01 the founder confirmed the 2026-11-15 expected date and delegated the remaining open decisions to the orchestrating session. These three rows record decisions made by that session under the delegation, not a personal review by the founder; the founder may override any of them. They supersede the WAITING_FOR_EXTERNAL rows above for the same items. Nothing is VERIFIED.
+
+| Item      | Status           | Commit  | Evidence   | Note                                                                                                                                                                                   |
+| --------- | ---------------- | ------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P02.02.09 | READY_FOR_REVIEW | 3510fea | EV-P02-096 | ADR-0002 and ADR-0034 accepted under the founder's delegation 2026-11-01 (decided by the orchestrating session; founder may override).                                                 |
+| P03.05.03 | READY_FOR_REVIEW | 3510fea | EV-P03-028 | Threat model review disposition accepted under delegation 2026-11-01, on the recorded independent BLOCK-MERGE review and its remediation (EV-P03-024). P03.05.01 and .02 stay PARTIAL. |
+| P03.01.02 | READY_FOR_REVIEW | 3510fea | EV-P03-029 | Eleven core ADRs accepted under delegation 2026-11-01 after ADR-0036 was written from the code on main; ticked.                                                                        |
