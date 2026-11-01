@@ -148,16 +148,7 @@ export async function withTenant<T>(
     correlationId: options.correlationId ?? outer?.correlationId,
   };
 
-  const client: PoolClient = await pool.connect();
-  // A connection killed mid-transaction (failover, `pg_terminate_backend`) emits 'error' on the
-  // checked-out client. With no listener Node treats that as uncaught and ends the process, taking
-  // every other in-flight unit of work with it. The query that was running already rejects, so the
-  // event carries nothing the caller does not get.
-  const ignoreConnectionError = (): void => undefined;
-  client.on('error', ignoreConnectionError);
-  let broken = false;
-  try {
-    await client.query('begin');
+  return inTransaction(pool, async (client) => {
     // Transaction-local. The `true` is the whole argument of this module.
     await client.query('select set_config($1, $2, true)', [TENANT_SETTING, organisationId]);
     // Correlation alongside the tenant, same transaction-local scope: in-database audit writers
@@ -168,15 +159,38 @@ export async function withTenant<T>(
       CORRELATION_SETTING,
       context.correlationId ?? '',
     ]);
-    const result = await storage.run(context, async () => fn(wrap(client)));
+    return storage.run(context, async () => fn(wrap(client)));
+  });
+}
+
+/**
+ * One transaction on one checked-out connection: begin, `body`, commit; rollback on throw. Every
+ * wrapper in this module goes through here, so the connection is handled one way.
+ *
+ * A connection killed mid-transaction (failover, `pg_terminate_backend`) emits 'error' on the
+ * checked-out client. With no listener Node treats that as uncaught and ends the process, taking
+ * every other in-flight unit of work with it. The query that was running already rejects, so the
+ * event carries nothing the caller does not get; the listener only keeps the process alive.
+ *
+ * The caller's own error is the one that propagates: a rollback that fails means the connection
+ * is already broken, so the client is released as broken (the pool discards it) rather than
+ * rethrowing a worse error from the rollback. The client is released either way — a leaked client
+ * is a connection the pool never gets back, and a pool that runs out looks like a database outage.
+ */
+async function inTransaction<T>(pool: Pool, body: (client: PoolClient) => Promise<T>): Promise<T> {
+  const client: PoolClient = await pool.connect();
+  const ignoreConnectionError = (): void => undefined;
+  client.on('error', ignoreConnectionError);
+  let broken = false;
+  try {
+    await client.query('begin');
+    const result = await body(client);
     await client.query('commit');
     return result;
   } catch (error) {
     try {
       await client.query('rollback');
     } catch {
-      // A rollback that fails means the connection is already broken; the release below discards
-      // it. Rethrowing from here would replace the caller's real error with a worse one.
       broken = true;
     }
     throw error;
@@ -225,24 +239,13 @@ export async function withSystemWork(
   process: (item: ClaimedItem, client: TenantClient) => Promise<void>,
   onFailure?: (item: ClaimedItem, error: unknown) => void,
 ): Promise<SystemWorkResult> {
-  const claimClient: PoolClient = await pool.connect();
-  let items: readonly ClaimedItem[];
-  try {
-    // The claim runs in its own transaction, so its leases are committed before any item is
-    // processed. Holding them open across the work would turn a slow item into a lock timeout.
-    await claimClient.query('begin');
-    items = await claim(wrap(claimClient));
-    await claimClient.query('commit');
-  } catch (error) {
-    try {
-      await claimClient.query('rollback');
-    } catch {
-      // See withTenant.
-    }
-    throw error;
-  } finally {
-    claimClient.release();
-  }
+  // The claim runs in its own transaction, so its leases are committed before any item is
+  // processed. Holding them open across the work would turn a slow item into a lock timeout. It
+  // goes through the same connection handling as withTenant: a lost connection rejects the claim,
+  // it does not end the process that runs the sweep.
+  const items: readonly ClaimedItem[] = await inTransaction(pool, async (client) =>
+    claim(wrap(client)),
+  );
 
   for (const item of items) {
     assertOrganisationId(item.organisationId);
