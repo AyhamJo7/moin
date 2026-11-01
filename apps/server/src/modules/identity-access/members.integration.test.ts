@@ -706,6 +706,13 @@ describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
         return { org, owner, email, ...issued };
       }
 
+      /** Changes the issuer's standing after the invitation was written. */
+      const reassign = (userId: string, role: string, permissions: readonly string[]) =>
+        admin.query(
+          'update memberships set permissions = $2::text[], role = $3 where user_id = $1',
+          [userId, permissions, role],
+        );
+
       const membershipOf = async (org: string, email: string) =>
         (
           await admin.query<{ role: string; permissions: string[] }>(
@@ -736,10 +743,7 @@ describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
 
       evidenceTest('an issuer demoted to admin without permissions confers nothing', async () => {
         const inv = await outstanding();
-        await admin.query(
-          "update memberships set role = 'admin', permissions = '{}' where user_id = $1",
-          [inv.owner.id],
-        );
+        await reassign(inv.owner.id, 'admin', []);
         const result = await accept(inv.org, inv.invitationId, inv.token, randomUUID(), inv.email);
         expect(result.outcome).toBe('rejected');
         expect(await membershipOf(inv.org, inv.email)).toBeUndefined();
@@ -755,10 +759,7 @@ describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
         'an issuer who kept only billing_admin confers no integration_admin',
         async () => {
           const inv = await outstanding();
-          await admin.query(
-            "update memberships set role = 'admin', permissions = '{billing_admin}' where user_id = $1",
-            [inv.owner.id],
-          );
+          await reassign(inv.owner.id, 'admin', ['billing_admin']);
           const result = await accept(
             inv.org,
             inv.invitationId,
@@ -804,9 +805,8 @@ describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
 
       evidenceTest('only an owner issuer confers the owner role', async () => {
         const inv = await outstanding('owner');
-        await admin.query("update memberships set role = 'admin' where user_id = $1", [
-          inv.owner.id,
-        ]);
+        // Keeps both permissions, so only the owner-role rule can refuse it.
+        await reassign(inv.owner.id, 'admin', BOTH);
         const result = await accept(inv.org, inv.invitationId, inv.token, randomUUID(), inv.email);
         expect(result.outcome).toBe('rejected');
       });
