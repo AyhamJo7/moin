@@ -22,6 +22,8 @@
  * migration-role pool; every probe runs through HTTP as `moin_app`, exactly as traffic.
  */
 import { createHash, randomUUID } from 'node:crypto';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { Test } from '@nestjs/testing';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { createTestDatabase, evidenceTest, type TestDatabase } from '@moin/testing';
@@ -41,6 +43,8 @@ import { WorkModule } from '../work/work.module.ts';
 import { CallSimulatorModule } from '../call-simulator/call-simulator.module.ts';
 import { EXPECTED_ROUTE_COUNT, INVENTORY } from './inventory.ts';
 import { reconstructRoutes } from './routes.ts';
+import { compareWithInventory, controllersReachableFrom, routesServedBy } from './root-routes.ts';
+import { loadProductionRoots } from './production-roots.ts';
 import { seedTwoTenants, type SeededWorld } from './seed.ts';
 import { ABSENT_SURFACES, assertSurfacesAbsent } from './surface.ts';
 
@@ -51,6 +55,13 @@ import { ABSENT_SURFACES, assertSurfacesAbsent } from './surface.ts';
  */
 const NON_PRODUCT_ROUTES = new Set(['GET /voice/relay']);
 
+/**
+ * Controller classes that exist in the source tree but are deliberately mounted by neither
+ * production root, each with its reason. Empty today: a controller file nobody mounts is either
+ * dead code or a route that was meant to ship, and both deserve a line here.
+ */
+const UNMOUNTED_CONTROLLERS: Record<string, string> = {};
+
 const LOCAL_KEY = 'local-v1:local-development-only';
 const APP_ORIGIN = 'http://localhost:3000';
 const CSRF_HEADER = 'x-csrf-token';
@@ -60,6 +71,7 @@ let database: TestDatabase;
 let admin: ReturnType<TestDatabase['fixturePool']>;
 let app: NestFastifyApplication;
 let world: SeededWorld;
+let productionRoots: Awaited<ReturnType<typeof loadProductionRoots>>;
 const clock = fixedClock(new Date());
 clock.set(new Date());
 
@@ -182,6 +194,7 @@ function authed(
 }
 
 beforeAll(async () => {
+  productionRoots = await loadProductionRoots();
   database = await createTestDatabase('xsuite');
   admin = database.fixturePool();
   world = await seedTwoTenants(admin, database.pool());
@@ -195,25 +208,75 @@ afterAll(async () => {
 });
 
 describe('route inventory covers the whole API surface (P06.13.02)', () => {
-  evidenceTest('every mounted route has an inventory row: 100 % or block', () => {
-    // Computed from the live Fastify router — the routes the app actually serves
-    // (`printRoutes` delegates to the router's `prettyPrint`; the tree walk lives in
-    // `routes.ts`, unit-pinned against a captured tree). Compared against the
-    // inventory in BOTH directions; an empty reconstruction fails too.
-    const instance = app.getHttpAdapter().getInstance() as unknown as {
-      printRoutes(): string;
-    };
-    const printed: string = instance.printRoutes();
-    const served = reconstructRoutes(printed);
-    expect(served.size).toBeGreaterThan(0);
-    for (const known of NON_PRODUCT_ROUTES) served.delete(known);
-    const inventoried = new Set(INVENTORY.map((r) => `${r.method} ${r.path}`));
-    const unprobed = [...served].filter((route) => !inventoried.has(route));
-    const orphaned = [...inventoried].filter((route) => !served.has(route));
-    expect({ unprobed, orphaned }).toStrictEqual({ unprobed: [], orphaned: [] });
-    // Count pin: a silent shrink of both sides together still fails.
-    expect(INVENTORY.length).toBe(EXPECTED_ROUTE_COUNT);
+  evidenceTest(
+    'every route the PRODUCTION roots serve has an inventory row: 100 % or block',
+    () => {
+      // The served set is read from ApiRootModule and VoiceRootModule themselves (root-routes.ts),
+      // not from the module list this file assembles below, so a feature module added to a
+      // production root is measured the day it is added (G12 H1, mutation A). Compared in BOTH
+      // directions with the inventory.
+      const served = routesServedBy([productionRoots.api, productionRoots.voice]);
+      expect(served.size).toBeGreaterThan(0);
+      const inventoried = new Set(INVENTORY.map((r) => `${r.method} ${r.path}`));
+      expect(compareWithInventory(served, inventoried)).toStrictEqual({
+        unprobed: [],
+        orphaned: [],
+      });
+      // Count pin: a silent shrink of both sides together still fails.
+      expect(INVENTORY.length).toBe(EXPECTED_ROUTE_COUNT);
+    },
+  );
+
+  evidenceTest('the app under test mounts every production route, and nothing else', () => {
+    // The probes below run against the app this file assembles. If a production module is not
+    // mounted here its routes are inventoried but cannot be probed, and a hand-registered route
+    // (the voice socket) is neither: so the live router must equal the roots' set plus the
+    // named non-product routes.
+    const instance = app.getHttpAdapter().getInstance() as unknown as { printRoutes(): string };
+    const mounted = reconstructRoutes(instance.printRoutes());
+    expect(mounted.size).toBeGreaterThan(0);
+    for (const known of NON_PRODUCT_ROUTES) mounted.delete(known);
+    const served = routesServedBy([productionRoots.api, productionRoots.voice]);
+    expect({
+      mountedOnlyInTest: [...mounted].filter((r) => !served.has(r)).sort(),
+      productionOnly: [...served].filter((r) => !mounted.has(r)).sort(),
+    }).toStrictEqual({ mountedOnlyInTest: [], productionOnly: [] });
   });
+
+  evidenceTest(
+    'every controller file is reachable from a production root or named as unmounted',
+    () => {
+      const reachable = new Set(
+        [...controllersReachableFrom([productionRoots.api, productionRoots.voice])].map(
+          (controller) => controller.name,
+        ),
+      );
+      const found: string[] = [];
+      const walk = (dir: string): void => {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          const full = join(dir, entry.name);
+          if (entry.isDirectory()) walk(full);
+          else if (entry.name.endsWith('.controller.ts')) {
+            for (const match of readFileSync(full, 'utf8').matchAll(
+              /export class (\w+Controller)\b/g,
+            )) {
+              found.push(match[1] ?? '');
+            }
+          }
+        }
+      };
+      walk(resolve(import.meta.dirname, '../..'));
+      expect(found.length).toBeGreaterThan(0);
+      const stray = found.filter(
+        (name) => !reachable.has(name) && !(name in UNMOUNTED_CONTROLLERS),
+      );
+      expect(stray).toStrictEqual([]);
+      // A named exemption that is mounted after all, or whose file is gone, is stale.
+      expect(
+        Object.keys(UNMOUNTED_CONTROLLERS).filter((n) => reachable.has(n) || !found.includes(n)),
+      ).toStrictEqual([]);
+    },
+  );
 
   evidenceTest('unknown routes answer 404, never tenant data', async () => {
     // No file-local probe: the path sits under the real MembersController, so the
