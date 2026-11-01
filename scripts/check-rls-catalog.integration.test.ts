@@ -332,6 +332,35 @@ describe('the inventory covers every reachable schema and relation kind (F3)', (
   });
 });
 
+describe('no function is callable by PUBLIC (F4)', () => {
+  evidenceTest('a function granted to PUBLIC is reported, and a revoke clears it', async () => {
+    // Created by the local owner, whose default privileges are PostgreSQL's: PUBLIC may execute.
+    await ddl(
+      `CREATE FUNCTION public.sec04_public_fn() RETURNS integer LANGUAGE sql AS 'SELECT 1'`,
+    );
+    try {
+      expect(rulesFor(await findings(), 'public.sec04_public_fn()')).toStrictEqual([
+        'function-public-execute',
+      ]);
+      await ddl(`REVOKE EXECUTE ON FUNCTION public.sec04_public_fn() FROM PUBLIC`);
+      expect(rulesFor(await findings(), 'public.sec04_public_fn()')).toStrictEqual([]);
+    } finally {
+      await ddl(`DROP FUNCTION public.sec04_public_fn()`);
+    }
+  });
+
+  evidenceTest('app.current_org() is no longer executable through PUBLIC', async () => {
+    const rows = await database.fixturePool().query<{ grantee: string }>(
+      `SELECT CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee) END AS grantee
+       FROM pg_proc p, aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a
+       WHERE p.oid = 'app.current_org()'::regprocedure AND a.privilege_type = 'EXECUTE'`,
+    );
+    const grantees = rows.rows.map((row) => row.grantee);
+    expect(grantees).not.toContain('PUBLIC');
+    expect(grantees).toContain('moin_app');
+  });
+});
+
 describe('the QG-09 provisioning registration', () => {
   it('rejects the same function without its documented registration', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'moin-definers-'));

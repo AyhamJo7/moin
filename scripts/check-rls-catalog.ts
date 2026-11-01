@@ -37,6 +37,8 @@
  *    schema's ordinary tables. A tenant table in another schema, a partitioned table, and a view
  *    (or materialised view) over tenant data are all reachable by a runtime role. A view must be
  *    `security_invoker` or registered, because a view runs as its owner and the owner ignores RLS.
+ * 6c. **No function is callable by PUBLIC.** A new function is granted by name, in the migration
+ *    that adds it; a PUBLIC grant makes it reachable by every role, the application role included.
  * 7. **A table with no `organisation_id` is on the global register**, with a reason. Otherwise
  *    "not a tenant table" and "somebody forgot the column" look identical.
  *
@@ -737,6 +739,30 @@ const FUNCTION_QUERY = `
   WHERE n.nspname IN ('public', 'app')
 `;
 
+/**
+ * Functions anyone can call. PostgreSQL grants EXECUTE on a new function to PUBLIC unless the
+ * creating role's default privileges say otherwise (0078), so a function that is callable by
+ * everyone was either created before that default or granted to PUBLIC on purpose. Extension
+ * members (pgvector, citext, pg_trgm) are exempt: PUBLIC is how an extension ships them.
+ */
+const PUBLIC_EXECUTE_QUERY = `
+  SELECT (n.nspname || '.' || p.proname || '(' || oidvectortypes(p.proargtypes) || ')')::text AS signature
+  FROM pg_proc p
+  JOIN pg_namespace n ON n.oid = p.pronamespace
+  WHERE p.prokind IN ('f', 'p')
+    AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+    AND n.nspname NOT LIKE 'pg\\_toast%' AND n.nspname NOT LIKE 'pg\\_temp\\_%'
+    AND NOT EXISTS (
+      SELECT 1 FROM pg_depend d
+      WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e'
+    )
+    AND EXISTS (
+      SELECT 1 FROM aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a
+      WHERE a.grantee = 0 AND a.privilege_type = 'EXECUTE'
+    )
+  ORDER BY 1
+`;
+
 const AUDIT_TRIGGER_TYPE = 27; // row (1) + before (2) + delete (8) + update (16)
 const TRUNCATE_TRIGGER_TYPE = 34; // before (2) + truncate (32), statement-level
 const INSERT_TRIGGER_TYPE = 7; // row (1) + before (2) + insert (4)
@@ -1344,6 +1370,16 @@ export async function inspect(
           detail: 'the exact reviewed privileged function signature is absent from the catalog.',
         });
       }
+    }
+
+    for (const row of (await pool.query<{ signature: string }>(PUBLIC_EXECUTE_QUERY)).rows) {
+      findings.push({
+        rule: 'function-public-execute',
+        subject: row.signature,
+        detail:
+          'EXECUTE is held by PUBLIC, so every role, the application role included, can call it ' +
+          'without a grant. Revoke it from PUBLIC and grant the roles that need it by name.',
+      });
     }
 
     const present = new Set(
