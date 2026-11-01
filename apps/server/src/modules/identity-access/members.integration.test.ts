@@ -224,6 +224,19 @@ async function ownerPair(): Promise<{ pair: SessionPair; owner: { id: string }; 
   return { pair, owner, org };
 }
 
+/** Polls `condition` every 50 ms until it holds or `timeoutMs` passes; names what it waited for. */
+async function waitFor(
+  condition: () => Promise<boolean>,
+  what: string,
+  timeoutMs = 30_000,
+): Promise<void> {
+  const until = Date.now() + timeoutMs;
+  while (!(await condition())) {
+    if (Date.now() > until) throw new Error(`timed out waiting for ${what}`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
 describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
   async function staleStepUp(pair: SessionPair) {
     const token = /__Host-moin_sid=([A-Za-z0-9_-]{43})/.exec(pair.header)?.[1] ?? '';
@@ -458,10 +471,16 @@ describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
       // comparison would read the snapshot fixed at its first statement — before the deadline —
       // and admit.
       const issued = await issue();
-      await admin.query(
-        "update invitations set created_at = clock_timestamp() - interval '7 days' + interval '4 seconds', expires_at = clock_timestamp() + interval '4 seconds' where id = $1",
+      const deadlineRow = await admin.query(
+        "update invitations set created_at = clock_timestamp() - interval '7 days' + interval '4 seconds', expires_at = clock_timestamp() + interval '4 seconds' where id = $1 returning expires_at",
         [issued.invitationId],
       );
+      const deadline = (deadlineRow.rows[0] as { expires_at: Date }).expires_at;
+      const databaseClockIsPast = async (): Promise<boolean> =>
+        (
+          (await admin.query('select clock_timestamp() >= $1::timestamptz as past', [deadline]))
+            .rows[0] as { past: boolean }
+        ).past;
       const holder = await database.fixturePool().connect();
       try {
         await holder.query('begin');
@@ -472,12 +491,29 @@ describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
         await holder.query('select * from invitations where id = $1 for update', [
           issued.invitationId,
         ]);
-        // Consumer starts now — ~4 s before the deadline — and blocks on the held locks.
+        // Consumer starts now — before the deadline — and blocks on the held locks.
         const late = withTenant(database.pool(), issued.org, (client) =>
           acceptInvitation(client, issued.invitationId, issued.token, randomUUID(), issued.email),
         );
-        // Hold past the deadline, then release: the waiter proceeds and must refuse.
-        await new Promise((resolve) => setTimeout(resolve, 5000));
+        // Wait until the consumer is really blocked on the advisory lock, and prove that the
+        // database clock was still before the deadline when it was: otherwise the case would pass
+        // for the wrong reason (a consumer that arrived after the deadline is trivially refused).
+        await waitFor(
+          async () =>
+            (
+              (
+                await admin.query(
+                  "select count(*)::int as n from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock' and wait_event = 'advisory'",
+                )
+              ).rows[0] as { n: number }
+            ).n > 0,
+          'the consumer to block on the invitation lock',
+        );
+        expect(await databaseClockIsPast(), 'the consumer blocked before the deadline').toBe(false);
+        // Hold until the DATABASE clock has passed the deadline. A fixed sleep measures the
+        // process timer, which is not the clock the function judges expiry on: where the wall
+        // clock lags the monotonic one (WSL2) a 5 s sleep can end before a 4 s wall-clock deadline.
+        await waitFor(databaseClockIsPast, 'the database clock to pass the deadline');
         await holder.query('rollback');
         expect((await late).outcome).toBe('expired');
       } finally {
