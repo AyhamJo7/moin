@@ -1819,3 +1819,17 @@ and open items in EV-P08-012. P08.05.01–.04 stay open; nothing is VERIFIED.
 | P08.05.03 | IN_PROGRESS | 8c75461 | EV-P08-012 | Schema-invalid and unknown-tenant messages dead-lettered without a handler                    |
 | P08.05.04 | IN_PROGRESS | 8c75461 | EV-P08-012 | Tests exist on the real consumer; the older in-memory Worker evidence (EV-P08-005) remains    |
 | P08.05.01 | IN_PROGRESS | 323b388 | EV-P08-012 | Review round 1: abandon checks envelope identity; a busy row is never acknowledged            |
+
+## Security acceptance group 1 fixes (2026-11-01, branch `fix/p06-02-rls-catalog-gaps`)
+
+Fixes for the independent acceptance review of P06.01 and P06.02 at `be4591d` (three HIGH, two MEDIUM,
+one LOW; all false negatives of the guard or gaps in its proof, no leak in the existing policies). Full
+gates 14/14 at `93418b0`. Independent re-review pending; nothing is VERIFIED.
+
+| Item      | Status           | Commit  | Evidence   | Note                                                                                                          |
+| --------- | ---------------- | ------- | ---------- | ------------------------------------------------------------------------------------------------------------- |
+| P06.02.04 | READY_FOR_REVIEW | eb56697 | EV-P06-087 | F1 permissive-policy predicates, F2 FK column pairs, F3 every schema, partitioned table and view; each KILLED |
+| P06.02.03 | READY_FOR_REVIEW | d8e3dbe | EV-P06-087 | F2: a key that maps organisation_id to the target id is a finding; the exploit is shown as moin_app           |
+| P06.01.02 | READY_FOR_REVIEW | 90902a2 | EV-P06-088 | F4: migration 0078, no PUBLIC EXECUTE on new functions; catalog finding; KILLED                               |
+| P06.02.06 | READY_FOR_REVIEW | c7f4a4d | EV-P06-089 | F5: write matrix generated from the live catalog (55 tables, audit_events registered); mutants killed         |
+| P06.02.02 | READY_FOR_REVIEW | 863901f | EV-P06-089 | F6: migration lint requires the helper for new tenant RLS; 12 older migrations (14 tables) grandfathered      |

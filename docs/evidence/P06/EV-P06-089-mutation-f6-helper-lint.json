@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/tmp/moin-sec01",
+  "head": "863901f6e51514a4aafb27670066c338f1a1b5e3",
+  "mode": "committed",
+  "fix_ref": "863901f6e51514a4aafb27670066c338f1a1b5e3",
+  "fix_paths": [
+    "scripts/check-migrations.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "node ./node_modules/vitest/vitest.mjs run --project unit scripts/check-migrations.test.ts -t F6",
+  "started": "2026-11-01T03:59:19+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-11-01T03:59:20+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 0.52,
+    "tail": " FAIL  |unit| scripts/check-migrations.test.ts > tenant row-level security goes through app.apply_tenant_rls (F6) > rejects a tenant table that never reaches the helper\nAssertionError: expected [] to strictly equal [ 'tenant-rls-not-via-helper' ]\n\n- Expected\n+ Received\n\n- [\n-   \"tenant-rls-not-via-helper\",\n- ]\n+ []\n\n \u276f Proxy.toStrictEqual scripts/mutation-evidence-probe.ts:84:27\n     82|       let result: unknown;\n     83|       try {\n     84|         result = original.apply(this, args);\n       |                           ^\n     85|       } catch (error) {\n     86|         record(name, error);\n \u276f scripts/check-migrations.test.ts:120:41\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[2/3]\u23af\n\n FAIL  |unit| scripts/check-migrations.test.ts > tenant row-level security goes through app.apply_tenant_rls (F6) > grandfathers exactly the twelve older migrations that cover fourteen tables, by name\nTypeError: Cannot convert undefined or null to object\n \u276f scripts/check-migrations.test.ts:147:19\n    145|\n    146|   it('grandfathers exactly the twelve older migrations that cover four\u2026\n    147|     expect(Object.keys(HAND_WRITTEN_RLS_GRANDFATHERED)).toHaveLength(1\u2026\n       |                   ^\n    148|     expect(Object.values(HAND_WRITTEN_RLS_GRANDFATHERED).flat()).toHav\u2026\n    149|     // The same text under a grandfathered name passes; under any othe\u2026\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[3/3]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  3 failed | 2 passed | 8 skipped (13)\n   Start at  04:59:19\n   Duration  272ms (transform 63%, setup 25%, import 7%, tests 5%, worker 1%)\n"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 0.52,
+    "tail": "\n RUN  v5.0.2 /tmp/moin-sec01\n\nstdout | scripts/check-migrations.test.ts\nmigration check: no findings\n\n \u2713 |unit| scripts/check-migrations.test.ts (13 tests | 8 skipped) 5ms\n\n Test Files  1 passed (1)\n      Tests  5 passed | 8 skipped (13)\n   Start at  04:59:20\n   Duration  258ms (transform 61%, setup 27%, import 9%, tests 2%, worker 1%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/tmp/moin-sec01/.git/claude-evidence/mutation/20261101T035919Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}
