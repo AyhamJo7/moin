@@ -236,6 +236,102 @@ describe('a composite foreign key must bind tenant to tenant (F2)', () => {
   });
 });
 
+describe('the inventory covers every reachable schema and relation kind (F3)', () => {
+  evidenceTest(
+    'a tenant table in an unregistered schema is reported, and its foreign row is readable',
+    async () => {
+      await seedTwoTenants();
+      await ddl(`CREATE SCHEMA sec03;
+        CREATE TABLE sec03.tenant_t (organisation_id uuid NOT NULL, id uuid PRIMARY KEY, note text);
+        CREATE TABLE sec03.plain_t (id uuid PRIMARY KEY);
+        GRANT USAGE ON SCHEMA sec03 TO moin_app;
+        GRANT SELECT ON sec03.tenant_t, sec03.plain_t TO moin_app;`);
+      try {
+        await fixture(
+          `INSERT INTO sec03.tenant_t (organisation_id, id, note) VALUES ($1, gen_random_uuid(), 'B secret')`,
+          [ORG_B],
+        );
+        // No policy, no RLS: tenant A reads tenant B's row.
+        const seen = await withTenant(
+          database.pool(),
+          ORG_A,
+          async (client) => (await client.query(`SELECT note FROM sec03.tenant_t`)).rows.length,
+        );
+        expect(seen).toBe(1);
+        const list = await findings();
+        expect(rulesFor(list, 'sec03.tenant_t')).toStrictEqual([
+          'no-composite-unique',
+          'no-policy',
+          'rls-not-enabled',
+          'rls-not-forced',
+        ]);
+        expect(rulesFor(list, 'sec03.plain_t')).toStrictEqual(['unregistered-global-table']);
+      } finally {
+        await ddl(`DROP SCHEMA sec03 CASCADE`);
+      }
+      expect((await findings()).filter((f) => f.subject.startsWith('sec03'))).toStrictEqual([]);
+    },
+  );
+
+  evidenceTest('a partitioned tenant table without RLS is reported', async () => {
+    await ddl(`CREATE TABLE sec03_part (organisation_id uuid NOT NULL, id uuid NOT NULL)
+      PARTITION BY HASH (organisation_id)`);
+    try {
+      expect(rulesFor(await findings(), 'sec03_part')).toContain('rls-not-enabled');
+    } finally {
+      await ddl(`DROP TABLE sec03_part`);
+    }
+  });
+
+  evidenceTest(
+    'a definer-style view over a tenant table is reported, and it really leaks',
+    async () => {
+      await seedTwoTenants();
+      // The view's owner is the migration/owner role, whose privileges ignore the policies.
+      await ddl(`CREATE VIEW sec03_locations AS SELECT * FROM locations;
+        GRANT SELECT ON sec03_locations TO moin_app;`);
+      const readThroughView = async (): Promise<number> =>
+        withTenant(
+          database.pool(),
+          ORG_A,
+          async (client) => (await client.query(`SELECT id FROM sec03_locations`)).rows.length,
+        );
+      try {
+        expect(await readThroughView()).toBe(2);
+        expect(rulesFor(await findings(), 'sec03_locations')).toStrictEqual([
+          'view-bypasses-tenant-policy',
+        ]);
+        // security_invoker makes the view obey the policies of the caller, and the finding goes.
+        await ddl(`ALTER VIEW sec03_locations SET (security_invoker = true)`);
+        expect(await readThroughView()).toBe(1);
+        expect(rulesFor(await findings(), 'sec03_locations')).toStrictEqual([]);
+      } finally {
+        await ddl(`DROP VIEW sec03_locations`);
+      }
+    },
+  );
+
+  evidenceTest('a materialised view over a tenant table is reported', async () => {
+    await ddl(`CREATE MATERIALIZED VIEW sec03_mat AS SELECT id, organisation_id FROM locations`);
+    try {
+      expect(rulesFor(await findings(), 'sec03_mat')).toStrictEqual([
+        'view-bypasses-tenant-policy',
+      ]);
+    } finally {
+      await ddl(`DROP MATERIALIZED VIEW sec03_mat`);
+    }
+  });
+
+  evidenceTest('a view that reads no tenant data is not reported', async () => {
+    await ddl(`CREATE VIEW sec03_plain_view AS SELECT 1 AS one`);
+    try {
+      expect(rulesFor(await findings(), 'sec03_plain_view')).toStrictEqual([]);
+    } finally {
+      await ddl(`DROP VIEW sec03_plain_view`);
+    }
+  });
+});
+
 describe('the QG-09 provisioning registration', () => {
   it('rejects the same function without its documented registration', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'moin-definers-'));
