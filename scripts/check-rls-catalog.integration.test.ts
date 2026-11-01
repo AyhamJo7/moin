@@ -18,9 +18,10 @@ import {
   allowlistedDefiners,
   type Finding,
 } from './check-rls-catalog.ts';
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { evidenceTest } from '@moin/testing';
 
 let database: TestDatabase;
@@ -234,6 +235,114 @@ describe('a composite foreign key must bind tenant to tenant (F2)', () => {
       await ddl(`DROP TABLE sec02_child`);
     }
   });
+});
+
+describe('the foreign keys of a tenant table outside public are checked too (R1-F1)', () => {
+  // The inventory reads every application schema; the foreign-key mapping has to read the same
+  // ones, or a tenant table in another schema passes its policy checks while its keys are never
+  // looked at. The child is created by the migration role, as a migration would create it.
+  const CHILD = `
+    CREATE SCHEMA r1fk;
+    GRANT USAGE ON SCHEMA r1fk TO moin_app;
+    CREATE TABLE r1fk.child (
+      organisation_id uuid NOT NULL REFERENCES public.organisations (id),
+      id uuid NOT NULL PRIMARY KEY,
+      location_id uuid NOT NULL,
+      UNIQUE (organisation_id, id),
+      CONSTRAINT FKPAIR
+    );
+    SELECT app.apply_tenant_rls('r1fk.child');
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE r1fk.child TO moin_app;`;
+
+  /** Tenant A inserts a row whose location is tenant B's organisation id, through moin_app. */
+  async function insertChildAsA(): Promise<void> {
+    await withTenant(database.pool(), ORG_A, async (client) => {
+      await client.query(
+        `INSERT INTO r1fk.child (organisation_id, id, location_id) VALUES ($1, gen_random_uuid(), $2)`,
+        [ORG_A, ORG_B],
+      );
+    });
+  }
+
+  /** The catalog check exactly as CI runs it: the command line, against this database. */
+  function runCli(): { status: number | null; stderr: string } {
+    const run = spawnSync(
+      process.execPath,
+      ['scripts/check-rls-catalog.ts', '--url', database.migrationUrl],
+      { cwd: resolve(import.meta.dirname, '..'), encoding: 'utf8' },
+    );
+    return { status: run.status, stderr: run.stderr };
+  }
+
+  async function inOtherSchema(constraint: string, body: () => Promise<void>): Promise<void> {
+    await seedTwoTenants();
+    await ddl(CHILD.replace('CONSTRAINT FKPAIR', constraint));
+    try {
+      await body();
+    } finally {
+      await ddl(`DROP SCHEMA r1fk CASCADE`);
+      await fixture(`DELETE FROM locations WHERE id = $1`, [ORG_A]);
+    }
+  }
+
+  evidenceTest(
+    'a swapped key on a table in another schema is reported, links tenants through moin_app, and fails the CLI',
+    async () => {
+      // Tenant B's location whose id equals tenant A's organisation id, as in the public case.
+      await seedTwoTenants();
+      await fixture(
+        `INSERT INTO locations (organisation_id, id, name) VALUES ($1, $2, 'B decoy')`,
+        [ORG_B, ORG_A],
+      );
+      await inOtherSchema(
+        'CONSTRAINT r1_swapped FOREIGN KEY (organisation_id, location_id) REFERENCES public.locations (id, organisation_id)',
+        async () => {
+          // The real application role writes a tenant-A row that references tenant B's row.
+          await insertChildAsA();
+          const found = (await findings()).filter((f) => f.subject.startsWith('r1fk.child'));
+          expect(found.map((f) => `${f.rule} ${f.subject}`)).toStrictEqual([
+            'foreign-key-tenant-mismapped r1fk.child.r1_swapped',
+          ]);
+          const cli = runCli();
+          expect(cli.status).not.toBe(0);
+          expect(cli.stderr).toContain('[foreign-key-tenant-mismapped] r1fk.child.r1_swapped');
+        },
+      );
+    },
+  );
+
+  evidenceTest(
+    'a key without organisation_id on a table in another schema is reported',
+    async () => {
+      await inOtherSchema(
+        'CONSTRAINT r1_omitted FOREIGN KEY (location_id) REFERENCES public.locations (id)',
+        async () => {
+          expect(
+            (await findings())
+              .filter((f) => f.subject.startsWith('r1fk.child'))
+              .map((f) => `${f.rule} ${f.subject}`),
+          ).toStrictEqual(['foreign-key-not-composite r1fk.child.r1_omitted']);
+          expect(runCli().status).not.toBe(0);
+        },
+      );
+    },
+  );
+
+  evidenceTest(
+    'the correctly bound key on a table in another schema passes, refuses the reference, and the CLI exits 0',
+    async () => {
+      await inOtherSchema(
+        'CONSTRAINT r1_bound FOREIGN KEY (organisation_id, location_id) REFERENCES public.locations (organisation_id, id)',
+        async () => {
+          expect(
+            (await findings()).filter((f) => f.subject.startsWith('r1fk.child')),
+          ).toStrictEqual([]);
+          await expect(insertChildAsA()).rejects.toMatchObject({ code: '23503' });
+          expect(runCli().status).toBe(0);
+        },
+      );
+    },
+  );
 });
 
 describe('the inventory covers every reachable schema and relation kind (F3)', () => {

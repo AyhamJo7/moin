@@ -552,7 +552,11 @@ const FK_QUERY = `
   JOIN pg_namespace n ON n.oid = c.relnamespace
   JOIN pg_class t ON t.oid = con.confrelid
   JOIN pg_namespace tn ON tn.oid = t.relnamespace
-  WHERE con.contype = 'f' AND n.nspname = 'public'
+  WHERE con.contype = 'f'
+    -- The same schema scope as TABLE_QUERY. A narrower one leaves the foreign keys of a tenant
+    -- table in another schema outside the paired-column validation that its inventory feeds.
+    AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+    AND n.nspname NOT LIKE 'pg\\_toast%' AND n.nspname NOT LIKE 'pg\\_temp\\_%'
 `;
 
 /**
