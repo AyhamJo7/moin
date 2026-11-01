@@ -1911,3 +1911,11 @@ Independent review of #250 at `d94e2d1` (REQUEST_CHANGES, one HIGH). Merged main
 | --------- | ---------------- | ------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | P06.02.03 | READY_FOR_REVIEW | 98e0f2f | EV-P06-093 | HIGH F1: the foreign-key query uses the same schema scope as the table inventory; swapped and missing-column keys on a child table in another schema are findings and the CLI exits non-zero; KILLED. |
 | P06.02.04 | READY_FOR_REVIEW | 98e0f2f | EV-P06-093 | The F3 inventory now reaches the keys of tenant tables outside public; the bound-key control passes and the CLI exits 0.                                                                              |
+
+## Security acceptance group 1 fix, review round 2 (2026-11-01, branch `fix/p06-02-rls-catalog-gaps`)
+
+Independent review of #250 at `d7c0d9d` (REQUEST_CHANGES, one HIGH). One fix commit on top. Full gates 14/14 at `29df927`. Independent re-review pending; nothing is VERIFIED.
+
+| Item      | Status           | Commit  | Evidence   | Note                                                                                                                                                                                                       |
+| --------- | ---------------- | ------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P06.02.03 | READY_FOR_REVIEW | 29df927 | EV-P06-094 | HIGH F1: the foreign-key tenant-pair exemption names public.organisations and the organisation_id to id mapping only; single-column and swapped keys to another-schema organisations fail the CLI; KILLED. |
