@@ -1819,3 +1819,9 @@ and open items in EV-P08-012. P08.05.01–.04 stay open; nothing is VERIFIED.
 | P08.05.03 | IN_PROGRESS | 8c75461 | EV-P08-012 | Schema-invalid and unknown-tenant messages dead-lettered without a handler                    |
 | P08.05.04 | IN_PROGRESS | 8c75461 | EV-P08-012 | Tests exist on the real consumer; the older in-memory Worker evidence (EV-P08-005) remains    |
 | P08.05.01 | IN_PROGRESS | 323b388 | EV-P08-012 | Review round 1: abandon checks envelope identity; a busy row is never acknowledged            |
+
+## Security acceptance group 6 fix (2026-11-01, branch `fix/p06-06-disable-step-up`)
+
+| Item      | Status           | Commit  | Evidence   | Note                                                                                                                                                                                                                              |
+| --------- | ---------------- | ------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P06.06.04 | READY_FOR_REVIEW | 0949e93 | EV-P06-092 | F1: member disable requires a fresh step-up (was the only unguarded sensitive identity-access route); real-HTTP tests and a step-up classification of every route in the real-route matrix; KILLED. Independent re-review pending |
