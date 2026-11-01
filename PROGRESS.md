@@ -1867,3 +1867,12 @@ resolver wiring, the amended QG-09 rule, next action), P07 (`POST /api/tasks/:id
 other paths), P08 (the job consumer of #245), P09, P10, P11, P12 (the only capture that runs is the
 simulated callback), P13 (the `apps/web/lib` helpers that are used, #241, #243, #244), P14 to P33 (the
 unchanged-since-M0 marker dropped where no file in the area changed). No tier status changed.
+
+### Status Ledger compaction (LEDGER-AB, 2026-11-01)
+
+Ledger cells over the 300-character target (P02, P05 to P13) were shortened to the blocker or external
+wait as IDs and one next action. The previous cell text moved verbatim into a "Status detail (as of
+2026-11-01)" paragraph under each phase heading in PLAN.md, so no fact, evidence ID or decision is lost
+(`/tmp/moin-review/ledger-ab-ids.txt` lists 60 evidence IDs, 14 external IDs, 13 decision IDs and 42 item
+IDs from the old ledger, all still present). Order followed: ledger first, phase header second, this row
+third. Tier statuses are unchanged.
