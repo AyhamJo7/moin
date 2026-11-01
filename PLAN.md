@@ -2820,7 +2820,7 @@ Concurrency suite run (EV-P07-011), reconciler kill test (EV-P07-010), identity-
 
 **Status:** PILOT IN_PROGRESS · **Target:** 2026-10-08 → 2026-10-16 · **Effort:** 4 engineering-days
 
-**Status detail (as of 2026-11-01):** Blocker / external wait (moved verbatim from the Status Ledger): No external wait. DB layer built (job ledger, outbox, provider inbox, idempotency keys, job history, timers, SSE replay store, flags; migrations 0062–0070, real-Postgres tests), plus a rate limiter and the older in-memory `Worker` class. Wired since #245 (EV-P08-012): an SQS job consumer in the worker role runs `executeJob` under the `job_runs` row lock with retry, DLQ, visibility heartbeat, receive ceiling, handler deadline and SIGTERM drain; it has no production job type and nothing publishes to the queue. Not built: outbox dispatcher/publisher (ASYNC-1B), Valkey transport, provider-inbox processing, scheduler/sweeps, `GET /api/v1/events`, Idempotency-Key middleware, metric emission. READY_FOR_REVIEW claims for P08.01–.11 corrected item by item (M0, 2026-10-16); library-only sub-items still at READY_FOR_REVIEW set to IN_PROGRESS (LEDGER-AB, 2026-11-01) Next action (moved verbatim): ASYNC-1B: outbox dispatcher onto the queue, then handlers, sweeps, SSE, middleware
+**Status detail (as of 2026-11-01):** Blocker / external wait (moved verbatim from the Status Ledger): No external wait. DB layer built (job ledger, outbox, provider inbox, idempotency keys, job history, timers, SSE replay store, flags; migrations 0062–0070, real-Postgres tests), plus a rate limiter and the older in-memory `Worker` class. Wired since #245 (EV-P08-012): an SQS job consumer in the worker role runs `executeJob` under the `job_runs` row lock with retry, DLQ, visibility heartbeat, receive ceiling, handler deadline and SIGTERM drain; it has no production job type and nothing publishes to the queue. Not built: outbox dispatcher/publisher (ASYNC-1B), Valkey transport, provider-inbox processing, scheduler/sweeps, `GET /api/v1/events`, Idempotency-Key middleware, metric emission. READY_FOR_REVIEW claims for P08.01–.11 corrected item by item (M0, 2026-10-16); library-only sub-items still at READY_FOR_REVIEW set to IN_PROGRESS (LEDGER-AB, 2026-11-01) Next action (moved verbatim): ASYNC-1B: outbox dispatcher onto the queue, then handlers, sweeps, SSE, middleware Re-run (C-RERUN, 2026-11-01, main be4591d): P08.03.01 (EV-P08-013), P08.05.03 (EV-P08-014) and P08.07.01 (EV-P08-015) re-proved at the item's own acceptance text; their wiring status is unchanged from LEDGER-AB (not wired, IN_PROGRESS). P08.10.02 is PARTIAL: only one of the six kill switches has a test (EV-P08-016). The audit is docs/audits/2026-11-01-c-rerun-p08.md. None VERIFIED.
 
 ### Objective
 Provide reliable, observable, replayable background processing and live UI updates, assuming every provider and queue delivers at least once, sometimes late, sometimes twice.
@@ -2848,7 +2848,7 @@ Job envelope + queue topology · outbox dispatcher · provider inbox · Idempote
   - [ ] P08.02.03 Metric `outbox.lag`; alarm > 2 min
   - [ ] P08.02.04 Tests: crash between publish and mark → duplicate publish tolerated by idempotent consumers; ordering per aggregate preserved by version checks
 - [ ] **P08.03 Provider inbox and deduplication** `[G:PILOT]`
-  - [ ] P08.03.01 `provider_inbox` with UNIQUE `(provider, provider_event_id)`; insert-then-ack pattern
+  - [ ] P08.03.01 `provider_inbox` with UNIQUE `(provider, provider_event_id)`; insert-then-ack pattern · re-proved on main be4591d: EV-P08-013 (supersedes EV-P08-003)
   - [ ] P08.03.02 Processing worker resolves the tenant and runs handlers in `withTenant`; poison events → DLQ + record status
   - [ ] P08.03.03 Payload retention 30 days (purged by retention engine)
   - [ ] P08.03.04 Tests: the same event delivered 3× → one effect (FS-01); out-of-order events handled by monotonic state
@@ -2859,14 +2859,14 @@ Job envelope + queue topology · outbox dispatcher · provider inbox · Idempote
 - [ ] **P08.05 Worker runtime** `[G:PILOT]`
   - [ ] P08.05.01 Long-poll consumers with bounded concurrency; visibility extension for long jobs; graceful shutdown on SIGTERM
   - [ ] P08.05.02 Retry policy per job type (exponential backoff with jitter via `ChangeMessageVisibility`), max attempts → DLQ
-  - [ ] P08.05.03 Poison detection (schema-invalid payload → DLQ immediately with reason)
+  - [ ] P08.05.03 Poison detection (schema-invalid payload → DLQ immediately with reason) · re-proved on main be4591d: EV-P08-014 (supersedes EV-P08-005)
   - [ ] P08.05.04 Tests: transient failure retried; permanent failure to DLQ; shutdown loses no message
 - [ ] **P08.06 Job history and replay tooling** `[G:PILOT]`
   - [ ] P08.06.01 `job_runs` history (status, attempts, error code, durations, correlation IDs), 30-day retention
   - [ ] P08.06.02 Ops CLI: list DLQ messages (metadata only), inspect, replay single/batch, discard with reason (audited)
   - [ ] P08.06.03 Tests: a replayed job is idempotent; discard requires a reason and is audited
 - [ ] **P08.07 Timers and sweeps** `[G:PILOT]`
-  - [ ] P08.07.01 `timers` table (`due_at`, `lease_until`, `attempts`); claim function with SKIP LOCKED leases
+  - [ ] P08.07.01 `timers` table (`due_at`, `lease_until`, `attempts`); claim function with SKIP LOCKED leases · re-proved on main be4591d: EV-P08-015 (supersedes EV-P08-007)
   - [ ] P08.07.02 Scheduler cron → `sweeps` queue → sweep handler (1 min); schedules enabled per environment
   - [ ] P08.07.03 Uses: task reminders, escalation acknowledgement timers (P14.05), summary expiry, integration renewals
   - [ ] P08.07.04 Tests: exactly-once effect under 3 concurrent sweepers; timers survive restarts and restores (rows, not schedules)
@@ -2881,7 +2881,7 @@ Job envelope + queue topology · outbox dispatcher · provider inbox · Idempote
   - [ ] P08.09.03 Tests: limits enforced; fallback engages when Valkey is down
 - [ ] **P08.10 Feature flags and kill switches** `[G:PILOT]`
   - [ ] P08.10.01 `feature_flag_definitions` + tenant overrides; typed accessors; ≤ 60 s propagation (cache TTL)
-  - [ ] P08.10.02 Global kill switches: `ai_answering`, `faq_answering`, `llm_wording`, `transfers`, `sms`, `booking_execution`
+  - [ ] P08.10.02 Global kill switches: `ai_answering`, `faq_answering`, `llm_wording`, `transfers`, `sms`, `booking_execution` · PARTIAL (C-RERUN 2026-11-01): only ai_answering has a test; the other five global kill switches (faq_answering, llm_wording, transfers, sms, booking_execution) are defined by migration 0069 but no test checks that they exist and default on (EV-P08-016, supersedes EV-P08-010)
   - [ ] P08.10.03 Flag changes audited; ops CLI to flip
   - [ ] P08.10.04 Tests: flipping `ai_answering` off makes the next call use deterministic capture only
 - [ ] **P08.11 Async failure-injection suite** `[G:PILOT]`
@@ -2929,7 +2929,7 @@ Failure-injection report (EV-P08-001), kill-switch drill (EV-P08-002), SSE isola
 
 **Status:** PILOT IN_PROGRESS · LAUNCH IN_PROGRESS · SELL IN_PROGRESS · **Target:** 2026-10-12 → 2026-10-20 · **Effort:** 4 engineering-days
 
-**Status detail (as of 2026-11-01):** Blocker / external wait (moved verbatim from the Status Ledger): No external wait. DB layer built for P09.01–.11 (migrations 0052–0061, SSRF-safe website import, approved-retrieval view, channel scoping, eval set). LAUNCH: PDF import stage gate only (#210). SELL: passage rows (0074); vectors/HNSW and the embedding provider not built. No owner UI (P13.06); unchanged since the 2026-10-16 reconciliation Next action (moved verbatim): Founder review of P09 PILOT evidence; embeddings arrive with the P10 provider
+**Status detail (as of 2026-11-01):** Blocker / external wait (moved verbatim from the Status Ledger): No external wait. DB layer built for P09.01–.11 (migrations 0052–0061, SSRF-safe website import, approved-retrieval view, channel scoping, eval set). LAUNCH: PDF import stage gate only (#210). SELL: passage rows (0074); vectors/HNSW and the embedding provider not built. No owner UI (P13.06); unchanged since the 2026-10-16 reconciliation Next action (moved verbatim): Founder review of P09 PILOT evidence; embeddings arrive with the P10 provider Re-run (C-RERUN, 2026-11-01, main be4591d): P09.10.02 (EV-P09-016, with the official mutation verdict KILLED), P09.11.01 (EV-P09-017) and P09.11.02 (EV-P09-018) re-proved. None VERIFIED.
 
 ### Objective
 Give every channel one governed source of approved business truth: structured facts, owner-approved FAQ cards and (later) approved passages, with lifecycle, validity, staleness and conflict controls.
@@ -2994,10 +2994,10 @@ Knowledge model + versions + approvals · business profile & structured facts ·
   - [ ] P09.09.05 Tests: drafts, retired, expired, suspended and disallowed-channel items never retrievable; RLS
 - [ ] **P09.10 Channel and sensitivity scoping** `[G:PILOT]`
   - [ ] P09.10.01 `allowed_channels` (voice, email, web) enforced in the view — ready for reconfirmation; scanner false positive resolved; EV-P09-012
-  - [ ] P09.10.02 Tests per channel — 14/14 gates and 7/7 assertion mutation kills recorded; reconfirmation pending; EV-P09-012
+  - [ ] P09.10.02 Tests per channel — 14/14 gates and 7/7 assertion mutation kills recorded; reconfirmation pending; EV-P09-012 · re-proved on main be4591d: EV-P09-016 (supersedes EV-P09-012)
 - [ ] **P09.11 Knowledge eval set** `[G:PILOT]`
-  - [ ] P09.11.01 Restaurant knowledge set (synthetic Musterrestaurant + Gurlitt-shaped fictional variant) with question variants, off-catalogue questions and near-miss questions
-  - [ ] P09.11.02 Metrics: correct card selection, correct abstention (feeds LG-V06/LG-V07)
+  - [ ] P09.11.01 Restaurant knowledge set (synthetic Musterrestaurant + Gurlitt-shaped fictional variant) with question variants, off-catalogue questions and near-miss questions · re-proved on main be4591d: EV-P09-017 (supersedes EV-P09-013)
+  - [ ] P09.11.02 Metrics: correct card selection, correct abstention (feeds LG-V06/LG-V07) · re-proved on main be4591d: EV-P09-018 (supersedes EV-P09-013)
 
 ### Security
 SSRF-safe fetcher; malware scanning; imported text treated as hostile; approval restricted to owner/admin with audit.
@@ -3039,7 +3039,7 @@ Retrieval exclusion test report (EV-P09-001), SSRF suite report (EV-P09-002), op
 
 **Status:** PILOT IN_PROGRESS · LAUNCH IN_PROGRESS · **Target:** 2026-10-12 → 2026-10-22 · **Effort:** 6 engineering-days
 
-**Status detail (as of 2026-11-01):** Blocker / external wait (moved verbatim from the Status Ledger): EXT-12 / DG-14 (no EU model access); DG-01 not taken. Libraries built and unit-tested but imported by no runtime: gateway port + OpenAI EU adapter, structured outputs, resilience, redaction, version sets, policy engine, tool guard, template loader, rules, life-safety lexicon, injection guard, eval scorer, cost micros (LAUNCH: alternative-provider contract, rollout flags). `templates/` and `evals/` are empty; no metric is emitted; no QG-07 CI job (re-checked 2026-11-01: `@moin/ai` is imported by no app or package) Next action (moved verbatim): Wire the gateway, policy engine and tool guard into the call path; build the eval datasets
+**Status detail (as of 2026-11-01):** Blocker / external wait (moved verbatim from the Status Ledger): EXT-12 / DG-14 (no EU model access); DG-01 not taken. Libraries built and unit-tested but imported by no runtime: gateway port + OpenAI EU adapter, structured outputs, resilience, redaction, version sets, policy engine, tool guard, template loader, rules, life-safety lexicon, injection guard, eval scorer, cost micros (LAUNCH: alternative-provider contract, rollout flags). `templates/` and `evals/` are empty; no metric is emitted; no QG-07 CI job (re-checked 2026-11-01: `@moin/ai` is imported by no app or package) Next action (moved verbatim): Wire the gateway, policy engine and tool guard into the call path; build the eval datasets Re-run (C-RERUN, 2026-11-01, main be4591d): P10.03.03 (EV-P10-016), P10.05.01 (EV-P10-017) and P10.13.05 (EV-P10-018) re-proved at the item's own acceptance text; they stay unwired (no importer of @moin/ai), as LEDGER-AB recorded. None VERIFIED.
 
 ### Objective
 Build the controlled AI layer: model gateway, strict structured outputs, redaction, the deterministic policy engine, the tool registry and guard, the vertical template system, owner rules, life-safety guardrails, injection defences, and the evaluation harness with statistics.
@@ -3067,14 +3067,14 @@ Accept ADR-0011 (dialogue manager and response types), ADR-0012 (gateway), ADR-0
 - [ ] **P10.03 Structured outputs and validation** `[G:PILOT]`
   - [ ] P10.03.01 JSON Schemas generated from Zod contracts (NLU turn, summary, import structuring)
   - [ ] P10.03.02 Re-validation with Zod; invalid → reject, metric `ai.schema.rejections`, deterministic fallback; never partial use (LG-V04)
-  - [ ] P10.03.03 Tests with malformed, truncated and extra-field outputs (FS-08)
+  - [ ] P10.03.03 Tests with malformed, truncated and extra-field outputs (FS-08) · re-proved on main be4591d: EV-P10-016 (supersedes EV-P10-002)
 - [ ] **P10.04 Deadlines, retries, circuit breaker, budgets** `[G:PILOT]`
   - [ ] P10.04.01 Per-purpose deadlines and retry policies (see [Model gateway](#model-gateway-adr-0012))
   - [ ] P10.04.02 Circuit breaker per provider and purpose (5 failures in 30 s → open 60 s; half-open probes)
   - [ ] P10.04.03 Per-call token caps; per-tenant daily AI cost budget alarms
   - [ ] P10.04.04 Tests: timeout → fallback path within the deadline; breaker opens and recovers (FS-02)
 - [ ] **P10.05 PII minimisation and redaction** `[G:PILOT]`
-  - [ ] P10.05.01 Context builders send only the fields the step needs (e.g. no caller number to NLU; slot names instead of values where possible)
+  - [ ] P10.05.01 Context builders send only the fields the step needs (e.g. no caller number to NLU; slot names instead of values where possible) · re-proved on main be4591d: EV-P10-017 (supersedes EV-P10-004)
   - [ ] P10.05.02 Redaction of stored `proposed_output` (phone numbers masked, names initialised) per ADR-0019
   - [ ] P10.05.03 Tests: prompts for sample calls contain no caller number; stored AI records pass the PII scanner
 - [ ] **P10.06 Prompt and policy registry and versioning** `[G:PILOT]`
@@ -3123,7 +3123,7 @@ Accept ADR-0011 (dialogue manager and response types), ADR-0012 (gateway), ADR-0
   - [ ] P10.13.02 Runner modes: recorded fixtures (PR), live model (nightly + AI changes); metrics per intent/slot; Wilson bounds; minimum-N enforcement
   - [ ] P10.13.03 Reports (Markdown + JSON) bound to the version set; stored as evidence; trend comparison with the previous report
   - [ ] P10.13.04 CI gate QG-07 wiring
-  - [ ] P10.13.05 Tests: runner computes metrics correctly on a synthetic dataset with known answers
+  - [ ] P10.13.05 Tests: runner computes metrics correctly on a synthetic dataset with known answers · re-proved on main be4591d: EV-P10-018 (supersedes EV-P10-012)
 - [ ] **P10.14 Cost and token telemetry** `[G:PILOT]`
   - [ ] P10.14.01 Per-call tokens and `cost_micros` from provider responses and price tables (configuration)
   - [ ] P10.14.02 Usage ledger `llm_tokens` entries (margin tracking, not customer billing)
@@ -3178,7 +3178,7 @@ Eval report v1 (EV-P10-001), adversarial report (EV-P10-002), emergency report (
 
 **Status:** PILOT IN_PROGRESS · LAUNCH IN_PROGRESS · **Target:** 2026-10-14 → 2026-10-26 · **Effort:** 7 engineering-days
 
-**Status detail (as of 2026-11-01):** Blocker / external wait (moved verbatim from the Status Ledger): EXT-10 NOT_STARTED (an unverified 2026-10-15 note reports a suspended Twilio account) / EXT-11; DG-01 not taken. Wired: signed inbound webhook → number-to-tenant resolution → disclosure TwiML → WSS session that runs the P04 measurement script; tokens and CallSid dedup in memory. Not wired: call machine, finaliser, fallback layers, degraded capture, caps, metering, reconciliation, drain, absence alarm (unit-tested helpers with no importer; LAUNCH: transfer validation) (re-checked 2026-11-01) Next action (moved verbatim): Vertical slice: call machine + finaliser + capture on the relay path
+**Status detail (as of 2026-11-01):** Blocker / external wait (moved verbatim from the Status Ledger): EXT-10 NOT_STARTED (an unverified 2026-10-15 note reports a suspended Twilio account) / EXT-11; DG-01 not taken. Wired: signed inbound webhook → number-to-tenant resolution → disclosure TwiML → WSS session that runs the P04 measurement script; tokens and CallSid dedup in memory. Not wired: call machine, finaliser, fallback layers, degraded capture, caps, metering, reconciliation, drain, absence alarm (unit-tested helpers with no importer; LAUNCH: transfer validation) (re-checked 2026-11-01) Next action (moved verbatim): Vertical slice: call machine + finaliser + capture on the relay path Re-run (C-RERUN, 2026-11-01, main be4591d): P11.01.01 (EV-P11-018) and P11.03.01 (EV-P11-019) re-proved; both are wired on the inbound path. None VERIFIED.
 
 ### Objective
 Turn the P04 adapter into a production telephony platform with robust behaviour for every call path:
@@ -3207,7 +3207,7 @@ Voice module · number routing · TwiML generator with disclosure invariant · r
 
 ### Checklist
 - [ ] **P11.01 Number routing and tenant resolution** `[G:PILOT]`
-  - [ ] P11.01.01 `number_routes` (global) with statuses active/quarantined (release is a row DELETE freeing the number, not a stored status); `resolve_route(e164)` returns `(organisation_id, location_id)` only
+  - [ ] P11.01.01 `number_routes` (global) with statuses active/quarantined (release is a row DELETE freeing the number, not a stored status); `resolve_route(e164)` returns `(organisation_id, location_id)` only · re-proved on main be4591d: EV-P11-018 (supersedes EV-P11-001)
   - [ ] P11.01.02 Voice config snapshot per tenant (business name for disclosure, enabled intents, template binding, limits, flags), cached in process with version check (≤ 60 s staleness)
   - [ ] P11.01.03 Unknown or quarantined number → neutral message TwiML ("Diese Rufnummer ist derzeit nicht vergeben") + metric; never another tenant
   - [ ] P11.01.04 Tests: routing correctness, quarantined numbers, cache invalidation on config change
@@ -3219,7 +3219,7 @@ Voice module · number routing · TwiML generator with disclosure invariant · r
   - [ ] P11.02.05 Latency budget ≤ 300 ms p95 for the webhook (cached config + one upsert)
   - [ ] P11.02.06 Tests: snapshot of TwiML for every tenant state; property test "every emitted ConversationRelay has the disclosure attributes"; duplicate webhook returns identical TwiML without a duplicate row
 - [ ] **P11.03 Request validation and idempotency** `[G:PILOT]`
-  - [ ] P11.03.01 `X-Twilio-Signature` validation on all voice HTTP endpoints; public URL reconstruction from configured hostnames (not the Host header)
+  - [ ] P11.03.01 `X-Twilio-Signature` validation on all voice HTTP endpoints; public URL reconstruction from configured hostnames (not the Host header) · re-proved on main be4591d: EV-P11-019 (supersedes EV-P11-003)
   - [ ] P11.03.02 Subaccount check (AccountSid must match the environment's subaccount)
   - [ ] P11.03.03 Invalid signature → 403 + `webhook.signature.invalid` metric + WAF sampling
   - [ ] P11.03.04 Tests: tampered params, wrong URL, wrong account, replayed request (idempotent)
@@ -3344,7 +3344,7 @@ Fallback suite report (EV-P11-001), permutation test report (EV-P11-002), draini
 
 **Status:** PILOT IN_PROGRESS · **Target:** 2026-10-19 → 2026-10-30 · **Effort:** 7 engineering-days
 
-**Status detail (as of 2026-11-01):** Blocker / external wait (moved verbatim from the Status Ledger): EXT-20, EXT-12, EXT-10. Turn helpers (greeting, intent routing, FAQ answer, callback/lead/appointment capture, escalation, silence/barge-in, outcome writer, summary draft) unit-tested and imported by no runtime; PROGRESS claims for P12.01/P12.02 cited the wrong PLAN items and P12.07.04/P12.13.05 do not exist — corrected (M0, 2026-10-16). The only capture that runs is the callback request on the development-only simulated call (#229–#232, #242; P12.09.01, P12.12.01) Next action (moved verbatim): Wire the turn helpers into the relay path (needs P11 call machine); the simulator carries the callback case only
+**Status detail (as of 2026-11-01):** Blocker / external wait (moved verbatim from the Status Ledger): EXT-20, EXT-12, EXT-10. Turn helpers (greeting, intent routing, FAQ answer, callback/lead/appointment capture, escalation, silence/barge-in, outcome writer, summary draft) unit-tested and imported by no runtime; PROGRESS claims for P12.01/P12.02 cited the wrong PLAN items and P12.07.04/P12.13.05 do not exist — corrected (M0, 2026-10-16). The only capture that runs is the callback request on the development-only simulated call (#229–#232, #242; P12.09.01, P12.12.01) Next action (moved verbatim): Wire the turn helpers into the relay path (needs P11 call machine); the simulator carries the callback case only Re-run (C-RERUN, 2026-11-01, main be4591d): P12.06.03 (EV-P12-016) and P12.12.02 (EV-P12-017) re-proved at the item's own acceptance text; they stay unwired, as LEDGER-AB recorded. None VERIFIED.
 
 ### Objective
 Implement the Reception conversation for the restaurant template v1 and prove it against the voice launch gates on the real phone network. Scope:
@@ -3399,7 +3399,7 @@ Dialogue manager · German normalisers · response templates (German) · read-ba
 - [ ] **P12.06 FAQ answering** `[G:PILOT]`
   - [ ] P12.06.01 Structured questions → deterministic answers (hours "jetzt geöffnet?", address, parking)
   - [ ] P12.06.02 Card questions → NLU closed-set selection → `spoken_answer` verbatim; `none` → uncertainty path (BR-129 sentence + callback offer)
-  - [ ] P12.06.03 Suspended/expired/sensitive-overdue cards never used
+  - [ ] P12.06.03 Suspended/expired/sensitive-overdue cards never used · re-proved on main be4591d: EV-P12-016 (supersedes EV-P12-003)
   - [ ] P12.06.04 Tests: eval set LG-V06/LG-V07
 - [ ] **P12.07 Reservation-request capture (no confirmation)** `[G:PILOT]`
   - [ ] P12.07.01 Capture slots, read back, create `appointment_request` + task "Reservierungsanfrage bestätigen"; tell the caller clearly: "Ich habe Ihre Anfrage aufgenommen. Das Team bestätigt Ihnen die Reservierung." (never "reserviert")
@@ -3426,7 +3426,7 @@ Dialogue manager · German normalisers · response templates (German) · read-ba
   - [ ] P12.11.05 Verify: silence, unintelligible speech, barge-in and non-German scenarios pass in the simulator and in ≥ 20 harness calls
 - [ ] **P12.12 Outcome writing** `[G:PILOT]`
   - [ ] P12.12.01 On end: contact resolution (P07.03), conversation, outcome, task/lead/request via tools, audit, SSE event
-  - [ ] P12.12.02 Result codes for "handled automatically" (FAQ resolved, request captured) vs "needs attention"
+  - [ ] P12.12.02 Result codes for "handled automatically" (FAQ resolved, request captured) vs "needs attention" · re-proved on main be4591d: EV-P12-017 (supersedes EV-P12-009)
   - [ ] P12.12.03 Tests: every intent produces the expected objects; duplicate end events idempotent
 - [ ] **P12.13 Structured call summary (async)** `[G:PILOT]`
   - [ ] P12.13.01 Summary job: input = validated facts + outcome + intent (not raw text by default per ADR-0019); output ≤ 3 sentences German, labelled "KI-Zusammenfassung"
@@ -3486,7 +3486,7 @@ Voice gate report (EV-P12-001), harness timing report (EV-P12-002), normaliser c
 
 **Status:** PILOT IN_PROGRESS · LAUNCH NOT_STARTED · **Target:** 2026-10-15 → 2026-10-30 · **Effort:** 7 engineering-days
 
-**Status detail (as of 2026-11-01):** Blocker / external wait (moved verbatim from the Status Ledger): DG-10 open. Heute is a server-rendered page reading the session tenant's live tasks from `GET /api/today` (shared contract; signed-out, loading, error and empty states); an open, visible Heute polls that read every 15 s and re-renders on change (M2B, EV-P13-016: measured 15.4 s arrival, the vertical-slice browser suite now also runs in GitHub CI on real PostgreSQL and Keycloak, 10 of 10, 15.9 s arrival, EV-P13-017; no SSE, no stale indicator, no fallback E2E, so P13.10 stays open). A callback card has **Erledigt** (M2A, EV-P13-015): `POST /api/tasks/:id/complete` with the task version walks the existing task machine as the signed-in member (owner/admin any task, staff own or unassigned; 409 stale, 403 not allowed, 404 other tenant; a lost answer is read back, never reported as a failure); no other card action, optimistic UI or completed-tasks view exists. No other owner view exists; the service worker is still unregistered. Of the `apps/web/lib` helpers, `i18n`, `today`, `today-view`, `live-today`, `complete-task` and `security` are used; `cards`, `customers`, `inbox`, `knowledge`, `morning`, `realtime`, `settings`, `states` and `a11y` are imported by no page (re-checked 2026-11-01). A packaged demo stack with a browser test exists (#241); the owner-app design authority is proposed for founder review (#243) and an isolated prototype for the DG-10 usability test is built (#244) Next action (moved verbatim): Heute: summary counts (P13.02.02); SSE and stale indicator (P13.10); then the remaining PILOT views
+**Status detail (as of 2026-11-01):** Blocker / external wait (moved verbatim from the Status Ledger): DG-10 open. Heute is a server-rendered page reading the session tenant's live tasks from `GET /api/today` (shared contract; signed-out, loading, error and empty states); an open, visible Heute polls that read every 15 s and re-renders on change (M2B, EV-P13-016: measured 15.4 s arrival, the vertical-slice browser suite now also runs in GitHub CI on real PostgreSQL and Keycloak, 10 of 10, 15.9 s arrival, EV-P13-017; no SSE, no stale indicator, no fallback E2E, so P13.10 stays open). A callback card has **Erledigt** (M2A, EV-P13-015): `POST /api/tasks/:id/complete` with the task version walks the existing task machine as the signed-in member (owner/admin any task, staff own or unassigned; 409 stale, 403 not allowed, 404 other tenant; a lost answer is read back, never reported as a failure); no other card action, optimistic UI or completed-tasks view exists. No other owner view exists; the service worker is still unregistered. Of the `apps/web/lib` helpers, `i18n`, `today`, `today-view`, `live-today`, `complete-task` and `security` are used; `cards`, `customers`, `inbox`, `knowledge`, `morning`, `realtime`, `settings`, `states` and `a11y` are imported by no page (re-checked 2026-11-01). A packaged demo stack with a browser test exists (#241); the owner-app design authority is proposed for founder review (#243) and an isolated prototype for the DG-10 usability test is built (#244) Next action (moved verbatim): Heute: summary counts (P13.02.02); SSE and stale indicator (P13.10); then the remaining PILOT views Re-run (C-RERUN, 2026-11-01, main be4591d): P13.02.03 re-proved (EV-P13-019): the Heute empty state test, the callback slice integration tests and the CI full-stack acceptance job. None VERIFIED.
 
 ### Objective
 Build the small, German-first, mobile-first owner application:
@@ -3516,7 +3516,7 @@ App shell and auth flows · Today · interaction cards and actions · Inbox · C
 - [ ] **P13.02 Today page** `[G:PILOT]`
   - [ ] P13.02.01 Sections: Dringend · Rückrufe · Neue Anfragen · Termine/Reservierungen zu bestätigen · Offene Kundenfragen (Documents hidden until P34; T-08)
   - [ ] P13.02.02 "Automatisch erledigt" summary counts (calls answered, FAQs resolved, requests captured, enquiries routed)
-  - [x] P13.02.03 Empty states that reassure ("Alles erledigt"), not blank — EV-P13-014
+  - [x] P13.02.03 Empty states that reassure ("Alles erledigt"), not blank — EV-P13-019 (supersedes EV-P13-014)
   - [x] P13.02.04 E2E test: a simulated call appears in the right section within 60 s (LG-P13) — EV-P13-017
 - [ ] **P13.03 Interaction cards and actions** `[G:PILOT]`
   - [ ] P13.03.01 Card layout: person, time + channel, reason, captured facts (template labels), result, next action (L522–563)
