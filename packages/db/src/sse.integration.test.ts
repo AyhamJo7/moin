@@ -95,3 +95,41 @@ describe('sse', () => {
     expect(pollA.map((e) => e.eventId)).toContain(id);
   });
 });
+
+describe('sse replay orders by the numeric event id (SEC-G04 F1 pattern)', () => {
+  const REPLAY_USER = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+
+  evidenceTest('replay returns the next numbers, not the next strings', async () => {
+    // Identifiers 8 to 19 cross the one-to-two digit boundary: sorted as text, '10' to '19' come
+    // before '8' and '9', so a client resuming at 7 with a small page would skip them.
+    const START = 8; // keep equal to the literal restart value below
+    const COUNT = 12;
+    await admin.query('alter table sse_events alter column event_id restart with 8');
+    const published: number[] = [];
+    await withTenant(app, ORG_A, async (client) => {
+      for (let i = 0; i < COUNT; i += 1) {
+        published.push(
+          await publishEvent(client, { userId: REPLAY_USER, type: 'task.created', payload: {} }),
+        );
+      }
+    });
+    expect(published).toStrictEqual(Array.from({ length: COUNT }, (_, i) => START + i));
+
+    const page = await withTenant(app, ORG_A, (client) =>
+      replaySince(client, { userId: REPLAY_USER, lastEventId: START - 1, limit: 3 }),
+    );
+    expect(page.map((e) => e.eventId)).toStrictEqual([8, 9, 10]);
+
+    const seen: number[] = [];
+    let cursor = START - 1;
+    for (let guard = 0; guard < 20; guard += 1) {
+      const next = await withTenant(app, ORG_A, (client) =>
+        replaySince(client, { userId: REPLAY_USER, lastEventId: cursor, limit: 5 }),
+      );
+      if (next.length === 0) break;
+      seen.push(...next.map((e) => e.eventId));
+      cursor = next.at(-1)?.eventId ?? cursor;
+    }
+    expect(seen).toStrictEqual(published);
+  });
+});
