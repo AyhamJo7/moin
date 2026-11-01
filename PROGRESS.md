@@ -1,12 +1,12 @@
 ---
-mission: M2C full-stack browser acceptance in CI (M2B #237 merged at cbef5f5)
+mission: LEDGER-AB correct and compact the Status Ledger (docs only; M2C resumes after)
 status: active
 mode: interactive
-phase: M1 (cross-phase slice: P07, P12, P13)
+phase: ledger-wide correction (P06, P08–P13)
 tier: PILOT
-plan: docs/development/m1-vertical-slice.md
-next: independent review of the M2C draft PR; P13.03.02 remaining card actions not started
-updated: 2026-10-17
+plan: docs/audits/2026-11-01-ledger-ab.md
+next: independent review of the LEDGER-AB draft PR; founder decisions on P06.04.03, P06.10.01, P06.08.02, P06.09.04
+updated: 2026-11-01
 ---
 
 # PROGRESS — moin
@@ -1819,3 +1819,30 @@ and open items in EV-P08-012. P08.05.01–.04 stay open; nothing is VERIFIED.
 | P08.05.03 | IN_PROGRESS | 8c75461 | EV-P08-012 | Schema-invalid and unknown-tenant messages dead-lettered without a handler                    |
 | P08.05.04 | IN_PROGRESS | 8c75461 | EV-P08-012 | Tests exist on the real consumer; the older in-memory Worker evidence (EV-P08-005) remains    |
 | P08.05.01 | IN_PROGRESS | 323b388 | EV-P08-012 | Review round 1: abandon checks envelope identity; a busy row is never acknowledged            |
+
+## Ledger correction LEDGER-AB (2026-11-01)
+
+Corrective rows from the 2026-10-31 backlog of READY_FOR_REVIEW rows, re-checked against `main` at
+`be4591d` (after #245). The rows above are unchanged; where a row below lists an item it supersedes the
+earlier status. Most of the backlog was already corrected by the M0 reconciliation (2026-10-16); only
+the items whose latest row still says READY_FOR_REVIEW get a row here. Nothing here is VERIFIED.
+Per-item list: `docs/audits/2026-11-01-ledger-ab.md`.
+
+| Item                            | Status           | Commit  | Evidence   | Note                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------- | ---------------- | ------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P08.03.01                       | IN_PROGRESS      | be24d71 | EV-P08-003 | LEDGER-AB 2026-11-01, corrects the READY_FOR_REVIEW row that M0 kept as met at the item text: library built and unit-tested, not wired into a runtime path: `provider_inbox` (0064) and `receiveProviderEvent` are in packages/db; no webhook, worker or controller calls them.                                                       |
+| P08.07.01                       | IN_PROGRESS      | 1c71fe7 | EV-P08-007 | LEDGER-AB 2026-11-01, corrects the READY_FOR_REVIEW row that M0 kept as met at the item text: library built and unit-tested, not wired into a runtime path: `timers` (0067), `scheduleTimer` and `claimDueTimers` are in packages/db; no sweeper process or caller exists.                                                            |
+| P08.10.02                       | IN_PROGRESS      | 8575cc1 | EV-P08-010 | LEDGER-AB 2026-11-01, corrects the READY_FOR_REVIEW row that M0 kept as met at the item text: library built and unit-tested, not wired into a runtime path: the kill-switch catalogue with `isEnabled` and `setFlag` is in packages/db; no runtime path reads a flag.                                                                 |
+| P10.03.03                       | IN_PROGRESS      | ddd3011 | EV-P10-002 | LEDGER-AB 2026-11-01, corrects the READY_FOR_REVIEW row that M0 kept as met at the item text: library built and unit-tested, not wired into a runtime path: structured-output validation: packages/ai exports it and no app or package imports `@moin/ai`.                                                                            |
+| P10.05.01                       | IN_PROGRESS      | 103aa21 | EV-P10-004 | LEDGER-AB 2026-11-01, corrects the READY_FOR_REVIEW row that M0 kept as met at the item text: library built and unit-tested, not wired into a runtime path: `buildNluMessages`: packages/ai exports it and no app or package imports `@moin/ai`.                                                                                      |
+| P10.07.01, P10.07.03, P10.07.04 | IN_PROGRESS      | cd38739 | EV-P10-006 | LEDGER-AB 2026-11-01, corrects the READY_FOR_REVIEW row that M0 kept as met at the item text: library built and unit-tested, not wired into a runtime path: `decide`: packages/ai exports it and no app or package imports `@moin/ai`.                                                                                                |
+| P10.08.01, P10.08.02            | IN_PROGRESS      | 64ad8eb | EV-P10-007 | LEDGER-AB 2026-11-01, corrects the READY_FOR_REVIEW row that M0 kept as met at the item text: library built and unit-tested, not wired into a runtime path: `defineTool` and `guardedExecute`: packages/ai exports it and no app or package imports `@moin/ai`.                                                                       |
+| P10.10.01, P10.10.02            | IN_PROGRESS      | 8b3f5ef | EV-P10-009 | LEDGER-AB 2026-11-01, corrects the READY_FOR_REVIEW row that M0 kept as met at the item text: library built and unit-tested, not wired into a runtime path: `evaluateRules`: packages/ai exports it and no app or package imports `@moin/ai`.                                                                                         |
+| P10.13.05                       | IN_PROGRESS      | 3f10726 | EV-P10-012 | LEDGER-AB 2026-11-01, corrects the READY_FOR_REVIEW row that M0 kept as met at the item text: library built and unit-tested, not wired into a runtime path: `scoreAnswers` runner: packages/ai exports it and no app or package imports `@moin/ai`.                                                                                   |
+| P11.11.01, P11.11.04            | IN_PROGRESS      | bcc2004 | EV-P11-010 | LEDGER-AB 2026-11-01, corrects the READY_FOR_REVIEW row that M0 kept as met at the item text: library built and unit-tested, not wired into a runtime path: `classifyCallerId` is called only by the development-only simulated-call controller (token guard, development and test); the inbound voice path does not classify `From`. |
+| P12.06.03                       | IN_PROGRESS      | a3f9659 | EV-P12-003 | LEDGER-AB 2026-11-01, corrects the READY_FOR_REVIEW row that M0 kept as met at the item text: library built and unit-tested, not wired into a runtime path: `answerFaq` (voice/application/faq-answer.ts) has no importer; the approved-retrieval view is proven at the database level only.                                          |
+| P12.11.02, P12.11.03            | IN_PROGRESS      | 032dea1 | EV-P12-008 | LEDGER-AB 2026-11-01, corrects the READY_FOR_REVIEW row that M0 kept as met at the item text: library built and unit-tested, not wired into a runtime path: `speechFailureTurn` and `bargeInTurn` (voice/application/silence-turn.ts) have no importer.                                                                               |
+| P12.12.02                       | IN_PROGRESS      | 9a75a10 | EV-P12-009 | LEDGER-AB 2026-11-01, corrects the READY_FOR_REVIEW row that M0 kept as met at the item text: library built and unit-tested, not wired into a runtime path: `createOutcomeWriter` (voice/application/outcome-write.ts) has no importer; the simulated-call path writes outcomes through its own transaction.                          |
+| P11.01.01                       | READY_FOR_REVIEW | b057174 | EV-P11-001 | LEDGER-AB 2026-11-01 re-check, status kept (wired on main): `VoiceController.inbound` calls `routeInboundCall` (voice role, `VoiceModule` in `voice-root.module.ts`) since #132; number route and `resolve_route` are on the inbound path. Not VERIFIED.                                                                              |
+| P11.03.01                       | READY_FOR_REVIEW | 5c40fb9 | EV-P11-003 | LEDGER-AB 2026-11-01 re-check, status kept (wired on main): `@UseGuards(TwilioSignatureGuard)` is on `VoiceController` in the voice role (guard 5c40fb9; inbound endpoint #132, b057174). Not VERIFIED.                                                                                                                               |
+| P13.02.03                       | READY_FOR_REVIEW | 85ad367 | EV-P13-014 | LEDGER-AB 2026-11-01 re-check, status kept (wired on main): `apps/web/app/page.tsx` imports `emptyLine` and `groupToday` from `lib/today.ts` and renders them (#229). Not VERIFIED.                                                                                                                                                   |
