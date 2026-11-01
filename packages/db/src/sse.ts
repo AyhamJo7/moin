@@ -85,7 +85,7 @@ export async function replaySince(
     `select event_id::text, event_type, payload from sse_events
      where user_id = $1::uuid and event_id > $2::bigint
        and created_at > now() - ($3::integer || ' minutes')::interval
-     order by event_id limit $4::integer`,
+     order by sse_events.event_id limit $4::integer`,
     [input.userId, input.lastEventId, SSE_REPLAY_MINUTES, limit],
   );
   return found.rows.map((r) => ({
