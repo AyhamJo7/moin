@@ -139,7 +139,7 @@ Single source of status. Tier columns show the status of that phase's items for 
 |---|---|---|---|---|---|---|---|---|
 | P00 | Planning baseline | READY_FOR_REVIEW | — | — | — | — | Founder review | Founder reads and adopts plan (P00.05) |
 | P01 | Discovery & Gurlitt observation | NOT_STARTED | NOT_STARTED | — | — | — | EXT-16 Gurlitt; the planned 2026-09-28 kickoff has no recorded outcome (no later record found, re-checked 2026-11-01) | Founder confirms the Gurlitt cooperation and schedules the kickoff (P01.02.01) |
-| P02 | Engineering foundation | READY_FOR_REVIEW | — | — | — | — | Founder: accept EXT-24 (EV-P02-047). Open: seed applies 0 rows (P02.04.02, EV-P02-025); 15-min cold stack unverified (P02.04.06, EV-P02-022/046); push rejection by configuration only (EV-P02-048). Detail: phase header | Founder accepts EXT-24; seed rows land with P06.04 |
+| P02 | Engineering foundation | IN_PROGRESS | — | — | — | — | Founder: accept EXT-24 (EV-P02-047); install Renovate (P02.08.01). Open: seed applies 0 rows (P02.04.02); cold stack untimed (P02.04.06); turbo test tasks absent (P02.02.02); image cannot start voice or worker (P02.03.02/.07); P02.07.03 not repeatable. Detail: phase header | Founder accepts EXT-24 and installs Renovate; engineering: ship every imported package in the image and boot all roles in CI, decide the turbo test tasks |
 | P03 | Architecture decisions & threat model | IN_PROGRESS | — | — | — | — | EXT-02 counsel not engaged | P03.05 review findings; founder sends the legal pack |
 | P04 | Feasibility proof & long-lead track | IN_PROGRESS | — | — | NOT_STARTED | — | EXT-01/07/10/11/12 | Adapter, gateway port and measurement harness built; every measurement waits on EXT-10/11/12 |
 | P05 | Cloud foundation & walking skeleton | IN_PROGRESS | — | — | — | — | EXT-09 AWS IN_PROGRESS: organisation, five accounts, Identity Center, root MFA and budget alerts exist (founder, 2026-10-14); SCPs, SES and quotas open. 0 Terraform files; shape helpers #207–#209 implement no P05 item. Detail: phase header | Terraform bootstrap and modules (engineering, plan-ready); founder applies |
@@ -2063,9 +2063,9 @@ Baseline report (EV-P01-001), owner sign-off e-mail reference (EV-P01-002), inte
 <a id="p02--engineering-foundation"></a>
 ## P02 — Engineering Foundation
 
-**Status:** PILOT READY_FOR_REVIEW · **Target:** 2026-09-28 → 2026-10-02 · **Effort:** 3 engineering-days
+**Status:** PILOT IN_PROGRESS · **Target:** 2026-09-28 → 2026-10-02 · **Effort:** 3 engineering-days
 
-**Status detail (as of 2026-11-01):** Next action (moved verbatim from the Status Ledger): P02 foundation implementation and evidence partially established: demo-tenant seeding (P02.04.02) incomplete, the seed applies 0 rows (EV-P02-025); the 15-minute fresh-clone stack with seed data (P02.04.06) unverified, measured warm with 0 rows seeded (EV-P02-022), realistic cold first run estimated at 45–90 min (EV-P02-046); direct-push rejection follows from the ruleset configuration, not an empirical test (EV-P02-048). EXT-24 READY_FOR_REVIEW: ruleset configuration evidenced (EV-P02-047), founder acceptance pending. None founder-VERIFIED; the item and evidence records are authoritative. `pnpm db:seed` is unchanged and still applies 0 rows; the packaged demo stack (#241) carries its own `deploy/demo/seed.sql`
+**Status detail (as of 2026-11-01):** Next action (moved verbatim from the Status Ledger): P02 foundation implementation and evidence partially established: demo-tenant seeding (P02.04.02) incomplete, the seed applies 0 rows (EV-P02-025); the 15-minute fresh-clone stack with seed data (P02.04.06) unverified, measured warm with 0 rows seeded (EV-P02-022), realistic cold first run estimated at 45–90 min (EV-P02-046); direct-push rejection follows from the ruleset configuration, not an empirical test (EV-P02-048). EXT-24 READY_FOR_REVIEW: ruleset configuration evidenced (EV-P02-047), founder acceptance pending. None founder-VERIFIED; the item and evidence records are authoritative. `pnpm db:seed` is unchanged and still applies 0 rows; the packaged demo stack (#241) carries its own `deploy/demo/seed.sql` Re-run (C-RERUN, 2026-11-01, main be4591d, clean clone): 38 of the 45 listed items re-proved (37 ticked items and the P02.03 QG-09 remediation) with new evidence that supersedes the older records (EV-P02-051…090 and EV-P02-091…094, each naming the record it supersedes). Seven items are PARTIAL and unticked: .02.02 (turbo `test` and `test:integration` tasks absent), .03.02 and .03.07 (the server image cannot start the voice and worker roles), .04.02 (`db:seed` applies 0 rows), .04.06 (warm run only, no seed data), .07.03 (a walkthrough cannot be re-run as a check), .08.01 (Renovate has never opened a pull request). The phase status moves from READY_FOR_REVIEW to IN_PROGRESS because of them. Section ticks of P02.02, .03, .04, .07 and .08 are removed. The audit is docs/audits/2026-11-01-c-rerun-p02.md. None VERIFIED.
 
 ### Objective
 Create a reproducible, governed monorepo in which every later phase lands with quality gates already enforced.
@@ -2084,63 +2084,63 @@ Monorepo skeleton · CI v1 · local stack · test harnesses · governance files 
 
 ### Checklist
 - [x] **P02.01 Repository governance** `[G:PILOT]` — EV-P02-047
-  - [x] P02.01.01 Ruleset on `main`: PR required, required checks (`verify`, `security-scan`, `container-scan`), linear history, no force-push/deletion (EXT-24 if the plan lacks private-repo rulesets) — EV-P02-047
-  - [x] P02.01.02 CODEOWNERS, PR template (what/why, risk, tests, evidence IDs, docs, migration/rollback, privacy impact), issue templates — EV-P02-003
-  - [x] P02.01.03 Conventional Commit enforcement on PR titles, plus a check rejecting AI-tool mentions in titles and bodies (workspace rule) — EV-P02-004
+  - [x] P02.01.01 Ruleset on `main`: PR required, required checks (`verify`, `security-scan`, `container-scan`), linear history, no force-push/deletion (EXT-24 if the plan lacks private-repo rulesets) — EV-P02-051 (supersedes EV-P02-047)
+  - [x] P02.01.02 CODEOWNERS, PR template (what/why, risk, tests, evidence IDs, docs, migration/rollback, privacy impact), issue templates — EV-P02-052 (supersedes EV-P02-003)
+  - [x] P02.01.03 Conventional Commit enforcement on PR titles, plus a check rejecting AI-tool mentions in titles and bodies (workspace rule) — EV-P02-053 (supersedes EV-P02-004)
   - [x] P02.01.04 `PROGRESS.md` ledger, `docs/evidence/INDEX.md`, evidence record template — EV-P02-005
   - [x] P02.01.05 `README.md` (purpose, quickstart, links to PLAN/ARCHITECTURE/SECURITY/PRIVACY/OPERATIONS) and `CONTRIBUTING.md` — EV-P02-006
   - [x] P02.01.06 Annotated/signed release-tag policy documented — EV-P02-007
-  - [x] P02.01.07 Verify: a direct push to `main` is rejected; a PR with failing required checks cannot merge — EV-P02-048
-- [x] **P02.02 Toolchain baseline** `[G:PILOT]` — EV-P02-001
-  - [x] P02.02.01 Pin Node 24 LTS (`.nvmrc`, `engines`), `packageManager: pnpm@10.x`; install via fnm/corepack without sudo — EV-P02-002
-  - [x] P02.02.02 Turborepo tasks: `lint`, `typecheck`, `test`, `test:integration`, `build` with caching and correct `dependsOn` — EV-P02-008
-  - [x] P02.02.03 TypeScript `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noImplicitOverride`, ESM — EV-P02-009, EV-P02-019
-  - [x] P02.02.04 ESLint flat config: `typescript-eslint` strict-type-checked, `no-explicit-any`, named exports only (Next.js route files excepted), ban `dangerouslySetInnerHTML`, ban string-built SQL, ban session-level `SET`, ban `console.*` in production code — EV-P02-001
-  - [x] P02.02.05 Custom lint rule stubs: no tenant-specific conditionals (INV-18), DB access only via tenant wrapper (activated in P06.03) — EV-P02-001
-  - [x] P02.02.06 Prettier, `.editorconfig` — EV-P02-010
-  - [x] P02.02.07 `dependency-cruiser` rules for module boundaries (see [Domain Boundaries](#domain-boundaries)) — EV-P02-011, EV-P02-020
-  - [x] P02.02.08 Terraform toolchain pinned (`tfenv` or pinned binary in `~/.local/bin`), `tflint`, Trivy — EV-P02-002
+  - [x] P02.01.07 Verify: a direct push to `main` is rejected; a PR with failing required checks cannot merge — EV-P02-054 (supersedes EV-P02-048)
+- [ ] **P02.02 Toolchain baseline** `[G:PILOT]` — EV-P02-001
+  - [x] P02.02.01 Pin Node 24 LTS (`.nvmrc`, `engines`), `packageManager: pnpm@10.x`; install via fnm/corepack without sudo — EV-P02-055 (supersedes EV-P02-002)
+  - [ ] P02.02.02 Turborepo tasks: `lint`, `typecheck`, `test`, `test:integration`, `build` with caching and correct `dependsOn` — EV-P02-091 (supersedes EV-P02-008) · PARTIAL (C-RERUN 2026-11-01): turbo.json defines build, typecheck, lint and dev; the tasks `test` and `test:integration` are absent (removed in 1867d75). Needs the tasks, or a PLAN decision that the root vitest projects replace them (EV-P02-091)
+  - [x] P02.02.03 TypeScript `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noImplicitOverride`, ESM — EV-P02-056 (supersedes EV-P02-009, EV-P02-019)
+  - [x] P02.02.04 ESLint flat config: `typescript-eslint` strict-type-checked, `no-explicit-any`, named exports only (Next.js route files excepted), ban `dangerouslySetInnerHTML`, ban string-built SQL, ban session-level `SET`, ban `console.*` in production code — EV-P02-057 (supersedes EV-P02-001)
+  - [x] P02.02.05 Custom lint rule stubs: no tenant-specific conditionals (INV-18), DB access only via tenant wrapper (activated in P06.03) — EV-P02-058 (supersedes EV-P02-001)
+  - [x] P02.02.06 Prettier, `.editorconfig` — EV-P02-059 (supersedes EV-P02-010)
+  - [x] P02.02.07 `dependency-cruiser` rules for module boundaries (see [Domain Boundaries](#domain-boundaries)) — EV-P02-060 (supersedes EV-P02-011, EV-P02-020)
+  - [x] P02.02.08 Terraform toolchain pinned (`tfenv` or pinned binary in `~/.local/bin`), `tflint`, Trivy — EV-P02-061 (supersedes EV-P02-002)
   - [x] P02.02.09 Accept ADR-0002 and ADR-0034 — EV-P02-002
-  - [x] P02.02.10 Verify: fixtures that violate each lint/boundary rule fail — EV-P02-001
-- [x] **P02.03 Monorepo skeleton** `[G:PILOT]` — EV-P02-018
-  - [x] P02.03.01 Create the structure from [Repository Structure](#repository-structure) — EV-P02-012
-  - [x] P02.03.02 Server role entrypoints (`main-api`, `main-voice`, `main-worker`, `main-migrate`) with role root modules — EV-P02-013
-  - [x] P02.03.03 Zod-validated configuration loader (fail fast on missing or invalid env; secrets never logged) — EV-P02-014
-  - [x] P02.03.04 Pino logger with redaction allowlist and request/correlation IDs (full telemetry in P15.01) — EV-P02-015
-  - [x] P02.03.05 `/healthz` (liveness) and `/readyz` (DB and dependency readiness) per role — EV-P02-016
-  - [x] P02.03.06 Multi-stage Dockerfiles (ARM64, non-root, read-only FS compatible, no package manager in runtime layer) — EV-P02-017
-  - [x] P02.03.07 Verify: images build; containers start; health endpoints return 200; image size recorded — EV-P02-018
-- [x] **P02.04 Local development environment** `[G:PILOT]` — EV-P02-022
-  - [x] P02.04.01 Docker Compose: Postgres 17 + pgvector (pinned digest), Valkey, SQS emulator (ElasticMQ), S3-compatible emulator (licence-checked), Mailpit, local OIDC provider for auth flows — EV-P02-024
-  - [x] P02.04.02 `pnpm dev:up`, `dev:down`, `dev:reset`, `db:migrate`, `db:seed` (synthetic demo tenants "Musterrestaurant" and "Musterbetrieb SHK") — EV-P02-025
-  - [x] P02.04.03 `.env.example` with fake values; `.env*` gitignored except the example — EV-P02-026
-  - [x] P02.04.04 Document the Twilio development path: developer-only tunnel to local voice service for sandbox numbers; never used for staging or production — EV-P02-027
-  - [x] P02.04.05 `pnpm doctor`: checks Node, pnpm, Docker, free ports, env completeness (pattern from exitos `doctor.ts`) — EV-P02-023
-  - [x] P02.04.06 Verify: fresh clone → running stack with seed data in ≤ 15 minutes (timed log) — EV-P02-022
+  - [x] P02.02.10 Verify: fixtures that violate each lint/boundary rule fail — EV-P02-062 (supersedes EV-P02-001)
+- [ ] **P02.03 Monorepo skeleton** `[G:PILOT]` — EV-P02-018 · QG-09 remediation re-proved (EV-P02-063, supersedes EV-P02-021); header unticked while .02 and .07 are PARTIAL
+  - [x] P02.03.01 Create the structure from [Repository Structure](#repository-structure) — EV-P02-064 (supersedes EV-P02-012)
+  - [ ] P02.03.02 Server role entrypoints (`main-api`, `main-voice`, `main-worker`, `main-migrate`) with role root modules — EV-P02-092 (supersedes EV-P02-013) · PARTIAL (C-RERUN 2026-11-01): all four roles boot from dist, but the server image cannot start voice or worker (ERR_MODULE_NOT_FOUND for @moin/telephony and @moin/integrations; apps/server/Dockerfile ships four workspace packages). Needs the image to carry every imported package and a CI job that boots every role (EV-P02-092)
+  - [x] P02.03.03 Zod-validated configuration loader (fail fast on missing or invalid env; secrets never logged) — EV-P02-065 (supersedes EV-P02-014)
+  - [x] P02.03.04 Pino logger with redaction allowlist and request/correlation IDs (full telemetry in P15.01) — EV-P02-066 (supersedes EV-P02-015)
+  - [x] P02.03.05 `/healthz` (liveness) and `/readyz` (DB and dependency readiness) per role — EV-P02-067 (supersedes EV-P02-016)
+  - [x] P02.03.06 Multi-stage Dockerfiles (ARM64, non-root, read-only FS compatible, no package manager in runtime layer) — EV-P02-068 (supersedes EV-P02-017)
+  - [ ] P02.03.07 Verify: images build; containers start; health endpoints return 200; image size recorded — EV-P02-093 (supersedes EV-P02-018) · PARTIAL (C-RERUN 2026-11-01): the image builds and the api role answers /healthz 200 read-only; voice and worker do not start (ERR_MODULE_NOT_FOUND); size 467.7 MB on amd64 (EV-P02-093)
+- [ ] **P02.04 Local development environment** `[G:PILOT]` — EV-P02-022
+  - [x] P02.04.01 Docker Compose: Postgres 17 + pgvector (pinned digest), Valkey, SQS emulator (ElasticMQ), S3-compatible emulator (licence-checked), Mailpit, local OIDC provider for auth flows — EV-P02-069 (supersedes EV-P02-024)
+  - [ ] P02.04.02 `pnpm dev:up`, `dev:down`, `dev:reset`, `db:migrate`, `db:seed` (synthetic demo tenants "Musterrestaurant" and "Musterbetrieb SHK") — EV-P02-070 (supersedes EV-P02-025) · PARTIAL (C-RERUN 2026-11-01): the commands work from a fresh clone; `db:seed` applies 0 rows, so Musterrestaurant and Musterbetrieb SHK do not exist (seeding lands with P06.04) (EV-P02-070)
+  - [x] P02.04.03 `.env.example` with fake values; `.env*` gitignored except the example — EV-P02-071 (supersedes EV-P02-026)
+  - [x] P02.04.04 Document the Twilio development path: developer-only tunnel to local voice service for sandbox numbers; never used for staging or production — EV-P02-072 (supersedes EV-P02-027)
+  - [x] P02.04.05 `pnpm doctor`: checks Node, pnpm, Docker, free ports, env completeness (pattern from exitos `doctor.ts`) — EV-P02-073 (supersedes EV-P02-023)
+  - [ ] P02.04.06 Verify: fresh clone → running stack with seed data in ≤ 15 minutes (timed log) — EV-P02-074 (supersedes EV-P02-022) · PARTIAL (C-RERUN 2026-11-01): warm run about 23 s; a cold run with image pulls, seed data and the documented copy of the environment example are not shown (EV-P02-074)
 - [x] **P02.05 Test infrastructure** `[G:PILOT]` — EV-P02-033
-  - [x] P02.05.01 Vitest projects: `unit`, `integration` — EV-P02-028
-  - [x] P02.05.02 Real-Postgres harness: template database cloning per test file, roles and migrations applied, runnable standalone — EV-P02-029
-  - [x] P02.05.03 `packages/testing` factories with German-realistic synthetic data (names, E.164 numbers in reserved/test ranges, PLZ) — EV-P02-030
-  - [x] P02.05.04 Playwright projects (Chromium, Firefox, WebKit, mobile viewport) + axe integration — EV-P02-032
-  - [x] P02.05.05 Fault-injection helpers and controllable clock — EV-P02-031
-  - [x] P02.05.06 Verify: example test of every type passes in-suite **and** standalone — EV-P02-033
+  - [x] P02.05.01 Vitest projects: `unit`, `integration` — EV-P02-075 (supersedes EV-P02-028)
+  - [x] P02.05.02 Real-Postgres harness: template database cloning per test file, roles and migrations applied, runnable standalone — EV-P02-076 (supersedes EV-P02-029)
+  - [x] P02.05.03 `packages/testing` factories with German-realistic synthetic data (names, E.164 numbers in reserved/test ranges, PLZ) — EV-P02-077 (supersedes EV-P02-030)
+  - [x] P02.05.04 Playwright projects (Chromium, Firefox, WebKit, mobile viewport) + axe integration — EV-P02-078 (supersedes EV-P02-032)
+  - [x] P02.05.05 Fault-injection helpers and controllable clock — EV-P02-079 (supersedes EV-P02-031)
+  - [x] P02.05.06 Verify: example test of every type passes in-suite **and** standalone — EV-P02-080 (supersedes EV-P02-033)
 - [x] **P02.06 CI pipeline v1** `[G:PILOT]` — EV-P02-049
-  - [x] P02.06.01 `verify`: frozen install, format, lint, typecheck, unit, integration (Postgres 17 + pgvector service), build — EV-P02-043
-  - [x] P02.06.02 `security-scan`: `pnpm audit`/OSV (fail on high/critical with fix), gitleaks full history, Semgrep, actionlint, shellcheck, Trivy filesystem, CycloneDX SBOM artifact — EV-P02-044
-  - [x] P02.06.03 `container-scan`: hadolint, image build, Trivy image scan (fail on high/critical with fix) — EV-P02-045
-  - [x] P02.06.04 `scripts/check-migrations.ts` (ordering, destructive/lock heuristics, adapted from exitos) wired to CI — EV-P02-034
-  - [x] P02.06.05 Job slots for RLS catalog check (P06.02) and OpenAPI drift (P06/P07) — EV-P02-040
-  - [x] P02.06.06 Actions pinned by SHA; `permissions: contents: read` by default; concurrency groups; caching — EV-P02-039
-  - [x] P02.06.07 Verify with four negative-control PRs: lint error, failing test, fake secret, vulnerable dependency, each fails the right job — EV-P02-049
-- [x] **P02.07 Developer documentation** `[G:PILOT]` — EV-P02-046
+  - [x] P02.06.01 `verify`: frozen install, format, lint, typecheck, unit, integration (Postgres 17 + pgvector service), build — EV-P02-081 (supersedes EV-P02-043)
+  - [x] P02.06.02 `security-scan`: `pnpm audit`/OSV (fail on high/critical with fix), gitleaks full history, Semgrep, actionlint, shellcheck, Trivy filesystem, CycloneDX SBOM artifact — EV-P02-082 (supersedes EV-P02-044)
+  - [x] P02.06.03 `container-scan`: hadolint, image build, Trivy image scan (fail on high/critical with fix) — EV-P02-083 (supersedes EV-P02-045)
+  - [x] P02.06.04 `scripts/check-migrations.ts` (ordering, destructive/lock heuristics, adapted from exitos) wired to CI — EV-P02-084 (supersedes EV-P02-034)
+  - [x] P02.06.05 Job slots for RLS catalog check (P06.02) and OpenAPI drift (P06/P07) — EV-P02-085 (supersedes EV-P02-040)
+  - [x] P02.06.06 Actions pinned by SHA; `permissions: contents: read` by default; concurrency groups; caching — EV-P02-086 (supersedes EV-P02-039)
+  - [x] P02.06.07 Verify with four negative-control PRs: lint error, failing test, fake secret, vulnerable dependency, each fails the right job — EV-P02-087 (supersedes EV-P02-049)
+- [ ] **P02.07 Developer documentation** `[G:PILOT]` — EV-P02-046
   - [x] P02.07.01 `docs/development/local-setup.md`, `testing.md`, `conventions.md` — EV-P02-041
   - [x] P02.07.02 `ARCHITECTURE.md` skeleton linking ADRs; `SECURITY.md` skeleton — EV-P02-042
-  - [x] P02.07.03 Verify: a fresh agent session follows the docs from a clean clone without help — EV-P02-046
-- [x] **P02.08 Dependency and supply-chain policy** `[G:PILOT]` — EV-P02-036
-  - [x] P02.08.01 Renovate: weekly grouped updates, immediate security updates, lockfile maintenance — EV-P02-037
-  - [x] P02.08.02 Licence allowlist check (fail on AGPL/SSPL/unknown in production dependencies) — EV-P02-035
-  - [x] P02.08.03 pnpm `onlyBuiltDependencies` allowlist; no unreviewed install scripts — EV-P02-038
-  - [x] P02.08.04 Verify: licence check fails on a copyleft fixture — EV-P02-036
+  - [ ] P02.07.03 Verify: a fresh agent session follows the docs from a clean clone without help — EV-P02-046 · PARTIAL (C-RERUN 2026-11-01): not re-run: a fresh-session walkthrough is an event, not a check. Needs a new walkthrough on current main
+- [ ] **P02.08 Dependency and supply-chain policy** `[G:PILOT]` — EV-P02-036
+  - [ ] P02.08.01 Renovate: weekly grouped updates, immediate security updates, lockfile maintenance — EV-P02-094 (supersedes EV-P02-037) · PARTIAL (C-RERUN 2026-11-01): the configuration passes; Renovate has never opened a pull request. Needs the GitHub App installed, a founder action (EV-P02-094)
+  - [x] P02.08.02 Licence allowlist check (fail on AGPL/SSPL/unknown in production dependencies) — EV-P02-088 (supersedes EV-P02-035)
+  - [x] P02.08.03 pnpm `onlyBuiltDependencies` allowlist; no unreviewed install scripts — EV-P02-089 (supersedes EV-P02-038)
+  - [x] P02.08.04 Verify: licence check fails on a copyleft fixture — EV-P02-090 (supersedes EV-P02-036)
 
 ### Security
 Supply chain (pinned actions, frozen lockfile, SBOM), secret scanning from the first commit, branch protection, minimal CI permissions.
