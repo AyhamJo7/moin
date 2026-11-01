@@ -1857,3 +1857,13 @@ Per-item list: `docs/audits/2026-11-01-ledger-ab.md`.
 | P06.10.03                       | IN_PROGRESS          | 393089a | EV-P06-056 | LEDGER-AB 2026-11-01, corrects the READY_FOR_REVIEW row (the PLAN item is unticked). Built: application-service paths. Missing: the tool guard (P10), operator actions and security events do not exist; the session DEFINERs are unaudited by founder decision.                                                                                                                                                                                             |
 | P06.11.03                       | IN_PROGRESS          | cee45a5 | EV-P06-057 | LEDGER-AB 2026-11-01, confirms the correction of the PLAN tick (already unticked). Built: grant lifecycle and the gate predicate. Missing: the four support read functions have no runtime EXECUTE grant (42501) until a trusted operator identity exists (P06.11.01); no grant-gated read is executed.                                                                                                                                                      |
 | P06.11.05                       | IN_PROGRESS          | cee45a5 | EV-P06-057 | LEDGER-AB 2026-11-01, confirms the correction of the PLAN tick (already unticked). Built: no-grant, expired and revoked cases at the gate predicate, and grant create/revoke audit. Missing: no read is executed, so "no data" and "every access audited" for reads are not proven.                                                                                                                                                                          |
+
+### Status Ledger accuracy pass (LEDGER-AB, 2026-11-01)
+
+PLAN.md Status Ledger rows re-checked against `main` at `be4591d`, the merged PRs since the 2026-10-16
+reconciliation (#229–#248) and the code. Changed: P01 and P05 (markers replaced by the re-check date),
+P02 (the demo stack seed is separate from `pnpm db:seed`), P06 (the four founder waits, `.06.05` and the
+resolver wiring, the amended QG-09 rule, next action), P07 (`POST /api/tasks/:id/complete` and the
+other paths), P08 (the job consumer of #245), P09, P10, P11, P12 (the only capture that runs is the
+simulated callback), P13 (the `apps/web/lib` helpers that are used, #241, #243, #244), P14 to P33 (the
+unchanged-since-M0 marker dropped where no file in the area changed). No tier status changed.
