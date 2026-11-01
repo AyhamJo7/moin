@@ -1804,3 +1804,18 @@ procedural control, not a security boundary. QG-09's founder concurrence is amen
 2026-11-01 (founder-merged until 2026-11-29; afterwards the agent reviews plus the independent Codex review, founder
 tie-break after two rounds); the PLAN.md QG-09 row, CLAUDE.md §10 and the v1.1.0 change-log row say so, and no
 invariant, threshold, scope or tier changed. Not verified: PR #247 is not merged, so session merging is not active.
+
+ASYNC-1A (2026-10-21, branch `feat/p08-05-worker-runtime` from 6e0f156, draft PR): the worker role runs a real SQS
+job consumer. A delivery executes under the `job_runs` row lock in one tenant transaction, the queue message is deleted
+only after the commit, and retry, DLQ, visibility heartbeat, receive ceiling, handler deadline and SIGTERM drain have
+executable proof against real PostgreSQL, ElasticMQ and the compiled entrypoint. No production job type has a handler
+yet and nothing publishes to the queue (ASYNC-1B). Full gates 14/14 local at `8c75461`; three internal reviews, findings
+and open items in EV-P08-012. P08.05.01–.04 stay open; nothing is VERIFIED.
+
+| Item      | Status      | Commit  | Evidence   | Note                                                                                          |
+| --------- | ----------- | ------- | ---------- | --------------------------------------------------------------------------------------------- |
+| P08.05.01 | IN_PROGRESS | 8c75461 | EV-P08-012 | Consumer, heartbeat, drain; no production handler, no publisher, one physical queue           |
+| P08.05.02 | IN_PROGRESS | 8c75461 | EV-P08-012 | Retry through ChangeMessageVisibility, per-type policy from the kernel; real queue and ledger |
+| P08.05.03 | IN_PROGRESS | 8c75461 | EV-P08-012 | Schema-invalid and unknown-tenant messages dead-lettered without a handler                    |
+| P08.05.04 | IN_PROGRESS | 8c75461 | EV-P08-012 | Tests exist on the real consumer; the older in-memory Worker evidence (EV-P08-005) remains    |
+| P08.05.01 | IN_PROGRESS | 323b388 | EV-P08-012 | Review round 1: abandon checks envelope identity; a busy row is never acknowledged            |

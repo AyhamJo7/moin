@@ -1,0 +1,34 @@
+{
+  "verdict": "KILLED",
+  "repo": "/tmp/moin-245",
+  "head": "a7ff0d8c91a443e7cabbc8d67f5ddb4158ac8528",
+  "mode": "committed",
+  "fix_ref": "a7ff0d8c91a443e7cabbc8d67f5ddb4158ac8528",
+  "fix_paths": [
+    "apps/server/src/modules/platform/job-consumer.ts",
+    "packages/db/src/job-execution.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "node ./node_modules/vitest/vitest.mjs run --project integration apps/server/src/modules/platform/job-consumer.integration.test.ts -t wrong",
+  "started": "2026-11-01T03:12:17+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-11-01T03:12:22+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 2.51,
+    "tail": "     \u2193 shutdown past the drain budget acknowledges nothing; a restarted worker completes it once\n     \u2193 a process shutting down takes no new work\n     \u2193 a job type with no handler is left on the queue unclaimed, never acknowledged as processed\n     \u2193 shutdown with every slot busy still drains inside its budget instead of waiting for a handler\n     \u2193 a handler past its deadline frees its slot and is never acknowledged\n     \u2193 a job whose transaction keeps dying is dead-lettered by the receive ceiling\n     \u00d7 a delivery past the receive ceiling with the wrong correlation id is rejected and changes nothing 56ms\n     \u00d7 a delivery past the receive ceiling with the wrong type is rejected and changes nothing 48ms\n     \u00d7 a delivery past the receive ceiling with the wrong version is rejected and changes nothing 54ms\n     \u2193 logs and ledger carry ids and codes, never payload or error text\n     \u2193 a job another worker is running right now is left on the queue, and survives that worker dying\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 3 \u23af\u23af\u23af\u23af\u23af\u23af\u23af\n\n FAIL  |integration| apps/server/src/modules/platform/job-consumer.integration.test.ts > job consumer over SQS and PostgreSQL > a delivery past the receive ceiling with the wrong correlation id is rejected and changes nothing\n FAIL  |integration| apps/server/src/modules/platform/job-consumer.integration.test.ts > job consumer over SQS and PostgreSQL > a delivery past the receive ceiling with the wrong type is rejected and changes nothing\n FAIL  |integration| apps/server/src/modules/platform/job-consumer.integration.test.ts > job consumer over SQS and PostgreSQL > a delivery past the receive ceiling with the wrong version is rejected and changes nothing\nAssertionError: expected 'max-receive-exceeded' to be 'job-mismatch' // Object.is equality\n\nExpected: \"job-mismatch\"\nReceived: \"max-receive-exceeded\"\n\n \u276f Proxy.toBe scripts/mutation-evidence-probe.ts:84:27\n     82|       let result: unknown;\n     83|       try {\n     84|         result = original.apply(this, args);\n       |                           ^\n     85|       } catch (error) {\n     86|         record(name, error);\n \u276f apps/server/src/modules/platform/job-consumer.integration.test.ts:628:48\n \u276f evidenceBody packages/testing/src/mutation/evidence-state.ts:277:7\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/3]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  3 failed | 1 passed | 20 skipped (24)\n   Start at  04:12:17\n   Duration  2.19s (tests 77%, transform 17%, import 3%, setup 3%)\n"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 2.48,
+    "tail": "\n RUN  v5.0.2 /tmp/moin-245\n\n \u2713 |integration| apps/server/src/modules/platform/job-consumer.integration.test.ts (24 tests | 20 skipped) 1192ms\n\n Test Files  1 passed (1)\n      Tests  4 passed | 20 skipped (24)\n   Start at  04:12:20\n   Duration  2.17s (tests 77%, transform 17%, setup 3%, import 3%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/tmp/moin-245/.git/claude-evidence/mutation/20261101T031217Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}

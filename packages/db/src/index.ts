@@ -276,3 +276,15 @@ export type {
   ImportWebsiteInput,
   WebsiteImportResult,
 } from './import.ts';
+export { enqueueJob, JobConflictError } from './jobs.ts';
+export type { EnqueueInput, JobRow } from './jobs.ts';
+export { MAX_DEFER_SECONDS, abandonJob, executeJob } from './job-execution.ts';
+export type {
+  ClaimedJob,
+  JobAbandonRequest,
+  JobAbandonResult,
+  JobExecutionContext,
+  JobExecutionRequest,
+  JobExecutionResult,
+  JobHandler,
+} from './job-execution.ts';

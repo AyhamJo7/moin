@@ -149,6 +149,13 @@ export async function withTenant<T>(
   };
 
   const client: PoolClient = await pool.connect();
+  // A connection killed mid-transaction (failover, `pg_terminate_backend`) emits 'error' on the
+  // checked-out client. With no listener Node treats that as uncaught and ends the process, taking
+  // every other in-flight unit of work with it. The query that was running already rejects, so the
+  // event carries nothing the caller does not get.
+  const ignoreConnectionError = (): void => undefined;
+  client.on('error', ignoreConnectionError);
+  let broken = false;
   try {
     await client.query('begin');
     // Transaction-local. The `true` is the whole argument of this module.
@@ -170,10 +177,12 @@ export async function withTenant<T>(
     } catch {
       // A rollback that fails means the connection is already broken; the release below discards
       // it. Rethrowing from here would replace the caller's real error with a worse one.
+      broken = true;
     }
     throw error;
   } finally {
-    client.release();
+    client.off('error', ignoreConnectionError);
+    client.release(broken);
   }
 }
 

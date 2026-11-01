@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/tmp/moin-245",
+  "head": "323b388656f49bac6ef0927e2e5e74f2b4982b5e",
+  "mode": "committed",
+  "fix_ref": "323b388656f49bac6ef0927e2e5e74f2b4982b5e",
+  "fix_paths": [
+    "apps/server/src/modules/platform/job-consumer.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "node ./node_modules/vitest/vitest.mjs run --project integration apps/server/src/modules/platform/job-consumer.integration.test.ts -t ceiling",
+  "started": "2026-11-01T03:15:35+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-11-01T03:17:09+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 83.29,
+    "tail": "     \u2193 a job another worker is running right now is left on the queue, and survives that worker dying\n\n\u23af\u23af\u23af\u23af\u23af\u23af Failed Suites 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af\n\n FAIL  |integration| apps/server/src/modules/platform/job-consumer.integration.test.ts [ apps/server/src/modules/platform/job-consumer.integration.test.ts ]\nError: Hook timed out in 60000ms.\nIf this is a long-running hook, pass a timeout value as the last argument or configure it globally with \"hookTimeout\".\n \u276f apps/server/src/modules/platform/job-consumer.integration.test.ts:74:1\n     72| });\n     73|\n     74| afterAll(async () => {\n       | ^\n     75|   await admin.end();\n     76|   await database.drop();\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/2]\u23af\n\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af\n\n FAIL  |integration| apps/server/src/modules/platform/job-consumer.integration.test.ts > job consumer over SQS and PostgreSQL > a delivery past the receive ceiling for a row another transaction holds is kept, then settles\nError: condition not reached in time\n \u276f until apps/server/src/modules/platform/job-consumer.integration.test.ts:87:9\n     85|     await sleep(100);\n     86|   }\n     87|   throw new Error('condition not reached in time');\n       |         ^\n     88| }\n     89|\n \u276f apps/server/src/modules/platform/job-consumer.integration.test.ts:664:7\n \u276f evidenceBody packages/testing/src/mutation/evidence-state.ts:277:7\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[2/2]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  1 failed | 5 passed | 20 skipped (26)\n   Start at  04:15:35\n   Duration  82.75s (tests 100%)\n"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 14.51,
+    "tail": "\n RUN  v5.0.2 /tmp/moin-245\n\n \u2713 |integration| apps/server/src/modules/platform/job-consumer.integration.test.ts (26 tests | 20 skipped) 13212ms\n   \u2713 job consumer over SQS and PostgreSQL (26)\n     \u2713 a job whose transaction keeps dying is dead-lettered by the receive ceiling 6139ms\n     \u2713 a delivery past the receive ceiling for a row another transaction holds is kept, then settles 5733ms\n\n Test Files  1 passed (1)\n      Tests  6 passed | 20 skipped (26)\n   Start at  04:16:54\n   Duration  14.21s (tests 97%, transform 2%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/tmp/moin-245/.git/claude-evidence/mutation/20261101T031535Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}
