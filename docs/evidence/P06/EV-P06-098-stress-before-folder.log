@@ -1,0 +1,84 @@
+gates stress x20 @ 3510fea208: pnpm exec vitest run --project unit --project integration apps/server/src/modules/identity-access
+  [  1/20] FAIL       20.2s
+  [  2/20] ok         21.9s
+  [  3/20] ok         20.2s
+  [  4/20] ok         20.1s
+  [  5/20] ok         21.7s
+  [  6/20] ok         21.8s
+  [  7/20] ok         20.2s
+  [  8/20] FAIL       21.5s
+  [  9/20] ok         21.6s
+  [ 10/20] ok         20.1s
+  [ 11/20] FAIL       20.9s
+  [ 12/20] ok         21.6s
+  [ 13/20] ok         20.1s
+  [ 14/20] ok         20.1s
+  [ 15/20] ok         21.6s
+  [ 16/20] ok         21.6s
+  [ 17/20] ok         20.1s
+  [ 18/20] FAIL       21.5s
+  [ 19/20] ok         21.6s
+  [ 20/20] ok         20.2s
+  failures: 4/20
+  first failing log: /tmp/moin-flaky/.git/claude-evidence/logs/20261101T143845Z-stress-001.log
+          | AssertionError: expected 604799 to be 604800 // Object.is equality
+          | 
+          | - Expected
+          | + Received
+          | 
+          | - 604800
+          | + 604799
+          | 
+          |  ❯ Proxy.toBe scripts/mutation-evidence-probe.ts:84:27
+          |      82|       let result: unknown;
+          |      83|       try {
+          |      84|         result = original.apply(this, args);
+          |        |                           ^
+          |      85|       } catch (error) {
+          |      86|         record(name, error);
+          |  ❯ apps/server/src/modules/identity-access/sign-in.integration.test.ts:190:73
+          |  ❯ evidenceBody packages/testing/src/mutation/evidence-state.ts:277:7
+          | 
+          | ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+          | 
+          | 
+          |  Test Files  1 failed | 26 passed (27)
+          |       Tests  1 failed | 279 passed (280)
+          |    Start at  15:38:46
+          |    Duration  19.65s (tests 76%, transform 16%, import 5%, setup 3%)
+          | 
+          |   Transform  |unit| transforming modules took 7.04s · 58% of tracked time, re-done on every run
+          |              persist transforms across runs with fsModuleCache: true
+          |              learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns
+  first failing log: /tmp/moin-flaky/.git/claude-evidence/logs/20261101T143845Z-stress-008.log
+          | ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+          | 
+          |  FAIL  |integration| apps/server/src/modules/identity-access/members.integration.test.ts > invitations (P06.08.01, P06.08.02, P06.08.04) > a waiter on the invitation lock judges expiry at its own lock time (HIGH2)
+          | AssertionError: expected 'accepted' to be 'expired' // Object.is equality
+          | 
+          | Expected: "expired"
+          | Received: "accepted"
+          | 
+          |  ❯ Proxy.toBe scripts/mutation-evidence-probe.ts:84:27
+          |      82|       let result: unknown;
+          |      83|       try {
+          |      84|         result = original.apply(this, args);
+          |        |                           ^
+          |      85|       } catch (error) {
+          |      86|         record(name, error);
+          |  ❯ apps/server/src/modules/identity-access/members.integration.test.ts:482:38
+          |  ❯ evidenceBody packages/testing/src/mutation/evidence-state.ts:277:7
+          | 
+          | ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+          | 
+          | 
+          |  Test Files  1 failed | 26 passed (27)
+          |       Tests  1 failed | 279 passed (280)
+          |    Start at  15:41:05
+          |    Duration  21.00s (tests 77%, transform 15%, import 5%, setup 3%)
+          | 
+          |   Transform  |unit| transforming modules took 6.46s · 58% of tracked time, re-done on every run
+          |              persist transforms across runs with fsModuleCache: true
+          |              learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns
+RESULT: FAIL (16/20 iterations passed)
+  evidence: /tmp/moin-flaky/.git/claude-evidence/20261101T143845Z-stress.json

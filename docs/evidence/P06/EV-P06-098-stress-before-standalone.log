@@ -1,0 +1,84 @@
+gates stress x20 @ 3510fea208: pnpm exec vitest run --project unit --project integration apps/server/src/modules/identity-access/members.integration.test.ts -t waiter
+  [  1/20] ok          8.8s
+  [  2/20] ok          8.2s
+  [  3/20] FAIL        8.2s
+  [  4/20] ok          8.4s
+  [  5/20] ok          8.2s
+  [  6/20] ok          8.2s
+  [  7/20] FAIL        8.2s
+  [  8/20] ok          8.2s
+  [  9/20] ok          8.2s
+  [ 10/20] ok          8.2s
+  [ 11/20] ok          8.2s
+  [ 12/20] ok          8.3s
+  [ 13/20] ok          8.1s
+  [ 14/20] FAIL        8.2s
+  [ 15/20] ok          8.2s
+  [ 16/20] ok          8.2s
+  [ 17/20] ok          8.2s
+  [ 18/20] FAIL        8.2s
+  [ 19/20] ok          8.3s
+  [ 20/20] ok          8.2s
+  failures: 4/20
+  first failing log: /tmp/moin-flaky/.git/claude-evidence/logs/20261101T142240Z-stress-003.log
+          |      ↓ ownership transfer promotes then demotes in one transaction
+          |      ↓ transfer without fresh step-up is refused 403 and changes nothing
+          |      ↓ transfer to a disabled member is refused 404 and demotes nobody
+          | 
+          | ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+          | 
+          |  FAIL  |integration| apps/server/src/modules/identity-access/members.integration.test.ts > invitations (P06.08.01, P06.08.02, P06.08.04) > a waiter on the invitation lock judges expiry at its own lock time (HIGH2)
+          | AssertionError: expected 'accepted' to be 'expired' // Object.is equality
+          | 
+          | Expected: "expired"
+          | Received: "accepted"
+          | 
+          |  ❯ Proxy.toBe scripts/mutation-evidence-probe.ts:84:27
+          |      82|       let result: unknown;
+          |      83|       try {
+          |      84|         result = original.apply(this, args);
+          |        |                           ^
+          |      85|       } catch (error) {
+          |      86|         record(name, error);
+          |  ❯ apps/server/src/modules/identity-access/members.integration.test.ts:482:38
+          |  ❯ evidenceBody packages/testing/src/mutation/evidence-state.ts:277:7
+          | 
+          | ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+          | 
+          | 
+          |  Test Files  1 failed (1)
+          |       Tests  1 failed | 27 skipped (28)
+          |    Start at  15:22:57
+          |    Duration  7.70s (tests 89%, transform 7%, import 4%, setup 1%)
+  first failing log: /tmp/moin-flaky/.git/claude-evidence/logs/20261101T142240Z-stress-007.log
+          |      ↓ ownership transfer promotes then demotes in one transaction
+          |      ↓ transfer without fresh step-up is refused 403 and changes nothing
+          |      ↓ transfer to a disabled member is refused 404 and demotes nobody
+          | 
+          | ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+          | 
+          |  FAIL  |integration| apps/server/src/modules/identity-access/members.integration.test.ts > invitations (P06.08.01, P06.08.02, P06.08.04) > a waiter on the invitation lock judges expiry at its own lock time (HIGH2)
+          | AssertionError: expected 'accepted' to be 'expired' // Object.is equality
+          | 
+          | Expected: "expired"
+          | Received: "accepted"
+          | 
+          |  ❯ Proxy.toBe scripts/mutation-evidence-probe.ts:84:27
+          |      82|       let result: unknown;
+          |      83|       try {
+          |      84|         result = original.apply(this, args);
+          |        |                           ^
+          |      85|       } catch (error) {
+          |      86|         record(name, error);
+          |  ❯ apps/server/src/modules/identity-access/members.integration.test.ts:482:38
+          |  ❯ evidenceBody packages/testing/src/mutation/evidence-state.ts:277:7
+          | 
+          | ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+          | 
+          | 
+          |  Test Files  1 failed (1)
+          |       Tests  1 failed | 27 skipped (28)
+          |    Start at  15:23:29
+          |    Duration  7.65s (tests 89%, transform 7%, import 4%, setup 1%)
+RESULT: FAIL (16/20 iterations passed)
+  evidence: /tmp/moin-flaky/.git/claude-evidence/20261101T142240Z-stress.json

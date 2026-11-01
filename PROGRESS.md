@@ -1905,3 +1905,11 @@ Source: `/tmp/moin-review/sec-g02.md`, independent acceptance review of group 2 
 | Item      | Status           | Commit  | Evidence   | Note                                                                                                                                                                                                                              |
 | --------- | ---------------- | ------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | P06.06.04 | READY_FOR_REVIEW | 0949e93 | EV-P06-092 | F1: member disable requires a fresh step-up (was the only unguarded sensitive identity-access route); real-HTTP tests and a step-up classification of every route in the real-route matrix; KILLED. Independent re-review pending |
+
+## Invitation lock timing test (2026-11-01, branch `test/p06-invitation-lock-timing`)
+
+The expiry case for a waiter on the invitation lock failed in 3 gate runs of the catalog gap fix and in a before-run of the step-up fix. Cause: the case slept a fixed 5 s on the process timer while the function judges expiry on the database wall clock, which lags on this host. Test change only; the function is correct. Full gates 14/14 at `849edca`. Independent re-review pending; nothing is VERIFIED.
+
+| Item      | Status           | Commit  | Evidence   | Note                                                                                                                                                                              |
+| --------- | ---------------- | ------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P06.08.01 | READY_FOR_REVIEW | 849edca | EV-P06-098 | The waiter case waits on the database clock; 16/20 before, 20/20 after, standalone and in the identity-access folder. A separate sign-in Max-Age flake was seen once (not fixed). |
