@@ -2063,3 +2063,12 @@ On 2026-11-01 the founder confirmed the 2026-11-15 expected date and delegated t
 | P02.02.09 | READY_FOR_REVIEW | 3510fea | EV-P02-096 | ADR-0002 and ADR-0034 accepted under the founder's delegation 2026-11-01 (decided by the orchestrating session; founder may override).                                                 |
 | P03.05.03 | READY_FOR_REVIEW | 3510fea | EV-P03-028 | Threat model review disposition accepted under delegation 2026-11-01, on the recorded independent BLOCK-MERGE review and its remediation (EV-P03-024). P03.05.01 and .02 stay PARTIAL. |
 | P03.01.02 | READY_FOR_REVIEW | 3510fea | EV-P03-029 | Eleven core ADRs accepted under delegation 2026-11-01 after ADR-0036 was written from the code on main; ticked.                                                                        |
+
+## Security hardening 1: invite role ceiling (2026-11-01, branch `fix/p06-07-invite-role-ceiling`)
+
+From group 9 M1: an admin could invite a member with `billing_admin` or `integration_admin`, powers the matrix denies to admins. One fix commit. Full gates 14/14 at `03b91ed` on the second run (the first failed on the invitation-lock timing case, fixed by the open draft #260). Independent re-review pending; nothing is VERIFIED.
+
+| Item      | Status           | Commit  | Evidence   | Note                                                                                                                                                                   |
+| --------- | ---------------- | ------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P06.07.01 | READY_FOR_REVIEW | 03b91ed | EV-P06-104 | M1: an inviter cannot confer more than it holds; 403 and no row; defence in depth in issueInvitation; KILLED. The item stays unticked until the independent re-review. |
+| P06.07.01 | READY_FOR_REVIEW | 047d7b4 | EV-P06-106 | M1 accept half (migration 0079): the issuer is judged again at acceptance; a demoted issuer confers nothing. KILLED twice. Not verified.                               |

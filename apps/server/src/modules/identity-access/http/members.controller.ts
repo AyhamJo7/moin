@@ -46,6 +46,7 @@ import { LOGGER } from '../../../observability/logger.module.ts';
 import { currentTenantScope } from '../../platform/tenant-scope.ts';
 import { MemberQueries } from '../../platform/member-queries.ts';
 import { requireCapability } from '../application/authorization.ts';
+import { mayConfer } from '../domain/roles.ts';
 import { INVITATION_TTL_DAYS, issueInvitation, revokeInvitation } from '../domain/invitations.ts';
 import { RequireStepUpGuard } from './require-step-up.guard.ts';
 import { RequireRoleGuard } from './require-role.guard.ts';
@@ -108,6 +109,16 @@ export class MembersController {
     } catch {
       return fail(reply, 404, '/problems/not-found', 'Not found');
     }
+    // Conferring is bounded by holding (G09 M1): an inviter cannot hand out `billing_admin` or
+    // `integration_admin` unless the matrix gives the inviter that power. The caller may invite
+    // in general, so nothing about existence leaks: this is a plain 403, as the role guard's.
+    if (!mayConfer(scope.role, scope.permissions, parsed.data.permissions ?? [])) {
+      this.logger.warn(
+        { outcome: 'permission_grant_refused' },
+        'refused an invitation conferring more than the inviter holds',
+      );
+      return fail(reply, 403, '/problems/forbidden', 'Forbidden');
+    }
     try {
       // Mutation and audit share one commit (HIGH3): either both land or neither does.
       const issued = await this.members.inScope((client) =>
@@ -117,6 +128,7 @@ export class MembersController {
           role: parsed.data.role,
           permissions: parsed.data.permissions,
           createdBy: scope.actorId,
+          grantor: { role: scope.role, permissions: scope.permissions },
           audit: (invitationId) =>
             appendAuditEvent(client, {
               source: 'api',

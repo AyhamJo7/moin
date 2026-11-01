@@ -88,3 +88,31 @@ export function may(role: string, permissions: readonly string[], capability: Ca
     (permission) => isPermission(permission) && extended.includes(permission),
   );
 }
+
+/**
+ * The capability a caller must itself hold to confer an additive permission. Conferring is
+ * bounded by holding: an inviter cannot hand out a power the matrix denies to the inviter
+ * (PLAN Authorisation: "Connect/disconnect integrations" and "Billing" are owner-only plus the
+ * extending permission). Without this an admin could mint `billing_admin` and
+ * `integration_admin` holders through an invitation (G09 M1).
+ */
+export const PERMISSION_GRANT_CAPABILITY: Readonly<Record<Permission, Capability>> = {
+  integration_admin: 'integrations:manage',
+  billing_admin: 'billing:manage',
+};
+
+/**
+ * Whether a membership with `role` and `held` permissions may confer every permission in
+ * `requested`. Unknown permissions confer nothing, so they are refused here as well; the invitation
+ * code rejects them earlier with its own message.
+ */
+export function mayConfer(
+  role: string,
+  held: readonly string[],
+  requested: readonly string[],
+): boolean {
+  return requested.every(
+    (permission) =>
+      isPermission(permission) && may(role, held, PERMISSION_GRANT_CAPABILITY[permission]),
+  );
+}
