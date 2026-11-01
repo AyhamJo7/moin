@@ -350,3 +350,52 @@ describe('audit application API', () => {
     ).rejects.toThrow('invalid audit query');
   });
 });
+
+describe('audit pagination orders by the numeric sequence (SEC-G04 F1)', () => {
+  const ORG_C = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+  const ORG_D = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+  const TWELVE = 12;
+
+  beforeAll(async () => {
+    await admin.query(
+      `insert into organisations(id, slug, name) values
+       ($1, 'audit-gamma', 'Audit Gamma'), ($2, 'audit-delta', 'Audit Delta')`,
+      [ORG_C, ORG_D],
+    );
+    // Twelve events for C, so sequence numbers 10, 11 and 12 exist beside 1 to 9; a control
+    // tenant D whose events must never appear in C's feed.
+    await withTenant(app, ORG_C, async (client) => {
+      for (let i = 0; i < TWELVE; i += 1) await append(client, { operation: 'page.checked' });
+    });
+    await withTenant(app, ORG_D, async (client) => {
+      for (let i = 0; i < 3; i += 1) await append(client, { operation: 'page.control' });
+    });
+  });
+
+  const seqs = (events: readonly { readonly seq: string }[]): string[] =>
+    events.map((event) => event.seq);
+
+  it('returns the next numbers after a cursor, not the next strings', async () => {
+    // Sorted as text, '10', '11' and '12' come before '3'; the cursor then skips 3 to 9.
+    const page = await withTenant(app, ORG_C, (client) =>
+      listAuditEvents(client, { afterSeq: '2', limit: 3 }),
+    );
+    expect(seqs(page)).toStrictEqual(['3', '4', '5']);
+  });
+
+  it('pages through every event exactly once, in numeric order, without another tenant', async () => {
+    const seen: string[] = [];
+    let cursor = '0';
+    for (let guard = 0; guard < 20; guard += 1) {
+      const page = await withTenant(app, ORG_C, (client) =>
+        listAuditEvents(client, { afterSeq: cursor, limit: 2 }),
+      );
+      if (page.length === 0) break;
+      seen.push(...seqs(page));
+      cursor = page.at(-1)?.seq ?? cursor;
+    }
+    expect(seen).toStrictEqual(Array.from({ length: TWELVE }, (_, i) => String(i + 1)));
+    const foreign = await withTenant(app, ORG_C, (client) => listAuditEvents(client, {}));
+    expect(foreign.every((event) => event.operation === 'page.checked')).toBe(true);
+  });
+});

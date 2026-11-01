@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/tmp/moin-sec04",
+  "head": "8dab76eb01ab37acde07281c589a59c9211a0a5f",
+  "mode": "committed",
+  "fix_ref": "8dab76eb01ab37acde07281c589a59c9211a0a5f",
+  "fix_paths": [
+    "packages/db/src/sse.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "node ./node_modules/vitest/vitest.mjs run --project integration packages/db/src/sse.integration.test.ts",
+  "started": "2026-11-01T04:14:54+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-11-01T04:14:59+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 2.12,
+    "tail": "     \u2713 reconnect replays missed events in order 25ms\n     \u2713 a tenant never receives another tenant\u2019s events 9ms\n     \u2713 Valkey outage fallback: the store is the poll source 10ms\n   \u276f sse replay orders by the numeric event id (SEC-G04 F1 pattern) (1)\n     \u00d7 replay returns the next numbers, not the next strings 20ms\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af\n\n FAIL  |integration| packages/db/src/sse.integration.test.ts > sse replay orders by the numeric event id (SEC-G04 F1 pattern) > replay returns the next numbers, not the next strings\nAssertionError: expected [ 10, 11, 12 ] to strictly equal [ 8, 9, 10 ]\n\n- Expected\n+ Received\n\n  [\n-   8,\n-   9,\n    10,\n+   11,\n+   12,\n  ]\n\n \u276f Proxy.toStrictEqual scripts/mutation-evidence-probe.ts:84:27\n     82|       let result: unknown;\n     83|       try {\n     84|         result = original.apply(this, args);\n       |                           ^\n     85|       } catch (error) {\n     86|         record(name, error);\n \u276f packages/db/src/sse.integration.test.ts:121:40\n \u276f evidenceBody packages/testing/src/mutation/evidence-state.ts:277:7\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/1]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  1 failed | 3 passed (4)\n   Start at  05:14:55\n   Duration  1.79s (tests 86%, transform 9%, setup 4%)\n"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 2.09,
+    "tail": "\n RUN  v5.0.2 /tmp/moin-sec04\n\n \u2713 |integration| packages/db/src/sse.integration.test.ts (4 tests) 1012ms\n\n Test Files  1 passed (1)\n      Tests  4 passed (4)\n   Start at  05:14:57\n   Duration  1.78s (tests 87%, transform 8%, setup 4%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/tmp/moin-sec04/.git/claude-evidence/mutation/20261101T041454Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}
