@@ -688,6 +688,156 @@ describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
       expect(response.statusCode, response.body).toBe(201);
       expect(await countInvitations(org)).toBe(before + 1);
     });
+
+    describe('the issuer is judged again at acceptance (G09 M1, accept half)', () => {
+      const BOTH = ['billing_admin', 'integration_admin'];
+
+      /** An outstanding invitation conferring both permissions, issued by a live owner. */
+      async function outstanding(role = 'staff') {
+        const { pair, owner, org } = await ownerPair();
+        const email = `late-${randomUUID().slice(0, 8)}@example.test`;
+        const response = await postAs(pair, '/api/members/invite', {
+          email,
+          role,
+          permissions: BOTH,
+        });
+        expect(response.statusCode, response.body).toBe(201);
+        const issued = response.json<{ invitationId: string; token: string }>();
+        return { org, owner, email, ...issued };
+      }
+
+      const membershipOf = async (org: string, email: string) =>
+        (
+          await admin.query<{ role: string; permissions: string[] }>(
+            `select m.role, m.permissions from memberships m join users u on u.id = m.user_id
+              where m.organisation_id = $1 and u.email = $2`,
+            [org, email],
+          )
+        ).rows[0];
+
+      evidenceTest(
+        'while the issuer still holds the authority the invitation is accepted',
+        async () => {
+          const inv = await outstanding();
+          const result = await accept(
+            inv.org,
+            inv.invitationId,
+            inv.token,
+            randomUUID(),
+            inv.email,
+          );
+          expect(result.outcome).toBe('accepted');
+          expect(await membershipOf(inv.org, inv.email)).toMatchObject({
+            role: 'staff',
+            permissions: expect.arrayContaining(BOTH) as string[],
+          });
+        },
+      );
+
+      evidenceTest('an issuer demoted to admin without permissions confers nothing', async () => {
+        const inv = await outstanding();
+        await admin.query(
+          "update memberships set role = 'admin', permissions = '{}' where user_id = $1",
+          [inv.owner.id],
+        );
+        const result = await accept(inv.org, inv.invitationId, inv.token, randomUUID(), inv.email);
+        expect(result.outcome).toBe('rejected');
+        expect(await membershipOf(inv.org, inv.email)).toBeUndefined();
+        // The invitation stays outstanding: nothing was consumed.
+        const row = await admin.query<{ accepted_at: Date | null }>(
+          'select accepted_at from invitations where id = $1',
+          [inv.invitationId],
+        );
+        expect(row.rows[0]?.accepted_at).toBeNull();
+      });
+
+      evidenceTest(
+        'an issuer who kept only billing_admin confers no integration_admin',
+        async () => {
+          const inv = await outstanding();
+          await admin.query(
+            "update memberships set role = 'admin', permissions = '{billing_admin}' where user_id = $1",
+            [inv.owner.id],
+          );
+          const result = await accept(
+            inv.org,
+            inv.invitationId,
+            inv.token,
+            randomUUID(),
+            inv.email,
+          );
+          expect(result.outcome).toBe('rejected');
+          expect(await membershipOf(inv.org, inv.email)).toBeUndefined();
+        },
+      );
+
+      evidenceTest('a disabled or removed issuer confers nothing', async () => {
+        const disabled = await outstanding();
+        await admin.query("update memberships set status = 'disabled' where user_id = $1", [
+          disabled.owner.id,
+        ]);
+        expect(
+          (
+            await accept(
+              disabled.org,
+              disabled.invitationId,
+              disabled.token,
+              randomUUID(),
+              disabled.email,
+            )
+          ).outcome,
+        ).toBe('rejected');
+        const removed = await outstanding();
+        await admin.query('delete from memberships where user_id = $1', [removed.owner.id]);
+        expect(
+          (
+            await accept(
+              removed.org,
+              removed.invitationId,
+              removed.token,
+              randomUUID(),
+              removed.email,
+            )
+          ).outcome,
+        ).toBe('rejected');
+      });
+
+      evidenceTest('only an owner issuer confers the owner role', async () => {
+        const inv = await outstanding('owner');
+        await admin.query("update memberships set role = 'admin' where user_id = $1", [
+          inv.owner.id,
+        ]);
+        const result = await accept(inv.org, inv.invitationId, inv.token, randomUUID(), inv.email);
+        expect(result.outcome).toBe('rejected');
+      });
+
+      evidenceTest(
+        'an invitation with no issuer confers admin or staff without permissions only',
+        async () => {
+          const org = (await ownerPair()).org;
+          const plain = `plain-${randomUUID().slice(0, 8)}@example.test`;
+          const loaded = `loaded-${randomUUID().slice(0, 8)}@example.test`;
+          const mint = async (email: string, role: string, permissions: string[]) => {
+            const token = randomSecret();
+            const id = randomUUID();
+            await admin.query(
+              `insert into invitations (organisation_id, id, token_hash, email, role, permissions, expires_at)
+               values ($1, $2, $3, $4, $5, $6::text[], now() + interval '7 days')`,
+              [org, id, digestOf(token), email, role, `{${permissions.join(',')}}`],
+            );
+            return { id, token };
+          };
+          const ok = await mint(plain, 'staff', []);
+          expect((await accept(org, ok.id, ok.token, randomUUID(), plain)).outcome).toBe(
+            'accepted',
+          );
+          const bad = await mint(loaded, 'staff', ['billing_admin']);
+          expect((await accept(org, bad.id, bad.token, randomUUID(), loaded)).outcome).toBe(
+            'rejected',
+          );
+        },
+      );
+    });
   });
 });
 
