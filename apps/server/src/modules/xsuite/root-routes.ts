@@ -10,6 +10,7 @@
 
 import { RequestMethod } from '@nestjs/common';
 import { METHOD_METADATA, MODULE_METADATA, PATH_METADATA } from '@nestjs/common/constants';
+import { MetadataScanner } from '@nestjs/core';
 
 type Constructor = abstract new (...args: never[]) => unknown;
 
@@ -62,12 +63,16 @@ export function controllersReachableFrom(roots: readonly unknown[]): Set<Constru
   return controllers;
 }
 
-/** `METHOD /path` for every handler of `controller`, from the decorators' own metadata. */
+/** `METHOD /path` for every handler of `controller` and its base classes, from the decorators' own metadata. */
 export function routesOfController(controller: Constructor): string[] {
   const prototype = (controller as unknown as { prototype: Record<string, unknown> }).prototype;
   const prefixes = paths(Reflect.getMetadata(PATH_METADATA, controller));
   const routes: string[] = [];
-  for (const name of Object.getOwnPropertyNames(prototype)) {
+  // Nest mounts decorated methods inherited from base controllers too, so the scan walks the
+  // whole prototype chain with the scanner the router itself uses. `prototype[name]` resolves
+  // an override to the subclass method, and an undecorated override carries no route metadata
+  // and is skipped, exactly as the router does (P06.13.02, G12 review round 1).
+  for (const name of new MetadataScanner().getAllMethodNames(prototype)) {
     const handler = prototype[name];
     if (typeof handler !== 'function') continue;
     const method = Reflect.getMetadata(METHOD_METADATA, handler) as RequestMethod | undefined;

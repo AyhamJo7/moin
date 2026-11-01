@@ -1,5 +1,7 @@
 import 'reflect-metadata';
 import { Controller, Get, Module, Post } from '@nestjs/common';
+import { NestFactory } from '@nestjs/core';
+import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { beforeAll, describe, expect } from 'vitest';
 import { evidenceTest } from '@moin/testing';
 import { loadProductionRoots } from './production-roots.ts';
@@ -19,6 +21,34 @@ class ZzLeakController {
 @Module({ controllers: [ZzLeakController] })
 // eslint-disable-next-line @typescript-eslint/no-extraneous-class -- a Nest module is a decorated empty class by design.
 class ZzLeakModule {}
+
+/** Mutation A of the round-1 review: the handler lives in a base class, the module is registered
+ * only in the production root, and an own-prototype scan sees no routes at all. */
+class InheritedLeakBase {
+  @Get(':id')
+  read(): { foreignTenant: string } {
+    return { foreignTenant: 'xsuite-beta' };
+  }
+  @Get('kept')
+  kept(): string {
+    return 'base';
+  }
+  @Get('shadowed/path')
+  shadowed(): string {
+    return 'base';
+  }
+}
+@Controller('api/zz-inherited')
+class InheritedLeakController extends InheritedLeakBase {
+  /** An override without decorators: Nest reads the subclass method, finds no route metadata and
+   * mounts nothing for this name, so the scanner must not list it either. */
+  override shadowed(): string {
+    return 'derived';
+  }
+}
+@Module({ controllers: [InheritedLeakController] })
+// eslint-disable-next-line @typescript-eslint/no-extraneous-class -- a Nest module is a decorated empty class by design.
+class InheritedLeakModule {}
 
 let ApiRootModule: unknown;
 let VoiceRootModule: unknown;
@@ -81,6 +111,43 @@ describe('routes served by the production root modules', () => {
       'GET /api/zz-leak/:id',
     ]);
   });
+
+  evidenceTest('a handler inherited from a base controller is reported as unprobed', () => {
+    // eslint-disable-next-line @typescript-eslint/no-extraneous-class -- a Nest module is a decorated empty class by design.
+    const mutated = class {};
+    Module({ imports: [ApiRootModule as never, InheritedLeakModule] })(mutated);
+    const served = routesServedBy([mutated, VoiceRootModule]);
+    expect(compareWithInventory(served, inventoried).unprobed).toStrictEqual([
+      'GET /api/zz-inherited/:id',
+      'GET /api/zz-inherited/kept',
+    ]);
+  });
+
+  evidenceTest(
+    'the scanner lists exactly the routes Nest mounts for an inherited shape',
+    async () => {
+      const app = await NestFactory.create<NestFastifyApplication>(
+        InheritedLeakModule,
+        new FastifyAdapter(),
+        { logger: false },
+      );
+      await app.init();
+      await app.getHttpAdapter().getInstance().ready();
+      try {
+        const mounted = async (path: string): Promise<boolean> =>
+          (await app.inject({ method: 'GET', url: path })).statusCode === 200;
+        expect(await mounted('/api/zz-inherited/42')).toBe(true);
+        expect(await mounted('/api/zz-inherited/kept')).toBe(true);
+        expect(await mounted('/api/zz-inherited/shadowed/path')).toBe(false);
+      } finally {
+        await app.close();
+      }
+      expect([...routesServedBy([InheritedLeakModule])].sort()).toStrictEqual([
+        'GET /api/zz-inherited/:id',
+        'GET /api/zz-inherited/kept',
+      ]);
+    },
+  );
 
   evidenceTest('an inventory row that nothing serves is reported as orphaned', () => {
     const withGhost = new Set([...inventoried, 'GET /api/ghost']);
