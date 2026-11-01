@@ -1877,6 +1877,12 @@ wait as IDs and one next action. The previous cell text moved verbatim into a "S
 IDs from the old ledger, all still present). Order followed: ledger first, phase header second, this row
 third. Tier statuses are unchanged.
 
+## Security acceptance group 4 fix (2026-11-01, branch `fix/p06-10-audit-seq-order`)
+
+| Item      | Status           | Commit  | Evidence   | Note                                                                                                                                                                                                                |
+| --------- | ---------------- | ------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P06.10.04 | READY_FOR_REVIEW | 0ec2b0b | EV-P06-091 | F1: the audit feed orders by the numeric sequence, not its text; paging test as moin_app fails before and passes after; KILLED. The SSE replay had the same defect (8dab76e, KILLED). Independent re-review pending |
+
 ## Security acceptance group 2 fix (2026-11-01, branch `fix/p06-14-system-work-connection-loss`)
 
 | Item      | Status           | Commit  | Evidence   | Note                                                                                                                                                                                                                     |

@@ -125,7 +125,7 @@ export async function loadHours(client: TenantClient, locationId: string): Promi
   );
   const exceptions = await client.query<ExceptionRow>(
     `select kind, start_date::text, end_date::text, opens_min, closes_min, label
-     from opening_exceptions where location_id = $1 order by start_date`,
+     from opening_exceptions where location_id = $1 order by opening_exceptions.start_date`,
     [locationId],
   );
   return { rules: rules.rows, exceptions: exceptions.rows };

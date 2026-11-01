@@ -122,7 +122,7 @@ export async function listAuditEvents(
        and ($3::uuid is null or actor_id = $3)
        and ($4::uuid is null or correlation_id = $4)
        and seq > $5::bigint
-     order by seq asc limit $6`,
+     order by audit_events.seq asc limit $6`,
     [
       query.targetKind ?? null,
       query.targetId ?? null,
