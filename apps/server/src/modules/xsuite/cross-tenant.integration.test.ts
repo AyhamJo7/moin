@@ -224,6 +224,9 @@ afterAll(async () => {
   await database.drop();
 });
 
+/** Tenant tables in the migrated schema; the write matrix in packages/db covers all of them. */
+const LIVE_TENANT_TABLES = 55;
+
 describe('route inventory covers the whole API surface (P06.13.02)', () => {
   evidenceTest(
     'every route the PRODUCTION roots serve has an inventory row: 100 % or block',
@@ -670,13 +673,25 @@ describe('the tenant comes from the session, never from the request (P06.03.02, 
 
 describe('DB layer: every tenant table isolates A from B (P06.13.03)', () => {
   evidenceTest('tenant tables expose no foreign rows to the app role', async () => {
-    // All 9 tenant tables (every apply_tenant_rls call site): as A, B's row selects
-    // nothing. DELETE is probed only where the app role holds it (locations,
+    // The nine tables below are the ones with a seeded world row of B (the HTTP-facing
+    // tables); the live schema has 55 tenant tables, and the write matrix over all of them
+    // (SELECT, INSERT, tenant-moving UPDATE, DELETE, from the catalog) is
+    // packages/db/src/tenant-write-matrix.integration.test.ts. The count is pinned here so a
+    // new tenant table cannot arrive without this suite being looked at.
+    // As A, B's row selects nothing. DELETE is probed only where the app role holds it (locations,
     // memberships — the DEFINER-managed tables refuse the grant, which the 42501
     // assertion below pins separately). Table names are migration-inventory
     // literals, never caller input: one literal statement per table, no template
     // expression ever carries a table name.
     const pool = database.pool();
+    const live = await pool.query<{ n: number }>(
+      `select count(*)::int as n from pg_class c join pg_namespace s on s.oid = c.relnamespace
+       where c.relkind in ('r', 'p') and s.nspname not in ('pg_catalog', 'information_schema')
+         and s.nspname not like 'pg\\_toast%'
+         and exists (select 1 from pg_attribute a
+                     where a.attrelid = c.oid and a.attname = 'organisation_id' and not a.attisdropped)`,
+    );
+    expect(live.rows[0]?.n, 'tenant tables in the live schema').toBe(LIVE_TENANT_TABLES);
     async function unseen(sql: string, id: string, label: string): Promise<void> {
       const seen = await withTenant(pool, world.a.organisationId, (client) =>
         client.query(sql, [id]).then((r) => (r.rows[0] as { n: number }).n),

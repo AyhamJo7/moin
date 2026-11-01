@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/tmp/moin-sec01",
+  "head": "b072df82515959c7d82106f4c4f081c166adfd73",
+  "mode": "committed",
+  "fix_ref": "b072df82515959c7d82106f4c4f081c166adfd73",
+  "fix_paths": [
+    "scripts/check-rls-catalog.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "node ./node_modules/vitest/vitest.mjs run --project integration scripts/check-rls-catalog.integration.test.ts -t F1",
+  "started": "2026-11-01T03:48:02+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-11-01T03:48:07+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 2.5,
+    "tail": "     82|       let result: unknown;\n     83|       try {\n     84|         result = original.apply(this, args);\n       |                           ^\n     85|       } catch (error) {\n     86|         record(name, error);\n \u276f scripts/check-rls-catalog.integration.test.ts:124:57\n \u276f evidenceBody packages/testing/src/mutation/evidence-state.ts:277:7\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[2/3]\u23af\n\n FAIL  |integration| scripts/check-rls-catalog.integration.test.ts > permissive policies beyond the reviewed predicate (F1) > a registered exception passes only for the table and text it names\nAssertionError: expected [] to strictly equal [ 'policy-unreviewed-permissive' ]\n\n- Expected\n+ Received\n\n- [\n-   \"policy-unreviewed-permissive\",\n- ]\n+ []\n\n \u276f Proxy.toStrictEqual scripts/mutation-evidence-probe.ts:84:27\n     82|       let result: unknown;\n     83|       try {\n     84|         result = original.apply(this, args);\n       |                           ^\n     85|       } catch (error) {\n     86|         record(name, error);\n \u276f scripts/check-rls-catalog.integration.test.ts:144:57\n \u276f evidenceBody packages/testing/src/mutation/evidence-state.ts:277:7\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[3/3]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  3 failed | 44 skipped (47)\n   Start at  04:48:02\n   Duration  2.20s (tests 79%, transform 16%, setup 3%, import 2%)\n"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 2.54,
+    "tail": "\n RUN  v5.0.2 /tmp/moin-sec01\n\n \u2713 |integration| scripts/check-rls-catalog.integration.test.ts (47 tests | 44 skipped) 1314ms\n\n Test Files  1 passed (1)\n      Tests  3 passed | 44 skipped (47)\n   Start at  04:48:05\n   Duration  2.26s (tests 80%, transform 16%, setup 3%, import 2%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/tmp/moin-sec01/.git/claude-evidence/mutation/20261101T034802Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}

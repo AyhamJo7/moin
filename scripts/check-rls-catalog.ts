@@ -17,15 +17,28 @@
  *    table's owner, and the owner is who runs migrations, backfills and admin connections.
  * 2. **Its policy covers every command.** A policy with `USING` and no `WITH CHECK` reads
  *    correctly and permits writing a row into another tenant.
+ *    **And every permissive policy is the reviewed one.** Policies of a table are ORed, so a
+ *    `USING (true)` beside the reviewed policy shows every tenant's rows while all of the above
+ *    still holds. Each permissive policy must be exactly `organisation_id = app.current_org()` for
+ *    its command, for PUBLIC, or be registered with a reason in `REVIEWED_POLICY_EXCEPTIONS`.
  * 3. **`UNIQUE (organisation_id, id)`**, because a child's composite foreign key has nothing to
  *    reference without it.
  * 4. **Every foreign key out of a tenant table is composite**, carrying `organisation_id`. RLS
- *    stops a query returning another tenant's row; this stops a row *pointing* at one.
+ *    stops a query returning another tenant's row; this stops a row *pointing* at one. The key
+ *    must bind `organisation_id` to the target's `organisation_id` (the column pairs are read
+ *    together): one that holds the column but maps it to the target's `id` still lets tenant A
+ *    reference tenant B.
  * 5. **No runtime role can bypass RLS.** A role with `BYPASSRLS` or `SUPERUSER` makes every
  *    policy above decorative.
  * 6. **Every `SECURITY DEFINER` function is on the allowlist and pins `search_path`.** These are
  *    the only sanctioned way across a tenant boundary. An unpinned `search_path` on one of them
  *    is a privilege-escalation primitive: the caller chooses which `public.foo()` it calls.
+ * 6b. **The inventory is every non-system schema and every relation kind**, not the `public`
+ *    schema's ordinary tables. A tenant table in another schema, a partitioned table, and a view
+ *    (or materialised view) over tenant data are all reachable by a runtime role. A view must be
+ *    `security_invoker` or registered, because a view runs as its owner and the owner ignores RLS.
+ * 6c. **No function is callable by PUBLIC.** A new function is granted by name, in the migration
+ *    that adds it; a PUBLIC grant makes it reachable by every role, the application role included.
  * 7. **A table with no `organisation_id` is on the global register**, with a reason. Otherwise
  *    "not a tenant table" and "somebody forgot the column" look identical.
  *
@@ -59,6 +72,7 @@ export interface Finding {
 }
 
 interface TableRow {
+  readonly table_schema: string;
   readonly table_name: string;
   readonly has_org_column: boolean;
   readonly rls_enabled: boolean;
@@ -66,14 +80,30 @@ interface TableRow {
   readonly policy_count: number;
   readonly commands: string[];
   readonly policies_without_check: string[];
+  readonly policies: PolicyRow[];
   readonly has_composite_unique: boolean;
 }
 
+/** One row-level-security policy as the catalog stores it, expressions rendered by PostgreSQL. */
+interface PolicyRow {
+  readonly name: string;
+  /** r, a, w, d or * */
+  readonly cmd: string;
+  readonly permissive: boolean;
+  /** Role names the policy applies to; PUBLIC when it names none. */
+  readonly roles: string[];
+  readonly using: string | null;
+  readonly check: string | null;
+}
+
 interface ForeignKeyRow {
+  readonly table_schema: string;
   readonly table_name: string;
   readonly constraint_name: string;
-  readonly columns: string[];
+  readonly target_schema: string;
   readonly target_table: string;
+  /** Column pairs in declaration order: source column and the target column it must equal. */
+  readonly pairs: readonly { readonly source: string; readonly target: string }[];
 }
 
 interface FunctionRow {
@@ -429,7 +459,7 @@ interface RoleRow {
 export function registeredGlobalTables(path: string = GLOBAL_REGISTER): Set<string> {
   const text = readFileSync(path, 'utf8');
   const names = new Set<string>();
-  for (const match of text.matchAll(/^\|\s*`([a-z0-9_]+)`\s*\|\s*([^|]+?)\s*\|/gm)) {
+  for (const match of text.matchAll(/^\|\s*`([a-z0-9_.]+)`\s*\|\s*([^|]+?)\s*\|/gm)) {
     const name = match[1];
     const reason = (match[2] ?? '').trim();
     // A row with no reason is not a justification, and this register exists to carry the reason.
@@ -457,7 +487,8 @@ export function allowlistedDefiners(path: string = DEFINER_ALLOWLIST): Set<strin
 }
 
 const TABLE_QUERY = `
-  SELECT c.relname::text AS table_name,
+  SELECT n.nspname::text AS table_schema,
+         c.relname::text AS table_name,
          EXISTS (
            SELECT 1 FROM pg_attribute a
            WHERE a.attrelid = c.oid AND a.attname = 'organisation_id' AND NOT a.attisdropped
@@ -471,6 +502,17 @@ const TABLE_QUERY = `
            FROM pg_policy p
            WHERE p.polrelid = c.oid AND p.polcmd IN ('*', 'a', 'w') AND p.polwithcheck IS NULL
          ), '{}') AS policies_without_check,
+         COALESCE((
+           SELECT json_agg(json_build_object(
+             'name', p.polname::text,
+             'cmd', p.polcmd::text,
+             'permissive', p.polpermissive,
+             'roles', COALESCE((SELECT array_agg((CASE WHEN r = 0 THEN 'PUBLIC' ELSE pg_get_userbyid(r) END)::text ORDER BY r)
+                                FROM unnest(p.polroles) r), ARRAY['PUBLIC']),
+             'using', pg_get_expr(p.polqual, p.polrelid),
+             'check', pg_get_expr(p.polwithcheck, p.polrelid)) ORDER BY p.polname)
+           FROM pg_policy p WHERE p.polrelid = c.oid
+         ), '[]'::json) AS policies,
          EXISTS (
            SELECT 1 FROM pg_constraint u
            WHERE u.conrelid = c.oid AND u.contype IN ('u', 'p')
@@ -481,23 +523,214 @@ const TABLE_QUERY = `
          ) AS has_composite_unique
   FROM pg_class c
   JOIN pg_namespace n ON n.oid = c.relnamespace
-  WHERE c.relkind = 'r' AND n.nspname = 'public'
-  ORDER BY c.relname
+  WHERE c.relkind IN ('r', 'p')
+    AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+    AND n.nspname NOT LIKE 'pg\\_toast%' AND n.nspname NOT LIKE 'pg\\_temp\\_%'
+    AND NOT EXISTS (
+      SELECT 1 FROM pg_depend d
+      WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e'
+    )
+  ORDER BY n.nspname, c.relname
 `;
 
+/** The tenant root: the one relation whose `id` is the organisation id (INV-01). */
+const TENANT_ROOT_SCHEMA = 'public';
+const TENANT_ROOT_TABLE = 'organisations';
+
 const FK_QUERY = `
-  SELECT c.relname::text AS table_name,
+  SELECT n.nspname::text AS table_schema,
+         c.relname::text AS table_name,
          con.conname::text AS constraint_name,
-         (SELECT array_agg(att.attname::text ORDER BY att.attname)
-          FROM unnest(con.conkey) k JOIN pg_attribute att
-            ON att.attrelid = c.oid AND att.attnum = k) AS columns,
-         t.relname::text AS target_table
+         tn.nspname::text AS target_schema,
+         t.relname::text AS target_table,
+         -- conkey and confkey are two arrays that pair up by position. Reading them separately (as
+         -- sorted name lists) loses which source column is bound to which target column.
+         COALESCE((
+           SELECT json_agg(json_build_object('source', sa.attname::text, 'target', ta.attname::text) ORDER BY k.ord)
+           FROM unnest(con.conkey, con.confkey) WITH ORDINALITY AS k(src, tgt, ord)
+           JOIN pg_attribute sa ON sa.attrelid = con.conrelid AND sa.attnum = k.src
+           JOIN pg_attribute ta ON ta.attrelid = con.confrelid AND ta.attnum = k.tgt
+         ), '[]'::json) AS pairs
   FROM pg_constraint con
   JOIN pg_class c ON c.oid = con.conrelid
-  JOIN pg_class t ON t.oid = con.confrelid
   JOIN pg_namespace n ON n.oid = c.relnamespace
-  WHERE con.contype = 'f' AND n.nspname = 'public'
+  JOIN pg_class t ON t.oid = con.confrelid
+  JOIN pg_namespace tn ON tn.oid = t.relnamespace
+  WHERE con.contype = 'f'
+    -- The same schema scope as TABLE_QUERY. A narrower one leaves the foreign keys of a tenant
+    -- table in another schema outside the paired-column validation that its inventory feeds.
+    AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+    AND n.nspname NOT LIKE 'pg\\_toast%' AND n.nspname NOT LIKE 'pg\\_temp\\_%'
 `;
+
+/**
+ * The only predicate a tenant policy may use (INV-01, INV-02): the row's tenant equals the
+ * transaction's tenant, and a transaction with no tenant matches nothing.
+ */
+const TENANT_PREDICATE = 'organisation_id=app.current_org()';
+
+/**
+ * A policy expression as PostgreSQL renders it, reduced to a form two spellings of the same text
+ * share: no whitespace, no redundant outer parentheses, lower case. It is a comparison of text,
+ * not of meaning, on purpose: a policy whose text differs from the reviewed one is a finding to be
+ * reviewed, never a pass.
+ */
+export function normalisePredicate(expression: string | null): string | null {
+  if (expression === null) return null;
+  let text = expression.replace(/\s+/g, '').toLowerCase();
+  while (text.startsWith('(') && text.endsWith(')')) {
+    let depth = 0;
+    let wraps = true;
+    for (let i = 0; i < text.length; i += 1) {
+      if (text[i] === '(') depth += 1;
+      else if (text[i] === ')') depth -= 1;
+      if (depth === 0 && i < text.length - 1) {
+        wraps = false;
+        break;
+      }
+    }
+    if (!wraps) break;
+    text = text.slice(1, -1);
+  }
+  return text;
+}
+
+function isTenantPredicate(expression: string | null): boolean {
+  const text = normalisePredicate(expression);
+  return text === TENANT_PREDICATE || text === 'app.current_org()=organisation_id';
+}
+
+/** A permissive policy that is exactly the reviewed tenant policy for its command. */
+function isCanonicalPolicy(policy: PolicyRow): boolean {
+  if (!policy.permissive || policy.roles.join(',') !== 'PUBLIC') return false;
+  switch (policy.cmd) {
+    case '*':
+    case 'w':
+      return isTenantPredicate(policy.using) && isTenantPredicate(policy.check);
+    case 'r':
+    case 'd':
+      return isTenantPredicate(policy.using) && policy.check === null;
+    case 'a':
+      return policy.using === null && isTenantPredicate(policy.check);
+    default:
+      return false;
+  }
+}
+
+/**
+ * Permissive policies other than the canonical one, each reviewed and given a reason. Policies of
+ * one table are ORed, so every entry here widens what the table shows; a new one is a decision
+ * for a reviewer, not a side effect of a migration. Expressions are compared through
+ * `normalisePredicate`.
+ */
+export interface ReviewedPolicy {
+  readonly cmd: string;
+  readonly using: string | null;
+  readonly check: string | null;
+  readonly reason: string;
+}
+
+const REQUEST_LOOKUP_USING =
+  "((organisation_id = app.current_org()) OR ((current_setting('app.request_lookup'::text, true) = 'resolve_request_context'::text) AND (CURRENT_USER = ANY (ARRAY['moin_migrator'::name, 'moin_owner'::name]))))";
+
+export const REVIEWED_POLICY_EXCEPTIONS: Readonly<Record<string, readonly ReviewedPolicy[]>> = {
+  // resolve_request_context (P06.06.03) reads the caller's memberships before a tenant is known.
+  // The lookup branch is open only to the definer's owner and only inside that function.
+  memberships: [
+    {
+      cmd: 'r',
+      using: REQUEST_LOOKUP_USING,
+      check: null,
+      reason: 'per-request membership lookup before the tenant is known (P06.06.03)',
+    },
+    {
+      cmd: 'w',
+      using: REQUEST_LOOKUP_USING,
+      check: '(organisation_id = app.current_org())',
+      reason: 'same lookup branch on the UPDATE command, writes still bound to the tenant',
+    },
+  ],
+};
+
+function isReviewedPolicy(table: string, policy: PolicyRow): boolean {
+  if (!policy.permissive || policy.roles.join(',') !== 'PUBLIC') return false;
+  return (REVIEWED_POLICY_EXCEPTIONS[table] ?? []).some(
+    (reviewed) =>
+      reviewed.cmd === policy.cmd &&
+      normalisePredicate(reviewed.using) === normalisePredicate(policy.using) &&
+      normalisePredicate(reviewed.check) === normalisePredicate(policy.check),
+  );
+}
+
+interface ViewRow {
+  readonly view_schema: string;
+  readonly view_name: string;
+  readonly kind: string;
+  readonly security_invoker: boolean;
+  /** Tenant tables the view reaches, directly or through other views. */
+  readonly tenant_tables: string[];
+}
+
+/**
+ * Views and materialised views, with the tenant tables they read. A view runs with its owner's
+ * privileges unless it is `security_invoker`, and the owner is the migration role: such a view over
+ * a tenant table hands the caller every tenant's rows, whatever the table's policies say. A
+ * materialised view is a stored copy and cannot be `security_invoker` at all.
+ */
+const VIEW_QUERY = `
+  SELECT n.nspname::text AS view_schema,
+         c.relname::text AS view_name,
+         c.relkind::text AS kind,
+         COALESCE(c.reloptions @> ARRAY['security_invoker=true'] OR c.reloptions @> ARRAY['security_invoker=on'], false)
+           AS security_invoker,
+         COALESCE((
+           WITH RECURSIVE chain(obj) AS (
+             SELECT d.refobjid
+             FROM pg_depend d
+             JOIN pg_rewrite rw ON rw.oid = d.objid
+             WHERE rw.ev_class = c.oid AND d.classid = 'pg_rewrite'::regclass
+               AND d.refclassid = 'pg_class'::regclass AND d.refobjid <> c.oid
+             UNION
+             SELECT d.refobjid
+             FROM pg_depend d
+             JOIN pg_rewrite rw ON rw.oid = d.objid
+             JOIN chain ON chain.obj = rw.ev_class
+             WHERE d.classid = 'pg_rewrite'::regclass
+               AND d.refclassid = 'pg_class'::regclass AND d.refobjid <> c.oid
+           )
+           SELECT array_agg(DISTINCT dn.nspname || '.' || dc.relname)
+           FROM chain
+           JOIN pg_class dc ON dc.oid = chain.obj
+           JOIN pg_namespace dn ON dn.oid = dc.relnamespace
+           WHERE dc.relkind IN ('r', 'p')
+             AND dn.nspname NOT IN ('pg_catalog', 'information_schema')
+             AND EXISTS (
+               SELECT 1 FROM pg_attribute a
+               WHERE a.attrelid = dc.oid AND a.attname = 'organisation_id' AND NOT a.attisdropped
+             )
+         ), '{}'::text[]) AS tenant_tables
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE c.relkind IN ('v', 'm')
+    AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+    AND n.nspname NOT LIKE 'pg\\_toast%' AND n.nspname NOT LIKE 'pg\\_temp\\_%'
+    AND NOT EXISTS (
+      SELECT 1 FROM pg_depend d
+      WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e'
+    )
+  ORDER BY n.nspname, c.relname
+`;
+
+/**
+ * Views over tenant data that run as their owner, each with the reason that makes it safe. Empty:
+ * the only view over tenant data (`knowledge_approved_current`) is `security_invoker`.
+ */
+export const REVIEWED_TENANT_VIEWS: Readonly<Record<string, string>> = {};
+
+/** `public` tables are named bare, as findings and the global register always have; others by schema. */
+function tableRef(schema: string, name: string): string {
+  return schema === 'public' ? name : `${schema}.${name}`;
+}
 
 const FUNCTION_QUERY = `
   SELECT (n.nspname || '.' || p.proname)::text AS function_name,
@@ -512,6 +745,30 @@ const FUNCTION_QUERY = `
   FROM pg_proc p
   JOIN pg_namespace n ON n.oid = p.pronamespace
   WHERE n.nspname IN ('public', 'app')
+`;
+
+/**
+ * Functions anyone can call. PostgreSQL grants EXECUTE on a new function to PUBLIC unless the
+ * creating role's default privileges say otherwise (0078), so a function that is callable by
+ * everyone was either created before that default or granted to PUBLIC on purpose. Extension
+ * members (pgvector, citext, pg_trgm) are exempt: PUBLIC is how an extension ships them.
+ */
+const PUBLIC_EXECUTE_QUERY = `
+  SELECT (n.nspname || '.' || p.proname || '(' || oidvectortypes(p.proargtypes) || ')')::text AS signature
+  FROM pg_proc p
+  JOIN pg_namespace n ON n.oid = p.pronamespace
+  WHERE p.prokind IN ('f', 'p')
+    AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+    AND n.nspname NOT LIKE 'pg\\_toast%' AND n.nspname NOT LIKE 'pg\\_temp\\_%'
+    AND NOT EXISTS (
+      SELECT 1 FROM pg_depend d
+      WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e'
+    )
+    AND EXISTS (
+      SELECT 1 FROM aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a
+      WHERE a.grantee = 0 AND a.privilege_type = 'EXECUTE'
+    )
+  ORDER BY 1
 `;
 
 const AUDIT_TRIGGER_TYPE = 27; // row (1) + before (2) + delete (8) + update (16)
@@ -880,11 +1137,14 @@ export async function inspect(
 
     const tables = (await pool.query<TableRow>(TABLE_QUERY)).rows;
     for (const table of tables) {
+      // Findings and the global register name a `public` table by its bare name, as they always
+      // have, and a table in any other schema as `schema.table`.
+      const ref = tableRef(table.table_schema, table.table_name);
       if (!table.has_org_column) {
-        if (!globals.has(table.table_name)) {
+        if (!globals.has(ref)) {
           findings.push({
             rule: 'unregistered-global-table',
-            subject: table.table_name,
+            subject: ref,
             detail:
               'has no organisation_id and is not in docs/architecture/global-tables.md. ' +
               '"Deliberately global" and "somebody forgot the column" must not look the same.',
@@ -896,7 +1156,7 @@ export async function inspect(
       if (!table.rls_enabled) {
         findings.push({
           rule: 'rls-not-enabled',
-          subject: table.table_name,
+          subject: ref,
           detail:
             'has organisation_id but no row-level security. Every row is visible to every tenant.',
         });
@@ -904,7 +1164,7 @@ export async function inspect(
       if (!table.rls_forced) {
         findings.push({
           rule: 'rls-not-forced',
-          subject: table.table_name,
+          subject: ref,
           detail:
             'row-level security is enabled but not FORCEd, so it does not apply to the table owner — ' +
             'who runs migrations, backfills and admin connections.',
@@ -913,7 +1173,7 @@ export async function inspect(
       if (table.policy_count === 0) {
         findings.push({
           rule: 'no-policy',
-          subject: table.table_name,
+          subject: ref,
           detail:
             'row-level security is on with no policy, which denies everything and will be "fixed" by disabling it.',
         });
@@ -922,7 +1182,7 @@ export async function inspect(
         if (missing.length > 0) {
           findings.push({
             rule: 'policy-missing-commands',
-            subject: table.table_name,
+            subject: ref,
             detail: `no policy covers ${missing.join(', ')} (r=select a=insert w=update d=delete).`,
           });
         }
@@ -930,41 +1190,118 @@ export async function inspect(
       if (table.policies_without_check.length > 0) {
         findings.push({
           rule: 'policy-without-with-check',
-          subject: table.table_name,
+          subject: ref,
           detail:
             `policy ${table.policies_without_check.join(', ')} permits writes with no WITH CHECK, ` +
             'so a row can be written into another tenant.',
         });
       }
+      // The commands above only say that *some* policy exists. What it lets through is the
+      // predicate, and policies of a table are ORed: one `USING (true)` beside the reviewed policy
+      // opens every row of every tenant while every flag and every command still look right.
+      for (const policy of table.policies) {
+        if (!policy.permissive) continue; // RESTRICTIVE policies only narrow what is visible.
+        if (isCanonicalPolicy(policy) || isReviewedPolicy(ref, policy)) continue;
+        // The right predicate with no WITH CHECK is already reported as policy-without-with-check.
+        if (
+          ['*', 'a', 'w'].includes(policy.cmd) &&
+          policy.check === null &&
+          isTenantPredicate(policy.using)
+        ) {
+          continue;
+        }
+        findings.push({
+          rule: 'policy-unreviewed-permissive',
+          subject: ref,
+          detail:
+            `policy ${policy.name} (command ${policy.cmd}, roles ${policy.roles.join(', ')}, ` +
+            `USING ${policy.using ?? 'none'}, WITH CHECK ${policy.check ?? 'none'}) is not the ` +
+            'reviewed tenant predicate organisation_id = app.current_org() and is not registered ' +
+            'in REVIEWED_POLICY_EXCEPTIONS. A permissive policy is ORed with the others and can ' +
+            'show or accept another tenant’s rows.',
+        });
+      }
       if (!table.has_composite_unique) {
         findings.push({
           rule: 'no-composite-unique',
-          subject: table.table_name,
+          subject: ref,
           detail:
             'has no UNIQUE (organisation_id, id); a child table has nothing to reference compositely.',
         });
       }
     }
 
-    const tenantTables = new Set(tables.filter((t) => t.has_org_column).map((t) => t.table_name));
+    const qualified = (schema: string, name: string): string => `${schema}.${name}`;
+    const tenantTables = new Set(
+      tables.filter((t) => t.has_org_column).map((t) => qualified(t.table_schema, t.table_name)),
+    );
     for (const fk of (await pool.query<ForeignKeyRow>(FK_QUERY)).rows) {
-      if (!tenantTables.has(fk.table_name) || !tenantTables.has(fk.target_table)) {
+      if (
+        !tenantTables.has(qualified(fk.table_schema, fk.table_name)) ||
+        !tenantTables.has(qualified(fk.target_schema, fk.target_table))
+      ) {
         continue;
       }
-      // A foreign key whose target is `organisations` needs only the tenant column: the parent
-      // *is* the tenant, so there is no second identity that could belong to someone else.
-      if (fk.target_table === 'organisations') {
+      // The tenant root, and only it, is its own tenant: `public.organisations.id` *is* the
+      // organisation id, so a key from a row's organisation_id to that id has no second identity
+      // that could belong to someone else. The exemption is the exact schema-qualified relation
+      // and the exact mapping. A table that is merely *named* organisations in another schema is
+      // an ordinary tenant table, and any other column pointing at the root is an ordinary key.
+      if (
+        fk.target_schema === TENANT_ROOT_SCHEMA &&
+        fk.target_table === TENANT_ROOT_TABLE &&
+        fk.pairs.length === 1 &&
+        fk.pairs[0]?.source === 'organisation_id' &&
+        fk.pairs[0].target === 'id'
+      ) {
         continue;
       }
-      if (!fk.columns.includes('organisation_id')) {
+      const subject = `${tableRef(fk.table_schema, fk.table_name)}.${fk.constraint_name}`;
+      // The tenant column must be bound to the target's tenant column, and to nothing else. A key
+      // that merely *contains* organisation_id passes a name check yet can bind the source tenant
+      // to the target's id: `(organisation_id, x) REFERENCES t (id, organisation_id)` makes the
+      // database accept a row of tenant A that points at tenant B's row.
+      const bound = fk.pairs.some(
+        (pair) => pair.source === 'organisation_id' && pair.target === 'organisation_id',
+      );
+      const crossed = fk.pairs.some(
+        (pair) => (pair.source === 'organisation_id') !== (pair.target === 'organisation_id'),
+      );
+      if (crossed) {
+        findings.push({
+          rule: 'foreign-key-tenant-mismapped',
+          subject,
+          detail:
+            `binds ${fk.pairs.map((pair) => `${pair.source} to ${pair.target}`).join(', ')} on ` +
+            `${fk.target_table}. organisation_id must reference organisation_id and no other ` +
+            'column may reference it, or a row of one tenant can point at another tenant’s row.',
+        });
+      } else if (!bound) {
         findings.push({
           rule: 'foreign-key-not-composite',
-          subject: `${fk.table_name}.${fk.constraint_name}`,
+          subject,
           detail:
             `references ${fk.target_table} without organisation_id. A row could then point at ` +
             'another tenant’s row, which row-level security does not prevent.',
         });
       }
+    }
+
+    for (const view of (await pool.query<ViewRow>(VIEW_QUERY)).rows) {
+      if (view.tenant_tables.length === 0) continue;
+      const ref = tableRef(view.view_schema, view.view_name);
+      if (REVIEWED_TENANT_VIEWS[ref] !== undefined) continue;
+      if (view.kind === 'v' && view.security_invoker) continue;
+      findings.push({
+        rule: 'view-bypasses-tenant-policy',
+        subject: ref,
+        detail:
+          (view.kind === 'm'
+            ? 'is a materialised view, a stored copy that row-level security does not apply to, '
+            : 'runs with its owner’s privileges (it is not security_invoker), which bypass row-level security, ') +
+          `over tenant data (${view.tenant_tables.join(', ')}). Make it security_invoker, or register ` +
+          'it with a reason in REVIEWED_TENANT_VIEWS.',
+      });
     }
 
     const functions = (await pool.query<FunctionRow>(FUNCTION_QUERY)).rows;
@@ -1052,7 +1389,19 @@ export async function inspect(
       }
     }
 
-    const present = new Set(tables.map((table) => table.table_name));
+    for (const row of (await pool.query<{ signature: string }>(PUBLIC_EXECUTE_QUERY)).rows) {
+      findings.push({
+        rule: 'function-public-execute',
+        subject: row.signature,
+        detail:
+          'EXECUTE is held by PUBLIC, so every role, the application role included, can call it ' +
+          'without a grant. Revoke it from PUBLIC and grant the roles that need it by name.',
+      });
+    }
+
+    const present = new Set(
+      tables.filter((table) => table.table_schema === 'public').map((table) => table.table_name),
+    );
     for (const guarded of APPEND_ONLY_TABLES) {
       if (!present.has(guarded.table)) continue;
       const triggers = (
