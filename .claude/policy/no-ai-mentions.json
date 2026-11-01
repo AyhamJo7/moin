@@ -1,7 +1,7 @@
 {
   "_doc": "A-22 / P02.01.03: commit messages, tag messages and PR/issue text never mention AI coding tools or carry tool attribution. This file is the single source for policy_guard.py (agent commands, GitHub MCP tools) and for P02.01.03's CI check. Scope is tools and attribution, NOT the product domain: 'feat(ai): ...', 'AI disclosure (INV-03)' and the provider name 'OpenAI' are allowed. Patterns are Python `re` syntax, matched with re.search. The examples are executable: tests assert every block example is blocked and every allow example passes.",
   "patterns": [
-    {"id": "tool-claude", "regex": "(?i)(?<![A-Za-z0-9])claude(?![A-Za-z0-9])", "why": "names the tool; also covers Claude-Session trailers, claude.ai links, Claude Code"},
+    {"id": "tool-claude", "regex": "(?i)(?:(?<![A-Za-z0-9.])claude(?![A-Za-z0-9]|\\.md\\b|-evidence\\b)|\\.claude(?![/A-Za-z0-9]))", "why": "names the tool; also covers Claude-Session trailers, claude.ai links, Claude Code, and a dotted '...Claude'. Only complete repository paths are not attribution: .claude/..., CLAUDE.md and claude-evidence pass"},
     {"id": "vendor-anthropic", "regex": "(?i)(?<![A-Za-z0-9])anthropic(?![A-Za-z0-9])", "why": "names the vendor"},
     {"id": "session-trailer", "regex": "(?im)^[ \\t]*claude-session[ \\t]*:", "why": "cloud-session commit trailer"},
     {"id": "session-link", "regex": "(?i)claude\\.ai/(?:code|chat|share|artifact)", "why": "cloud-session link in PR text"},
@@ -22,7 +22,12 @@
     "chore: reviewed by codex",
     "Anthropic model routing notes",
     "co-authored-by: someone <a@example.com>",
-    "feat: written by an AI assistant"
+    "feat: written by an AI assistant",
+    "fix: tidy retry loop, thanks Claude.",
+    "see github.com/anthropics/claude-code",
+    "fix: thanks...Claude!",
+    "fix: generated with .Claude Code",
+    "fix: generated with https://www.claude.ai"
   ],
   "allow_examples": [
     "feat(ai): add model gateway with EU routing",
@@ -31,6 +36,9 @@
     "test(api): cover cursor pagination edge cases",
     "chore(tooling): port repository guard hooks",
     "docs(plan): add master execution plan baseline",
-    "feat(telephony): negotiate the opus audio codec at 48 kHz"
+    "feat(telephony): negotiate the opus audio codec at 48 kHz",
+    "docs(control-plane): describe .claude/bin/merge_gate.py",
+    "docs: shorten CLAUDE.md section 8",
+    "chore: keep gate records in .git/claude-evidence"
   ]
 }
