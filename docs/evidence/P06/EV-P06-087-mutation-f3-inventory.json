@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/tmp/moin-sec01",
+  "head": "eb56697b34807ab9a5049845311d0d1255e93a7c",
+  "mode": "committed",
+  "fix_ref": "eb56697b34807ab9a5049845311d0d1255e93a7c",
+  "fix_paths": [
+    "scripts/check-rls-catalog.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "node ./node_modules/vitest/vitest.mjs run --project integration scripts/check-rls-catalog.integration.test.ts -t F3",
+  "started": "2026-11-01T03:50:46+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-11-01T03:50:51+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 2.54,
+    "tail": "     82|       let result: unknown;\n     83|       try {\n     84|         result = original.apply(this, args);\n       |                           ^\n     85|       } catch (error) {\n     86|         record(name, error);\n \u276f scripts/check-rls-catalog.integration.test.ts:301:63\n \u276f evidenceBody packages/testing/src/mutation/evidence-state.ts:277:7\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[3/4]\u23af\n\n FAIL  |integration| scripts/check-rls-catalog.integration.test.ts > the inventory covers every reachable schema and relation kind (F3) > a materialised view over a tenant table is reported\nAssertionError: expected [] to strictly equal [ 'view-bypasses-tenant-policy' ]\n\n- Expected\n+ Received\n\n- [\n-   \"view-bypasses-tenant-policy\",\n- ]\n+ []\n\n \u276f Proxy.toStrictEqual scripts/mutation-evidence-probe.ts:84:27\n     82|       let result: unknown;\n     83|       try {\n     84|         result = original.apply(this, args);\n       |                           ^\n     85|       } catch (error) {\n     86|         record(name, error);\n \u276f scripts/check-rls-catalog.integration.test.ts:317:55\n \u276f evidenceBody packages/testing/src/mutation/evidence-state.ts:277:7\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[4/4]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  4 failed | 1 passed | 50 skipped (55)\n   Start at  04:50:46\n   Duration  2.23s (tests 79%, transform 17%, setup 3%, import 2%)\n"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 2.65,
+    "tail": "\n RUN  v5.0.2 /tmp/moin-sec01\n\n \u2713 |integration| scripts/check-rls-catalog.integration.test.ts (55 tests | 50 skipped) 1433ms\n\n Test Files  1 passed (1)\n      Tests  5 passed | 50 skipped (55)\n   Start at  04:50:49\n   Duration  2.38s (tests 82%, transform 14%, setup 3%, import 1%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/tmp/moin-sec01/.git/claude-evidence/mutation/20261101T035046Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}
