@@ -1905,3 +1905,11 @@ Source: `/tmp/moin-review/sec-g02.md`, independent acceptance review of group 2 
 | Item      | Status           | Commit  | Evidence   | Note                                                                                                                                                                                                                              |
 | --------- | ---------------- | ------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | P06.06.04 | READY_FOR_REVIEW | 0949e93 | EV-P06-092 | F1: member disable requires a fresh step-up (was the only unguarded sensitive identity-access route); real-HTTP tests and a step-up classification of every route in the real-route matrix; KILLED. Independent re-review pending |
+
+## Security hardening 1: invite role ceiling (2026-11-01, branch `fix/p06-07-invite-role-ceiling`)
+
+From group 9 M1: an admin could invite a member with `billing_admin` or `integration_admin`, powers the matrix denies to admins. One fix commit. Full gates 14/14 at `03b91ed` on the second run (the first failed on the invitation-lock timing case, fixed by the open draft #260). Independent re-review pending; nothing is VERIFIED.
+
+| Item      | Status           | Commit  | Evidence   | Note                                                                                                                                                                   |
+| --------- | ---------------- | ------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P06.07.01 | READY_FOR_REVIEW | 03b91ed | EV-P06-104 | M1: an inviter cannot confer more than it holds; 403 and no row; defence in depth in issueInvitation; KILLED. The item stays unticked until the independent re-review. |
