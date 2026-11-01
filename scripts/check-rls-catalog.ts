@@ -24,7 +24,10 @@
  * 3. **`UNIQUE (organisation_id, id)`**, because a child's composite foreign key has nothing to
  *    reference without it.
  * 4. **Every foreign key out of a tenant table is composite**, carrying `organisation_id`. RLS
- *    stops a query returning another tenant's row; this stops a row *pointing* at one.
+ *    stops a query returning another tenant's row; this stops a row *pointing* at one. The key
+ *    must bind `organisation_id` to the target's `organisation_id` (the column pairs are read
+ *    together): one that holds the column but maps it to the target's `id` still lets tenant A
+ *    reference tenant B.
  * 5. **No runtime role can bypass RLS.** A role with `BYPASSRLS` or `SUPERUSER` makes every
  *    policy above decorative.
  * 6. **Every `SECURITY DEFINER` function is on the allowlist and pins `search_path`.** These are
@@ -63,6 +66,7 @@ export interface Finding {
 }
 
 interface TableRow {
+  readonly table_schema: string;
   readonly table_name: string;
   readonly has_org_column: boolean;
   readonly rls_enabled: boolean;
@@ -87,10 +91,13 @@ interface PolicyRow {
 }
 
 interface ForeignKeyRow {
+  readonly table_schema: string;
   readonly table_name: string;
   readonly constraint_name: string;
-  readonly columns: string[];
+  readonly target_schema: string;
   readonly target_table: string;
+  /** Column pairs in declaration order: source column and the target column it must equal. */
+  readonly pairs: readonly { readonly source: string; readonly target: string }[];
 }
 
 interface FunctionRow {
@@ -474,7 +481,8 @@ export function allowlistedDefiners(path: string = DEFINER_ALLOWLIST): Set<strin
 }
 
 const TABLE_QUERY = `
-  SELECT c.relname::text AS table_name,
+  SELECT n.nspname::text AS table_schema,
+         c.relname::text AS table_name,
          EXISTS (
            SELECT 1 FROM pg_attribute a
            WHERE a.attrelid = c.oid AND a.attname = 'organisation_id' AND NOT a.attisdropped
@@ -514,16 +522,24 @@ const TABLE_QUERY = `
 `;
 
 const FK_QUERY = `
-  SELECT c.relname::text AS table_name,
+  SELECT n.nspname::text AS table_schema,
+         c.relname::text AS table_name,
          con.conname::text AS constraint_name,
-         (SELECT array_agg(att.attname::text ORDER BY att.attname)
-          FROM unnest(con.conkey) k JOIN pg_attribute att
-            ON att.attrelid = c.oid AND att.attnum = k) AS columns,
-         t.relname::text AS target_table
+         tn.nspname::text AS target_schema,
+         t.relname::text AS target_table,
+         -- conkey and confkey are two arrays that pair up by position. Reading them separately (as
+         -- sorted name lists) loses which source column is bound to which target column.
+         COALESCE((
+           SELECT json_agg(json_build_object('source', sa.attname::text, 'target', ta.attname::text) ORDER BY k.ord)
+           FROM unnest(con.conkey, con.confkey) WITH ORDINALITY AS k(src, tgt, ord)
+           JOIN pg_attribute sa ON sa.attrelid = con.conrelid AND sa.attnum = k.src
+           JOIN pg_attribute ta ON ta.attrelid = con.confrelid AND ta.attnum = k.tgt
+         ), '[]'::json) AS pairs
   FROM pg_constraint con
   JOIN pg_class c ON c.oid = con.conrelid
-  JOIN pg_class t ON t.oid = con.confrelid
   JOIN pg_namespace n ON n.oid = c.relnamespace
+  JOIN pg_class t ON t.oid = con.confrelid
+  JOIN pg_namespace tn ON tn.oid = t.relnamespace
   WHERE con.contype = 'f' AND n.nspname = 'public'
 `;
 
@@ -1098,9 +1114,15 @@ export async function inspect(
       }
     }
 
-    const tenantTables = new Set(tables.filter((t) => t.has_org_column).map((t) => t.table_name));
+    const qualified = (schema: string, name: string): string => `${schema}.${name}`;
+    const tenantTables = new Set(
+      tables.filter((t) => t.has_org_column).map((t) => qualified(t.table_schema, t.table_name)),
+    );
     for (const fk of (await pool.query<ForeignKeyRow>(FK_QUERY)).rows) {
-      if (!tenantTables.has(fk.table_name) || !tenantTables.has(fk.target_table)) {
+      if (
+        !tenantTables.has(qualified(fk.table_schema, fk.table_name)) ||
+        !tenantTables.has(qualified(fk.target_schema, fk.target_table))
+      ) {
         continue;
       }
       // A foreign key whose target is `organisations` needs only the tenant column: the parent
@@ -1108,10 +1130,30 @@ export async function inspect(
       if (fk.target_table === 'organisations') {
         continue;
       }
-      if (!fk.columns.includes('organisation_id')) {
+      const subject = `${fk.table_name}.${fk.constraint_name}`;
+      // The tenant column must be bound to the target's tenant column, and to nothing else. A key
+      // that merely *contains* organisation_id passes a name check yet can bind the source tenant
+      // to the target's id: `(organisation_id, x) REFERENCES t (id, organisation_id)` makes the
+      // database accept a row of tenant A that points at tenant B's row.
+      const bound = fk.pairs.some(
+        (pair) => pair.source === 'organisation_id' && pair.target === 'organisation_id',
+      );
+      const crossed = fk.pairs.some(
+        (pair) => (pair.source === 'organisation_id') !== (pair.target === 'organisation_id'),
+      );
+      if (crossed) {
+        findings.push({
+          rule: 'foreign-key-tenant-mismapped',
+          subject,
+          detail:
+            `binds ${fk.pairs.map((pair) => `${pair.source} to ${pair.target}`).join(', ')} on ` +
+            `${fk.target_table}. organisation_id must reference organisation_id and no other ` +
+            'column may reference it, or a row of one tenant can point at another tenant’s row.',
+        });
+      } else if (!bound) {
         findings.push({
           rule: 'foreign-key-not-composite',
-          subject: `${fk.table_name}.${fk.constraint_name}`,
+          subject,
           detail:
             `references ${fk.target_table} without organisation_id. A row could then point at ` +
             'another tenant’s row, which row-level security does not prevent.',

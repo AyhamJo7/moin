@@ -150,6 +150,92 @@ describe('permissive policies beyond the reviewed predicate (F1)', () => {
   });
 });
 
+describe('a composite foreign key must bind tenant to tenant (F2)', () => {
+  const FIXTURE_CHILD = `
+    CREATE TABLE sec02_child (
+      organisation_id uuid NOT NULL REFERENCES organisations (id),
+      id uuid NOT NULL PRIMARY KEY,
+      location_id uuid NOT NULL,
+      UNIQUE (organisation_id, id),
+      CONSTRAINT FKPAIR
+    );
+    SELECT app.apply_tenant_rls('sec02_child');
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE sec02_child TO moin_app;`;
+
+  async function insertChildAsA(): Promise<void> {
+    await withTenant(database.pool(), ORG_A, async (client) => {
+      await client.query(
+        `INSERT INTO sec02_child (organisation_id, id, location_id) VALUES ($1, gen_random_uuid(), $2)`,
+        [ORG_A, ORG_B],
+      );
+    });
+  }
+
+  evidenceTest(
+    'a key that holds organisation_id but binds it to the target id is reported, and it really links tenants',
+    async () => {
+      await seedTwoTenants();
+      // Tenant B's location whose id equals tenant A's organisation id: the swapped key matches
+      // the child's (organisation_id, location_id) = (A, B) against the parent's (id, organisation_id).
+      await fixture(
+        `INSERT INTO locations (organisation_id, id, name) VALUES ($1, $2, 'B decoy')`,
+        [ORG_B, ORG_A],
+      );
+      await ddl(
+        FIXTURE_CHILD.replace(
+          'CONSTRAINT FKPAIR',
+          'CONSTRAINT sec02_swapped FOREIGN KEY (organisation_id, location_id) REFERENCES locations (id, organisation_id)',
+        ),
+      );
+      try {
+        // The database accepts a tenant-A row that points at tenant B's row.
+        await insertChildAsA();
+        const found = (await findings()).filter((f) => f.subject === 'sec02_child.sec02_swapped');
+        expect(found.map((f) => f.rule)).toStrictEqual(['foreign-key-tenant-mismapped']);
+      } finally {
+        await ddl(`DROP TABLE sec02_child`);
+        await fixture(`DELETE FROM locations WHERE id = $1`, [ORG_A]);
+      }
+    },
+  );
+
+  evidenceTest('the properly bound key passes and refuses the same reference', async () => {
+    await seedTwoTenants();
+    await ddl(
+      FIXTURE_CHILD.replace(
+        'CONSTRAINT FKPAIR',
+        'CONSTRAINT sec02_bound FOREIGN KEY (organisation_id, location_id) REFERENCES locations (organisation_id, id)',
+      ),
+    );
+    try {
+      expect((await findings()).filter((f) => f.subject.startsWith('sec02_child'))).toStrictEqual(
+        [],
+      );
+      await expect(insertChildAsA()).rejects.toMatchObject({ code: '23503' });
+    } finally {
+      await ddl(`DROP TABLE sec02_child`);
+    }
+  });
+
+  evidenceTest('a key that leaves organisation_id out is still reported', async () => {
+    await ddl(
+      FIXTURE_CHILD.replace(
+        'CONSTRAINT FKPAIR',
+        'CONSTRAINT sec02_omitted FOREIGN KEY (location_id) REFERENCES locations (id)',
+      ),
+    );
+    try {
+      expect(
+        (await findings())
+          .filter((f) => f.subject === 'sec02_child.sec02_omitted')
+          .map((f) => f.rule),
+      ).toStrictEqual(['foreign-key-not-composite']);
+    } finally {
+      await ddl(`DROP TABLE sec02_child`);
+    }
+  });
+});
+
 describe('the QG-09 provisioning registration', () => {
   it('rejects the same function without its documented registration', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'moin-definers-'));
