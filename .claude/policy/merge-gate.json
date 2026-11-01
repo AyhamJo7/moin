@@ -1,5 +1,5 @@
 {
-  "_doc": "Autonomous merge policy for .claude/bin/merge_gate.py (CLAUDE.md §8). A session may squash-merge a PR only through that script, which requires, all bound to the PR's exact head SHA: the PR targets `base`; verify-head --ci says VERIFIED for that same SHA; no AI-tool mentions in title/body; no changed file (rename and copy sources included, taken from git objects) matches `founder_paths`, nor `founder_paths_trial` up to and including `trial_until`; and, last, a Codex CLI review that the script runs itself on an isolated snapshot of that SHA ends in a single `VERDICT: APPROVE` with no CRITICAL/HIGH finding line (list markers and emphasis ignored). `*AGENTS*.md` covers AGENTS.override.md, which Codex reads before AGENTS.md; `*.gitattributes` covers attributes that could hide content (export-ignore, -diff); `packages/config/*`, `*tsconfig*.json`, `.dependency-cruiser.cjs`, the prettier, editorconfig, gitignore, gitleaks, semgrep, dockerignore, tflint and terraform-version files and `.env.example` are the configuration the gates in .claude/gates.json, lefthook.yml and .github/workflows actually read. Founder-path PRs stay founder-merged. Patterns are fnmatch globs on repository paths (`*` also matches `/`). founder_paths are permanent: they define the checks, guards, gate inputs and agent instructions that gate this very merge, so an agent must never be able to merge a change to them (PLAN.md is deliberately absent: every PR updates its Status Ledger; the reviewer treats loosening a gate, INV or QG rule there as CRITICAL). founder_paths_trial cover the control paths the founder reviews during the autonomy trial; extend it by moving trial_until. `tools` are the absolute paths of the only executables the script runs (never resolved from the caller's PATH); every child gets a scrubbed environment plus `child_path` as PATH. This is a procedural control against mistakes and drift, not a security boundary against a session that deliberately subverts it. GitHub enforces only the status checks.",
+  "_doc": "Autonomous merge policy for .claude/bin/merge_gate.py (CLAUDE.md §8). A session may squash-merge a PR only through that script, which requires, all bound to the PR's exact head SHA: the PR targets `base`; verify-head --ci says VERIFIED for that same SHA; no AI-tool mentions in title/body; no changed file (rename and copy sources included, taken from git objects) matches `founder_paths`, nor `founder_paths_trial` up to and including `trial_until`; and, last, a Codex CLI review that the script runs itself on an isolated snapshot of that SHA ends in a single `VERDICT: APPROVE` with no CRITICAL/HIGH finding line (list markers and emphasis ignored). `*AGENTS*.md` covers AGENTS.override.md, which Codex reads before AGENTS.md; `*.gitattributes` covers attributes that could hide content (export-ignore, -diff); `packages/config/*`, `*tsconfig*.json`, `.dependency-cruiser.cjs`, the prettier, editorconfig, tflint and terraform-version files and `.env.example` are the configuration the gates in .claude/gates.json, lefthook.yml and .github/workflows actually read. Scanner suppression and configuration is held as a class: every `*ignore` file (.semgrepignore, .trivyignore, .gitleaksignore, .gitignore, .dockerignore, ...), anything named for semgrep, trivy, gitleaks, hadolint, codeql or osv-scanner (trivy.yaml, trivy-secret.yaml, rule directories), and the registry configuration `.npmrc` and `.yarnrc*`. Founder-path PRs stay founder-merged. Patterns are fnmatch globs on repository paths (`*` also matches `/`). founder_paths are permanent: they define the checks, guards, gate inputs and agent instructions that gate this very merge, so an agent must never be able to merge a change to them (PLAN.md is deliberately absent: every PR updates its Status Ledger; the reviewer treats loosening a gate, INV or QG rule there as CRITICAL). founder_paths_trial cover the control paths the founder reviews during the autonomy trial; extend it by moving trial_until. `tools` are the absolute paths of the only executables the script runs (never resolved from the caller's PATH); every child gets a scrubbed environment plus `child_path` as PATH. This is a procedural control against mistakes and drift, not a security boundary against a session that deliberately subverts it. GitHub enforces only the status checks.",
   "base": "main",
   "tools": {
     "git": "/usr/bin/git",
@@ -35,16 +35,20 @@
     "*tsconfig*.json",
     "*.dependency-cruiser.cjs",
     "*.prettierrc*",
-    "*.prettierignore",
     "*.editorconfig",
-    "*.gitignore",
-    "*.gitleaks.toml",
-    "*.dockerignore",
     "*.tflint.hcl",
     "*.terraform-version",
     "*.env.example",
-    ".semgrep/*",
-    "*next.config.*"
+    "*next.config.*",
+    "*ignore",
+    "*semgrep*",
+    "*trivy*",
+    "*gitleaks*",
+    "*hadolint*",
+    "*codeql*",
+    "*osv-scanner*",
+    "*.npmrc",
+    "*.yarnrc*"
   ],
   "founder_paths_trial": [
     "packages/db/migrations/*",

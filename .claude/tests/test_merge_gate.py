@@ -76,6 +76,38 @@ PERMANENT_FOUNDER_PATHS = (
     ".env.example",
     ".semgrep/moin.yml",
     "apps/web/next.config.ts",
+    # Scanner suppression and configuration, root and nested, as a class.
+    ".semgrepignore",
+    ".trivyignore",
+    "apps/web/.trivyignore",
+    "trivy.yaml",
+    "trivy-secret.yaml",
+    ".gitleaksignore",
+    ".eslintignore",
+    ".hadolint.yaml",
+    "osv-scanner.toml",
+    ".npmrc",
+    "apps/web/.npmrc",
+    ".yarnrc.yml",
+)
+# Real application paths that must stay eligible for a session merge.
+ELIGIBLE_PATHS = (
+    "apps/web/app/page.tsx",
+    "apps/web/app/complete-action.tsx",
+    "apps/web/e2e/smoke.spec.ts",
+    "apps/server/src/bootstrap.ts",
+    "apps/server/src/modules/call-simulator/application/callback-request.ts",
+    "packages/ai/src/index.ts",
+    "packages/db/src/index.ts",
+    "packages/kernel/src/index.ts",
+    "packages/ui/src/index.ts",
+    "packages/contracts/src/index.ts",
+    "packages/observability/src/index.ts",
+    "packages/telephony/src/index.ts",
+    "packages/testing/src/index.ts",
+    "docs/runbooks/dlq-replay.md",
+    "PLAN.md",
+    "PROGRESS.md",
 )
 ATTRIBUTES = "PLAN.md -diff export-ignore\napps/web/src/today/card.tsx -diff export-ignore\n"
 MARKER = "GATE-LOOSENED-MARKER"
@@ -151,6 +183,11 @@ class RefusalsTest(unittest.TestCase):
 
     def test_plan_md_is_not_a_founder_path(self) -> None:
         self.assertEqual(self.check(files=["PLAN.md"], today=LATER), [])
+
+    def test_application_paths_stay_eligible(self) -> None:
+        for path in ELIGIBLE_PATHS:
+            with self.subTest(path=path):
+                self.assertEqual(self.check(files=[path], today=LATER), [])
 
     def test_trial_paths_until_the_date(self) -> None:
         for path in TRIAL_FOUNDER_PATHS:
