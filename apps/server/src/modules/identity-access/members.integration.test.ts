@@ -660,6 +660,79 @@ describe('membership lifecycle (P06.08.03, P06.08.04)', () => {
     expect(still.rows[0]?.n).toBe('1');
   });
 
+  /** Removes the step-up stamp altogether: a session that never proved a second factor. */
+  async function noStepUp(pair: SessionPair) {
+    const token = /__Host-moin_sid=([A-Za-z0-9_-]{43})/.exec(pair.header)?.[1] ?? '';
+    await admin.query('update sessions set step_up_at = null where token_hash = $1', [
+      digestOf(token),
+    ]);
+    contexts().clearCache();
+  }
+
+  /** What a refused disable must leave alone: the membership, the target's session and the audit. */
+  async function expectDisableRefusedAndUnchanged(
+    response: Awaited<ReturnType<typeof postAs>>,
+    targetId: string,
+  ) {
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toMatchObject({ type: '/problems/step-up-required' });
+    const membership = await admin.query<{ status: string }>(
+      'select status from memberships where user_id = $1',
+      [targetId],
+    );
+    expect(membership.rows[0]?.status).toBe('active');
+    const live = await admin.query<{ n: string }>(
+      'select count(*)::text as n from sessions where user_id = $1 and revoked_at is null',
+      [targetId],
+    );
+    expect(live.rows[0]?.n).toBe('1');
+    const audits = await admin.query<{ n: string }>(
+      "select count(*)::text as n from audit_events where target_id = $1 and operation = 'member.disable'",
+      [targetId],
+    );
+    expect(audits.rows[0]?.n).toBe('0');
+  }
+
+  evidenceTest(
+    'disable needs step-up: a session with no stamp is refused 403 and changes nothing',
+    async () => {
+      const { pair, org } = await ownerPair();
+      const staff = await person();
+      await member(staff.id, 'staff', 'active', org);
+      await signInPair(staff);
+      await noStepUp(pair);
+      const response = await postAs(pair, '/api/members/disable', { userId: staff.id });
+      await expectDisableRefusedAndUnchanged(response, staff.id);
+    },
+  );
+
+  evidenceTest(
+    'disable needs step-up: a 16-minute-old stamp is refused 403 and changes nothing',
+    async () => {
+      const { pair, org } = await ownerPair();
+      const staff = await person();
+      await member(staff.id, 'staff', 'active', org);
+      await signInPair(staff);
+      await staleStepUp(pair);
+      const response = await postAs(pair, '/api/members/disable', { userId: staff.id });
+      await expectDisableRefusedAndUnchanged(response, staff.id);
+    },
+  );
+
+  evidenceTest('disable with a fresh step-up stamp still disables', async () => {
+    const { pair, org } = await ownerPair();
+    const staff = await person();
+    await member(staff.id, 'staff', 'active', org);
+    await signInPair(staff);
+    const response = await postAs(pair, '/api/members/disable', { userId: staff.id });
+    expect(response.statusCode).toBe(200);
+    const membership = await admin.query<{ status: string }>(
+      'select status from memberships where user_id = $1',
+      [staff.id],
+    );
+    expect(membership.rows[0]?.status).toBe('disabled');
+  });
+
   evidenceTest(
     'an admin cannot disable or remove an owner (404), and nothing changes',
     async () => {
