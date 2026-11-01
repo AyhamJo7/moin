@@ -34,13 +34,29 @@ handlers. The callback-to-outbox pipeline does not exist yet. P08.05.01–.04 st
 | What | Where | Result |
 |---|---|---|
 | Full gates, HEAD `8c75461` | `.claude/bin/gates.py full` (Keycloak, ElasticMQ and PostgreSQL running locally) | 14/14 PASS |
-| Ledger execution, real PostgreSQL as `moin_app`, FORCE RLS | `packages/db/src/job-execution.integration.test.ts` | 14 tests |
+| Ledger execution, real PostgreSQL as `moin_app`, FORCE RLS | `packages/db/src/job-execution.integration.test.ts` | 15 tests |
 | SQS adapter against ElasticMQ | `packages/integrations/src/queue/sqs-queue.integration.test.ts` | 5 tests |
-| Consumer over SQS and PostgreSQL | `apps/server/src/modules/platform/job-consumer.integration.test.ts` | 21 tests |
+| Consumer over SQS and PostgreSQL | `apps/server/src/modules/platform/job-consumer.integration.test.ts` | 26 tests |
 | Compiled `dist/main-worker.js` as a process | `apps/server/src/modules/platform/worker-process.integration.test.ts` | 4 tests |
 | Connection loss inside `withTenant` | `packages/db/src/tenant-connection-loss.integration.test.ts` | 1 test |
 | Official `mutation_check.py` for the `tenant.ts` fix | `EV-P08-012-mutation-tenant-connection-loss.json` | KILLED, assertion failure |
 | Manual semantic mutants of the new runtime (no pre-fix state exists, so the official tool does not apply) | `EV-P08-012-mutants-worker-runtime.json` | 23 of 23 KILLED by an assertion |
+
+### Independent review, round 1 (head `f45c453`, REQUEST_CHANGES, two High on the receive-ceiling path)
+
+Both findings were reproduced by the reviewer against real PostgreSQL and ElasticMQ, then fixed one
+per commit. Each regression test failed on the pre-fix code and passes after; the official
+`mutation_check.py` verdicts are committed beside this file.
+
+| Finding | Fix | Regression tests | Before the fix | Mutation |
+|---|---|---|---|---|
+| H2 abandonment skipped the envelope-to-ledger identity check | `a7ff0d8`: one `lockJob` helper (lock, then type, version, correlation id) used by `executeJob` and `abandonJob`; `abandonJob` takes the full identity and returns `abandoned`, `already-terminal`, `busy`, `unknown` or `mismatch` | consumer: wrong correlation id, type and version past the ceiling are rejected as `job-mismatch`, no handler call, row stays `queued` at attempt 0 (3 tests); db: forged identities return `mismatch`, ledger unchanged | 3 failed on the assertion: reason `max-receive-exceeded` instead of `job-mismatch` | `EV-P08-012-mutation-abandon-identity.json`: KILLED |
+| H1 a busy row's source message was deleted at the ceiling | `323b388`: the consumer removes the source only on `abandoned`, `already-terminal` or a validated rejection; `busy` hides it for the busy backoff | consumer: row lock held in another `withTenant` transaction while deliveries cross the ceiling (`receiveCeilingFactor: 1`): source kept, nothing dead-lettered, ledger `queued`; after the holder rolls back a later delivery ends the job as `dead` and dead-letters it; a job that already succeeded is deleted, not dead-lettered | failed by timeout: no `max-receive-busy` outcome, the message was removed while the lock was held | `EV-P08-012-mutation-ceiling-busy.json`: KILLED |
+
+The `busy` regression fails on the old code by timeout (`condition not reached in time`: the
+`max-receive-busy` outcome never occurs because the message is already gone), not by an assertion on
+the message count. The suite's `afterEach` hook then also times out because the test never released
+the lock holder. Both appear in the mutation record. The mismatch tests fail on assertions.
 
 The manual mutants are one source edit each, run against the named test, restored byte-for-byte
 (SHA-256 checked). Two survived on the first pass (a weak queue assertion and an invisible lease loss);

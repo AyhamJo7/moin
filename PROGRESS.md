@@ -1792,3 +1792,4 @@ and open items in EV-P08-012. P08.05.01–.04 stay open; nothing is VERIFIED.
 | P08.05.02 | IN_PROGRESS | 8c75461 | EV-P08-012 | Retry through ChangeMessageVisibility, per-type policy from the kernel; real queue and ledger |
 | P08.05.03 | IN_PROGRESS | 8c75461 | EV-P08-012 | Schema-invalid and unknown-tenant messages dead-lettered without a handler                    |
 | P08.05.04 | IN_PROGRESS | 8c75461 | EV-P08-012 | Tests exist on the real consumer; the older in-memory Worker evidence (EV-P08-005) remains    |
+| P08.05.01 | IN_PROGRESS | 323b388 | EV-P08-012 | Review round 1: abandon checks envelope identity; a busy row is never acknowledged            |
