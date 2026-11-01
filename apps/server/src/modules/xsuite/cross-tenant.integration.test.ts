@@ -54,6 +54,12 @@ import {
 } from './probe-ledger.ts';
 import { seedTwoTenants, type SeededWorld } from './seed.ts';
 import { ABSENT_SURFACES, assertSurfacesAbsent } from './surface.ts';
+import {
+  assertSeedCoverage,
+  checkSeedCoverage,
+  SEEDED_TABLES,
+  type SeedCoverage,
+} from './seed-coverage.ts';
 
 /**
  * Routes served by the test app that are NOT product API surface: the voice relay
@@ -80,6 +86,8 @@ let app: NestFastifyApplication;
 let world: SeededWorld;
 /** Every route a probe below actually called, with the status it got and what it asserted. */
 const ledger = new ProbeLedger();
+/** Filled by the seed-coverage test below and stored in the coverage report. */
+let seedCoverage: SeedCoverage | null = null;
 let productionRoots: Awaited<ReturnType<typeof loadProductionRoots>>;
 const clock = fixedClock(new Date());
 clock.set(new Date());
@@ -848,6 +856,42 @@ describe('DB layer: every tenant table isolates A from B (P06.13.03)', () => {
   });
 });
 
+describe('the seed accounts for every FORCE-RLS table (P06.13.01)', () => {
+  // One literal statement per seeded table: no table name is ever interpolated into SQL.
+  const COUNT_SQL: Record<string, string> = {
+    organisations: 'select count(*)::int as n from organisations',
+    locations: 'select count(*)::int as n from locations',
+    memberships: 'select count(*)::int as n from memberships',
+    invitations: 'select count(*)::int as n from invitations',
+    owner_invitation_requests: 'select count(*)::int as n from owner_invitation_requests',
+    support_access_grants: 'select count(*)::int as n from support_access_grants',
+    tasks: 'select count(*)::int as n from tasks',
+    tenant_setup: 'select count(*)::int as n from tenant_setup',
+  };
+
+  evidenceTest('every live FORCE-RLS table is seeded or carries a registered reason', async () => {
+    const forced = await admin.query(
+      `select c.relname::text as name from pg_class c join pg_namespace n on n.oid = c.relnamespace
+       where c.relforcerowsecurity and c.relkind in ('r', 'p') and n.nspname = 'public'`,
+    );
+    seedCoverage = checkSeedCoverage(forced.rows.map((row) => (row as { name: string }).name));
+    assertSeedCoverage(seedCoverage);
+    expect(Object.keys(COUNT_SQL).sort()).toStrictEqual([...SEEDED_TABLES].sort());
+  });
+
+  evidenceTest('each seeded table really holds a row for A and a row for B', async () => {
+    for (const table of SEEDED_TABLES) {
+      const sql = COUNT_SQL[table] ?? '';
+      for (const organisationId of [world.a.organisationId, world.b.organisationId]) {
+        const rows = await withTenant(database.pool(), organisationId, (client) =>
+          client.query(sql).then((r) => (r.rows[0] as { n: number }).n),
+        );
+        expect(rows, `${table} has no seeded row for ${organisationId}`).toBeGreaterThan(0);
+      }
+    }
+  });
+});
+
 describe('absent surfaces stay absent (P06.13.04)', () => {
   evidenceTest('no SSE, cache-key or S3 surface exists to leak across tenants', () => {
     // Negative registry: these surfaces do not exist, so there is nothing to assert
@@ -872,6 +916,7 @@ describe('coverage is calls made, not inventory rows (P06.13.02, P06.13.05, LG-P
           coverageArtifact(report, {
             commit: process.env['GITHUB_SHA'] ?? null,
             generatedAt: new Date().toISOString(),
+            tables: seedCoverage,
           }),
           null,
           2,

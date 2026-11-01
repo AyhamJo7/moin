@@ -121,7 +121,11 @@ export function assertFullyProbed(report: CoverageReport): void {
 /** The stored report: the figure, the inventory and the outcome of every route. */
 export function coverageArtifact(
   report: CoverageReport,
-  meta: { readonly commit: string | null; readonly generatedAt: string },
+  meta: {
+    readonly commit: string | null;
+    readonly generatedAt: string;
+    readonly tables?: unknown;
+  },
 ): Record<string, unknown> {
   return {
     commit: meta.commit,
@@ -131,6 +135,7 @@ export function coverageArtifact(
     exempt: report.exempt,
     executed: report.executed,
     unprobed: report.unprobed,
+    tables: meta.tables ?? null,
     rows: report.rows,
   };
 }
