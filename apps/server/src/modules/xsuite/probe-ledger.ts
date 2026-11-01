@@ -117,3 +117,20 @@ export function assertFullyProbed(report: CoverageReport): void {
   if (problems.length > 0)
     throw new Error(`cross-tenant probes incomplete: ${problems.join('; ')}`);
 }
+
+/** The stored report: the figure, the inventory and the outcome of every route. */
+export function coverageArtifact(
+  report: CoverageReport,
+  meta: { readonly commit: string | null; readonly generatedAt: string },
+): Record<string, unknown> {
+  return {
+    commit: meta.commit,
+    generatedAt: meta.generatedAt,
+    coverage: report.summary,
+    inventoried: report.inventoried,
+    exempt: report.exempt,
+    executed: report.executed,
+    unprobed: report.unprobed,
+    rows: report.rows,
+  };
+}

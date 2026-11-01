@@ -172,10 +172,19 @@ jobs:
       - run: pnpm test:integration
 
       - run: pnpm xsuite:report
+      # The per-route report (inventory, probe outcome, "N of N probed") is written by the suite
+      # itself, even when it fails, and is stored with the vitest result.
+      - name: Route coverage
+        if: ${{ !cancelled() }}
+        run: |
+          node -p "'xsuite route coverage: ' + JSON.parse(require('node:fs').readFileSync('test-results/xsuite-coverage.json', 'utf8')).coverage" | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
         with:
           name: xsuite-coverage
-          path: test-results/xsuite.json
+          path: |
+            test-results/xsuite.json
+            test-results/xsuite-coverage.json
 
       - name: Migration safety check
         run: node scripts/check-migrations.ts

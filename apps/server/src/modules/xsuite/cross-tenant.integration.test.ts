@@ -45,7 +45,13 @@ import { EXPECTED_ROUTE_COUNT, INVENTORY } from './inventory.ts';
 import { reconstructRoutes } from './routes.ts';
 import { compareWithInventory, controllersReachableFrom, routesServedBy } from './root-routes.ts';
 import { loadProductionRoots } from './production-roots.ts';
-import { assertFullyProbed, buildCoverageReport, key, ProbeLedger } from './probe-ledger.ts';
+import {
+  assertFullyProbed,
+  buildCoverageReport,
+  coverageArtifact,
+  key,
+  ProbeLedger,
+} from './probe-ledger.ts';
 import { seedTwoTenants, type SeededWorld } from './seed.ts';
 import { ABSENT_SURFACES, assertSurfacesAbsent } from './surface.ts';
 
@@ -863,16 +869,10 @@ describe('coverage is calls made, not inventory rows (P06.13.02, P06.13.05, LG-P
       writeFileSync(
         out,
         `${JSON.stringify(
-          {
+          coverageArtifact(report, {
             commit: process.env['GITHUB_SHA'] ?? null,
             generatedAt: new Date().toISOString(),
-            coverage: report.summary,
-            inventoried: report.inventoried,
-            exempt: report.exempt,
-            executed: report.executed,
-            unprobed: report.unprobed,
-            rows: report.rows,
-          },
+          }),
           null,
           2,
         )}\n`,
