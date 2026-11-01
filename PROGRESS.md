@@ -1819,3 +1819,9 @@ and open items in EV-P08-012. P08.05.01–.04 stay open; nothing is VERIFIED.
 | P08.05.03 | IN_PROGRESS | 8c75461 | EV-P08-012 | Schema-invalid and unknown-tenant messages dead-lettered without a handler                    |
 | P08.05.04 | IN_PROGRESS | 8c75461 | EV-P08-012 | Tests exist on the real consumer; the older in-memory Worker evidence (EV-P08-005) remains    |
 | P08.05.01 | IN_PROGRESS | 323b388 | EV-P08-012 | Review round 1: abandon checks envelope identity; a busy row is never acknowledged            |
+
+## Security acceptance group 4 fix (2026-11-01, branch `fix/p06-10-audit-seq-order`)
+
+| Item      | Status           | Commit  | Evidence   | Note                                                                                                                                                                                                                |
+| --------- | ---------------- | ------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P06.10.04 | READY_FOR_REVIEW | 0ec2b0b | EV-P06-091 | F1: the audit feed orders by the numeric sequence, not its text; paging test as moin_app fails before and passes after; KILLED. The SSE replay had the same defect (8dab76e, KILLED). Independent re-review pending |
