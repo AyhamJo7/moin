@@ -1900,6 +1900,12 @@ Source: `/tmp/moin-review/sec-g02.md`, independent acceptance review of group 2 
 | P06.14    | IN_PROGRESS | bd1b930 | EV-P06-014 | Section tick removed because two children are unticked.                                                                                                                                                  |
 | P06.03.06 | IN_PROGRESS | bd1b930 | EV-P06-013 | Unticked, PARTIAL. Holds: logger tenant enrichment and redaction. Missing: tracer or span enrichment across concurrent tenants (depends on P15.01.01).                                                   |
 
+## Security acceptance group 6 fix (2026-11-01, branch `fix/p06-06-disable-step-up`)
+
+| Item      | Status           | Commit  | Evidence   | Note                                                                                                                                                                                                                              |
+| --------- | ---------------- | ------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P06.06.04 | READY_FOR_REVIEW | 0949e93 | EV-P06-092 | F1: member disable requires a fresh step-up (was the only unguarded sensitive identity-access route); real-HTTP tests and a step-up classification of every route in the real-route matrix; KILLED. Independent re-review pending |
+
 ## Security acceptance group 1 fixes (2026-11-01, branch `fix/p06-02-rls-catalog-gaps`)
 
 Fixes for the independent acceptance review of P06.01 and P06.02 at `be4591d` (three HIGH, two MEDIUM,
