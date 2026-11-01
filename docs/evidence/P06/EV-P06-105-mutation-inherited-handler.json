@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/tmp/moin-xsuite",
+  "head": "64cd63689f276c81f6b915fc6b2495b32ab7be93",
+  "mode": "committed",
+  "fix_ref": "64cd63689f276c81f6b915fc6b2495b32ab7be93",
+  "fix_paths": [
+    "apps/server/src/modules/xsuite/root-routes.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "bash /tmp/moin-review/xsuite-mutation.sh ai",
+  "started": "2026-11-01T17:07:53+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-11-01T17:07:56+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 1.59,
+    "tail": "mutation ai NOT detected (vitest exit 0)"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 1.58,
+    "tail": "mutation ai detected (vitest exit 1)"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/tmp/moin-xsuite/.git/claude-evidence/mutation/20261101T170753Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}

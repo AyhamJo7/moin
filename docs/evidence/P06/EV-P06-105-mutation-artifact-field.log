@@ -1,0 +1,39 @@
+
+ RUN  v5.0.2 /tmp/moin-xsuite
+
+ ❯ |unit| apps/server/src/modules/xsuite/coverage-artifact.test.ts (2 tests | 1 failed) 7ms
+   ❯ the stored coverage report (P06.13.05) (2)
+     × carries the figure, the inventory and the outcome of every route 6ms
+     ✓ the CI job prints the figure and uploads the report even when the suite fails 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |unit| apps/server/src/modules/xsuite/coverage-artifact.test.ts > the stored coverage report (P06.13.05) > carries the figure, the inventory and the outcome of every route
+AssertionError: expected [] to strictly equal [ 'GET /api/auth/login' ]
+
+- Expected
++ Received
+
+- [
+-   "GET /api/auth/login",
+- ]
++ []
+
+ ❯ Proxy.toStrictEqual scripts/mutation-evidence-probe.ts:84:27
+     82|       let result: unknown;
+     83|       try {
+     84|         result = original.apply(this, args);
+       |                           ^
+     85|       } catch (error) {
+     86|         record(name, error);
+ ❯ apps/server/src/modules/xsuite/coverage-artifact.test.ts:26:34
+ ❯ evidenceBody packages/testing/src/mutation/evidence-state.ts:277:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed (2)
+   Start at  18:08:24
+   Duration  266ms (transform 65%, setup 28%, tests 4%, import 1%, worker 1%)
+
