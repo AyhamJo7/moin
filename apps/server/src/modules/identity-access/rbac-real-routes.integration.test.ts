@@ -28,6 +28,8 @@ import { RecoveryController } from './http/recovery.controller.ts';
 import { SupportController } from './http/support.controller.ts';
 import { AuthController } from './http/auth.controller.ts';
 import { CAPABILITIES_KEY } from './http/role.ts';
+import { RequireStepUpGuard } from './http/require-step-up.guard.ts';
+import { digestOf } from './domain/secret-values.ts';
 import { startFakeOidcProvider, type FakeOidcProvider } from './__fixtures__/fake-oidc-provider.ts';
 import type { RequestContextService } from './application/request-context.service.ts';
 import type { Capability } from './domain/roles.ts';
@@ -228,6 +230,8 @@ interface RouteSpec {
   readonly method: 'GET' | 'POST';
   readonly url: string;
   readonly capabilities: readonly Capability[];
+  /** The route's own guards include `RequireStepUpGuard` (read from the metadata Nest reads). */
+  readonly stepUp: boolean;
 }
 
 const CONTROLLERS = [
@@ -253,7 +257,9 @@ function readRoutes(): readonly RouteSpec[] {
       if (path === undefined || method === undefined) continue;
       const capabilities =
         (Reflect.getMetadata(CAPABILITIES_KEY, handler) as readonly Capability[] | undefined) ?? [];
+      const guards = (Reflect.getMetadata('__guards__', handler) ?? []) as readonly unknown[];
       out.push({
+        stepUp: guards.includes(RequireStepUpGuard),
         // Nest Method enum: GET=0, POST=1 — every product route here is one of the two.
         method: method === 0 ? ('GET' as const) : ('POST' as const),
         url: join(prefix, path),
@@ -369,12 +375,90 @@ evidenceTest('live controller metadata matches the expected capability table', (
   }
 });
 
+/**
+ * Sensitive actions (PLAN security architecture: "MFA within the last 15 minutes" for user and
+ * role management and support-access grants). Every product route is classified exactly once,
+ * either as requiring a fresh step-up or as exempt for a stated reason; a new route that is in
+ * neither list fails the pin, so an unguarded sensitive route cannot appear unnoticed (the way
+ * member disable once did).
+ */
+const STEP_UP_REQUIRED: ReadonlySet<string> = new Set([
+  'POST /api/members/invite',
+  'POST /api/members/invitations/:id/revoke',
+  'POST /api/members/disable',
+  'POST /api/members/remove',
+  'POST /api/members/transfer-ownership',
+  'POST /api/recovery/disable-user',
+  'POST /api/recovery/enable-user',
+  'POST /api/recovery/revoke-sessions',
+  'POST /api/support/grants',
+  'POST /api/support/grants/:id/revoke',
+  'GET /api/support/grants',
+]);
+
+const STEP_UP_EXEMPT: Readonly<Record<string, string>> = {
+  'POST /api/auth/step-up': 'it is how a fresh step-up is obtained',
+  'POST /api/auth/sign-out-others': 'protective: it ends the caller’s other sessions',
+  'GET /api/auth/login': 'public entry point, no session yet',
+  'GET /api/auth/callback': 'public entry point, no session yet',
+};
+
+evidenceTest('every product route is classified for step-up and its guard matches', () => {
+  const classified = new Set([...STEP_UP_REQUIRED, ...Object.keys(STEP_UP_EXEMPT)]);
+  for (const route of ROUTES) {
+    const key = `${route.method} ${route.url}`;
+    expect(classified.has(key), `${key} is neither step-up required nor exempt`).toBe(true);
+    expect(route.stepUp, `${key} step-up guard`).toBe(STEP_UP_REQUIRED.has(key));
+  }
+  // No stale entry either: every classified route exists.
+  const live = new Set(ROUTES.map((route) => `${route.method} ${route.url}`));
+  for (const key of classified) expect(live.has(key), `${key} is not a live route`).toBe(true);
+  // A route cannot be both.
+  for (const key of Object.keys(STEP_UP_EXEMPT)) expect(STEP_UP_REQUIRED.has(key)).toBe(false);
+});
+
+describe('sensitive actions refuse a session without a fresh step-up (real HTTP)', () => {
+  /** Ends the session's step-up window DB-side, then drops the cache: no stamp, or 16 minutes old. */
+  async function setStepUp(pair: SessionPair, stamp: 'none' | 'stale'): Promise<void> {
+    const token = /__Host-moin_sid=([A-Za-z0-9_-]{43})/.exec(pair.header)?.[1] ?? '';
+    await admin.query(
+      stamp === 'none'
+        ? 'update sessions set step_up_at = null where token_hash = $1'
+        : "update sessions set step_up_at = clock_timestamp() - interval '16 minutes' where token_hash = $1",
+      [digestOf(token)],
+    );
+    contexts().clearCache();
+  }
+
+  for (const stamp of ['none', 'stale'] as const) {
+    evidenceTest(
+      `${stamp === 'none' ? 'no stamp' : 'a 16-minute-old stamp'}: 403 step-up-required on every sensitive route`,
+      async () => {
+        for (const route of EXPECTED) {
+          const key = `${route.method} ${route.url}`;
+          if (!STEP_UP_REQUIRED.has(key)) continue;
+          // One owner world per cell: the guard answers before the handler, so a random id is enough.
+          const { pair, targetId } = await world('owner');
+          await setStepUp(pair, stamp);
+          const url = route.url.replace(':id', randomUUID());
+          const response =
+            route.method === 'GET'
+              ? await getAs(pair, url)
+              : await postAs(pair, url, bodyFor(route.url, targetId));
+          expect(response.statusCode, key).toBe(403);
+          expect(response.json(), key).toMatchObject({ type: '/problems/step-up-required' });
+        }
+      },
+    );
+  }
+});
+
 describe('the role matrix on real routes, every route × every role (P06.07.05)', () => {
   /** One fresh world per cell: holder routes mutate state (transfer demotes the actor,
    * revoke consumes the row), so cells never share an org. */
   async function callAs(
     role: string,
-    route: RouteSpec,
+    route: Pick<RouteSpec, 'method' | 'url'>,
   ): Promise<{ status: number; body: unknown }> {
     const { pair, targetId } = await world(role);
     let url = route.url;

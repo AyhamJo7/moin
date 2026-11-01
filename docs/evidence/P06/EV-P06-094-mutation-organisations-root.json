@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/tmp/moin-sec01",
+  "head": "29df9270b0a30d57f44e6bacb479007d228fb0bd",
+  "mode": "committed",
+  "fix_ref": "29df9270b0a30d57f44e6bacb479007d228fb0bd",
+  "fix_paths": [
+    "scripts/check-rls-catalog.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "pnpm exec vitest run --project integration scripts/check-rls-catalog.integration.test.ts -t 'not the tenant root'",
+  "started": "2026-11-01T10:55:35+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-11-01T10:55:41+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 2.76,
+    "tail": "     85|       } catch (error) {\n     86|         record(name, error);\n \u276f scripts/check-rls-catalog.integration.test.ts:407:53\n \u276f underNamedParent scripts/check-rls-catalog.integration.test.ts:387:9\n \u276f scripts/check-rls-catalog.integration.test.ts:402:9\n \u276f evidenceBody packages/testing/src/mutation/evidence-state.ts:277:7\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/2]\u23af\n\n FAIL  |integration| scripts/check-rls-catalog.integration.test.ts > the foreign keys of a tenant table outside public are checked too (R1-F1) > a table named organisations in another schema is not the tenant root (R2-F1) > a swapped composite key to it is reported and fails the CLI\nAssertionError: expected [] to strictly equal [ Array(1) ]\n\n- Expected\n+ Received\n\n- [\n-   \"foreign-key-tenant-mismapped r2org.child.r2_swapped\",\n- ]\n+ []\n\n \u276f Proxy.toStrictEqual scripts/mutation-evidence-probe.ts:84:27\n     82|       let result: unknown;\n     83|       try {\n     84|         result = original.apply(this, args);\n       |                           ^\n     85|       } catch (error) {\n     86|         record(name, error);\n \u276f scripts/check-rls-catalog.integration.test.ts:420:51\n \u276f underNamedParent scripts/check-rls-catalog.integration.test.ts:387:9\n \u276f scripts/check-rls-catalog.integration.test.ts:417:7\n \u276f evidenceBody packages/testing/src/mutation/evidence-state.ts:277:7\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[2/2]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  2 failed | 1 passed | 60 skipped (63)\n   Start at  11:55:35\n   Duration  2.28s (tests 78%, transform 17%, setup 3%, import 2%)\n"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 3.0,
+    "tail": "\n RUN  v5.0.2 /tmp/moin-sec01\n\n \u2713 |integration| scripts/check-rls-catalog.integration.test.ts (63 tests | 60 skipped) 1543ms\n\n Test Files  1 passed (1)\n      Tests  3 passed | 60 skipped (63)\n   Start at  11:55:38\n   Duration  2.51s (tests 81%, transform 14%, setup 3%, import 1%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/tmp/moin-sec01/.git/claude-evidence/mutation/20261101T105535Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}
