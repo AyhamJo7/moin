@@ -1899,3 +1899,17 @@ Source: `/tmp/moin-review/sec-g02.md`, independent acceptance review of group 2 
 | P06.14.02 | IN_PROGRESS | bd1b930 | EV-P06-015 | Unticked, PARTIAL. Holds: the cross-tenant envelope test, per-item rollback. Missing: a concurrent-claim exclusivity test and an expired-lease reclaim test (need P06.14.01).                            |
 | P06.14    | IN_PROGRESS | bd1b930 | EV-P06-014 | Section tick removed because two children are unticked.                                                                                                                                                  |
 | P06.03.06 | IN_PROGRESS | bd1b930 | EV-P06-013 | Unticked, PARTIAL. Holds: logger tenant enrichment and redaction. Missing: tracer or span enrichment across concurrent tenants (depends on P15.01.01).                                                   |
+
+## C-RERUN P04 re-proof (2026-11-01, branch `docs/p04-rerun-evidence`)
+
+Stale evidence re-run on main `be4591d` in a clean clone: 7 items re-proved, 0 PARTIAL and unticked. Details: `docs/audits/2026-11-01-c-rerun-p04.md`. Full gates 14/14 on the clone at `be4591d`; gates on this branch's head are recorded in the PR. Independent re-review pending; nothing is VERIFIED.
+
+| Item      | Status           | Commit  | Evidence   | Note                                                                                               |
+| --------- | ---------------- | ------- | ---------- | -------------------------------------------------------------------------------------------------- |
+| P04.04.01 | READY_FOR_REVIEW | be4591d | EV-P04-009 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P04-001 |
+| P04.04.02 | READY_FOR_REVIEW | be4591d | EV-P04-010 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P04-002 |
+| P04.04.03 | READY_FOR_REVIEW | be4591d | EV-P04-011 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P04-003 |
+| P04.04.04 | READY_FOR_REVIEW | be4591d | EV-P04-012 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P04-004 |
+| P04.04.05 | READY_FOR_REVIEW | be4591d | EV-P04-013 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P04-005 |
+| P04.07.04 | READY_FOR_REVIEW | be4591d | EV-P04-014 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P04-007 |
+| P04.10.04 | READY_FOR_REVIEW | be4591d | EV-P04-015 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P04-008 |
