@@ -1,0 +1,35 @@
+{
+  "verdict": "KILLED",
+  "repo": "/tmp/moin-xsuite",
+  "head": "95d6ae477fca22436750e923bd9fe51af79b1a66",
+  "mode": "committed",
+  "fix_ref": "95d6ae477fca22436750e923bd9fe51af79b1a66",
+  "fix_paths": [
+    "apps/server/src/modules/xsuite/cross-tenant.integration.test.ts",
+    "apps/server/src/modules/xsuite/probe-ledger.test.ts",
+    "apps/server/src/modules/xsuite/probe-ledger.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "/tmp/moin-review/xsuite-mutation.sh c2",
+  "started": "2026-11-01T12:26:16+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-11-01T12:26:23+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 3.7,
+    "tail": "mutation c2 NOT detected (vitest exit 0)"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 3.75,
+    "tail": "mutation c2 detected (vitest exit 1)"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/tmp/moin-xsuite/.git/claude-evidence/mutation/20261101T122616Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}

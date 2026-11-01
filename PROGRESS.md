@@ -1899,3 +1899,14 @@ Source: `/tmp/moin-review/sec-g02.md`, independent acceptance review of group 2 
 | P06.14.02 | IN_PROGRESS | bd1b930 | EV-P06-015 | Unticked, PARTIAL. Holds: the cross-tenant envelope test, per-item rollback. Missing: a concurrent-claim exclusivity test and an expired-lease reclaim test (need P06.14.01).                            |
 | P06.14    | IN_PROGRESS | bd1b930 | EV-P06-014 | Section tick removed because two children are unticked.                                                                                                                                                  |
 | P06.03.06 | IN_PROGRESS | bd1b930 | EV-P06-013 | Unticked, PARTIAL. Holds: logger tenant enrichment and redaction. Missing: tracer or span enrichment across concurrent tenants (depends on P15.01.01).                                                   |
+
+## Security acceptance group 12 fix (2026-11-01, branch `fix/p06-13-route-coverage-production-app`)
+
+Fixes for the independent acceptance review of P06.13 at `3ac126e` (one HIGH, one MEDIUM on P06.13.01, one MEDIUM on P06.13.05). Four fix commits, each mutation-killed. Full gates 14/14 at `b445b9a`. Independent re-review pending; nothing is VERIFIED.
+
+| Item      | Status           | Commit  | Evidence   | Note                                                                                                                                                                       |
+| --------- | ---------------- | ------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P06.13.02 | READY_FOR_REVIEW | b9f51a8 | EV-P06-095 | H1: coverage is measured against ApiRootModule and VoiceRootModule, not the test-assembled app; mutation A fails; KILLED.                                                  |
+| P06.13.02 | READY_FOR_REVIEW | 95d6ae4 | EV-P06-095 | H1: coverage counts probes that were called (23 of 23); a list route with a row and no call fails (mutation C2); the two session routes get probes; KILLED.                |
+| P06.13.05 | READY_FOR_REVIEW | 644bc77 | EV-P06-096 | M2: the CI artifact holds the per-route report and the figure; uploaded also when the suite fails; KILLED.                                                                 |
+| P06.13.01 | IN_PROGRESS      | b445b9a | EV-P06-097 | M1: 8 of 55 FORCE-RLS tables are seeded and 47 are registered with a reason; a new unseeded table fails the suite; KILLED. The item is not closed until the 47 are seeded. |
