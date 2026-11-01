@@ -2063,3 +2063,12 @@ On 2026-11-01 the founder confirmed the 2026-11-15 expected date and delegated t
 | P02.02.09 | READY_FOR_REVIEW | 3510fea | EV-P02-096 | ADR-0002 and ADR-0034 accepted under the founder's delegation 2026-11-01 (decided by the orchestrating session; founder may override).                                                 |
 | P03.05.03 | READY_FOR_REVIEW | 3510fea | EV-P03-028 | Threat model review disposition accepted under delegation 2026-11-01, on the recorded independent BLOCK-MERGE review and its remediation (EV-P03-024). P03.05.01 and .02 stay PARTIAL. |
 | P03.01.02 | READY_FOR_REVIEW | 3510fea | EV-P03-029 | Eleven core ADRs accepted under delegation 2026-11-01 after ADR-0036 was written from the code on main; ticked.                                                                        |
+
+## Invitation lock timing test (2026-11-01, branch `test/p06-invitation-lock-timing`)
+
+The expiry case for a waiter on the invitation lock failed in 3 gate runs of the catalog gap fix and in a before-run of the step-up fix. Cause: the case slept a fixed 5 s on the process timer while the function judges expiry on the database wall clock, which lags on this host. Test change only; the function is correct. Full gates 14/14 at `849edca`. Independent re-review pending; nothing is VERIFIED.
+
+| Item      | Status           | Commit  | Evidence   | Note                                                                                                                                                                              |
+| --------- | ---------------- | ------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P06.08.01 | READY_FOR_REVIEW | 849edca | EV-P06-098 | The waiter case waits on the database clock; 16/20 before, 20/20 after, standalone and in the identity-access folder. A separate sign-in Max-Age flake was seen once (not fixed). |
+| P06.08.01 | READY_FOR_REVIEW | 849edca | EV-P06-098 | Correction: four folder failures, three invitation expiry (iterations 8, 11, 18) and one independent sign-in cookie Max-Age (1). Fix and 20/20 unaffected.                        |
