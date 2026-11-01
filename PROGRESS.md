@@ -1819,3 +1819,9 @@ and open items in EV-P08-012. P08.05.01–.04 stay open; nothing is VERIFIED.
 | P08.05.03 | IN_PROGRESS | 8c75461 | EV-P08-012 | Schema-invalid and unknown-tenant messages dead-lettered without a handler                    |
 | P08.05.04 | IN_PROGRESS | 8c75461 | EV-P08-012 | Tests exist on the real consumer; the older in-memory Worker evidence (EV-P08-005) remains    |
 | P08.05.01 | IN_PROGRESS | 323b388 | EV-P08-012 | Review round 1: abandon checks envelope identity; a busy row is never acknowledged            |
+
+## Security acceptance group 2 fix (2026-11-01, branch `fix/p06-14-system-work-connection-loss`)
+
+| Item      | Status           | Commit  | Evidence   | Note                                                                                                                                                                                                                     |
+| --------- | ---------------- | ------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| P06.14.01 | READY_FOR_REVIEW | 71a4551 | EV-P06-090 | F1: withSystemWork claim shares withTenant connection handling; child-process test fails before, passes after; KILLED. F2 (claim leases) and F3 (tracing) stay open as status corrections. Independent re-review pending |
