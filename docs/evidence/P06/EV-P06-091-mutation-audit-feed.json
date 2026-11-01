@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/tmp/moin-sec04",
+  "head": "0ec2b0b5418fef50f08c5cf76c9e4481f85c6ba8",
+  "mode": "committed",
+  "fix_ref": "0ec2b0b5418fef50f08c5cf76c9e4481f85c6ba8",
+  "fix_paths": [
+    "packages/db/src/audit.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "node ./node_modules/vitest/vitest.mjs run --project integration packages/db/src/audit.integration.test.ts -t SEC-G04",
+  "started": "2026-11-01T04:14:06+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-11-01T04:14:10+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 2.11,
+    "tail": "\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/2]\u23af\n\n FAIL  |integration| packages/db/src/audit.integration.test.ts > audit pagination orders by the numeric sequence (SEC-G04 F1) > pages through every event exactly once, in numeric order, without another tenant\nAssertionError: expected [ '1', '10', '11', '12' ] to strictly equal [ '1', '2', '3', '4', '5', '6', \u2026(6) ]\n\n- Expected\n+ Received\n\n  [\n    \"1\",\n-   \"2\",\n-   \"3\",\n-   \"4\",\n-   \"5\",\n-   \"6\",\n-   \"7\",\n-   \"8\",\n-   \"9\",\n    \"10\",\n    \"11\",\n    \"12\",\n  ]\n\n \u276f Proxy.toStrictEqual scripts/mutation-evidence-probe.ts:84:27\n     82|       let result: unknown;\n     83|       try {\n     84|         result = original.apply(this, args);\n       |                           ^\n     85|       } catch (error) {\n     86|         record(name, error);\n \u276f packages/db/src/audit.integration.test.ts:397:18\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[2/2]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  2 failed | 11 skipped (13)\n   Start at  05:14:06\n   Duration  1.80s (tests 86%, transform 9%, setup 4%)\n"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 2.06,
+    "tail": "\n RUN  v5.0.2 /tmp/moin-sec04\n\n \u2713 |integration| packages/db/src/audit.integration.test.ts (13 tests | 11 skipped) 1010ms\n\n Test Files  1 passed (1)\n      Tests  2 passed | 11 skipped (13)\n   Start at  05:14:09\n   Duration  1.78s (tests 87%, transform 9%, setup 4%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/tmp/moin-sec04/.git/claude-evidence/mutation/20261101T041406Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}
