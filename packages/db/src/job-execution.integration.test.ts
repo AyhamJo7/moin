@@ -73,6 +73,20 @@ function request(
   };
 }
 
+function abandonment(
+  job: { jobId: string; correlationId: string; type: 'sweep-run' | 'postcall-finalise' },
+  org = ORG_A,
+) {
+  return {
+    jobId: job.jobId,
+    organisationId: org,
+    type: job.type,
+    version: 1,
+    correlationId: job.correlationId,
+    errorCode: 'max-receive-exceeded',
+  };
+}
+
 const writeEffect: JobHandler = async ({ client, job }) => {
   await client.query(`insert into job_effects (organisation_id, job_id) values ($1, $2)`, [
     job.organisationId,
@@ -360,16 +374,23 @@ describe('executeJob', () => {
     'abandonJob ends an open job, spares a finished one and skips a locked one',
     async () => {
       const open = await newJob();
-      expect(await abandonJob(app, ORG_A, open.jobId, 'max-receive-exceeded')).toBe(true);
+      expect(await abandonJob(app, abandonment(open))).toEqual({ kind: 'abandoned' });
       expect(await ledger(open.jobId)).toMatchObject({
         status: 'dead',
         error_code: 'max-receive-exceeded',
       });
+      expect(await abandonJob(app, abandonment(open))).toEqual({
+        kind: 'already-terminal',
+        status: 'dead',
+      });
       const done = await newJob();
       await executeJob(app, request(done, writeEffect));
-      expect(await abandonJob(app, ORG_A, done.jobId, 'max-receive-exceeded')).toBe(false);
+      expect(await abandonJob(app, abandonment(done))).toEqual({
+        kind: 'already-terminal',
+        status: 'succeeded',
+      });
       expect((await ledger(done.jobId))?.status).toBe('succeeded');
-      expect(await abandonJob(app, ORG_B, open.jobId, 'max-receive-exceeded')).toBe(false);
+      expect(await abandonJob(app, abandonment(open, ORG_B))).toEqual({ kind: 'unknown' });
       const held = await newJob();
       let release: () => void = () => undefined;
       const gate = new Promise<void>((resolve) => {
@@ -382,10 +403,31 @@ describe('executeJob', () => {
         await gate;
       });
       while (!state.holding) await new Promise((resolve) => setTimeout(resolve, 20));
-      expect(await abandonJob(app, ORG_A, held.jobId, 'max-receive-exceeded')).toBe(false);
+      expect(await abandonJob(app, abandonment(held))).toEqual({ kind: 'busy' });
       release();
       await holder;
       expect((await ledger(held.jobId))?.status).toBe('queued');
+    },
+  );
+
+  evidenceTest(
+    'abandonJob rejects a type, version or correlation id the ledger does not hold',
+    async () => {
+      const job = await newJob();
+      const forged = [
+        { ...abandonment(job), correlationId: uuidv7() },
+        { ...abandonment(job), type: 'postcall-finalise' as const },
+        { ...abandonment(job), version: 2 },
+      ];
+      for (const attempt of forged) {
+        expect(await abandonJob(app, attempt)).toEqual({ kind: 'mismatch' });
+      }
+      expect(await ledger(job.jobId)).toMatchObject({
+        status: 'queued',
+        attempt: 0,
+        error_code: null,
+      });
+      expect(await abandonJob(app, abandonment(job))).toEqual({ kind: 'abandoned' });
     },
   );
 });

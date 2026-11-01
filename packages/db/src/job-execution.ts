@@ -59,13 +59,7 @@ export type JobExecutionResult =
   | { readonly kind: 'unknown' }
   | { readonly kind: 'mismatch' };
 
-export interface JobExecutionRequest {
-  readonly jobId: string;
-  readonly organisationId: string;
-  /** What the queue message claims; the ledger row is authoritative and must agree. */
-  readonly type: JobType;
-  readonly version: number;
-  readonly correlationId: string;
+export interface JobExecutionRequest extends JobIdentity {
   readonly handler: JobHandler;
   readonly random?: (() => number) | undefined;
 }
@@ -87,6 +81,53 @@ const HANDLER_SAVEPOINT = 'job_handler';
 /** Upper bound for one deferral, so a far-future `not_before` is re-checked rather than trusted. */
 export const MAX_DEFER_SECONDS = 12 * 60 * 60;
 
+/** What a queue message claims about a job; the ledger row is authoritative and must agree. */
+interface JobIdentity {
+  readonly jobId: string;
+  readonly organisationId: string;
+  readonly type: JobType;
+  readonly version: number;
+  readonly correlationId: string;
+}
+
+type LockedJob =
+  | { readonly kind: 'row'; readonly row: LedgerRow }
+  | { readonly kind: 'busy' | 'unknown' | 'mismatch' };
+
+/**
+ * Takes the job row lock without waiting and checks the claimed identity against the ledger. Every
+ * path that changes a job's state goes through here, so none can act on a row the message does
+ * not describe (INV-02): execution and abandonment share this one check.
+ */
+async function lockJob(client: TenantClient, identity: JobIdentity): Promise<LockedJob> {
+  const locked = await client.query<LedgerRow>(
+    `select id::text, type, version, correlation_id::text, trace_context, status, attempt,
+            payload,
+            case when not_before > now()
+                 then ceil(extract(epoch from (not_before - now())))::integer end
+              as defer_seconds
+     from job_runs where id = $1::uuid for update skip locked`,
+    [identity.jobId],
+  );
+  const row = locked.rows[0];
+  if (row === undefined) {
+    // Locked by a competing worker, or not visible to this tenant (absent or another
+    // organisation's). The unlocked read tells the two apart; RLS answers for the tenant.
+    const exists = await client.query(`select 1 from job_runs where id = $1::uuid`, [
+      identity.jobId,
+    ]);
+    return { kind: exists.rows.length > 0 ? 'busy' : 'unknown' };
+  }
+  if (
+    row.type !== identity.type ||
+    row.version !== identity.version ||
+    row.correlation_id !== identity.correlationId.toLowerCase()
+  ) {
+    return { kind: 'mismatch' };
+  }
+  return { kind: 'row', row };
+}
+
 export async function executeJob(
   pool: Pool,
   request: JobExecutionRequest,
@@ -95,31 +136,9 @@ export async function executeJob(
     pool,
     request.organisationId,
     async (client) => {
-      const locked = await client.query<LedgerRow>(
-        `select id::text, type, version, correlation_id::text, trace_context, status, attempt,
-                payload,
-                case when not_before > now()
-                     then ceil(extract(epoch from (not_before - now())))::integer end
-                  as defer_seconds
-         from job_runs where id = $1::uuid for update skip locked`,
-        [request.jobId],
-      );
-      const row = locked.rows[0];
-      if (row === undefined) {
-        // Locked by a competing worker, or not visible to this tenant (absent or another
-        // organisation's). The unlocked read tells the two apart; RLS answers for the tenant.
-        const exists = await client.query(`select 1 from job_runs where id = $1::uuid`, [
-          request.jobId,
-        ]);
-        return exists.rows.length > 0 ? { kind: 'busy' } : { kind: 'unknown' };
-      }
-      if (
-        row.type !== request.type ||
-        row.version !== request.version ||
-        row.correlation_id !== request.correlationId.toLowerCase()
-      ) {
-        return { kind: 'mismatch' };
-      }
+      const locked = await lockJob(client, request);
+      if (locked.kind !== 'row') return { kind: locked.kind };
+      const row = locked.row;
       if (row.status === 'succeeded') return { kind: 'duplicate' };
       if (row.status === 'dead') {
         return { kind: 'dead', errorCode: 'already-dead', alreadyDead: true };
@@ -184,26 +203,40 @@ async function recordFailure(
   return { kind: 'retry', delaySeconds: decision.delaySeconds, errorCode: failure.code };
 }
 
+export interface JobAbandonRequest extends JobIdentity {
+  readonly errorCode: string;
+}
+
+/** Why the consumer may, or may not, acknowledge a delivery that crossed the receive ceiling. */
+export type JobAbandonResult =
+  | { readonly kind: 'abandoned' }
+  | { readonly kind: 'already-terminal'; readonly status: 'succeeded' | 'dead' }
+  | { readonly kind: 'busy' }
+  | { readonly kind: 'unknown' }
+  | { readonly kind: 'mismatch' };
+
 /**
  * Ends a job whose deliveries keep failing without ever reaching the retry policy (a handler that
  * kills its own transaction rolls the attempt counter back with it). Takes no lock it would have
- * to wait for: a row a live transaction holds is left to that transaction.
+ * to wait for: a row a live transaction holds is `busy` and is left to that transaction. The
+ * request carries the same identity as execution and a mismatch changes nothing.
  */
 export async function abandonJob(
   pool: Pool,
-  organisationId: string,
-  jobId: string,
-  errorCode: string,
-): Promise<boolean> {
-  return withTenant(pool, organisationId, async (client) => {
-    const done = await client.query<{ id: string }>(
+  request: JobAbandonRequest,
+): Promise<JobAbandonResult> {
+  return withTenant(pool, request.organisationId, async (client) => {
+    const locked = await lockJob(client, request);
+    if (locked.kind !== 'row') return { kind: locked.kind };
+    const { status } = locked.row;
+    if (status === 'succeeded' || status === 'dead') {
+      return { kind: 'already-terminal', status };
+    }
+    await client.query(
       `update job_runs set status = 'dead', error_code = $2::text, finished_at = now()
-       where id = (select id from job_runs
-                   where id = $1::uuid and status in ('queued', 'claimed', 'failed')
-                   for update skip locked)
-       returning id::text`,
-      [jobId, errorCode],
+       where id = $1::uuid`,
+      [request.jobId, request.errorCode],
     );
-    return done.rows.length > 0;
+    return { kind: 'abandoned' };
   });
 }

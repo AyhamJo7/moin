@@ -591,6 +591,51 @@ describe('job consumer over SQS and PostgreSQL', () => {
     },
   );
 
+  // The ceiling path changes ledger state, so it checks the envelope against the row exactly as
+  // execution does. Five receives put the next delivery above the ceiling of every seeded type.
+  const IDENTITY_MISMATCHES: readonly {
+    readonly name: string;
+    readonly forge: (envelope: JobEnvelope) => JobEnvelope;
+  }[] = [
+    { name: 'correlation id', forge: (e) => ({ ...e, correlationId: uuidv7() }) },
+    { name: 'type', forge: (e) => ({ ...e, type: 'postcall-finalise' }) },
+    { name: 'version', forge: (e) => ({ ...e, version: 2 }) },
+  ];
+  for (const { name, forge } of IDENTITY_MISMATCHES) {
+    evidenceTest(
+      `a delivery past the receive ceiling with the wrong ${name} is rejected and changes nothing`,
+      async () => {
+        const job = await seed();
+        await queues.queues.jobs.send(JSON.stringify(forge(job.envelope)));
+        for (let i = 0; i < 5; i += 1) {
+          const message = await receiveOne(queues.queues.jobs);
+          if (message === undefined) throw new Error('priming delivery missing');
+          await queues.queues.jobs.hide(message, 0);
+        }
+        let calls = 0;
+        const count: JobHandler = () => {
+          calls += 1;
+          return Promise.resolve();
+        };
+        makeConsumer(
+          new JobHandlerRegistry()
+            .register('sweep-run', 1, count)
+            .register('sweep-run', 2, count)
+            .register('postcall-finalise', 1, count),
+          { receiveCeilingFactor: 1 },
+        ).start();
+        const rejected = await receiveOne(queues.queues.deadLetter, 30);
+        expect(rejected?.attributes['reason']).toBe('job-mismatch');
+        expect(calls).toBe(0);
+        expect(await ledger(job.envelope.jobId)).toEqual({
+          status: 'queued',
+          attempt: 0,
+          error_code: null,
+        });
+      },
+    );
+  }
+
   evidenceTest('logs and ledger carry ids and codes, never payload or error text', async () => {
     const job = await seed();
     await queues.queues.jobs.send(job.body);

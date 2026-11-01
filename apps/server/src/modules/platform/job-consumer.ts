@@ -222,7 +222,17 @@ export class JobConsumer {
       (options.receiveCeilingFactor ?? DEFAULT_RECEIVE_CEILING_FACTOR);
     if (message.receiveCount > ceiling) {
       // The ledger never saw these failures (the transaction died before the counter committed).
-      await abandonJob(pool, organisationId, envelope.jobId, 'max-receive-exceeded');
+      const abandoned = await abandonJob(pool, {
+        jobId: envelope.jobId,
+        organisationId,
+        type: envelope.type,
+        version: envelope.version,
+        correlationId: envelope.correlationId,
+        errorCode: 'max-receive-exceeded',
+      });
+      // The message does not describe this ledger row: nothing was changed, so reject it.
+      if (abandoned.kind === 'mismatch') return this.#reject(message, 'job-mismatch');
+      if (abandoned.kind === 'unknown') return this.#reject(message, 'job-unknown');
       logger.error({ ...fields, outcome: 'max-receive-exceeded' }, 'delivery ceiling exceeded');
       return this.#deadLetter(message, 'max-receive-exceeded');
     }
