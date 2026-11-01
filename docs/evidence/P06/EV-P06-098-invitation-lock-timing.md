@@ -13,3 +13,19 @@
 | Reviewer | pending |
 
 Sensitive material is stored by reference only (PLAN.md evidence rules).
+
+## Correction (appended 2026-11-01, independent review of PR #260, LOW)
+
+The summary above says all four failing runs of the identity-access folder failed with
+`expected 'accepted' to be 'expired'`. The committed before-folder log
+(`EV-P06-098-stress-before-folder.log`) and the original stress JSON show something narrower:
+
+- Four of the 20 folder runs failed in total.
+- Three of them (iterations 8, 11 and 18) are the invitation expiry failure this record is about.
+- One (iteration 1) is the independent cookie failure in `sign-in.integration.test.ts`
+  (`expected 604799 to be 604800`), which this change does not touch.
+
+The four **standalone** failures were all the expiry failure, as stated. The timing fix and the
+20 of 20 results after it are unaffected. The evidence index row keeps its original wording
+(the index is append-only); this correction is its disposition, and the next index append that
+refers to this record should carry the corrected counts.
