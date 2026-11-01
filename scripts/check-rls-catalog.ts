@@ -533,6 +533,10 @@ const TABLE_QUERY = `
   ORDER BY n.nspname, c.relname
 `;
 
+/** The tenant root: the one relation whose `id` is the organisation id (INV-01). */
+const TENANT_ROOT_SCHEMA = 'public';
+const TENANT_ROOT_TABLE = 'organisations';
+
 const FK_QUERY = `
   SELECT n.nspname::text AS table_schema,
          c.relname::text AS table_name,
@@ -1238,9 +1242,18 @@ export async function inspect(
       ) {
         continue;
       }
-      // A foreign key whose target is `organisations` needs only the tenant column: the parent
-      // *is* the tenant, so there is no second identity that could belong to someone else.
-      if (fk.target_table === 'organisations') {
+      // The tenant root, and only it, is its own tenant: `public.organisations.id` *is* the
+      // organisation id, so a key from a row's organisation_id to that id has no second identity
+      // that could belong to someone else. The exemption is the exact schema-qualified relation
+      // and the exact mapping. A table that is merely *named* organisations in another schema is
+      // an ordinary tenant table, and any other column pointing at the root is an ordinary key.
+      if (
+        fk.target_schema === TENANT_ROOT_SCHEMA &&
+        fk.target_table === TENANT_ROOT_TABLE &&
+        fk.pairs.length === 1 &&
+        fk.pairs[0]?.source === 'organisation_id' &&
+        fk.pairs[0].target === 'id'
+      ) {
         continue;
       }
       const subject = `${tableRef(fk.table_schema, fk.table_name)}.${fk.constraint_name}`;

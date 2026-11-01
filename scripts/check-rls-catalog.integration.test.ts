@@ -343,6 +343,104 @@ describe('the foreign keys of a tenant table outside public are checked too (R1-
       );
     },
   );
+
+  describe('a table named organisations in another schema is not the tenant root (R2-F1)', () => {
+    // Only public.organisations is its own tenant. An ordinary tenant table that happens to be
+    // called organisations gets the normal tenant-pair validation for every key into it.
+    const PARENT_AND_CHILD = `
+      CREATE SCHEMA r2org;
+      GRANT USAGE ON SCHEMA r2org TO moin_app;
+      CREATE TABLE r2org.organisations (
+        organisation_id uuid NOT NULL,
+        id uuid NOT NULL PRIMARY KEY,
+        UNIQUE (organisation_id, id)
+      );
+      CREATE TABLE r2org.child (
+        organisation_id uuid NOT NULL REFERENCES public.organisations (id),
+        id uuid NOT NULL PRIMARY KEY,
+        parent_id uuid NOT NULL,
+        UNIQUE (organisation_id, id),
+        CONSTRAINT FKPAIR
+      );
+      SELECT app.apply_tenant_rls('r2org.organisations');
+      SELECT app.apply_tenant_rls('r2org.child');
+      GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE r2org.organisations, r2org.child TO moin_app;`;
+    const PARENT_OF_B = '33333333-3333-4333-8333-333333333333';
+
+    async function insertChildOfBsParentAsA(): Promise<void> {
+      await withTenant(database.pool(), ORG_A, async (client) => {
+        await client.query(
+          `INSERT INTO r2org.child (organisation_id, id, parent_id) VALUES ($1, gen_random_uuid(), $2)`,
+          [ORG_A, PARENT_OF_B],
+        );
+      });
+    }
+
+    async function underNamedParent(constraint: string, body: () => Promise<void>): Promise<void> {
+      await seedTwoTenants();
+      await ddl(PARENT_AND_CHILD.replace('CONSTRAINT FKPAIR', constraint));
+      try {
+        await fixture(`INSERT INTO r2org.organisations (organisation_id, id) VALUES ($1, $2)`, [
+          ORG_B,
+          PARENT_OF_B,
+        ]);
+        await body();
+      } finally {
+        await ddl(`DROP SCHEMA r2org CASCADE`);
+      }
+    }
+
+    function childFindings(list: readonly Finding[]): string[] {
+      return list
+        .filter((f) => f.subject.startsWith('r2org.child'))
+        .map((f) => `${f.rule} ${f.subject}`);
+    }
+
+    evidenceTest(
+      'a single-column key to it is reported, links tenants through moin_app, and fails the CLI',
+      async () => {
+        await underNamedParent(
+          'CONSTRAINT r2_single FOREIGN KEY (parent_id) REFERENCES r2org.organisations (id)',
+          async () => {
+            // Tenant A's row points at tenant B's parent and the database accepts it.
+            await insertChildOfBsParentAsA();
+            expect(childFindings(await findings())).toStrictEqual([
+              'foreign-key-not-composite r2org.child.r2_single',
+            ]);
+            expect(runCli().status).toBe(1);
+          },
+        );
+      },
+    );
+
+    evidenceTest('a swapped composite key to it is reported and fails the CLI', async () => {
+      await underNamedParent(
+        'CONSTRAINT r2_swapped FOREIGN KEY (organisation_id, parent_id) REFERENCES r2org.organisations (id, organisation_id)',
+        async () => {
+          expect(childFindings(await findings())).toStrictEqual([
+            'foreign-key-tenant-mismapped r2org.child.r2_swapped',
+          ]);
+          expect(runCli().status).toBe(1);
+        },
+      );
+    });
+
+    evidenceTest(
+      'the correctly bound composite key to it passes, refuses the reference, and the CLI exits 0',
+      async () => {
+        await underNamedParent(
+          'CONSTRAINT r2_bound FOREIGN KEY (organisation_id, parent_id) REFERENCES r2org.organisations (organisation_id, id)',
+          async () => {
+            // The child's own organisation_id -> public.organisations(id) key is the tenant root
+            // mapping and stays exempt.
+            expect(childFindings(await findings())).toStrictEqual([]);
+            await expect(insertChildOfBsParentAsA()).rejects.toMatchObject({ code: '23503' });
+            expect(runCli().status).toBe(0);
+          },
+        );
+      },
+    );
+  });
 });
 
 describe('the inventory covers every reachable schema and relation kind (F3)', () => {
