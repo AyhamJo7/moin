@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/tmp/moin-h1",
+  "head": "047d7b40ccb553c1e6b55f61f29566cf667b3244",
+  "mode": "committed",
+  "fix_ref": "03b91ed7d8066f9883d2ee6ce88adb659e76640c",
+  "fix_paths": [
+    "apps/server/src/modules/identity-access/domain/invitations.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "pnpm exec vitest run --project unit apps/server/src/modules/identity-access/domain/invitations.test.ts",
+  "started": "2026-11-01T17:22:15+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-11-01T17:22:17+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 0.72,
+    "tail": "\n RUN  v5.0.2 /tmp/moin-h1\n\n \u276f |unit| apps/server/src/modules/identity-access/domain/invitations.test.ts (6 tests | 5 failed) 10ms\n   \u2713 invitation email (P06.08.01) (1)\n     \u2713 the invitation is a German message with a single-use link 1ms\n   \u276f issuing an invitation bounds what it confers (G09 M1, domain boundary) (5)\n     \u00d7 refuses an admin without permissions, billing_admin before any insert or audit 5ms\n     \u00d7 refuses an admin without permissions, integration_admin before any insert or audit 1ms\n     \u00d7 refuses a billing holder asking for integration_admin before any insert or audit 1ms\n     \u00d7 refuses staff asking for billing_admin before any insert or audit 1ms\n     \u00d7 refuses an unknown role before any insert or audit 0ms\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 5 \u23af\u23af\u23af\u23af\u23af\u23af\u23af\n\n FAIL  |unit| apps/server/src/modules/identity-access/domain/invitations.test.ts > issuing an invitation bounds what it confers (G09 M1, domain boundary) > refuses an admin without permissions, billing_admin before any insert or audit\n FAIL  |unit| apps/server/src/modules/identity-access/domain/invitations.test.ts > issuing an invitation bounds what it confers (G09 M1, domain boundary) > refuses an admin without permissions, integration_admin before any insert or audit\n FAIL  |unit| apps/server/src/modules/identity-access/domain/invitations.test.ts > issuing an invitation bounds what it confers (G09 M1, domain boundary) > refuses a billing holder asking for integration_admin before any insert or audit\n FAIL  |unit| apps/server/src/modules/identity-access/domain/invitations.test.ts > issuing an invitation bounds what it confers (G09 M1, domain boundary) > refuses staff asking for billing_admin before any insert or audit\n FAIL  |unit| apps/server/src/modules/identity-access/domain/invitations.test.ts > issuing an invitation bounds what it confers (G09 M1, domain boundary) > refuses an unknown role before any insert or audit\nAssertionError: expected Error: the store must not be reached to be an instance of InvitationError\n \u276f originalGet scripts/mutation-evidence-probe.ts:119:73\n    117|     const descriptor = Object.getOwnPropertyDescriptor(prototype, name\u2026\n    118|     if (descriptor?.get === undefined || descriptor.configurable !== t\u2026\n    119|     const originalGet = (receiver: unknown): unknown => descriptor.get\u2026\n       |                                                                         ^\n    120|\n    121|     Object.defineProperty(prototype, name, {\n \u276f _Assertion.get scripts/mutation-evidence-probe.ts:124:33\n \u276f apps/server/src/modules/identity-access/domain/invitations.test.ts:77:8\n \u276f evidenceBody packages/testing/src/mutation/evidence-state.ts:277:13\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/5]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  5 failed | 1 passed (6)\n   Start at  18:22:16\n   Duration  266ms (transform 65%, setup 27%, tests 5%, import 2%, worker 1%)\n"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 0.73,
+    "tail": "\n RUN  v5.0.2 /tmp/moin-h1\n\n \u2713 |unit| apps/server/src/modules/identity-access/domain/invitations.test.ts (6 tests) 5ms\n\n Test Files  1 passed (1)\n      Tests  6 passed (6)\n   Start at  18:22:16\n   Duration  246ms (transform 66%, setup 28%, tests 3%, import 2%, worker 1%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/tmp/moin-h1/.git/claude-evidence/mutation/20261101T172215Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}
