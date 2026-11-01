@@ -1,6 +1,6 @@
 ---
 name: phase
-description: "Scope this session to one PLAN.md phase and tier: check tier-scoped dependencies against the Status Ledger, then write the phase plan (item → EV ID → verification) and stop for founder approval. Use when the founder types /phase Pxx [TIER]."
+description: "Scope this session to one PLAN.md phase and tier: check tier-scoped dependencies against the Status Ledger, write the phase plan (item → EV ID → verification), then execute it; stop only for an unmet dependency, a PLAN ambiguity or a DG/EXT item without a usable default. Use when the founder types /phase Pxx [TIER]."
 argument-hint: "Pxx [PILOT|MTLIVE|LAUNCH|SELL|TEN]"
 disable-model-invocation: true
 allowed-tools:
@@ -10,7 +10,7 @@ allowed-tools:
   - "Bash(git branch *)"
 ---
 
-# /phase: plan one phase, then stop
+# /phase: plan one phase, then execute it
 
 Target: `$ARGUMENTS` (phase `$0`, tier `$1`, default: the earliest tier with open items).
 
@@ -24,8 +24,8 @@ and read the front matter of `PROGRESS.md` if it exists (created by P02.01.04).
 - PLAN.md is authoritative; BLUEPRINT.md is read-only and read only by the line ranges PLAN cites.
 - Read only: `plan_section.py --conventions`, `--ledger`, `--invariants`, `$0`, and `--id <ID>` for every
   ADR/EXT/DG/LG/PG/QG/FS the phase references. Never Read PLAN.md whole.
-- This skill writes **one file** (the phase plan) and edits nothing else. It never ticks items and
-  never changes the Status Ledger.
+- Planning writes **one file** (the phase plan). Ticking items and Status Ledger changes happen
+  during execution, under CLAUDE.md §4.
 
 ## Procedure
 
@@ -45,7 +45,11 @@ and read the front matter of `PROGRESS.md` if it exists (created by P02.01.04).
    - invariants at risk (INV IDs) and the test that proves each holds;
    - QG gates that apply (QG-01 always; QG-08/09/10/11/12 when triggered) and when the reviewers run;
    - the PR sequence: short-lived branches `<type>/<phase>-<section>-<slug>`, Conventional Commit
-     titles, squash merge by the founder;
+     titles, squash merge through `merge_gate.py` after the review loop (or by the founder for
+     founder-merged paths, CLAUDE.md §8);
+   - DG items whose recommended default the session may adopt (CLAUDE.md §7), and those it may not;
    - open questions where PLAN.md is ambiguous (ask; don't reinterpret).
-4. **Stop.** Final message: the plan path, the blockers, the EXT list, and the question "approve this
-   plan?". Do not implement anything in this turn.
+4. **Decide.** If step 1 found an unmet hard dependency, or step 3 has an open PLAN ambiguity or a
+   DG/EXT item that blocks the first section and has no adoptable default: stop and ask, listing them.
+   Otherwise commit the plan, print a short digest (plan path, EXT list, adopted defaults) and start
+   the first item. The founder may still stop or redirect at any time.

@@ -24,6 +24,7 @@
 | Version | Date | Change | Approved by |
 |---|---|---|---|
 | 1.0.0 | 2026-09-27 | Initial master plan from BLUEPRINT.md + repository audit + independent architecture review | pending (P00.05) |
+| 1.1.0 (process; QG-09 amended) | 2026-11-01 | Autonomy change (process, not scope): sessions may set a tier to `VERIFIED` when the gate evidence is complete and the independent reviewer concurs (`COMPLETE` stays founder-only); sessions squash-merge through `merge_gate.py` after CI and a Codex CLI review that the gate runs itself on the exact head SHA, with control-plane/CI/infrastructure paths always founder-merged and control-path code founder-merged until 2026-11-29; engineering-shaped DGs with a recommended default may be adopted by ADR, founder may override; mutation proof is required on control paths only; `/phase` proceeds after planning. QG-09's founder concurrence was amended with founder approval on 2026-11-01 (see the QG-09 row); no invariant, gate threshold, scope or tier changed. Detail: CLAUDE.md §3–§8 and §10; the merge gate is PR #247 | founder (2026-11-01 session) |
 | 1.0.0 (status only) | 2026-10-16 | M0 truth reconciliation: Status Ledger, phase headers and EXT statuses reconciled with the code on `main` (993ea23) and the evidence registry; P07 ledger row column shift fixed; P09.10.01/.02 indentation restored (the items were invisible to `plan_section.py`). No scope, gate, threshold or invariant changed. Detail: `docs/audits/2026-10-16-m0-reconciliation.md` | pending (founder review of PR #227) |
 
 ---
@@ -490,7 +491,7 @@ Every assumption has an owner and a validation point. When one is disproven, the
 
 ## Founder Decision Gates
 
-Business decisions that engineering cannot make. Each has a recommended default, the evidence it needs, and what it blocks.
+Business decisions that engineering cannot make. Each has a recommended default, the evidence it needs, and what it blocks. Since v1.1.0, an engineering-shaped gate (DG-04, DG-12, DG-13, DG-14 shortlist) that blocks work may be settled by adopting its recommended default in an ADR marked "Default adopted; founder may override"; DG-00, DG-03, DG-05, DG-09 and DG-11 never are.
 
 | ID | Decision | Recommended default | Evidence required | Deadline | Blocks |
 |---|---|---|---|---|---|
@@ -5581,7 +5582,7 @@ Gate decision record (EV-P33-001).
 | QG-06 | Post-deploy | after prod deploy | auto-rollback | Prod smoke, synthetic call, 30-min alarm watch |
 | QG-07 | AI change | any prompt/policy/template/model change | yes | Version-bound eval report meeting thresholds (N minima), adversarial + emergency suites 0 failures, shadow → canary rollout plan |
 | QG-08 | Schema change | migrations | yes | Expand/contract compliance, lock heuristics, RLS on new tenant tables, composite FKs, backfill as job, rehearsal on prod-like data |
-| QG-09 | Sensitive-area review | changes to auth, sessions, RLS/roles, `SECURITY DEFINER`, tool guard, webhooks, integrations, billing, privacy handlers | yes | Second review (security-reviewer + architecture-reviewer agents) + founder; findings resolved |
+| QG-09 | Sensitive-area review | changes to auth, sessions, RLS/roles, `SECURITY DEFINER`, tool guard, webhooks, integrations, billing, privacy handlers | yes | Second review (security-reviewer + architecture-reviewer agents, plus invariant-reviewer on control paths) + independent Codex review; findings resolved. Founder concurrence (amended with founder approval on 2026-11-01): until 2026-11-29 these PRs are founder-merged; afterwards the agent reviews plus the independent Codex review replace it, and the founder breaks ties after two rounds of disagreement |
 | QG-10 | Documentation | behaviour changes | yes | ADR/runbook/help article/claims matrix updated |
 | QG-11 | Dependency & licence | new dependencies | yes | Licence allowlist, maintenance/popularity check, no install scripts unless allowlisted |
 | QG-12 | Privacy impact | new personal-data field or flow | yes | Data inventory, retention category, erasure handler, export coverage, subprocessor register updated |
