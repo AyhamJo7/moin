@@ -1902,3 +1902,12 @@ gates 14/14 at `93418b0`. Independent re-review pending; nothing is VERIFIED.
 | P06.01.02 | READY_FOR_REVIEW | 90902a2 | EV-P06-088 | F4: migration 0078, no PUBLIC EXECUTE on new functions; catalog finding; KILLED                               |
 | P06.02.06 | READY_FOR_REVIEW | c7f4a4d | EV-P06-089 | F5: write matrix generated from the live catalog (55 tables, audit_events registered); mutants killed         |
 | P06.02.02 | READY_FOR_REVIEW | 863901f | EV-P06-089 | F6: migration lint requires the helper for new tenant RLS; 12 older migrations (14 tables) grandfathered      |
+
+## Security acceptance group 1 fix, review round 1 (2026-11-01, branch `fix/p06-02-rls-catalog-gaps`)
+
+Independent review of #250 at `d94e2d1` (REQUEST_CHANGES, one HIGH). Merged main `c714573` first (`cc5b9a3`), then one fix commit. Full gates 14/14 at `98e0f2f`. Independent re-review pending; nothing is VERIFIED.
+
+| Item      | Status           | Commit  | Evidence   | Note                                                                                                                                                                                                  |
+| --------- | ---------------- | ------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P06.02.03 | READY_FOR_REVIEW | 98e0f2f | EV-P06-093 | HIGH F1: the foreign-key query uses the same schema scope as the table inventory; swapped and missing-column keys on a child table in another schema are findings and the CLI exits non-zero; KILLED. |
+| P06.02.04 | READY_FOR_REVIEW | 98e0f2f | EV-P06-093 | The F3 inventory now reaches the keys of tenant tables outside public; the bound-key control passes and the CLI exits 0.                                                                              |
