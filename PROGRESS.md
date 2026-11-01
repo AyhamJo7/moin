@@ -1899,3 +1899,25 @@ Source: `/tmp/moin-review/sec-g02.md`, independent acceptance review of group 2 
 | P06.14.02 | IN_PROGRESS | bd1b930 | EV-P06-015 | Unticked, PARTIAL. Holds: the cross-tenant envelope test, per-item rollback. Missing: a concurrent-claim exclusivity test and an expired-lease reclaim test (need P06.14.01).                            |
 | P06.14    | IN_PROGRESS | bd1b930 | EV-P06-014 | Section tick removed because two children are unticked.                                                                                                                                                  |
 | P06.03.06 | IN_PROGRESS | bd1b930 | EV-P06-013 | Unticked, PARTIAL. Holds: logger tenant enrichment and redaction. Missing: tracer or span enrichment across concurrent tenants (depends on P15.01.01).                                                   |
+
+## C-RERUN P08 re-proof (2026-11-01, branch `docs/p08-p13-rerun-evidence`)
+
+Stale evidence re-run on main `be4591d` in a clean clone: 14 items re-proved, 1 PARTIAL and unticked. Details: `docs/audits/2026-11-01-c-rerun-p08.md`. Full gates 14/14 on the clone at `be4591d`; gates on this branch's head are recorded in the PR. Independent re-review pending; nothing is VERIFIED.
+
+| Item      | Status           | Commit  | Evidence   | Note                                                                                                                                                  |
+| --------- | ---------------- | ------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P08.03.01 | IN_PROGRESS      | be4591d | EV-P08-013 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P08-003                                                    |
+| P08.05.03 | IN_PROGRESS      | be4591d | EV-P08-014 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P08-005                                                    |
+| P08.07.01 | IN_PROGRESS      | be4591d | EV-P08-015 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P08-007                                                    |
+| P08.10.02 | IN_PROGRESS      | be4591d | EV-P08-016 | PARTIAL: only ai_answering has a test; the other five global kill switches (faq_answering, llm_wording, transfers, sms, booking_execution) are define |
+| P09.10.02 | READY_FOR_REVIEW | be4591d | EV-P09-016 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P09-012                                                    |
+| P09.11.01 | READY_FOR_REVIEW | be4591d | EV-P09-017 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P09-013                                                    |
+| P09.11.02 | READY_FOR_REVIEW | be4591d | EV-P09-018 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P09-013                                                    |
+| P10.03.03 | IN_PROGRESS      | be4591d | EV-P10-016 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P10-002                                                    |
+| P10.05.01 | IN_PROGRESS      | be4591d | EV-P10-017 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P10-004                                                    |
+| P10.13.05 | IN_PROGRESS      | be4591d | EV-P10-018 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P10-012                                                    |
+| P11.01.01 | READY_FOR_REVIEW | be4591d | EV-P11-018 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P11-001                                                    |
+| P11.03.01 | READY_FOR_REVIEW | be4591d | EV-P11-019 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P11-003                                                    |
+| P12.06.03 | IN_PROGRESS      | be4591d | EV-P12-016 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P12-003                                                    |
+| P12.12.02 | IN_PROGRESS      | be4591d | EV-P12-017 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P12-009                                                    |
+| P13.02.03 | READY_FOR_REVIEW | be4591d | EV-P13-019 | Re-proved at the item's own acceptance text; status kept as recorded before; supersedes EV-P13-014                                                    |
