@@ -22,7 +22,7 @@
  * migration-role pool; every probe runs through HTTP as `moin_app`, exactly as traffic.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { readdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { Test } from '@nestjs/testing';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
@@ -45,6 +45,7 @@ import { EXPECTED_ROUTE_COUNT, INVENTORY } from './inventory.ts';
 import { reconstructRoutes } from './routes.ts';
 import { compareWithInventory, controllersReachableFrom, routesServedBy } from './root-routes.ts';
 import { loadProductionRoots } from './production-roots.ts';
+import { assertFullyProbed, buildCoverageReport, key, ProbeLedger } from './probe-ledger.ts';
 import { seedTwoTenants, type SeededWorld } from './seed.ts';
 import { ABSENT_SURFACES, assertSurfacesAbsent } from './surface.ts';
 
@@ -71,6 +72,8 @@ let database: TestDatabase;
 let admin: ReturnType<TestDatabase['fixturePool']>;
 let app: NestFastifyApplication;
 let world: SeededWorld;
+/** Every route a probe below actually called, with the status it got and what it asserted. */
+const ledger = new ProbeLedger();
 let productionRoots: Awaited<ReturnType<typeof loadProductionRoots>>;
 const clock = fixedClock(new Date());
 clock.set(new Date());
@@ -326,6 +329,10 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
       expect(response.body).not.toContain(world.b.taskId);
       expect(response.body).not.toContain(world.b.owner.id);
       expect(response.body).not.toContain('xsuite-beta');
+      ledger.record(key(route), {
+        status: response.statusCode,
+        check: 'foreign id answers 404 and leaks no tenant B data',
+      });
     }
   });
 
@@ -355,6 +362,10 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
         .then((r) => (r.rows[0] as { n: number }).n),
     );
     expect(inviteInB).toBe(0);
+    ledger.record('POST /api/members/invite', {
+      status: invited.statusCode,
+      check: 'row lands in tenant A and not in B',
+    });
     const granted = await authed(session, 'POST', '/api/support/grants', {
       operatorSubject: `xsuite-probe-${Date.now()}`,
       scope: 'readonly',
@@ -379,6 +390,10 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
         .then((r) => (r.rows[0] as { n: number }).n),
     );
     expect(grantInB).toBe(0);
+    ledger.record('POST /api/support/grants', {
+      status: granted.statusCode,
+      check: 'row lands in tenant A and not in B',
+    });
   });
 
   evidenceTest('list routes show only the caller tenant rows', async () => {
@@ -389,6 +404,10 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
     expect(body).toContain(world.a.grantId);
     expect(body).not.toContain(world.b.grantId);
     expect(body).not.toContain('xsuite-beta');
+    ledger.record('GET /api/support/grants', {
+      status: grants.statusCode,
+      check: "A's grant present, B's absent",
+    });
 
     // Today (M1): one task per tenant, staged by the fixture pool like the seed (no audit
     // rows, so the DB-layer counts below stay exact); A's read holds A's task only.
@@ -404,7 +423,45 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
     expect(todayA.body).toContain(taskA);
     expect(todayA.body).not.toContain(taskB);
     expect(todayA.body).not.toContain('xsuite-beta');
+    ledger.record('GET /api/today', {
+      status: todayA.statusCode,
+      check: "A's task present, B's absent",
+    });
   });
+
+  evidenceTest(
+    'session routes act on the caller session only and leave tenant B alone',
+    async () => {
+      const sessionA = await mintSession(world.a.owner.id, true);
+      const sessionB = await mintSession(world.b.owner.id, true);
+      const stepUp = await authed(sessionA, 'POST', '/api/auth/step-up');
+      expect(stepUp.statusCode, stepUp.body).toBe(302);
+      expect(String(stepUp.headers.location)).not.toContain(world.b.owner.id);
+      expect(stepUp.body).not.toContain('xsuite-beta');
+      ledger.record('POST /api/auth/step-up', {
+        status: stepUp.statusCode,
+        check: "redirects for A's own session; nothing of B",
+      });
+      const liveOf = (userId: string): Promise<number> =>
+        admin
+          .query(
+            'select count(*)::int as n from sessions where user_id = $1::uuid and revoked_at is null',
+            [userId],
+          )
+          .then((r) => (r.rows[0] as { n: number }).n);
+      const bBefore = await liveOf(world.b.owner.id);
+      expect(bBefore).toBeGreaterThan(0);
+      const signOut = await authed(sessionA, 'POST', '/api/auth/sign-out-others');
+      expect(signOut.statusCode, signOut.body).toBe(200);
+      expect(signOut.body).not.toContain('xsuite-beta');
+      expect(await liveOf(world.b.owner.id)).toBe(bBefore);
+      expect(sessionB.header).not.toBe(sessionA.header);
+      ledger.record('POST /api/auth/sign-out-others', {
+        status: signOut.statusCode,
+        check: "ends A's other sessions only; B's sessions untouched",
+      });
+    },
+  );
 
   evidenceTest('public routes answer without tenant data', async () => {
     for (const url of ['/api/auth/login', '/healthz', '/readyz']) {
@@ -414,6 +471,10 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
       );
       expect(response.body).not.toContain('xsuite-alpha');
       expect(response.body).not.toContain('xsuite-beta');
+      ledger.record(`GET ${url}`, {
+        status: response.statusCode,
+        check: 'answers without tenant data',
+      });
     }
     const callback = await app.inject({
       method: 'GET',
@@ -421,6 +482,10 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
     });
     expect([400, 302].includes(callback.statusCode)).toBe(true);
     expect(callback.body).not.toContain('xsuite-alpha');
+    ledger.record('GET /api/auth/callback', {
+      status: callback.statusCode,
+      check: 'refuses a forged state without naming a tenant',
+    });
   });
 
   evidenceTest('forged webhooks are refused before tenancy', async () => {
@@ -434,6 +499,10 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
       expect([401, 403].includes(response.statusCode), `${url} → ${response.statusCode}`).toBe(
         true,
       );
+      ledger.record(`POST ${url}`, {
+        status: response.statusCode,
+        check: 'forged signature refused before tenancy',
+      });
     }
     // The simulated-call entry: no token and a forged token are both refused before tenancy.
     for (const authorization of [undefined, `Bearer ${SIMULATOR_TOKEN}-forged`]) {
@@ -453,6 +522,10 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
       });
       expect(response.statusCode).toBe(401);
       expect(response.body).not.toContain('xsuite-alpha');
+      ledger.record('POST /api/dev/simulated-calls', {
+        status: response.statusCode,
+        check: 'missing and forged bearer token refused before tenancy',
+      });
     }
   });
 });
@@ -777,4 +850,36 @@ describe('absent surfaces stay absent (P06.13.04)', () => {
     expect(ABSENT_SURFACES.length).toBeGreaterThan(0);
     assertSurfacesAbsent(app);
   });
+});
+
+describe('coverage is calls made, not inventory rows (P06.13.02, P06.13.05, LG-P01)', () => {
+  evidenceTest(
+    'every inventoried route was called by a probe above, and the report says so',
+    () => {
+      const report = buildCoverageReport(INVENTORY, ledger);
+      // Written before the assertion so a failing run still leaves the per-route evidence behind.
+      const out = resolve(import.meta.dirname, '../../../../../test-results/xsuite-coverage.json');
+      mkdirSync(resolve(out, '..'), { recursive: true });
+      writeFileSync(
+        out,
+        `${JSON.stringify(
+          {
+            commit: process.env['GITHUB_SHA'] ?? null,
+            generatedAt: new Date().toISOString(),
+            coverage: report.summary,
+            inventoried: report.inventoried,
+            exempt: report.exempt,
+            executed: report.executed,
+            unprobed: report.unprobed,
+            rows: report.rows,
+          },
+          null,
+          2,
+        )}\n`,
+      );
+      assertFullyProbed(report);
+      expect(report.executed).toBe(report.required);
+      expect(report.unprobed).toStrictEqual([]);
+    },
+  );
 });
