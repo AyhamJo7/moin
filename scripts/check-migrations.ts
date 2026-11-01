@@ -124,6 +124,97 @@ const LOCKING: readonly Rule[] = [
  */
 const ALLOW = /--\s*migration-check:\s*allow\s+([a-z-]+)\s+because\s+(.+)/gi;
 
+/**
+ * Tenant row-level security goes through `app.apply_tenant_rls` (P06.02.02, INV-01).
+ *
+ * The helper is the single implementation of the policy; a migration that writes its own
+ * ENABLE/FORCE/CREATE POLICY drifts from it (fourteen tables did), and a drifted copy is a policy
+ * nobody reads again. The catalog check (scripts/check-rls-catalog.ts) judges the result; this
+ * rule keeps new migrations from growing another copy.
+ *
+ * These twelve migrations predate the rule and are grandfathered by name, with the tables they
+ * cover. They are never rewritten (an applied migration is immutable); consolidating them is a
+ * separate forward migration. Nothing is added to this list: a new migration uses the helper or
+ * states why not with `-- migration-check: allow tenant-rls-not-via-helper because …`.
+ */
+export const HAND_WRITTEN_RLS_GRANDFATHERED: Readonly<Record<string, readonly string[]>> = {
+  '0062_job_envelope.sql': ['job_runs'],
+  '0063_outbox.sql': ['outbox'],
+  '0065_idempotency_keys.sql': ['idempotency_keys'],
+  '0067_timers.sql': ['timers'],
+  '0068_sse_outbox.sql': ['sse_events'],
+  '0069_feature_flags.sql': ['tenant_flag_overrides'],
+  '0071_notifications.sql': ['notifications', 'notification_prefs'],
+  '0072_escalation.sql': ['escalation_chains', 'escalation_acks'],
+  '0073_deliveries.sql': ['notification_deliveries'],
+  '0074_passages.sql': ['knowledge_passages'],
+  '0075_slot_holds.sql': ['slot_holds'],
+  '0076_slot_exclude.sql': ['booking_confirms'],
+};
+
+/**
+ * Tables that carry an `organisation_id` column and deliberately have no row-level security: the
+ * request-to-tenant mapping is read before any tenant context exists. Each is on the global
+ * register (docs/architecture/global-tables.md) with its reason, which the catalog check enforces.
+ */
+const GLOBAL_TABLES_WITH_ORGANISATION_COLUMN: ReadonlySet<string> = new Set([
+  'provisioning_requests',
+]);
+
+/** The name and body of each `CREATE TABLE name ( … )`, parentheses balanced. */
+function createTables(sql: string): { name: string; body: string }[] {
+  const tables: { name: string; body: string }[] = [];
+  const head = /\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:\w+\.)?"?(\w+)"?\s*\(/gi;
+  for (const match of sql.matchAll(head)) {
+    const start = (match.index ?? 0) + match[0].length;
+    let depth = 1;
+    let end = start;
+    while (end < sql.length && depth > 0) {
+      if (sql[end] === '(') depth += 1;
+      else if (sql[end] === ')') depth -= 1;
+      end += 1;
+    }
+    tables.push({ name: match[1] ?? '', body: sql.slice(start, end - 1) });
+  }
+  return tables;
+}
+
+function tenantRlsFindings(file: string, code: string): Finding[] {
+  if (HAND_WRITTEN_RLS_GRANDFATHERED[file] !== undefined) return [];
+  // The migration that defines the helper necessarily contains the statements it runs.
+  if (/\bFUNCTION\s+app\.apply_tenant_rls\b/i.test(code)) return [];
+  const detail: string[] = [];
+  const usesHelper = /\bapply_tenant_rls\s*\(/i.test(code);
+  // Only ENABLE: `NO FORCE` … `FORCE` around a backfill is a toggle on a table the helper already set up.
+  if (/\bENABLE\s+ROW\s+LEVEL\s+SECURITY\b/i.test(code)) {
+    detail.push('enables row-level security by hand');
+  }
+  if (/\bCREATE\s+POLICY\b/i.test(code) && !usesHelper) {
+    detail.push('writes a policy by hand without app.apply_tenant_rls');
+  }
+  for (const table of createTables(code)) {
+    if (GLOBAL_TABLES_WITH_ORGANISATION_COLUMN.has(table.name)) continue;
+    // A column definition named organisation_id, not a mention in a foreign-key column list.
+    if (!/(?:^|[\n,])\s*"?organisation_id"?\s+[a-z]/i.test(table.body)) continue;
+    const applied = new RegExp(`apply_tenant_rls\\s*\\(\\s*'(?:\\w+\\.)?"?${table.name}"?'`, 'i');
+    if (!applied.test(code)) {
+      detail.push(
+        `creates tenant table ${table.name} without SELECT app.apply_tenant_rls('${table.name}')`,
+      );
+    }
+  }
+  if (detail.length === 0) return [];
+  return [
+    {
+      file,
+      rule: 'tenant-rls-not-via-helper',
+      detail:
+        `${detail.join('; ')}. Tenant policy has one implementation, app.apply_tenant_rls; a ` +
+        'hand-written copy drifts from it.',
+    },
+  ];
+}
+
 export function checkSql(file: string, sql: string): Finding[] {
   const allowed = new Map<string, string>();
   for (const match of sql.matchAll(ALLOW)) {
@@ -137,6 +228,9 @@ export function checkSql(file: string, sql: string): Finding[] {
     if (reason !== undefined && reason.length > 0) continue;
     findings.push({ file, rule: rule.id, detail: rule.detail });
   }
+  const tenant = tenantRlsFindings(file, stripComments(sql));
+  const tenantReason = allowed.get('tenant-rls-not-via-helper');
+  if (tenantReason === undefined || tenantReason.length === 0) findings.push(...tenant);
   return findings;
 }
 
