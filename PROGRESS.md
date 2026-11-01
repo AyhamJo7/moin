@@ -1888,3 +1888,55 @@ third. Tier statuses are unchanged.
 | Item      | Status           | Commit  | Evidence   | Note                                                                                                                                                                                                                     |
 | --------- | ---------------- | ------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | P06.14.01 | READY_FOR_REVIEW | 71a4551 | EV-P06-090 | F1: withSystemWork claim shares withTenant connection handling; child-process test fails before, passes after; KILLED. F2 (claim leases) and F3 (tracing) stay open as status corrections. Independent re-review pending |
+
+## C-RERUN P02 re-proof (2026-11-01, branch `docs/p02-rerun-evidence`)
+
+Stale evidence re-run on main `be4591d` in a clean clone: 38 items re-proved, 7 PARTIAL and unticked. Details: `docs/audits/2026-11-01-c-rerun-p02.md`. Full gates 14/14 on the clone at `be4591d`; gates on this branch's head are recorded in the PR. Independent re-review pending; nothing is VERIFIED.
+
+| Item      | Status           | Commit  | Evidence   | Note                                                                                                                                                  |
+| --------- | ---------------- | ------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P02.01.01 | READY_FOR_REVIEW | be4591d | EV-P02-051 | Re-proved; supersedes EV-P02-047                                                                                                                      |
+| P02.01.02 | READY_FOR_REVIEW | be4591d | EV-P02-052 | Re-proved; supersedes EV-P02-003                                                                                                                      |
+| P02.01.03 | READY_FOR_REVIEW | be4591d | EV-P02-053 | Re-proved; supersedes EV-P02-004                                                                                                                      |
+| P02.01.07 | READY_FOR_REVIEW | be4591d | EV-P02-054 | Re-proved; supersedes EV-P02-048                                                                                                                      |
+| P02.02.01 | READY_FOR_REVIEW | be4591d | EV-P02-055 | Re-proved; supersedes EV-P02-002                                                                                                                      |
+| P02.02.02 | IN_PROGRESS      | be4591d | EV-P02-091 | PARTIAL: turbo.json defines build, typecheck, lint and dev; the tasks `test` and `test:integration` are absent (removed in 1867d75). Needs the tasks, |
+| P02.02.03 | READY_FOR_REVIEW | be4591d | EV-P02-056 | Re-proved; supersedes EV-P02-009, EV-P02-019                                                                                                          |
+| P02.02.04 | READY_FOR_REVIEW | be4591d | EV-P02-057 | Re-proved; supersedes EV-P02-001                                                                                                                      |
+| P02.02.05 | READY_FOR_REVIEW | be4591d | EV-P02-058 | Re-proved; supersedes EV-P02-001                                                                                                                      |
+| P02.02.06 | READY_FOR_REVIEW | be4591d | EV-P02-059 | Re-proved; supersedes EV-P02-010                                                                                                                      |
+| P02.02.07 | READY_FOR_REVIEW | be4591d | EV-P02-060 | Re-proved; supersedes EV-P02-011, EV-P02-020                                                                                                          |
+| P02.02.08 | READY_FOR_REVIEW | be4591d | EV-P02-061 | Re-proved; supersedes EV-P02-002                                                                                                                      |
+| P02.02.10 | READY_FOR_REVIEW | be4591d | EV-P02-062 | Re-proved; supersedes EV-P02-001                                                                                                                      |
+| P02.03    | READY_FOR_REVIEW | be4591d | EV-P02-021 | Re-proved; supersedes EV-P02-021                                                                                                                      |
+| P02.03.01 | READY_FOR_REVIEW | be4591d | EV-P02-064 | Re-proved; supersedes EV-P02-012                                                                                                                      |
+| P02.03.02 | IN_PROGRESS      | be4591d | EV-P02-092 | PARTIAL: all four roles boot from dist, but the server image cannot start voice or worker (ERR_MODULE_NOT_FOUND for @moin/telephony and @moin/integra |
+| P02.03.03 | READY_FOR_REVIEW | be4591d | EV-P02-065 | Re-proved; supersedes EV-P02-014                                                                                                                      |
+| P02.03.04 | READY_FOR_REVIEW | be4591d | EV-P02-066 | Re-proved; supersedes EV-P02-015                                                                                                                      |
+| P02.03.05 | READY_FOR_REVIEW | be4591d | EV-P02-067 | Re-proved; supersedes EV-P02-016                                                                                                                      |
+| P02.03.06 | READY_FOR_REVIEW | be4591d | EV-P02-068 | Re-proved; supersedes EV-P02-017                                                                                                                      |
+| P02.03.07 | IN_PROGRESS      | be4591d | EV-P02-093 | PARTIAL: the image builds and the api role answers /healthz 200 read-only; voice and worker do not start (ERR_MODULE_NOT_FOUND); size 467.7 MB on amd |
+| P02.04.01 | READY_FOR_REVIEW | be4591d | EV-P02-069 | Re-proved; supersedes EV-P02-024                                                                                                                      |
+| P02.04.02 | IN_PROGRESS      | be4591d | EV-P02-070 | PARTIAL: the commands work from a fresh clone; `db:seed` applies 0 rows, so Musterrestaurant and Musterbetrieb SHK do not exist (seeding lands with P |
+| P02.04.03 | READY_FOR_REVIEW | be4591d | EV-P02-071 | Re-proved; supersedes EV-P02-026                                                                                                                      |
+| P02.04.04 | READY_FOR_REVIEW | be4591d | EV-P02-072 | Re-proved; supersedes EV-P02-027                                                                                                                      |
+| P02.04.05 | READY_FOR_REVIEW | be4591d | EV-P02-073 | Re-proved; supersedes EV-P02-023                                                                                                                      |
+| P02.04.06 | IN_PROGRESS      | be4591d | EV-P02-074 | PARTIAL: warm run about 23 s; a cold run with image pulls, seed data and the documented copy of the environment example are not shown (EV-P02-074)    |
+| P02.05.01 | READY_FOR_REVIEW | be4591d | EV-P02-075 | Re-proved; supersedes EV-P02-028                                                                                                                      |
+| P02.05.02 | READY_FOR_REVIEW | be4591d | EV-P02-076 | Re-proved; supersedes EV-P02-029                                                                                                                      |
+| P02.05.03 | READY_FOR_REVIEW | be4591d | EV-P02-077 | Re-proved; supersedes EV-P02-030                                                                                                                      |
+| P02.05.04 | READY_FOR_REVIEW | be4591d | EV-P02-078 | Re-proved; supersedes EV-P02-032                                                                                                                      |
+| P02.05.05 | READY_FOR_REVIEW | be4591d | EV-P02-079 | Re-proved; supersedes EV-P02-031                                                                                                                      |
+| P02.05.06 | READY_FOR_REVIEW | be4591d | EV-P02-080 | Re-proved; supersedes EV-P02-033                                                                                                                      |
+| P02.06.01 | READY_FOR_REVIEW | be4591d | EV-P02-081 | Re-proved; supersedes EV-P02-043                                                                                                                      |
+| P02.06.02 | READY_FOR_REVIEW | be4591d | EV-P02-082 | Re-proved; supersedes EV-P02-044                                                                                                                      |
+| P02.06.03 | READY_FOR_REVIEW | be4591d | EV-P02-083 | Re-proved; supersedes EV-P02-045                                                                                                                      |
+| P02.06.04 | READY_FOR_REVIEW | be4591d | EV-P02-084 | Re-proved; supersedes EV-P02-034                                                                                                                      |
+| P02.06.05 | READY_FOR_REVIEW | be4591d | EV-P02-085 | Re-proved; supersedes EV-P02-040                                                                                                                      |
+| P02.06.06 | READY_FOR_REVIEW | be4591d | EV-P02-086 | Re-proved; supersedes EV-P02-039                                                                                                                      |
+| P02.06.07 | READY_FOR_REVIEW | be4591d | EV-P02-087 | Re-proved; supersedes EV-P02-049                                                                                                                      |
+| P02.07.03 | IN_PROGRESS      | be4591d | EV-P02-046 | PARTIAL: not re-run: a fresh-session walkthrough is an event, not a check. Needs a new walkthrough on current main                                    |
+| P02.08.01 | IN_PROGRESS      | be4591d | EV-P02-094 | PARTIAL: the configuration passes; Renovate has never opened a pull request. Needs the GitHub App installed, a founder action (EV-P02-094)            |
+| P02.08.02 | READY_FOR_REVIEW | be4591d | EV-P02-088 | Re-proved; supersedes EV-P02-035                                                                                                                      |
+| P02.08.03 | READY_FOR_REVIEW | be4591d | EV-P02-089 | Re-proved; supersedes EV-P02-038                                                                                                                      |
+| P02.08.04 | READY_FOR_REVIEW | be4591d | EV-P02-090 | Re-proved; supersedes EV-P02-036                                                                                                                      |
