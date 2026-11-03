@@ -63,22 +63,9 @@ export class SessionMembershipGuard implements CanActivate {
       await this.unavailable(request, reply);
       return false;
     }
-    let outcome: Awaited<ReturnType<RequestContextService['resolve']>>;
-    try {
-      outcome = await this.contexts.resolve(digestOf(presented), resolveMode(request));
-    } catch {
-      this.logger.error(
-        { route: request.routeOptions.url, method: request.method, reason: 'identity-unavailable' },
-        'request-context lookup failed',
-      );
-      await this.unavailable(request, reply);
-      return false;
-    }
-    if ('failure' in outcome) {
-      await this.problem(request, reply, outcome.failure);
-      return false;
-    }
-    request.sessionContext = outcome.context;
+    // G07 L2: the CSRF verdict comes before the session lookup, so a forged request is refused
+    // without taking the session's locks or sliding its idle expiry. A dead session with a
+    // well-formed proof still answers 401 below.
     if (requiresCsrfProtection(request.method)) {
       const expectedOrigin = this.config.APP_ORIGIN;
       // Unreachable when the api role started, because the loader requires APP_ORIGIN for it.
@@ -107,6 +94,9 @@ export class SessionMembershipGuard implements CanActivate {
         origin: request.headers.origin,
         token: firstHeader(request.headers[CSRF_HEADER]),
         cookie: readCookie(request.headers.cookie, CSRF_COOKIE),
+        sessionToken: presented,
+        fetchSite: request.headers['sec-fetch-site'],
+        referer: request.headers.referer,
         expectedOrigin,
       });
       if (!verdict.ok) {
@@ -123,6 +113,22 @@ export class SessionMembershipGuard implements CanActivate {
         return false;
       }
     }
+    let outcome: Awaited<ReturnType<RequestContextService['resolve']>>;
+    try {
+      outcome = await this.contexts.resolve(digestOf(presented), resolveMode(request));
+    } catch {
+      this.logger.error(
+        { route: request.routeOptions.url, method: request.method, reason: 'identity-unavailable' },
+        'request-context lookup failed',
+      );
+      await this.unavailable(request, reply);
+      return false;
+    }
+    if ('failure' in outcome) {
+      await this.problem(request, reply, outcome.failure);
+      return false;
+    }
+    request.sessionContext = outcome.context;
     return true;
   }
 

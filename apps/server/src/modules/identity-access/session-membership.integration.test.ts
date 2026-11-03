@@ -23,6 +23,7 @@ import { TenantPoolModule } from '../platform/tenant-pool.module.ts';
 import { TenantQueries } from '../platform/tenant-queries.ts';
 import { IdentityAccessModule } from './identity-access.module.ts';
 import { CONTEXT_CLOCK, IDENTITY_CLOCK, REQUEST_CONTEXTS } from './identity-access.tokens.ts';
+import { deriveCsrfToken } from './http/csrf.ts';
 import { SessionMembershipGuard } from './http/session-membership.guard.ts';
 import { RequireStepUpGuard } from './http/require-step-up.guard.ts';
 import { TenantContextInterceptor } from './http/tenant-context.interceptor.ts';
@@ -402,6 +403,102 @@ describe('CSRF synchronizer token plus Origin check (P06.06.06)', () => {
     expect(response.statusCode).toBe(201);
   });
 
+  evidenceTest(
+    "another session's valid token pair does not authorise this session's mutation (G07 M1)",
+    async () => {
+      const victim = await signedInCookies();
+      const attacker = await signedInCookies();
+      // The victim's session cookie with the attacker's own matching cookie and header: both
+      // halves agree with each other, but neither is derived from the victim's session.
+      const response = await app.inject({
+        method: 'POST',
+        url: '/probe',
+        headers: {
+          cookie: `${victim.header}; ${attacker.csrfCookie}`,
+          origin: APP_ORIGIN,
+          'x-csrf-token': attacker.csrfToken,
+        },
+      });
+      expect(response.statusCode).toBe(403);
+      expect(response.json()).toMatchObject({ type: '/problems/csrf-required' });
+    },
+  );
+
+  evidenceTest(
+    'a never-issued token pair that agrees with itself is refused (G07 M1)',
+    async () => {
+      const cookies = await signedInCookies();
+      const forged = 'Z'.repeat(43);
+      const response = await app.inject({
+        method: 'POST',
+        url: '/probe',
+        headers: {
+          cookie: `${cookies.header}; __Host-moin_csrf=${forged}`,
+          origin: APP_ORIGIN,
+          'x-csrf-token': forged,
+        },
+      });
+      expect(response.statusCode).toBe(403);
+    },
+  );
+
+  evidenceTest(
+    'an absent Origin is refused when the request says it is cross-site (L1)',
+    async () => {
+      const cookies = await signedInCookies();
+      const withoutOrigin: Record<string, string> = { ...csrfHeaders(cookies) };
+      delete withoutOrigin['origin'];
+      for (const extra of [
+        { 'sec-fetch-site': 'cross-site' },
+        { 'sec-fetch-site': 'same-site' },
+        { referer: 'https://evil.example/forged' },
+      ]) {
+        const response = await app.inject({
+          method: 'POST',
+          url: '/probe',
+          headers: { ...withoutOrigin, ...extra },
+        });
+        expect(response.statusCode, JSON.stringify(extra)).toBe(403);
+      }
+      // Same-origin evidence, or none at all, keeps working for non-browser clients.
+      for (const extra of [{ 'sec-fetch-site': 'same-origin' }, {}]) {
+        const response = await app.inject({
+          method: 'POST',
+          url: '/probe',
+          headers: { ...withoutOrigin, ...extra },
+        });
+        expect(response.statusCode, JSON.stringify(extra)).toBe(201);
+      }
+    },
+  );
+
+  evidenceTest('a forged POST neither locks nor slides the session it names (L2)', async () => {
+    const cookies = await signedInCookies();
+    const token = /__Host-moin_sid=([A-Za-z0-9_-]{43})/.exec(cookies.header)?.[1] ?? '';
+    const { digestOf } = await import('./domain/secret-values.ts');
+    // Age the idle deadline so a fresh resolution would slide it to about 12 hours out.
+    await admin.query(
+      "update sessions set idle_expires_at = now() + interval '2 hours' where token_hash = $1",
+      [digestOf(token)],
+    );
+    contexts().clearCache();
+    const before = await admin.query<{ idle: Date }>(
+      'select idle_expires_at as idle from sessions where token_hash = $1',
+      [digestOf(token)],
+    );
+    const response = await app.inject({
+      method: 'POST',
+      url: '/probe',
+      headers: { cookie: cookies.header },
+    });
+    expect(response.statusCode).toBe(403);
+    const after = await admin.query<{ idle: Date }>(
+      'select idle_expires_at as idle from sessions where token_hash = $1',
+      [digestOf(token)],
+    );
+    expect(after.rows[0]?.idle.getTime()).toBe(before.rows[0]?.idle.getTime());
+  });
+
   evidenceTest('a CSRF-less POST mints no session side effects (FS-16 adjacent)', async () => {
     // The guard rejects before the handler: no organisation is resolved, no write happens.
     const cookie = await signedInCookie();
@@ -437,6 +534,11 @@ describe('CSRF synchronizer token plus Origin check (P06.06.06)', () => {
     const all = setCookies(response.headers);
     const csrf = all.find((c) => c.startsWith('__Host-moin_csrf='));
     expect(CSRF_COOKIE_CONTRACT.test(csrf ?? '')).toBe(true);
+    // Bound to the session just issued (G07 M1): derived from its token.
+    const sessionToken = /^__Host-moin_sid=([A-Za-z0-9_-]{43});/.exec(
+      all.find((c) => c.startsWith('__Host-moin_sid=')) ?? '',
+    )?.[1];
+    expect(CSRF_COOKIE_CONTRACT.exec(csrf ?? '')?.[1]).toBe(deriveCsrfToken(sessionToken ?? ''));
   });
 });
 
@@ -1145,10 +1247,13 @@ describe('the step-up gate (P06.06.04)', () => {
     const before = await admin.query<{ n: string }>(
       'select count(*)::text as n from auth_transactions',
     );
+    // A well-formed proof for this session, so the membership check is what refuses it.
+    const sessionToken = /__Host-moin_sid=([^;\s]+)/.exec(cookie)?.[1] ?? '';
+    const proof = deriveCsrfToken(sessionToken);
     const begun = await app.inject({
       method: 'POST',
       url: '/api/auth/step-up',
-      headers: { cookie },
+      headers: { cookie: `${cookie}; __Host-moin_csrf=${proof}`, 'x-csrf-token': proof },
     });
     expect(begun.statusCode).toBe(401);
     const after = await admin.query<{ n: string }>(

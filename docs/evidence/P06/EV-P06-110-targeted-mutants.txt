@@ -1,0 +1,5 @@
+Targeted mutants of the session-bound CSRF check (tests intact, mutation applied to the fixed code, exits 0 when vitest fails):
+m1 drop the session-derived token check in verifyCsrf: detected (vitest exit 1)
+m2 disable the Sec-Fetch-Site / Referer check for an absent Origin: detected (vitest exit 1)
+m3 run the CSRF verdict after the session lookup again: detected (vitest exit 1)
+Script: csrf-mutation.sh; baseline (no mutation) passes.

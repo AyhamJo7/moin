@@ -1,0 +1,15 @@
+# EV-P06-110: Security acceptance G07 M1 and L1, L2. The CSRF synchronizer token was an unsigned double-submit cookie unrelated to the session: another session's matching pair, or an arbitrary never-issued pair that agreed with itself, was admitted (200). The token is now derived from the session (HMAC-SHA256 keyed with the session token over a fixed label, 43 characters), issued with the session at sign-in and recomputed by the guard from the presented session cookie, besides the existing double-submit check. No new secret and no stored state: the key is the session secret; the local token key cannot serve because the configuration loader refuses it outside development and test, so a server-keyed MAC would have needed a new deployed secret. An absent Origin is refused when Sec-Fetch-Site is not same-origin or none, or the Referer names another origin (L1). The CSRF verdict now precedes the session lookup, so a forged post takes no session locks and does not slide the idle deadline (L2). Before: foreign pair 200, random agreeing pair 200, cross-site fetch without Origin 201, forged post slid the idle deadline. After: 403 for all four. mutation_check on the three source files KILLED (19 tests fail without); three targeted mutants (drop the derived check, drop the originless check, restore the old order) each detected; gates full PASS 14/14.
+
+| Field | Value |
+|---|---|
+| Evidence ID | EV-P06-110 |
+| Item | P06.06.06 |
+| Date (UTC) | 2026-11-03 15:26 UTC |
+| Commit | `11e7eca05abfa689baf2afa5192259764033dd76` |
+| Environment | local |
+| Command / procedure | `.claude/bin/gates.py full`: `python3 .claude/bin/control_plane_check.py && python3 -m unittest discover -s .claude/tests -t .claude/tests` → pass (exit 0, 27.2 s); `uvx ruff@0.15.12 format --check --config .claude/ruff.toml .claude && uvx ruff@0.15.12 check --config .claude/ruff.toml .claude && uvx --from mypy==2.3.1 mypy --config-file .claude/mypy.ini` → pass (exit 0, 0.3 s); `node scripts/check-conventional-commit.ts --self-test && node scripts/check-no-ai-mentions.ts --self-test` → pass (exit 0, 0.1 s); `node scripts/check-adr-coverage.ts && node scripts/check-domain-coverage.ts && node scripts/check-dfd-coverage.ts && node scripts/check-threat-model-refs.ts && node scripts/check-data-classification.ts && node scripts/check-subprocessors.ts && node scripts/check-brand-strings.ts` → pass (exit 0, 1.5 s); `pnpm exec prettier --check .` → pass (exit 0, 7.4 s); `pnpm lint` → pass (exit 0, 9.4 s); `pnpm exec depcruise apps packages scripts --config .dependency-cruiser.cjs` → pass (exit 0, 1.2 s); `pnpm typecheck` → pass (exit 0, 6.4 s); `pnpm test` → pass (exit 0, 6.4 s); `pnpm test:integration` → pass (exit 0, 65.2 s); `node scripts/check-migrations.ts` → pass (exit 0, 0.1 s); `pnpm turbo run build` → pass (exit 0, 5.5 s); `node scripts/check-licences.ts` → pass (exit 0, 0.4 s); `gitleaks git --redact --no-banner --config .gitleaks.toml .` → pass (exit 0, 1.2 s) |
+| Result | PASS |
+| CI run / artifact | pending |
+| Reviewer | pending |
+
+Sensitive material is stored by reference only (PLAN.md evidence rules).
