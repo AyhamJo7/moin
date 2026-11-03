@@ -63,15 +63,25 @@ export function controllersReachableFrom(roots: readonly unknown[]): Set<Constru
   return controllers;
 }
 
-/** `METHOD /path` for every handler of `controller` and its base classes, from the decorators' own metadata. */
-export function routesOfController(controller: Constructor): string[] {
+/** One mounted route: its verb, full path and the decorated method Nest calls for it. */
+export interface HandlerRoute {
+  readonly verb: string;
+  readonly path: string;
+  readonly handler: (...args: never[]) => unknown;
+}
+
+/**
+ * Every route of `controller` and its base classes with the handler behind it, from the
+ * decorators' own metadata. Nest mounts decorated methods inherited from base controllers too, so
+ * the scan walks the whole prototype chain with the scanner the router itself uses.
+ * `prototype[name]` resolves an override to the subclass method, and an undecorated override
+ * carries no route metadata and is skipped, exactly as the router does (P06.13.02, G12 review
+ * round 1).
+ */
+export function handlersOfController(controller: Constructor): HandlerRoute[] {
   const prototype = (controller as unknown as { prototype: Record<string, unknown> }).prototype;
   const prefixes = paths(Reflect.getMetadata(PATH_METADATA, controller));
-  const routes: string[] = [];
-  // Nest mounts decorated methods inherited from base controllers too, so the scan walks the
-  // whole prototype chain with the scanner the router itself uses. `prototype[name]` resolves
-  // an override to the subclass method, and an undecorated override carries no route metadata
-  // and is skipped, exactly as the router does (P06.13.02, G12 review round 1).
+  const routes: HandlerRoute[] = [];
   for (const name of new MetadataScanner().getAllMethodNames(prototype)) {
     const handler = prototype[name];
     if (typeof handler !== 'function') continue;
@@ -80,11 +90,20 @@ export function routesOfController(controller: Constructor): string[] {
     const verb = RequestMethod[method];
     for (const prefix of prefixes) {
       for (const path of paths(Reflect.getMetadata(PATH_METADATA, handler))) {
-        routes.push(`${verb} ${join(prefix, path)}`);
+        routes.push({
+          verb,
+          path: join(prefix, path),
+          handler: handler as HandlerRoute['handler'],
+        });
       }
     }
   }
   return routes;
+}
+
+/** `METHOD /path` for every handler of `controller` and its base classes. */
+export function routesOfController(controller: Constructor): string[] {
+  return handlersOfController(controller).map((route) => `${route.verb} ${route.path}`);
 }
 
 /** The set of routes the given root modules serve. HEAD and OPTIONS are not product routes. */
