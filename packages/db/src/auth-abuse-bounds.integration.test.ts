@@ -62,13 +62,16 @@ async function writeEvent(cls: string, digest: Buffer): Promise<void> {
   );
 }
 
-const eventRows = async (where = 'true'): Promise<number> =>
-  Number(
-    (
-      await fixtures.query<{ n: string }>(
-        `select count(*)::text as n from auth_security_events where ${where}`,
-      )
-    ).rows[0]?.n,
+const scalar = async (sql: string, params: unknown[] = []): Promise<number> =>
+  Number((await fixtures.query<{ n: string }>(sql, params)).rows[0]?.n);
+
+const allEvents = (): Promise<number> =>
+  scalar('select count(*)::text as n from auth_security_events');
+const eventsOfClass = (cls: string): Promise<number> =>
+  scalar('select count(*)::text as n from auth_security_events where class = $1', [cls]);
+const eventsOlderThanAYear = (): Promise<number> =>
+  scalar(
+    "select count(*)::text as n from auth_security_events where created_at < clock_timestamp() - interval '1 year'",
   );
 
 describe('the throttle table has a ceiling (G11 M3)', () => {
@@ -126,25 +129,23 @@ describe('security events are retained for one year (G11 M3)', () => {
       [key()],
     );
     await writeEvent('sign_in', key());
-    expect(await eventRows("created_at < clock_timestamp() - interval '1 year'")).toBe(
-      OLD_EVENTS - EVENT_SWEEP_CAP,
-    );
+    expect(await eventsOlderThanAYear()).toBe(OLD_EVENTS - EVENT_SWEEP_CAP);
     await writeEvent('sign_in', key());
-    expect(await eventRows("created_at < clock_timestamp() - interval '1 year'")).toBe(0);
+    expect(await eventsOlderThanAYear()).toBe(0);
     // The eleven-month-old row and the two fresh ones survive.
-    expect(await eventRows()).toBe(3);
+    expect(await allEvents()).toBe(3);
   });
 
   evidenceTest('a throttle refusal is stored once per source per minute', async () => {
     const flooded = key();
     for (let i = 0; i < 5; i += 1) await writeEvent('throttle', flooded);
-    expect(await eventRows("class = 'throttle'")).toBe(1);
+    expect(await eventsOfClass('throttle')).toBe(1);
     await writeEvent('throttle', key());
-    expect(await eventRows("class = 'throttle'")).toBe(2);
+    expect(await eventsOfClass('throttle')).toBe(2);
     // Other classes are never deduplicated.
     const same = key();
     await writeEvent('sign_in', same);
     await writeEvent('sign_in', same);
-    expect(await eventRows("class = 'sign_in'")).toBe(2);
+    expect(await eventsOfClass('sign_in')).toBe(2);
   });
 });
