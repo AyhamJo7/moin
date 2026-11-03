@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/tmp/moin-h7",
+  "head": "4c056a74f66dc742f209d7b3a42e63c649480134",
+  "mode": "committed",
+  "fix_ref": "4c056a74f66dc742f209d7b3a42e63c649480134",
+  "fix_paths": [
+    "packages/db/migrations/0083_cap_override_audit.sql"
+  ],
+  "untracked_fix_files": [],
+  "test": "pnpm exec vitest run --project integration packages/db/src/cap-override.integration.test.ts -t 'a cap change without its audit record is refused'",
+  "started": "2026-11-03T15:58:46+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-11-03T15:58:53+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 3.03,
+    "tail": " \u276f packages/db/src/cap-override.integration.test.ts:110:8\n \u276f evidenceBody packages/testing/src/mutation/evidence-state.ts:277:7\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[3/5]\u23af\n\n FAIL  |integration| packages/db/src/cap-override.integration.test.ts > a cap change without its audit record is refused > an override record from an earlier transaction authorises nothing\nerror: function app.override_early_access_cap(unknown, unknown, unknown, unknown, unknown) does not exist\n \u276f node_modules/.pnpm/pg-pool@3.14.0_pg@8.23.0/node_modules/pg-pool/index.js:45:11\n \u276f override packages/db/src/cap-override.integration.test.ts:66:3\n     64|\n     65| async function override(newCap: number, newCounter: number | null = nu\u2026\n     66|   await migrator.query('select app.override_early_access_cap($1, $2, $\u2026\n       |   ^\n     67|     newCap,\n     68|     newCounter,\n \u276f packages/db/src/cap-override.integration.test.ts:116:5\n \u276f evidenceBody packages/testing/src/mutation/evidence-state.ts:277:7\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[4/5]\u23af\n\n FAIL  |integration| packages/db/src/cap-override.integration.test.ts > a cap change without its audit record is refused > an override record for a different change authorises nothing\nerror: function app.override_early_access_cap(unknown, unknown, unknown, unknown, unknown) does not exist\n \u276f node_modules/.pnpm/pg@8.23.0/node_modules/pg/lib/client.js:694:17\n \u276f packages/db/src/cap-override.integration.test.ts:128:7\n    126|     try {\n    127|       await client.query('begin');\n    128|       await client.query('select app.override_early_access_cap($1, nul\u2026\n       |       ^\n    129|         7,\n    130|         REASON,\n \u276f evidenceBody packages/testing/src/mutation/evidence-state.ts:277:7\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[5/5]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  5 failed | 7 skipped (12)\n   Start at  16:58:47\n   Duration  2.53s (tests 92%, transform 5%, setup 3%)\n"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 3.11,
+    "tail": "\n RUN  v5.0.2 /tmp/moin-h7\n\n \u2713 |integration| packages/db/src/cap-override.integration.test.ts (12 tests | 7 skipped) 1797ms\n   \u2713 a cap change without its audit record is refused (5)\n     \u2713 a migration that raises the cap by plain UPDATE leaves it unchanged 984ms\n     \u2713 the sixth paid tenant is still refused after the refused change 303ms\n\n Test Files  1 passed (1)\n      Tests  5 passed | 7 skipped (12)\n   Start at  16:58:50\n   Duration  2.60s (tests 92%, transform 5%, setup 3%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/tmp/moin-h7/.git/claude-evidence/mutation/20261103T155846Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}

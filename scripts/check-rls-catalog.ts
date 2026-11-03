@@ -144,6 +144,7 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.accept_invitation': '84f2e4b93e9aa3c1700747109b8222cf',
   'app.take_signin_bucket': 'c4f2a268dd9cfacb9b2d5936de8925c7',
   'app.write_signin_event': 'bc65e2433de7603be03149ed8a755e69',
+  'app.override_early_access_cap': '92738f2b262ca28f2cd55c7fdf4c7e7f',
   'app.live_support_grant': '627c5b62b80383a39b182444fbbb672b',
   'app.create_support_grant': 'a290be70a4a2a617cb08bcb1f1c944e7',
   'app.revoke_support_grant': 'a7f4ef52e1b5f0b4e949415424f10385',
@@ -440,6 +441,13 @@ const APPROVED_DEFINERS: Readonly<
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
     executeGrantees: ['moin_app'],
+  },
+  'app.override_early_access_cap': {
+    arguments: 'integer, integer, text, text, text',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    // Called from reviewed migrations by the migration role (the owner); no runtime role.
+    executeGrantees: [],
   },
   'app.accept_invitation': {
     arguments: 'uuid, bytea, text, citext, uuid, uuid',
