@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/tmp/moin-c-rerun",
+  "head": "be4591df127cd19e0bceee4e5426c325b119aed3",
+  "mode": "committed",
+  "fix_ref": "28e11f19184998d42a96f1cb881f6ae481009eef",
+  "fix_paths": [
+    "packages/db/src/faq.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "pnpm exec vitest run --project integration packages/db/src/channels.integration.test.ts -t 'omitted context is fail closed and legacy grants are not aliases'",
+  "started": "2026-11-01T09:41:43+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-11-01T09:41:47+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 3.94,
+    "tail": "   \u276f channel-scoping (7)\n     \u2193 voice sees own and all-channel content only\n     \u2193 email sees own and all-channel content only\n     \u2193 web sees own and all-channel content only\n     \u00d7 omitted context is fail closed and legacy grants are not aliases 51ms\n     \u2193 channel sensitivity matrix preserves verbatim grounded and overdue gates\n     \u2193 view context rejects unknown channels and cannot leak across transactions or tenants\n     \u2193 service and database reject invalid and empty channel grants\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af\n\n FAIL  |integration| packages/db/src/channels.integration.test.ts > channel-scoping > omitted context is fail closed and legacy grants are not aliases\nAssertionError: expected true to be false // Object.is equality\n\n- Expected\n+ Received\n\n- false\n+ true\n\n \u276f Proxy.toBe scripts/mutation-evidence-probe.ts:84:27\n     82|       let result: unknown;\n     83|       try {\n     84|         result = original.apply(this, args);\n       |                           ^\n     85|       } catch (error) {\n     86|         record(name, error);\n \u276f packages/db/src/channels.integration.test.ts:171:11\n \u276f withTenant packages/db/src/tenant.ts:171:20\n \u276f packages/db/src/channels.integration.test.ts:153:5\n \u276f evidenceBody packages/testing/src/mutation/evidence-state.ts:277:7\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/1]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  1 failed | 6 skipped (7)\n   Start at  10:41:43\n   Duration  3.35s (tests 91%, transform 6%, setup 2%)\n"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 1.82,
+    "tail": "\n RUN  v5.0.2 /tmp/moin-c-rerun\n\n \u2713 |integration| packages/db/src/channels.integration.test.ts (7 tests | 6 skipped) 389ms\n\n Test Files  1 passed (1)\n      Tests  1 passed | 6 skipped (7)\n   Start at  10:41:46\n   Duration  1.27s (tests 66%, transform 24%, setup 8%, import 1%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/tmp/moin-c-rerun/.git/claude-evidence/mutation/20261101T094143Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}
