@@ -113,8 +113,11 @@ describe('a cap change without its audit record is refused', () => {
   );
 
   evidenceTest('an override record from an earlier transaction authorises nothing', async () => {
-    await override(5); // an audited no-op change in its own transaction
-    expect(await overrides()).toBe(1);
+    // Two audited changes in their own transactions, 5 to 6 and back, leave a record that matches
+    // a later plain 5 to 6 exactly. It must not be replayable.
+    await override(6);
+    await override(5);
+    expect(await overrides()).toBe(2);
     await expect(
       migrator.query('update provisioning_limits set early_access_cap = 6'),
     ).rejects.toMatchObject({ code: '23000' });
