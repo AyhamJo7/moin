@@ -3,6 +3,7 @@ import { evidenceTest } from '@moin/testing';
 import { randomSecret } from '../domain/secret-values.ts';
 import {
   CSRF_HEADER,
+  deriveCsrfToken,
   firstHeader,
   parseOrigin,
   requiresCsrfProtection,
@@ -11,12 +12,17 @@ import {
 
 const ORIGIN = 'https://app.example.de';
 
-function valid(token = randomSecret()) {
+const SESSION = randomSecret();
+
+/** A request of the session `SESSION`: the header and the cookie both carry its derived token. */
+function valid(sessionToken = SESSION) {
+  const token = deriveCsrfToken(sessionToken);
   return {
     method: 'POST',
     origin: ORIGIN,
     token,
     cookie: token,
+    sessionToken,
     expectedOrigin: ORIGIN,
   };
 }
@@ -44,7 +50,7 @@ describe('the CSRF verdict (P06.06.06)', () => {
     });
   });
 
-  evidenceTest('a forged token fails: the header must echo the cookie', () => {
+  evidenceTest('a forged token fails: the header must echo the cookie and the session', () => {
     expect(verifyCsrf({ ...valid(), token: randomSecret() })).toStrictEqual({
       ok: false,
       reason: 'token-invalid',
@@ -65,12 +71,58 @@ describe('the CSRF verdict (P06.06.06)', () => {
     });
   });
 
-  evidenceTest('an absent origin passes the origin layer, not the token layer', () => {
+  evidenceTest('an absent origin with nothing cross-site about it passes the origin layer', () => {
     expect(verifyCsrf({ ...valid(), origin: undefined }).ok).toBe(true);
     expect(verifyCsrf({ ...valid(), origin: undefined, token: randomSecret() })).toStrictEqual({
       ok: false,
       reason: 'token-invalid',
     });
+  });
+
+  evidenceTest('an absent origin is refused when the request says it is cross-site (L1)', () => {
+    for (const fetchSite of ['cross-site', 'same-site']) {
+      expect(verifyCsrf({ ...valid(), origin: undefined, fetchSite })).toStrictEqual({
+        ok: false,
+        reason: 'origin-mismatch',
+      });
+    }
+    expect(
+      verifyCsrf({ ...valid(), origin: undefined, referer: 'https://evil.example/page' }),
+    ).toStrictEqual({ ok: false, reason: 'origin-mismatch' });
+    // Same-origin evidence is admitted.
+    expect(verifyCsrf({ ...valid(), origin: undefined, fetchSite: 'same-origin' }).ok).toBe(true);
+    expect(verifyCsrf({ ...valid(), origin: undefined, fetchSite: 'none' }).ok).toBe(true);
+    expect(verifyCsrf({ ...valid(), origin: undefined, referer: `${ORIGIN}/page` }).ok).toBe(true);
+  });
+
+  evidenceTest("another session's well-formed token pair is refused (G07 M1)", () => {
+    const other = deriveCsrfToken(randomSecret());
+    expect(verifyCsrf({ ...valid(), token: other, cookie: other })).toStrictEqual({
+      ok: false,
+      reason: 'token-invalid',
+    });
+  });
+
+  evidenceTest('a never-issued random pair is refused even though header and cookie agree', () => {
+    const forged = randomSecret();
+    expect(verifyCsrf({ ...valid(), token: forged, cookie: forged })).toStrictEqual({
+      ok: false,
+      reason: 'token-invalid',
+    });
+  });
+
+  evidenceTest('no session token means no proof', () => {
+    expect(verifyCsrf({ ...valid(), sessionToken: undefined })).toStrictEqual({
+      ok: false,
+      reason: 'token-invalid',
+    });
+  });
+
+  evidenceTest('the derived token is deterministic, 43 characters and per session', () => {
+    expect(deriveCsrfToken(SESSION)).toBe(deriveCsrfToken(SESSION));
+    expect(deriveCsrfToken(SESSION)).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(deriveCsrfToken(SESSION)).not.toBe(deriveCsrfToken(randomSecret()));
+    expect(deriveCsrfToken(SESSION)).not.toContain(SESSION);
   });
 
   evidenceTest('opaque and non-http origins never match', () => {

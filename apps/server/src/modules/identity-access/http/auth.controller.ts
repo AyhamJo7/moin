@@ -30,10 +30,10 @@ import {
   type SecurityClass,
   type SecurityReason,
 } from '../application/security-events.ts';
-import { randomSecret } from '../domain/secret-values.ts';
 import type { SessionService } from '../application/session.service.ts';
 import { SESSIONS, SIGN_IN, type SignInGate } from '../identity-access.tokens.ts';
 import { clearCookie, readCookie, serializeCookie } from './cookies.ts';
+import { deriveCsrfToken } from './csrf.ts';
 import { AuthThrottleStore } from '../../platform/auth-throttle-store.ts';
 import { CONFIG } from '../../../config/config.module.ts';
 import type { Config } from '../../../config/env.ts';
@@ -163,7 +163,9 @@ export class AuthController {
       // Accepted sign-in: new family (no superseded predecessor) is the new-device
       // heuristic — documented as such, not a fingerprint.
       await this.#event(request, 'sign_in', 'accepted', 'ok', completed.steppedUp !== true);
-      const csrfToken = randomSecret();
+      // Bound to the session just issued: derived from its token, so the guard recomputes it
+      // from the presented cookie (G07 M1).
+      const csrfToken = deriveCsrfToken(completed.sessionToken);
       await reply
         .code(302)
         .header('location', completed.location)
