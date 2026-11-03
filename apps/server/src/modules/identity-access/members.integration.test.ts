@@ -824,3 +824,126 @@ describe('membership lifecycle (P06.08.03, P06.08.04)', () => {
     expect(row.rows[0]?.role).toBe('owner');
   });
 });
+
+describe('ownership changes take the organisation lock before any row lock (G09 M2)', () => {
+  /**
+   * Holds the organisation's ownership lock from a separate connection, fires `action`, waits
+   * until a backend is queued on that advisory lock, and answers whether the target's
+   * membership row was already locked by the queued request. Before the fix every path locked
+   * the target row first and queued on the lock afterwards (opposite orders deadlock); after
+   * it the request queues with no row lock held.
+   */
+  async function rowLockedWhileQueued(
+    org: string,
+    targetId: string,
+    action: () => Promise<{ statusCode: number }>,
+  ): Promise<{ rowLocked: boolean; statusCode: number }> {
+    const holder = await admin.connect();
+    const prober = await admin.connect();
+    try {
+      await holder.query('begin');
+      await holder.query("select pg_advisory_xact_lock(hashtext('last-owner:' || $1::text))", [
+        org,
+      ]);
+      const pending = action();
+      const deadline = Date.now() + 20_000;
+      for (;;) {
+        const queued = await prober.query<{ n: string }>(
+          `select count(*)::text as n from pg_stat_activity
+            where datname = current_database() and wait_event_type = 'Lock'
+              and wait_event = 'advisory' and pid <> pg_backend_pid()`,
+        );
+        if (queued.rows[0]?.n !== '0') break;
+        if (Date.now() > deadline) throw new Error('the request never queued on the lock');
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      await prober.query('begin');
+      let rowLocked = false;
+      try {
+        await prober.query('select 1 from memberships where user_id = $1 for update nowait', [
+          targetId,
+        ]);
+      } catch (error) {
+        if ((error as { code?: string }).code !== '55P03') throw error;
+        rowLocked = true;
+      }
+      await prober.query('rollback');
+      await holder.query('commit');
+      const response = await pending;
+      return { rowLocked, statusCode: response.statusCode };
+    } finally {
+      holder.release();
+      prober.release();
+    }
+  }
+
+  evidenceTest('remove queues on the lock holding no row lock', async () => {
+    const { pair, org } = await ownerPair();
+    const staff = await person();
+    await member(staff.id, 'staff', 'active', org);
+    const result = await rowLockedWhileQueued(org, staff.id, () =>
+      postAs(pair, '/api/members/remove', { userId: staff.id }),
+    );
+    expect(result).toEqual({ rowLocked: false, statusCode: 200 });
+  });
+
+  evidenceTest('disable queues on the lock holding no row lock', async () => {
+    const { pair, org } = await ownerPair();
+    const staff = await person();
+    await member(staff.id, 'staff', 'active', org);
+    const result = await rowLockedWhileQueued(org, staff.id, () =>
+      postAs(pair, '/api/members/disable', { userId: staff.id }),
+    );
+    expect(result).toEqual({ rowLocked: false, statusCode: 200 });
+  });
+
+  evidenceTest('transfer queues on the lock holding no row lock', async () => {
+    const { pair, org } = await ownerPair();
+    const successor = await person();
+    await member(successor.id, 'admin', 'active', org);
+    const result = await rowLockedWhileQueued(org, successor.id, () =>
+      postAs(pair, '/api/members/transfer-ownership', { userId: successor.id }),
+    );
+    expect(result).toEqual({ rowLocked: false, statusCode: 200 });
+  });
+
+  evidenceTest(
+    'transfer racing the removal of the transferring owner never answers 5xx',
+    async () => {
+      const rounds = 12;
+      for (let round = 0; round < rounds; round += 1) {
+        const org = randomUUID();
+        await admin.query('insert into organisations (id, slug, name) values ($1, $2, $3)', [
+          org,
+          `race-${org.slice(0, 8)}`,
+          'Race Org',
+        ]);
+        const first = await person();
+        const second = await person();
+        const successor = await person();
+        await member(first.id, 'owner', 'active', org);
+        await member(second.id, 'owner', 'active', org);
+        await member(successor.id, 'admin', 'active', org);
+        const firstPair = await signInPair(first);
+        const secondPair = await signInPair(second);
+        contexts().clearCache();
+        const responses = await Promise.all([
+          postAs(firstPair, '/api/members/transfer-ownership', { userId: successor.id }),
+          postAs(secondPair, '/api/members/remove', { userId: first.id }),
+        ]);
+        const codes = responses.map((response) => response.statusCode);
+        expect(
+          codes.every((code) => code < 500),
+          `round ${String(round)}: ${codes.join(',')}`,
+        ).toBe(true);
+        const owners = await admin.query<{ n: string }>(
+          `select count(*)::text as n from memberships m join users u on u.id = m.user_id
+          where m.organisation_id = $1 and m.role = 'owner' and m.status = 'active' and u.status = 'active'`,
+          [org],
+        );
+        expect(Number(owners.rows[0]?.n)).toBeGreaterThanOrEqual(1);
+      }
+    },
+    120_000,
+  );
+});

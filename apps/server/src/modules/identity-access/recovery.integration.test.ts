@@ -725,6 +725,65 @@ describe('disabled-account callback and races (M2)', () => {
   });
 });
 
+describe('account disable under an ownership race (G09 L1)', () => {
+  evidenceTest(
+    'disable-user that would strand the organisation answers 409, never 500',
+    async () => {
+      const org = randomUUID();
+      await admin.query('insert into organisations (id, slug, name) values ($1, $2, $3)', [
+        org,
+        `race-${org.slice(0, 8)}`,
+        'Race Org',
+      ]);
+      const actor = await person();
+      const other = await person();
+      await member(actor.id, org, 'owner');
+      await member(other.id, org, 'owner');
+      const actorPair = await signInPair(actor);
+      contexts().clearCache();
+      // While the request is queued on the ownership lock, the actor's own account is
+      // disabled out of band by the lock holder, so by the time the request runs the other
+      // owner is the last effective one and the users_last_owner backstop refuses.
+      const holder = await admin.connect();
+      const prober = await admin.connect();
+      try {
+        await holder.query('begin');
+        await holder.query("select pg_advisory_xact_lock(hashtext('last-owner:' || $1::text))", [
+          org,
+        ]);
+        const pending = postAs(actorPair, '/api/recovery/disable-user', {
+          userId: other.id,
+          reason: 'mfa_reset',
+        });
+        const deadline = Date.now() + 20_000;
+        for (;;) {
+          const queued = await prober.query<{ n: string }>(
+            `select count(*)::text as n from pg_stat_activity
+              where datname = current_database() and wait_event_type = 'Lock'
+                and wait_event = 'advisory' and pid <> pg_backend_pid()`,
+          );
+          if (queued.rows[0]?.n !== '0') break;
+          if (Date.now() > deadline) throw new Error('the request never queued on the lock');
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        await holder.query("update users set status = 'disabled' where id = $1", [actor.id]);
+        await holder.query('commit');
+        const response = await pending;
+        expect(response.statusCode).toBe(409);
+      } finally {
+        holder.release();
+        prober.release();
+      }
+      const status = await admin.query<{ status: string }>(
+        'select status from users where id = $1',
+        [other.id],
+      );
+      expect(status.rows[0]?.status).toBe('active');
+    },
+    60_000,
+  );
+});
+
 describe('password-reset revocation hook (P06.09.01, our side)', () => {
   evidenceTest('after an established reset, every session ends with password_reset', async () => {
     // The provider's email flow is the provider's (Cognito when P05 provisions it); this proves

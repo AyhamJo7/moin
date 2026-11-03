@@ -44,7 +44,7 @@ import { appendAuditEvent } from '@moin/db';
 import type { Logger } from '@moin/observability';
 import { LOGGER } from '../../../observability/logger.module.ts';
 import { currentTenantScope } from '../../platform/tenant-scope.ts';
-import { MemberQueries } from '../../platform/member-queries.ts';
+import { MemberQueries, isRetryableConflict } from '../../platform/member-queries.ts';
 import { requireCapability } from '../application/authorization.ts';
 import { INVITATION_TTL_DAYS, issueInvitation, revokeInvitation } from '../domain/invitations.ts';
 import { RequireStepUpGuard } from './require-step-up.guard.ts';
@@ -189,7 +189,7 @@ export class MembersController {
     // owner, owner capability demanded) or waits on this transaction — never slips between a
     // read and a later write. Unknown targets and forbidden ones share one 404 (P06.07.03).
     const outcome = await this.members
-      .inScope(async (client) => {
+      .inOwnershipScope(async (client) => {
         const target = await client
           .query<{ role: string }>(
             'select m.role from memberships m where m.user_id = $1::uuid for update',
@@ -226,11 +226,13 @@ export class MembersController {
       .catch((error: unknown) => {
         // Last-owner backstop (P06.07.04): disabling the last active owner fails structurally.
         if (isIntegrityViolation(error)) return 'last-owner' as const;
+        if (isRetryableConflict(error)) return 'conflict' as const;
         throw error;
       });
     if (outcome === 'last-owner') {
       return fail(reply, 409, '/problems/last-owner', 'The last owner cannot be disabled');
     }
+    if (outcome === 'conflict') return conflict(reply);
     if (outcome !== 'disabled') {
       // Missing, denied on a non-owner (the route guard already answered 403 for the caller's
       // own role), and owner-existence all share one 404: the response never confirms whether
@@ -266,7 +268,7 @@ export class MembersController {
     // Same single-transaction shape as disable: lock the target row, judge the capability
     // against the locked row, delete and audit in the same commit. Owner existence stays 404.
     const outcome = await this.members
-      .inScope(async (client) => {
+      .inOwnershipScope(async (client) => {
         const target = await client
           .query<{ role: string }>(
             'select m.role from memberships m where m.user_id = $1::uuid for update',
@@ -301,11 +303,13 @@ export class MembersController {
       })
       .catch((error: unknown) => {
         if (isIntegrityViolation(error)) return 'last-owner' as const;
+        if (isRetryableConflict(error)) return 'conflict' as const;
         throw error;
       });
     if (outcome === 'last-owner') {
       return fail(reply, 409, '/problems/last-owner', 'The last owner cannot be removed');
     }
+    if (outcome === 'conflict') return conflict(reply);
     if (outcome !== 'removed') {
       return fail(reply, 404, '/problems/not-found', 'Not found');
     }
@@ -332,40 +336,52 @@ export class MembersController {
     // The demote targets the actor's OWN row (locked): a zero-row demote means the actor's
     // membership vanished mid-transfer — fail closed rather than auditing a transfer that
     // left two owners.
-    const transferred = await this.members.inScope(async (client) => {
-      const promoted = await client
-        .query<{ n: number }>(
-          // eslint-disable-next-line no-restricted-syntax -- membership write through the tenant wrapper; the SET-session rule matches UPDATE ... SET verb text.
-          `update memberships set role = 'owner', status = 'active', updated_at = now(), version = version + 1
+    const transferred = await this.members
+      .inOwnershipScope(async (client) => {
+        const promoted = await client
+          .query<{ n: number }>(
+            // eslint-disable-next-line no-restricted-syntax -- membership write through the tenant wrapper; the SET-session rule matches UPDATE ... SET verb text.
+            `update memberships set role = 'owner', status = 'active', updated_at = now(), version = version + 1
             where user_id = $1::uuid and status = 'active' returning 1 as n`,
-          [parsed.data.userId],
-        )
-        .then((query) => (query.rows[0]?.n ?? 0) === 1);
-      if (!promoted) return false;
-      const demoted = await client
-        .query<{ n: number }>(
-          // eslint-disable-next-line no-restricted-syntax -- membership write through the tenant wrapper; the SET-session rule matches UPDATE ... SET verb text.
-          `update memberships set role = 'admin', updated_at = now(), version = version + 1
+            [parsed.data.userId],
+          )
+          .then((query) => (query.rows[0]?.n ?? 0) === 1);
+        if (!promoted) return false;
+        const demoted = await client
+          .query<{ n: number }>(
+            // eslint-disable-next-line no-restricted-syntax -- membership write through the tenant wrapper; the SET-session rule matches UPDATE ... SET verb text.
+            `update memberships set role = 'admin', updated_at = now(), version = version + 1
             where user_id = $1::uuid and role = 'owner' returning 1 as n`,
-          [scope.actorId],
-        )
-        .then((query) => (query.rows[0]?.n ?? 0) === 1);
-      if (!demoted) return false;
-      await appendAuditEvent(client, {
-        source: 'api',
-        operation: 'member.transfer_ownership',
-        targetKind: 'membership',
-        targetId: parsed.data.userId,
-        result: 'succeeded',
+            [scope.actorId],
+          )
+          .then((query) => (query.rows[0]?.n ?? 0) === 1);
+        if (!demoted) return false;
+        await appendAuditEvent(client, {
+          source: 'api',
+          operation: 'member.transfer_ownership',
+          targetKind: 'membership',
+          targetId: parsed.data.userId,
+          result: 'succeeded',
+        });
+        return true;
+      })
+      .catch((error: unknown) => {
+        if (isRetryableConflict(error)) return 'conflict' as const;
+        throw error;
       });
-      return true;
-    });
+    if (transferred === 'conflict') return conflict(reply);
     if (!transferred) {
       return fail(reply, 404, '/problems/not-found', 'Not found');
     }
     this.logger.info({ outcome: 'ownership_transferred' }, 'transferred ownership');
     return { transferred: true };
   }
+}
+
+/** A deadlock victim or serialisation failure: nothing changed, the caller may retry. */
+function conflict(reply: FastifyReply) {
+  void reply.header('retry-after', '1');
+  return fail(reply, 409, '/problems/concurrent-change', 'Concurrent change, retry');
 }
 
 function isIntegrityViolation(error: unknown): boolean {

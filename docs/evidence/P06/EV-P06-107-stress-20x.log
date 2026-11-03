@@ -1,0 +1,24 @@
+gates stress x20 @ c6f6a9e32a: pnpm exec vitest run --project unit --project integration apps/server/src/modules/identity-access/members.integration.test.ts apps/server/src/modules/identity-access/recovery.integration.test.ts -t 'organisation lock before any row lock|ownership race'
+  [  1/20] ok          3.9s
+  [  2/20] ok          3.9s
+  [  3/20] ok          3.7s
+  [  4/20] ok          3.9s
+  [  5/20] ok          3.8s
+  [  6/20] ok          3.6s
+  [  7/20] ok          3.6s
+  [  8/20] ok          3.8s
+  [  9/20] ok          3.8s
+  [ 10/20] ok          3.6s
+  [ 11/20] ok          3.7s
+  [ 12/20] ok          3.9s
+  [ 13/20] ok          3.7s
+  [ 14/20] ok          3.6s
+  [ 15/20] ok          3.6s
+  [ 16/20] ok          3.7s
+  [ 17/20] ok          3.8s
+  [ 18/20] ok          3.4s
+  [ 19/20] ok          3.6s
+  [ 20/20] ok          3.8s
+  failures: 0/20
+RESULT: PASS (20/20 iterations passed)
+  evidence: /tmp/moin-h2/.git/claude-evidence/20261103T143109Z-stress.json
