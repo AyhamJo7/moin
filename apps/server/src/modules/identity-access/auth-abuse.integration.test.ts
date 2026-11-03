@@ -170,18 +170,50 @@ describe('throttling engages (P06.12.01, P06.12.03)', () => {
     },
   );
 
-  evidenceTest('throttle refusals are counted as security events (rate_limited)', async () => {
-    // Exhaust the bucket, then confirm a rate_limited row exists for the throttle class.
-    for (let i = 0; i < 400; i++) {
+  evidenceTest('a throttle refusal is recorded once as a rate_limited security event', async () => {
+    // Exhaust the bucket, keep hammering, then read the table: the refusals are one row for the
+    // source (deduplicated per minute so a refused flood cannot become a write flood), coarse,
+    // and not claimed as notified.
+    await admin.query('delete from auth_security_events');
+    let refused = 0;
+    for (let i = 0; i < 600 && refused < 5; i++) {
       const response = await app.inject({ method: 'GET', url: '/api/auth/login' });
-      if (response.statusCode === 429) break;
+      if (response.statusCode === 429) refused += 1;
     }
-    // The guard's own warn log is the throttle signal; the callback-event path above proves
-    // the writer. Here assert the bucket state instead: a further login stays refused.
-    const again = await app.inject({ method: 'GET', url: '/api/auth/login' });
-    expect(again.statusCode).toBe(429);
-    expect(again.headers['retry-after']).toBeDefined();
+    expect(refused).toBe(5);
+    const rows = await admin.query<{
+      outcome: string;
+      reason_class: string;
+      owner_notified: boolean;
+    }>(
+      "select outcome, reason_class, owner_notified from auth_security_events where class = 'throttle'",
+    );
+    expect(rows.rows).toStrictEqual([
+      { outcome: 'refused', reason_class: 'rate_limited', owner_notified: false },
+    ]);
   });
+
+  evidenceTest(
+    'addresses of one IPv6 /64 share a bucket; a neighbouring /64 does not',
+    async () => {
+      // G11 M1: a host that owns a /64 must not get a fresh budget per address.
+      const login = (remoteAddress: string) =>
+        app.inject({ method: 'GET', url: '/api/auth/login', remoteAddress });
+      let exhausted = false;
+      for (let i = 0; i < 400 && !exhausted; i++) {
+        exhausted = (await login('2001:db8:1:2::1')).statusCode === 429;
+      }
+      expect(exhausted).toBe(true);
+      // Another address of the same /64, in other spellings, is refused at once.
+      for (const neighbour of ['2001:db8:1:2::2', '2001:DB8:1:2::99', '2001:db8:1:2:ffff::1']) {
+        expect((await login(neighbour)).statusCode, neighbour).toBe(429);
+      }
+      // The next /64 has its own budget.
+      expect((await login('2001:db8:1:3::1')).statusCode).toBe(302);
+      // An IPv4-mapped address is the IPv4 address: it shares nothing with the exhausted /64.
+      expect((await login('::ffff:192.0.2.7')).statusCode).toBe(302);
+    },
+  );
 
   evidenceTest('moin_app holds no direct table grant on the bucket table', async () => {
     // MEDIUM fix: buckets advance only through the DEFINER. The app pool (moin_app role)

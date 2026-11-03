@@ -272,6 +272,68 @@ beforeEach(() => {
   provider.claims = {};
 });
 
+/** Accepted security events of a class (global table; counted, never read for detail). */
+async function countAccepted(cls: string): Promise<number> {
+  const result = await admin.query<{ n: number }>(
+    "select count(*)::int as n from auth_security_events where class = $1 and outcome = 'accepted'",
+    [cls],
+  );
+  return result.rows[0]?.n ?? -1;
+}
+
+describe('the new-device flag (P06.12.02, G11 M4)', () => {
+  /** One sign-in, optionally presenting a session cookie the way a returning browser does. */
+  async function signInPresenting(
+    who: { subject: string; email: string },
+    presented?: string,
+  ): Promise<SessionCookies> {
+    const started = await app.inject({ method: 'GET', url: '/api/auth/login' });
+    const binding = /^__Host-moin_signin=([A-Za-z0-9_-]{43});/.exec(
+      String(started.headers['set-cookie']),
+    )?.[1];
+    if (binding === undefined) throw new Error('no binding');
+    const { code, state } = provider.authorize(String(started.headers.location), {
+      subject: who.subject,
+      email: who.email,
+    });
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/auth/callback?${new URLSearchParams({ state, code, iss: provider.issuer }).toString()}`,
+      headers: {
+        cookie:
+          presented === undefined
+            ? `__Host-moin_signin=${binding}`
+            : `__Host-moin_signin=${binding}; ${presented}`,
+      },
+    });
+    expect(response.statusCode).toBe(302);
+    return sessionCookiesFromCallback(response.headers);
+  }
+
+  const flagsSince = async (since: Date): Promise<boolean[]> =>
+    (
+      await admin.query<{ is_new_family: boolean }>(
+        `select is_new_family from auth_security_events
+          where class = 'sign_in' and outcome = 'accepted' and created_at >= $1
+          order by created_at`,
+        [since],
+      )
+    ).rows.map((row) => row.is_new_family);
+
+  evidenceTest(
+    'only a sign-in that presents no session is flagged new; a returning browser is not',
+    async () => {
+      const who = await person();
+      await member(who.id, ORG_A);
+      const since = new Date();
+      const first = await signInPresenting(who);
+      await signInPresenting(who, first.header);
+      await signInPresenting(who, first.header);
+      expect(await flagsSince(since)).toStrictEqual([true, false, false]);
+    },
+  );
+});
+
 describe('signing out other devices (P06.06.05)', () => {
   evidenceTest(
     'POST /api/auth/sign-out-others ends the other sessions and keeps this one',
@@ -282,6 +344,7 @@ describe('signing out other devices (P06.06.05)', () => {
       const second = await signedInCookiesAs(who);
       // A fresh sign-in supersedes the old family, so this endpoint's own count is the one other
       // live session of this account.
+      const revokesBefore = await countAccepted('revoke');
       const answer = await app.inject({
         method: 'POST',
         url: '/api/auth/sign-out-others',
@@ -289,6 +352,7 @@ describe('signing out other devices (P06.06.05)', () => {
       });
       expect(answer.statusCode).toBe(200);
       expect(answer.json()).toStrictEqual({ revoked: 1 });
+      expect(await countAccepted('revoke')).toBe(revokesBefore + 1);
       expect(
         (
           await app.inject({
@@ -1050,6 +1114,7 @@ describe('the step-up gate (P06.06.04)', () => {
     ).toBe(403);
 
     // The step-up round-trip: POST starts it, provider re-verifies, callback rotates.
+    const stepUpsBefore = await countAccepted('step_up');
     const begun = await app.inject({
       method: 'POST',
       url: '/api/auth/step-up',
@@ -1076,6 +1141,8 @@ describe('the step-up gate (P06.06.04)', () => {
     )?.[1];
     if (newToken === undefined) throw new Error('no successor cookie');
     expect(newToken).not.toBe(oldToken);
+    // The completed step-up is a step-up event (G11 M4), not a sign-in.
+    expect(await countAccepted('step_up')).toBe(stepUpsBefore + 1);
     const newCookie = `__Host-moin_sid=${newToken}`;
     contexts().clearCache();
     expect(
