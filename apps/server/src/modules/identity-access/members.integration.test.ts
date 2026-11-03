@@ -693,9 +693,9 @@ describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
       const BOTH = ['billing_admin', 'integration_admin'];
 
       /** An outstanding invitation conferring both permissions, issued by a live owner. */
-      async function outstanding(role = 'staff') {
+      async function outstanding(role = 'staff', toEmail?: string) {
         const { pair, owner, org } = await ownerPair();
-        const email = `late-${randomUUID().slice(0, 8)}@example.test`;
+        const email = toEmail ?? `late-${randomUUID().slice(0, 8)}@example.test`;
         const response = await postAs(pair, '/api/members/invite', {
           email,
           role,
@@ -802,6 +802,104 @@ describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
           ).outcome,
         ).toBe('rejected');
       });
+
+      evidenceTest(
+        'a demotion cannot commit between the authority check and the grant (round 2)',
+        async () => {
+          // The acceptor already has an account, so acceptance blocks on that user row AFTER it
+          // has judged the issuer. While it is blocked the issuer is demoted, as the runtime
+          // role: the demotion must queue behind the acceptance (the authority read is held to
+          // commit) instead of committing first and leaving the grant standing on authority the
+          // issuer no longer has.
+          const target = await person();
+          const inv = await outstanding('staff', target.email);
+          // Warm the runtime pool so the acceptance below does not open its first connection
+          // while the row is held.
+          await Promise.all(
+            [1, 2, 3].map(() =>
+              withTenant(database.pool(), inv.org, (client) =>
+                client.query('select pg_sleep(0.2)'),
+              ),
+            ),
+          );
+          const holder = await admin.connect();
+          try {
+            await holder.query('begin');
+            await holder.query('select id from users where id = $1 for update', [target.id]);
+            const holderPid = (
+              await holder.query<{ pid: number }>('select pg_backend_pid() as pid')
+            ).rows[0]?.pid;
+            const accepting = accept(
+              inv.org,
+              inv.invitationId,
+              inv.token,
+              target.subject,
+              target.email,
+            );
+            const settled = accepting.then(
+              (value) => ({ value }),
+              (error: unknown) => ({ error }),
+            );
+            const deadline = Date.now() + 10_000;
+            const waitFor = async (sql: string, params: unknown[], what: string) => {
+              for (;;) {
+                const found = await holder.query<{ pid: number | null }>(sql, params);
+                const pid = found.rows[0]?.pid ?? null;
+                if (pid !== null) return pid;
+                if (Date.now() > deadline) throw new Error(what);
+                await new Promise((resolve) => setTimeout(resolve, 10));
+              }
+            };
+            // The acceptance, blocked on the held user row after it read the issuer.
+            const acceptPid = await waitFor(
+              `select a.pid from pg_stat_activity a
+                where a.datname = current_database() and a.wait_event_type = 'Lock'
+                  and $1::int = any(pg_blocking_pids(a.pid)) limit 1`,
+              [holderPid],
+              'acceptance never reached the held row',
+            );
+            const demotionState = { committed: false };
+            const demotion = withTenant(database.pool(), inv.org, (client) =>
+              client.query(
+                'update memberships set permissions = $2::text[], role = $3 where user_id = $1',
+                [inv.owner.id, [], 'admin'],
+              ),
+            ).then(() => {
+              demotionState.committed = true;
+            });
+            // Either the demotion commits (the defect) or it queues behind the acceptance.
+            let queuedBehindAcceptance = false;
+            while (!demotionState.committed && !queuedBehindAcceptance) {
+              const queued = await holder.query<{ pid: number }>(
+                `select a.pid from pg_stat_activity a
+                  where a.datname = current_database() and a.wait_event_type = 'Lock'
+                    and $1::int = any(pg_blocking_pids(a.pid)) limit 1`,
+                [acceptPid],
+              );
+              queuedBehindAcceptance = queued.rows.length > 0;
+              if (Date.now() > deadline)
+                throw new Error('the demotion neither committed nor queued');
+              await new Promise((resolve) => setTimeout(resolve, 10));
+            }
+            expect(demotionState.committed, 'the demotion committed mid-acceptance').toBe(false);
+            await holder.query('rollback');
+            const result = await settled;
+            if ('error' in result) throw result.error as Error;
+            await demotion;
+            // Serial order: the acceptance judged and granted first, the demotion followed.
+            expect(result.value.outcome).toBe('accepted');
+            const issuer = await admin.query<{ role: string; permissions: string[] }>(
+              'select role, permissions from memberships where user_id = $1',
+              [inv.owner.id],
+            );
+            expect(issuer.rows[0]).toMatchObject({ role: 'admin', permissions: [] });
+          } finally {
+            await holder.query('rollback').catch(() => undefined);
+            holder.release();
+          }
+        },
+        60_000,
+      );
 
       evidenceTest('only an owner issuer confers the owner role', async () => {
         const inv = await outstanding('owner');
