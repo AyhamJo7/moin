@@ -1,0 +1,36 @@
+{
+  "verdict": "KILLED",
+  "repo": "/tmp/moin-h6",
+  "head": "16fbb14d4cd03c3693d6cd0aa05286c8ae9d1a99",
+  "mode": "committed",
+  "fix_ref": "16fbb14d4cd03c3693d6cd0aa05286c8ae9d1a99",
+  "fix_paths": [
+    "apps/server/src/modules/identity-access/rbac-real-routes.integration.test.ts",
+    "apps/server/src/modules/xsuite/root-routes.ts",
+    "apps/server/src/roots/route-policy.test.ts",
+    "apps/server/src/roots/route-policy.ts"
+  ],
+  "untracked_fix_files": [],
+  "test": "bash /tmp/moin-review/matrix-mutation.sh v1",
+  "started": "2026-11-03T15:45:09+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-11-03T15:45:20+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 5.6,
+    "tail": "mutation v1 NOT detected"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 6.0,
+    "tail": "mutation v1 detected (vitest exit 1)"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/tmp/moin-h6/.git/claude-evidence/mutation/20261103T154509Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}

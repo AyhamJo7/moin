@@ -1,0 +1,5 @@
+Targeted mutants applied to the production code with the new matrix tests in place (script matrix-mutation.sh, exits 0 when vitest fails):
+v1 an undecorated route added to the Work TasksController: detected
+v2 a new controller registered only in ApiRootModule, no policy row: detected
+v3 the Require removed from the member disable route: detected
+The same v1 and v2 against the previous matrix (hand-listed controllers): NOT detected (EV-P06-112-mutation-v1.json, -v2.json, without_fix).

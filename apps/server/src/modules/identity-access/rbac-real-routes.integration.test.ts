@@ -23,13 +23,12 @@ import { LoggerModule } from '../../observability/logger.module.ts';
 import { TenantPoolModule } from '../platform/tenant-pool.module.ts';
 import { IdentityAccessModule } from './identity-access.module.ts';
 import { CONTEXT_CLOCK, IDENTITY_CLOCK, REQUEST_CONTEXTS } from './identity-access.tokens.ts';
-import { MembersController } from './http/members.controller.ts';
-import { RecoveryController } from './http/recovery.controller.ts';
-import { SupportController } from './http/support.controller.ts';
-import { AuthController } from './http/auth.controller.ts';
 import { CAPABILITIES_KEY } from './http/role.ts';
 import { RequireStepUpGuard } from './http/require-step-up.guard.ts';
 import { digestOf } from './domain/secret-values.ts';
+import { ROUTE_POLICY } from '../../roots/route-policy.ts';
+import { loadProductionRoots } from '../xsuite/production-roots.ts';
+import { controllersReachableFrom, handlersOfController } from '../xsuite/root-routes.ts';
 import { startFakeOidcProvider, type FakeOidcProvider } from './__fixtures__/fake-oidc-provider.ts';
 import type { RequestContextService } from './application/request-context.service.ts';
 import type { Capability } from './domain/roles.ts';
@@ -234,35 +233,33 @@ interface RouteSpec {
   readonly stepUp: boolean;
 }
 
-const CONTROLLERS = [
-  MembersController,
-  RecoveryController,
-  SupportController,
-  AuthController,
-] as const;
-
-function readRoutes(): readonly RouteSpec[] {
+/**
+ * The routes this matrix drives, DERIVED from the production root modules (G09 M4): every
+ * controller the roots reach, every handler Nest mounts for it (inherited ones too), and the
+ * capabilities and guards its decorators declare. A controller added to any module appears here
+ * without anyone editing a list; `roots/route-policy.test.ts` separately requires every served
+ * route to be classified, so this matrix only has to drive the capability-bearing ones and the
+ * public sign-in entry points.
+ */
+async function readRoutes(): Promise<readonly RouteSpec[]> {
+  const roots = await loadProductionRoots();
   const out: RouteSpec[] = [];
-  for (const controller of CONTROLLERS) {
-    const prefix = Reflect.getMetadata('path', controller) as string;
-    const names = Object.getOwnPropertyNames(controller.prototype).filter(
-      (name) => name !== 'constructor',
-    );
-    for (const name of names) {
-      const handler = (controller.prototype as unknown as Record<string, unknown>)[name] as (
-        ...args: never[]
-      ) => unknown;
-      const path = Reflect.getMetadata('path', handler) as string | string[] | undefined;
-      const method = Reflect.getMetadata('method', handler) as number | undefined;
-      if (path === undefined || method === undefined) continue;
+  for (const controller of controllersReachableFrom([roots.api, roots.voice])) {
+    for (const route of handlersOfController(controller)) {
+      const key = `${route.verb} ${route.path}`;
+      const policy = ROUTE_POLICY[key];
+      const driven =
+        policy !== undefined &&
+        ('capabilities' in policy || (route.path.startsWith('/api/auth/') && 'public' in policy));
+      if (!driven || (route.verb !== 'GET' && route.verb !== 'POST')) continue;
       const capabilities =
-        (Reflect.getMetadata(CAPABILITIES_KEY, handler) as readonly Capability[] | undefined) ?? [];
-      const guards = (Reflect.getMetadata('__guards__', handler) ?? []) as readonly unknown[];
+        (Reflect.getMetadata(CAPABILITIES_KEY, route.handler) as
+          readonly Capability[] | undefined) ?? [];
+      const guards = (Reflect.getMetadata('__guards__', route.handler) ?? []) as readonly unknown[];
       out.push({
         stepUp: guards.includes(RequireStepUpGuard),
-        // Nest Method enum: GET=0, POST=1 — every product route here is one of the two.
-        method: method === 0 ? ('GET' as const) : ('POST' as const),
-        url: join(prefix, path),
+        method: route.verb,
+        url: route.path,
         capabilities,
       });
     }
@@ -270,18 +267,12 @@ function readRoutes(): readonly RouteSpec[] {
   return out;
 }
 
-function join(prefix: string, path: string | string[]): string {
-  const leaf = Array.isArray(path) ? (path[0] ?? '') : path;
-  const base = `/${prefix}`.replace(/\/+$/, '');
-  return leaf === '' || leaf === '/' ? base : `${base}/${leaf.replace(/^\/+/, '')}`;
-}
-
-const ROUTES: readonly RouteSpec[] = readRoutes();
+const ROUTES: readonly RouteSpec[] = await readRoutes();
 
 /**
- * The expected route→capability table, hand-kept from the RBAC decision table
- * (`domain/roles.ts`). The pin test below asserts the live controller metadata matches
- * this EXACTLY — a removed `@Require`, a weakened capability (owner-only → users:manage),
+ * The expected route→capability table, from `roots/route-policy.ts` (hand-kept from the RBAC
+ * decision table in `domain/roles.ts`). The pin test below asserts the live controller metadata
+ * matches this EXACTLY — a removed `@Require`, a weakened capability (owner-only → users:manage),
  * or an undecorated new route fails loudly instead of the role loops silently deriving
  * their expectations from the same weakened metadata. Update this table deliberately when
  * the matrix changes, never to make a failing pin pass without a PLAN reason.
@@ -290,23 +281,13 @@ const EXPECTED: readonly {
   method: 'GET' | 'POST';
   url: string;
   capabilities: readonly Capability[];
-}[] = [
-  { method: 'POST', url: '/api/members/invite', capabilities: ['users:manage'] },
-  { method: 'POST', url: '/api/members/invitations/:id/revoke', capabilities: ['users:manage'] },
-  { method: 'POST', url: '/api/members/disable', capabilities: ['users:manage'] },
-  { method: 'POST', url: '/api/members/remove', capabilities: ['users:manage'] },
-  { method: 'POST', url: '/api/members/transfer-ownership', capabilities: ['users:manage-owners'] },
-  { method: 'POST', url: '/api/recovery/disable-user', capabilities: ['users:manage'] },
-  { method: 'POST', url: '/api/recovery/enable-user', capabilities: ['users:manage'] },
-  { method: 'POST', url: '/api/recovery/revoke-sessions', capabilities: ['users:manage'] },
-  { method: 'POST', url: '/api/support/grants', capabilities: ['support:grant'] },
-  { method: 'POST', url: '/api/support/grants/:id/revoke', capabilities: ['support:grant'] },
-  { method: 'GET', url: '/api/support/grants', capabilities: ['support:grant'] },
-  { method: 'POST', url: '/api/auth/step-up', capabilities: ['session:step-up'] },
-  { method: 'POST', url: '/api/auth/sign-out-others', capabilities: ['session:sign-out-others'] },
-  { method: 'GET', url: '/api/auth/login', capabilities: [] },
-  { method: 'GET', url: '/api/auth/callback', capabilities: [] },
-];
+}[] = Object.entries(ROUTE_POLICY).flatMap(([key, policy]) => {
+  const [method, url] = key.split(' ') as ['GET' | 'POST', string];
+  if ('capabilities' in policy) return [{ method, url, capabilities: policy.capabilities }];
+  if ('public' in policy && url.startsWith('/api/auth/'))
+    return [{ method, url, capabilities: [] }];
+  return [];
+});
 
 /** Routes every role holds by design (matrix grants session:* to all three roles). */
 const SESSION_ROUTES = new Set(['/api/auth/step-up', '/api/auth/sign-out-others']);
