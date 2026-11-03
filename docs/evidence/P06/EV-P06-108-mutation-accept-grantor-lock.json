@@ -1,0 +1,33 @@
+{
+  "verdict": "KILLED",
+  "repo": "/tmp/moin-h8",
+  "head": "d8212bcdc0000e33d73686a83b4ec6c51b3fc709",
+  "mode": "committed",
+  "fix_ref": "d8212bcdc0000e33d73686a83b4ec6c51b3fc709",
+  "fix_paths": [
+    "packages/db/migrations/0081_accept_invitation_grantor_lock.sql"
+  ],
+  "untracked_fix_files": [],
+  "test": "pnpm exec vitest run --project integration apps/server/src/modules/identity-access/members.integration.test.ts -t 'demotion cannot commit'",
+  "started": "2026-11-03T15:06:34+00:00",
+  "tool": "mutation-check",
+  "finished": "2026-11-03T15:06:41+00:00",
+  "without_fix": {
+    "exit_code": 1,
+    "timed_out": false,
+    "duration_s": 3.45,
+    "tail": "     \u2193 remove ends access immediately and revokes every session\n     \u2193 remove needs fresh step-up: a stale session is refused 403\n     \u2193 disable needs step-up: a session with no stamp is refused 403 and changes nothing\n     \u2193 disable needs step-up: a 16-minute-old stamp is refused 403 and changes nothing\n     \u2193 disable with a fresh step-up stamp still disables\n     \u2193 an admin cannot disable or remove an owner (404), and nothing changes\n     \u2193 removing yourself is refused 409\n     \u2193 ownership transfer promotes then demotes in one transaction\n     \u2193 transfer without fresh step-up is refused 403 and changes nothing\n     \u2193 transfer to a disabled member is refused 404 and demotes nobody\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af\n\n FAIL  |integration| apps/server/src/modules/identity-access/members.integration.test.ts > invitations (P06.08.01, P06.08.02, P06.08.04) > conferring an additive permission is bounded by holding it (G09 M1) > the issuer is judged again at acceptance (G09 M1, accept half) > a demotion cannot commit between the authority check and the grant (round 2)\nAssertionError: the demotion committed mid-acceptance: expected true to be false // Object.is equality\n\n- Expected\n+ Received\n\n- false\n+ true\n\n \u276f Proxy.toBe scripts/mutation-evidence-probe.ts:84:27\n     82|       let result: unknown;\n     83|       try {\n     84|         result = original.apply(this, args);\n       |                           ^\n     85|       } catch (error) {\n     86|         record(name, error);\n \u276f apps/server/src/modules/identity-access/members.integration.test.ts:884:86\n \u276f evidenceBody packages/testing/src/mutation/evidence-state.ts:277:7\n\n\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/1]\u23af\n\n\n Test Files  1 failed (1)\n      Tests  1 failed | 37 skipped (38)\n   Start at  16:06:34\n   Duration  2.92s (tests 64%, transform 22%, import 11%, setup 2%)\n"
+  },
+  "with_fix": {
+    "exit_code": 0,
+    "timed_out": false,
+    "duration_s": 5.2,
+    "tail": "\n RUN  v5.0.2 /tmp/moin-h8\n\n{\"level\":30,\"time\":\"2026-11-03T15:06:39.725Z\",\"service\":\"moin\",\"role\":\"api\",\"env\":\"test\",\"outcome\":\"sign-in started\",\"provider\":\"keycloak\",\"msg\":\"sign-in started\"}\n{\"level\":30,\"time\":\"2026-11-03T15:06:39.745Z\",\"service\":\"moin\",\"role\":\"api\",\"env\":\"test\",\"outcome\":\"signed in\",\"provider\":\"keycloak\",\"sessionId\":\"01a1a1f2-b2be-7e6e-89bc-699200b576d8\",\"userId\":\"8a9c0d24-d002-4acf-9f0e-5443cba5b55b\",\"msg\":\"signed in\"}\n{\"level\":30,\"time\":\"2026-11-03T15:06:39.772Z\",\"service\":\"moin\",\"role\":\"api\",\"env\":\"test\",\"outcome\":\"invitation_issued\",\"msg\":\"issued a member invitation\"}\n \u2713 |integration| apps/server/src/modules/identity-access/members.integration.test.ts (38 tests | 37 skipped) 3176ms\n   \u2713 invitations (P06.08.01, P06.08.02, P06.08.04) (27)\n     \u2713 conferring an additive permission is bounded by holding it (G09 M1) (10)\n       \u2713 the issuer is judged again at acceptance (G09 M1, accept half) (7)\n         \u2713 a demotion cannot commit between the authority check and the grant (round 2) 2085ms\n\n Test Files  1 passed (1)\n      Tests  1 passed | 37 skipped (38)\n   Start at  16:06:37\n   Duration  4.68s (tests 79%, transform 13%, import 6%, setup 1%)\n"
+  },
+  "restored": true,
+  "tree_changed_by_tests": false,
+  "safety_snapshot": "",
+  "patch_file": "/tmp/moin-h8/.git/claude-evidence/mutation/20261103T150634Z.patch",
+  "untracked_backup": "",
+  "notes": []
+}
