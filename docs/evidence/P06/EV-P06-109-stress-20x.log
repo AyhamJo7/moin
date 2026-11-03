@@ -1,0 +1,24 @@
+gates stress x20 @ c83a089bb2: pnpm exec vitest run --project unit --project integration apps/server/src/modules/identity-access/support.integration.test.ts -t 'grant integrity'
+  [  1/20] ok          3.5s
+  [  2/20] ok          3.4s
+  [  3/20] ok          3.6s
+  [  4/20] ok          3.5s
+  [  5/20] ok          3.5s
+  [  6/20] ok          3.5s
+  [  7/20] ok          3.5s
+  [  8/20] ok          3.5s
+  [  9/20] ok          3.5s
+  [ 10/20] ok          3.5s
+  [ 11/20] ok          3.6s
+  [ 12/20] ok          3.4s
+  [ 13/20] ok          3.4s
+  [ 14/20] ok          3.6s
+  [ 15/20] ok          3.5s
+  [ 16/20] ok          3.5s
+  [ 17/20] ok          3.7s
+  [ 18/20] ok          3.5s
+  [ 19/20] ok          3.5s
+  [ 20/20] ok          3.6s
+  failures: 0/20
+RESULT: PASS (20/20 iterations passed)
+  evidence: /tmp/moin-h3/.git/claude-evidence/20261103T143917Z-stress.json
