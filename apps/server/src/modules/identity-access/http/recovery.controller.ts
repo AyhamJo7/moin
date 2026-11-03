@@ -47,7 +47,7 @@ import { z } from 'zod';
 import type { Logger } from '@moin/observability';
 import { LOGGER } from '../../../observability/logger.module.ts';
 import { currentTenantScope } from '../../platform/tenant-scope.ts';
-import { MemberQueries } from '../../platform/member-queries.ts';
+import { MemberQueries, isRetryableConflict } from '../../platform/member-queries.ts';
 import { requireCapability } from '../application/authorization.ts';
 import type { SessionService } from '../application/session.service.ts';
 import { SESSIONS } from '../identity-access.tokens.ts';
@@ -65,7 +65,12 @@ const accountBody = z.object({
   reason: z.enum(['password_reset', 'mfa_reset']),
 });
 
-type Outcome = 'missing' | 'denied' | 'done' | 'last-owner';
+type Outcome = 'missing' | 'denied' | 'done' | 'last-owner' | 'conflict';
+
+function conflict(reply: FastifyReply) {
+  void reply.header('retry-after', '1');
+  return fail(reply, 409, '/problems/concurrent-change', 'Concurrent change, retry');
+}
 
 function fail(reply: FastifyReply, status: number, type: string, title: string) {
   void reply.code(status).header('content-type', 'application/problem+json');
@@ -117,6 +122,10 @@ export class RecoveryController {
       reason: parsed.data.reason,
     });
     if (outcome === 'done') return { disabled: true, containment: 'partial' as const };
+    if (outcome === 'last-owner') {
+      return fail(reply, 409, '/problems/recovery-rejected', 'Recovery action rejected');
+    }
+    if (outcome === 'conflict') return conflict(reply);
     // Missing, denied on a non-owner, and owner-existence share one 404 (P06.07.03,
     // intentional-indistinguishability: the shape reveals nothing about which case hit).
     return fail(reply, 404, '/problems/not-found', 'Not found');
@@ -140,36 +149,42 @@ export class RecoveryController {
     }
     const scope = currentTenantScope();
     if (scope === undefined) throw new Error('no tenant scope');
-    const enabled = await this.members.inScope(async (client) => {
-      const target = await client
-        .query<{ role: string }>(
-          `select m.role from memberships m
+    const enabled = await this.members
+      .inOwnershipScope(async (client) => {
+        const target = await client
+          .query<{ role: string }>(
+            `select m.role from memberships m
              where m.organisation_id = $1::uuid and m.user_id = $2::uuid for update`,
-          [scope.organisationId, parsed.data.userId],
-        )
-        .then((result) => result.rows[0]);
-      if (target === undefined) return false;
-      try {
-        requireCapability(
-          scope.role,
-          scope.permissions,
-          target.role === 'owner' ? 'users:manage-owners' : 'users:manage',
-        );
-      } catch {
-        return false;
-      }
-      // One call, one audit path: status flip + audit land in the same setter commit. The
-      // setter returns (changed, revoked); a scalar select of the composite would misread —
-      // always SELECT * and read .changed. No controller-side audit: the setter already
-      // wrote it, and a second write would double-audit every re-enable.
-      const settled = await client
-        .query<{ changed: boolean; revoked: number }>(
-          'select * from app.set_user_status($1::uuid, $2::text, $3::text, $4::uuid, $5::uuid)',
-          [parsed.data.userId, 'active', parsed.data.reason, scope.actorId, randomUUID()],
-        )
-        .then((result) => result.rows[0]);
-      return settled?.changed ?? false;
-    });
+            [scope.organisationId, parsed.data.userId],
+          )
+          .then((result) => result.rows[0]);
+        if (target === undefined) return false;
+        try {
+          requireCapability(
+            scope.role,
+            scope.permissions,
+            target.role === 'owner' ? 'users:manage-owners' : 'users:manage',
+          );
+        } catch {
+          return false;
+        }
+        // One call, one audit path: status flip + audit land in the same setter commit. The
+        // setter returns (changed, revoked); a scalar select of the composite would misread —
+        // always SELECT * and read .changed. No controller-side audit: the setter already
+        // wrote it, and a second write would double-audit every re-enable.
+        const settled = await client
+          .query<{ changed: boolean; revoked: number }>(
+            'select * from app.set_user_status($1::uuid, $2::text, $3::text, $4::uuid, $5::uuid)',
+            [parsed.data.userId, 'active', parsed.data.reason, scope.actorId, randomUUID()],
+          )
+          .then((result) => result.rows[0]);
+        return settled?.changed ?? false;
+      })
+      .catch((error: unknown) => {
+        if (isRetryableConflict(error)) return 'conflict' as const;
+        throw error;
+      });
+    if (enabled === 'conflict') return conflict(reply);
     if (!enabled) {
       return fail(reply, 404, '/problems/not-found', 'Not found');
     }
