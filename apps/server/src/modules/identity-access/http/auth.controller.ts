@@ -24,16 +24,12 @@ import {
   SIGN_IN_COOKIE,
 } from '../domain/session-policy.ts';
 import { SignInError, type SignInFailure } from '../application/sign-in.service.ts';
-import {
-  reasonClassOf,
-  securitySourceDigest,
-  type SecurityClass,
-  type SecurityReason,
-} from '../application/security-events.ts';
+import { type SecurityClass } from '../application/security-events.ts';
 import { randomSecret } from '../domain/secret-values.ts';
 import type { SessionService } from '../application/session.service.ts';
 import { SESSIONS, SIGN_IN, type SignInGate } from '../identity-access.tokens.ts';
 import { clearCookie, readCookie, serializeCookie } from './cookies.ts';
+import { recordSecurityEvent } from './record-security-event.ts';
 import { AuthThrottleStore } from '../../platform/auth-throttle-store.ts';
 import { CONFIG } from '../../../config/config.module.ts';
 import type { Config } from '../../../config/env.ts';
@@ -103,15 +99,15 @@ export class AuthController {
     reason: string,
     newFamily?: boolean,
   ): Promise<void> {
-    const key = this.config.AUTH_LOCAL_TOKEN_KEY;
-    if (key === undefined) return Promise.resolve();
-    const ip = typeof request.ip === 'string' ? request.ip : 'invalid';
-    const resolved: SecurityReason =
-      reason === 'ok' || reason === 'rate_limited' || reason === 'reset'
-        ? reason
-        : reasonClassOf(reason);
-    const digest = securitySourceDigest(key, `ip:${ip}`);
-    return this.throttleStore.recordEvent(outcome, cls, resolved, digest, newFamily ?? false);
+    return recordSecurityEvent(
+      this.throttleStore,
+      this.config.AUTH_LOCAL_TOKEN_KEY,
+      request,
+      cls,
+      outcome,
+      reason,
+      newFamily,
+    );
   }
 
   @Get('login')
@@ -162,7 +158,16 @@ export class AuthController {
       // completion, same lifetime as the session cookie; cleared with the sign-in cookie it is not.
       // Accepted sign-in: new family (no superseded predecessor) is the new-device
       // heuristic — documented as such, not a fingerprint.
-      await this.#event(request, 'sign_in', 'accepted', 'ok', completed.steppedUp !== true);
+      // A completed step-up is a step-up event; a sign-in is a new family only when the browser
+      // presented no session at all (no predecessor to supersede, G11 M4). The server holds no
+      // device identifier, so "no session cookie" is the signal for a client it has not seen.
+      await this.#event(
+        request,
+        completed.steppedUp === true ? 'step_up' : 'sign_in',
+        'accepted',
+        'ok',
+        completed.steppedUp !== true && readCookie(cookieHeader, SESSION_COOKIE) === undefined,
+      );
       const csrfToken = randomSecret();
       await reply
         .code(302)
@@ -224,6 +229,7 @@ export class AuthController {
   @UseGuards(SessionMembershipGuard, AccountThrottleGuard, RequireRoleGuard)
   async signOutOthers(
     @Headers('cookie') cookieHeader: string | undefined,
+    @Req() request: FastifyRequest,
     @Res() reply: FastifyReply,
   ): Promise<void> {
     void reply.header('cache-control', 'no-store');
@@ -242,6 +248,7 @@ export class AuthController {
       });
       return;
     }
+    await this.#event(request, 'revoke', 'accepted', 'ok');
     await reply.code(200).send({ revoked });
   }
 
