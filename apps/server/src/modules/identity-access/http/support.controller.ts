@@ -86,22 +86,38 @@ export class SupportController {
     if (scope === undefined) throw new Error('no tenant scope');
     // One DEFINER call: grant row + audit in the same commit. The organisation is the
     // guard-resolved tenant, never a caller claim (INV-02).
-    const created = await this.members.inScope((client) =>
-      client
-        .query<{ id: string }>(
-          'select app.create_support_grant($1::uuid, $2::text, $3::text, $4::text, $5::integer, $6::uuid, $7::uuid) as id',
-          [
-            scope.organisationId,
-            parsed.data.operatorSubject,
-            parsed.data.scope,
-            parsed.data.reason,
-            parsed.data.hours ?? 24,
-            scope.actorId,
-            randomUUID(),
-          ],
-        )
-        .then((result) => result.rows[0]?.id),
-    );
+    const created = await this.members
+      .inScope((client) =>
+        client
+          .query<{ id: string }>(
+            'select app.create_support_grant($1::uuid, $2::text, $3::text, $4::text, $5::integer, $6::uuid, $7::uuid) as id',
+            [
+              scope.organisationId,
+              parsed.data.operatorSubject,
+              parsed.data.scope,
+              parsed.data.reason,
+              parsed.data.hours ?? 24,
+              scope.actorId,
+              randomUUID(),
+            ],
+          )
+          .then((result) => result.rows[0]?.id),
+      )
+      .catch((error: unknown) => {
+        // The function's own refusals are the caller's to see as 4xx, never a 500 (G10 M3):
+        // the per-organisation quota (P0001) and a parameter or check refusal that the
+        // request schema did not catch (22023, 23514).
+        const code = (error as { code?: string } | null)?.code;
+        if (code === 'P0001') return 'quota' as const;
+        if (code === '22023' || code === '23514') return 'invalid' as const;
+        throw error;
+      });
+    if (created === 'quota') {
+      return fail(reply, 409, '/problems/support-quota', 'Support grant limit reached');
+    }
+    if (created === 'invalid') {
+      return fail(reply, 400, '/problems/support-rejected', 'Support action rejected');
+    }
     if (created === undefined) throw new Error('grant creation returned no id');
     this.logger.info({ outcome: 'support_grant_created' }, 'created a support access grant');
     return { grantId: created };

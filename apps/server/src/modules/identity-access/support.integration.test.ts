@@ -15,6 +15,7 @@ import { Test } from '@nestjs/testing';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { createTestDatabase, evidenceTest, type TestDatabase } from '@moin/testing';
 import { fixedClock } from '@moin/kernel';
+import { withTenant } from '@moin/db';
 import { afterAll, beforeAll, beforeEach, describe, expect } from 'vitest';
 import { ConfigModule } from '../../config/config.module.ts';
 import { loadConfig } from '../../config/env.ts';
@@ -520,4 +521,116 @@ describe('every access audited (P06.11.04, P06.11.05)', () => {
       ),
     ).rejects.toMatchObject({ code: '42501' });
   });
+});
+
+describe('grant integrity (G10 M1 to M4)', () => {
+  const grantFor = (pair: SessionPair, operatorSubject: string, hours?: number) =>
+    postAs(pair, '/api/support/grants', {
+      operatorSubject,
+      scope: 'readonly',
+      reason: 'customer asked for help with sign-in',
+      ...(hours === undefined ? {} : { hours }),
+    });
+
+  const liveGrants = async (org: string): Promise<number> =>
+    (
+      await admin.query<{ n: number }>(
+        `select count(*)::int as n from support_access_grants
+          where organisation_id = $1 and revoked_at is null and expires_at > clock_timestamp()`,
+        [org],
+      )
+    ).rows[0]?.n ?? -1;
+
+  evidenceTest(
+    'the runtime role cannot forge, un-revoke or extend a grant with plain SQL (M1)',
+    async () => {
+      const { pair, org } = await ownerPair();
+      const grantId = await grant(pair);
+      expect((await postAs(pair, `/api/support/grants/${grantId}/revoke`)).statusCode).toBe(200);
+      const asRuntime = (sql: string, params: unknown[]) =>
+        withTenant(database.pool(), org, (client) => client.query(sql, params));
+      await expect(
+        asRuntime(
+          `insert into support_access_grants
+             (organisation_id, id, operator_subject, scope, reason, created_by, expires_at)
+           values ($1, $2, 'rogue-op', 'readonly', 'forged by direct insert', $3, now() + interval '1 hour')`,
+          [org, randomUUID(), randomUUID()],
+        ),
+      ).rejects.toMatchObject({ code: '42501' });
+      await expect(
+        asRuntime('update support_access_grants set revoked_at = null where id = $1', [grantId]),
+      ).rejects.toMatchObject({ code: '42501' });
+      await expect(
+        asRuntime(
+          "update support_access_grants set expires_at = now() + interval '1000 days' where id = $1",
+          [grantId],
+        ),
+      ).rejects.toMatchObject({ code: '42501' });
+      // The revoked grant stayed revoked and nothing was minted.
+      expect(await liveGrants(org)).toBe(0);
+      // The listing route still reads the table.
+      const listed = await app.inject({
+        method: 'GET',
+        url: '/api/support/grants',
+        headers: { cookie: pair.header },
+      });
+      expect(listed.statusCode).toBe(200);
+    },
+  );
+
+  evidenceTest(
+    'twelve parallel creates leave at most five live grants and no 5xx (M2)',
+    async () => {
+      const { pair, org } = await ownerPair();
+      const responses = await Promise.all(
+        Array.from({ length: 12 }, (_, index) => grantFor(pair, `parallel-op-${String(index)}`)),
+      );
+      const codes = responses.map((response) => response.statusCode);
+      expect(codes.filter((code) => code >= 500)).toStrictEqual([]);
+      expect(codes.filter((code) => code === 201)).toHaveLength(5);
+      expect(codes.filter((code) => code === 409)).toHaveLength(7);
+      expect(await liveGrants(org)).toBe(5);
+    },
+  );
+
+  evidenceTest('the documented maximum of 72 hours is accepted (M3)', async () => {
+    const { pair } = await ownerPair();
+    const response = await grantFor(pair, OPERATOR, 72);
+    expect(response.statusCode, response.body).toBe(201);
+  });
+
+  evidenceTest('a refused quota is a 409 problem, not a 500 (M3)', async () => {
+    const { pair } = await ownerPair();
+    for (let index = 0; index < 5; index += 1) {
+      expect((await grantFor(pair, `quota-op-${String(index)}`)).statusCode).toBe(201);
+    }
+    const refused = await grantFor(pair, 'quota-op-extra');
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json()).toMatchObject({ type: '/problems/support-quota' });
+  });
+
+  evidenceTest(
+    'superseding a live grant writes a revoke audit row for the old one (M4)',
+    async () => {
+      const { pair, org } = await ownerPair();
+      const first = await grant(pair);
+      const second = await grant(pair);
+      expect(second).not.toBe(first);
+      const audits = await admin.query<{ operation: string; target_id: string }>(
+        `select operation, target_id::text as target_id from audit_events
+        where organisation_id = $1 and operation like 'support.grant_%' order by seq`,
+        [org],
+      );
+      expect(audits.rows).toStrictEqual([
+        { operation: 'support.grant_create', target_id: first },
+        { operation: 'support.grant_revoke', target_id: first },
+        { operation: 'support.grant_create', target_id: second },
+      ]);
+      const old = await admin.query<{ revoked_at: Date | null }>(
+        'select revoked_at from support_access_grants where id = $1',
+        [first],
+      );
+      expect(old.rows[0]?.revoked_at).not.toBeNull();
+    },
+  );
 });
