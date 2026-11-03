@@ -1,0 +1,15 @@
+# EV-P02-097: The image built from apps/server/Dockerfile could not start the voice or worker role (ERR_MODULE_NOT_FOUND for @moin/telephony and @moin/integrations; found by the C-RERUN, EV-P02-092 and EV-P02-093). The image shipped four hand-listed workspace packages; the packages are now derived from the dependency graph (a closure stage reads the manifests and follows dependencies and optional dependencies that point into the workspace, never development ones). scripts/check-server-image-roles.sh starts api, voice and worker from the built image (read-only, tmpfs, no new privileges; the worker with the compose-pinned queue emulator) and requires /healthz 200; container-scan runs it. Before (image built from main): api ok, voice and worker fail with ERR_MODULE_NOT_FOUND, exit 1. After: all three answer /healthz 200, exit 0. Unchanged: user node, no npm, npx, corepack, yarn or pnpm, all 78 migrations present; size 467.7 MB to 486.7 MB (host architecture build, not the arm64 CI build). A unit test pins the closure (the two missing packages in, no development package in, transitive dependencies followed). gates full PASS 14/14. NOT verified: the arm64 build under emulation and the container-scan job itself (remote CI); the P02.03.02 and P02.03.07 items stay PARTIAL until the independent review and the CI run.
+
+| Field | Value |
+|---|---|
+| Evidence ID | EV-P02-097 |
+| Item | P02.03.02 |
+| Date (UTC) | 2026-11-03 16:15 UTC |
+| Commit | `a85bb516a3aed767ae7eaa6c9d4078d68b56b026` |
+| Environment | local |
+| Command / procedure | `.claude/bin/gates.py full`: `python3 .claude/bin/control_plane_check.py && python3 -m unittest discover -s .claude/tests -t .claude/tests` → pass (exit 0, 27.7 s); `uvx ruff@0.15.12 format --check --config .claude/ruff.toml .claude && uvx ruff@0.15.12 check --config .claude/ruff.toml .claude && uvx --from mypy==2.3.1 mypy --config-file .claude/mypy.ini` → pass (exit 0, 1.4 s); `node scripts/check-conventional-commit.ts --self-test && node scripts/check-no-ai-mentions.ts --self-test` → pass (exit 0, 0.1 s); `node scripts/check-adr-coverage.ts && node scripts/check-domain-coverage.ts && node scripts/check-dfd-coverage.ts && node scripts/check-threat-model-refs.ts && node scripts/check-data-classification.ts && node scripts/check-subprocessors.ts && node scripts/check-brand-strings.ts` → pass (exit 0, 1.5 s); `pnpm exec prettier --check .` → pass (exit 0, 7.8 s); `pnpm lint` → pass (exit 0, 12.3 s); `pnpm exec depcruise apps packages scripts --config .dependency-cruiser.cjs` → pass (exit 0, 1.3 s); `pnpm typecheck` → pass (exit 0, 6.8 s); `pnpm test` → pass (exit 0, 6.5 s); `pnpm test:integration` → pass (exit 0, 63.9 s); `node scripts/check-migrations.ts` → pass (exit 0, 0.1 s); `pnpm turbo run build` → pass (exit 0, 5.4 s); `node scripts/check-licences.ts` → pass (exit 0, 0.4 s); `gitleaks git --redact --no-banner --config .gitleaks.toml .` → pass (exit 0, 1.2 s) |
+| Result | PASS |
+| CI run / artifact | pending |
+| Reviewer | pending |
+
+Sensitive material is stored by reference only (PLAN.md evidence rules).
