@@ -1,0 +1,5 @@
+Targeted mutants of migration 0083 with the tests intact (script cap-mutation.sh, exits 0 when vitest fails):
+t1 drop the guard trigger on provisioning_limits: detected
+t2 the guard accepts an override record from any transaction: detected
+t3 the override records are mutable: detected
+Baseline (no mutation): 12 of 12 pass.
