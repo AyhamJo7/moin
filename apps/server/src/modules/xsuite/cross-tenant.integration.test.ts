@@ -21,8 +21,7 @@
  * the infrastructure the probes stand on, not what's under test. Seeding runs through the
  * migration-role pool; every probe runs through HTTP as `moin_app`, exactly as traffic.
  */
-import { deriveCsrfToken } from '../identity-access/http/csrf.ts';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { Test } from '@nestjs/testing';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { createTestDatabase, evidenceTest, type TestDatabase } from '@moin/testing';
@@ -131,7 +130,9 @@ async function mintSession(userId: string, freshStepUp: boolean): Promise<Seeded
   const digest = createHash('sha256').update(token, 'utf8').digest();
   const sessionId = randomUUID();
   // The synchronizer token is derived from the session token (G07 M1), as sign-in issues it.
-  const csrf = deriveCsrfToken(token);
+  // The module boundary keeps this suite out of the identity module's internals, so the
+  // derivation is restated here; the session suite pins the same formula against sign-in.
+  const csrf = createHmac('sha256', token).update('moin-csrf-v1').digest('base64url');
   // Expiries use the TEST clock (the guards judge against the database clock, and the
   // fixed test clock is set to wall time in beforeAll — never clock_timestamp() + the
   // full ceiling, which trips the sessions_absolute_ceiling CHECK on skew).
