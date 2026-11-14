@@ -37,6 +37,11 @@
       "name": "guard",
       "run": "python3 .claude/hooks/policy_guard.py --self-test",
       "timeout": 60
+    },
+    {
+      "name": "tooling",
+      "run": "python3 -m unittest discover -s .claude/tests -t .claude/tests",
+      "timeout": 300
     }
   ],
   "fast": ["format", "lint", "typecheck", "guard"],
