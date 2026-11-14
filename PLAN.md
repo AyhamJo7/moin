@@ -1,5 +1,7 @@
 # KlarDesk Master Execution Plan
 
+> **Reference only since 2026-11-14.** Status, order of work and the finish line live in [`ROADMAP.md`](ROADMAP.md). The Status Ledger, checklist ticks and evidence IDs below are frozen history; item IDs, invariants and gate definitions remain the reference.
+
 > **Product:** KlarDesk — *Digitales Front Office für kleine Betriebe* (working name, **not trademark-cleared**, see EXT-07 / DG-00)
 > **Repository codename:** `moin` (used for packages, infrastructure and internal identifiers so a brand change never requires code changes)
 > **Source specification:** [`BLUEPRINT.md`](BLUEPRINT.md) — read-only; this plan implements it and records every deviation explicitly.
