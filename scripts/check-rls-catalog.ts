@@ -145,7 +145,7 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.take_signin_bucket': 'c4f2a268dd9cfacb9b2d5936de8925c7',
   'app.write_signin_event': 'bc65e2433de7603be03149ed8a755e69',
   'app.live_support_grant': '627c5b62b80383a39b182444fbbb672b',
-  'app.create_support_grant': 'a290be70a4a2a617cb08bcb1f1c944e7',
+  'app.create_support_grant': '3a96737a954f4979ea553d6e2fe0ca5a',
   'app.revoke_support_grant': 'a7f4ef52e1b5f0b4e949415424f10385',
   'app.support_read_memberships': '5bd98e08aa79ba2040b6fd1435d40f9c',
   'app.support_read_invitations': '32223553918c6f990711b1fc1fe5da05',
