@@ -158,10 +158,12 @@ describe('routes served by the production root modules', () => {
       }
     }
     @Module({})
+    // eslint-disable-next-line @typescript-eslint/no-extraneous-class -- a Nest module is a decorated empty class by design.
     class PromisedModule {}
     @Module({
       imports: [Promise.resolve({ module: PromisedModule, controllers: [PromisedController] })],
     })
+    // eslint-disable-next-line @typescript-eslint/no-extraneous-class -- a Nest module is a decorated empty class by design.
     class RootWithPromise {}
     expect(() => routesServedBy([RootWithPromise])).toThrow(/promised module/);
   });
