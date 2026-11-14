@@ -54,7 +54,7 @@ describe('the probe ledger counts calls, not inventory rows', () => {
     expect(report.required).toBe(INVENTORY.length);
     expect(() => {
       assertFullyProbed(report);
-    }).toThrow(new RegExp(`not called: ${key(first!).replace(/[/:]/g, '\\$&')}`));
+    }).toThrow(`not called: ${key(first!)}`);
     expect(() => {
       assertFullyProbed(buildCoverageReport([], new ProbeLedger()));
     }).toThrow(/the inventory is empty/);
