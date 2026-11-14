@@ -69,6 +69,30 @@ export class MemberQueries {
     });
   }
 
+  /**
+   * Runs `fn` inside the caller's tenant with the organisation's ownership lock taken FIRST.
+   *
+   * Every path that can change who owns, or is an active owner of, an organisation (disable,
+   * remove, transfer, account disable and enable) goes through here. The last-owner triggers
+   * (0017, 0029, 0030) take the same advisory lock after their statement has already locked
+   * rows; two transactions that lock rows in opposite order and then queue on that lock
+   * deadlock (40P01, G09 M2). Taking the lock before any row lock gives every such path one
+   * order: organisation lock, then rows. The key matches the triggers' exactly and the lock is
+   * re-entrant for the holder, so the trigger's own call is a no-op.
+   */
+  inOwnershipScope<T>(fn: (client: TenantClient) => Promise<T>): Promise<T> {
+    const scope = currentTenantScope();
+    if (scope === undefined) {
+      throw new Error('no tenant scope: the route is not guarded by SessionMembershipGuard');
+    }
+    return this.inScope(async (client) => {
+      await client.query("select pg_advisory_xact_lock(hashtext('last-owner:' || $1::text))", [
+        scope.organisationId,
+      ]);
+      return fn(client);
+    });
+  }
+
   /** The raw support pool, for grant-gated DEFINER calls (P06.11.03 test + tooling). */
   supportPool(): Pool {
     if (this.supportDbPool === null) {
@@ -89,7 +113,7 @@ export class MemberQueries {
    *
    * Moved out of RecoveryController (arch-M1): the transaction orchestration lives here so
    * operator workflows arriving later share one checked path instead of duplicating it.
-   * Returns 'done' | 'missing' | 'denied'; the controller maps to HTTP shapes. */
+   * Returns 'done' | 'missing' | 'denied' | 'last-owner' | 'conflict'; the controller maps to HTTP shapes. */
   async disableAccount(input: {
     organisationId: string;
     actorId: string;
@@ -97,8 +121,8 @@ export class MemberQueries {
     role: string;
     permissions: readonly string[];
     reason: string;
-  }): Promise<'done' | 'missing' | 'denied'> {
-    return this.inScope(async (client) => {
+  }): Promise<'done' | 'missing' | 'denied' | 'last-owner' | 'conflict'> {
+    return this.inOwnershipScope(async (client) => {
       const target = await client
         .query<{ role: string }>(
           `select m.role from memberships m
@@ -128,6 +152,29 @@ export class MemberQueries {
         'disabled an account and revoked its sessions',
       );
       return 'done';
+    }).catch((error: unknown) => {
+      // The users_last_owner backstop (0030) refuses disabling the last effective owner with
+      // 23000. Thrown out of the transaction so it rolls back; under a race that is a 409,
+      // not a 500 (G09 L1).
+      if (isIntegrityViolation(error)) return 'last-owner' as const;
+      if (isRetryableConflict(error)) return 'conflict' as const;
+      throw error;
     });
   }
+}
+
+/** A deadlock victim (40P01) or serialisation failure (40001): the change did not happen. */
+export function isRetryableConflict(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return false;
+  const { code } = error as { code: string };
+  return code === '40P01' || code === '40001';
+}
+
+function isIntegrityViolation(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code: string }).code === '23000'
+  );
 }
