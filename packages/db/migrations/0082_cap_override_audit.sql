@@ -73,24 +73,43 @@ CREATE TRIGGER provisioning_limit_overrides_no_truncate
 ALTER TABLE provisioning_limit_overrides ENABLE ALWAYS TRIGGER provisioning_limit_overrides_immutable;
 ALTER TABLE provisioning_limit_overrides ENABLE ALWAYS TRIGGER provisioning_limit_overrides_no_truncate;
 
+-- One override record authorises exactly one guarded change. `overrides_applied` counts the
+-- records the limits row has consumed; a guarded change needs a record it has not consumed yet,
+-- written in this transaction, as the newest record, for exactly this change, and consumes every
+-- record up to it. A second change in the same transaction therefore needs a second record: a
+-- reset, a provisioning and a plain reset to the same values cannot ride on one approval.
+ALTER TABLE provisioning_limits ADD COLUMN overrides_applied bigint NOT NULL DEFAULT 0;
+
+COMMENT ON COLUMN provisioning_limits.overrides_applied IS
+  'How many override records this row has consumed; maintained by the guard trigger only (P06.04.03).';
+
 CREATE FUNCTION app.require_limit_override() RETURNS trigger
   LANGUAGE plpgsql
   SET search_path = pg_catalog, public, app, pg_temp
 AS $$
+DECLARE
+  v_total bigint;
+  v_latest public.provisioning_limit_overrides%ROWTYPE;
 BEGIN
   IF NEW.early_access_cap IS DISTINCT FROM OLD.early_access_cap
      OR NEW.accepted_paid_early_access < OLD.accepted_paid_early_access THEN
-    IF NOT EXISTS (
-      SELECT 1 FROM public.provisioning_limit_overrides o
-        WHERE o.txid = txid_current()
-          AND o.old_cap = OLD.early_access_cap AND o.new_cap = NEW.early_access_cap
-          AND o.old_counter = OLD.accepted_paid_early_access
-          AND o.new_counter = NEW.accepted_paid_early_access
-    ) THEN
+    SELECT count(*) INTO v_total FROM public.provisioning_limit_overrides;
+    SELECT * INTO v_latest FROM public.provisioning_limit_overrides
+      ORDER BY created_at DESC, id DESC LIMIT 1;
+    IF v_total <= OLD.overrides_applied
+       OR v_latest.txid IS DISTINCT FROM txid_current()
+       OR v_latest.old_cap IS DISTINCT FROM OLD.early_access_cap
+       OR v_latest.new_cap IS DISTINCT FROM NEW.early_access_cap
+       OR v_latest.old_counter IS DISTINCT FROM OLD.accepted_paid_early_access
+       OR v_latest.new_counter IS DISTINCT FROM NEW.accepted_paid_early_access THEN
       RAISE EXCEPTION
-        'changing the Early Access cap or resetting its counter needs an override record written in the same transaction (app.override_early_access_cap, P06.04.03)'
+        'changing the Early Access cap or resetting its counter needs its own unused override record written in the same transaction (app.override_early_access_cap, P06.04.03)'
         USING ERRCODE = 'integrity_constraint_violation';
     END IF;
+    NEW.overrides_applied := v_total;
+  ELSIF NEW.overrides_applied IS DISTINCT FROM OLD.overrides_applied THEN
+    RAISE EXCEPTION 'overrides_applied is maintained by the override guard only'
+      USING ERRCODE = 'integrity_constraint_violation';
   END IF;
   RETURN NEW;
 END
@@ -102,6 +121,29 @@ CREATE TRIGGER provisioning_limits_require_override
   BEFORE UPDATE ON provisioning_limits
   FOR EACH ROW EXECUTE FUNCTION app.require_limit_override();
 ALTER TABLE provisioning_limits ENABLE ALWAYS TRIGGER provisioning_limits_require_override;
+
+-- The limits row cannot be removed and put back with other values: delete and truncate are
+-- refused for every role, and the singleton key refuses a second row.
+CREATE FUNCTION app.reject_limits_removal() RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = pg_catalog, public, app, pg_temp
+AS $$
+BEGIN
+  RAISE EXCEPTION 'provisioning_limits cannot be deleted or truncated (P06.04.03)'
+    USING ERRCODE = 'integrity_constraint_violation';
+END
+$$;
+
+REVOKE ALL ON FUNCTION app.reject_limits_removal() FROM PUBLIC;
+
+CREATE TRIGGER provisioning_limits_no_delete
+  BEFORE DELETE ON provisioning_limits
+  FOR EACH ROW EXECUTE FUNCTION app.reject_limits_removal();
+CREATE TRIGGER provisioning_limits_no_truncate
+  BEFORE TRUNCATE ON provisioning_limits
+  FOR EACH STATEMENT EXECUTE FUNCTION app.reject_limits_removal();
+ALTER TABLE provisioning_limits ENABLE ALWAYS TRIGGER provisioning_limits_no_delete;
+ALTER TABLE provisioning_limits ENABLE ALWAYS TRIGGER provisioning_limits_no_truncate;
 
 CREATE FUNCTION app.override_early_access_cap(
   p_new_cap integer,

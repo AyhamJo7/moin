@@ -18,6 +18,14 @@ let provisioner: Pool;
 const APPROVAL = 'founder approval 2026-11-15, PR #999, ADR-0099';
 const REASON = 'raise the cap for the sixth pilot customer';
 
+function migratorUrl(): string {
+  const base = process.env['TEST_DATABASE_MIGRATOR_URL'];
+  if (base === undefined) throw new Error('TEST_DATABASE_MIGRATOR_URL is required');
+  const url = new URL(base);
+  url.pathname = `/${database.name}`;
+  return url.toString();
+}
+
 function provisionerUrl(): string {
   const base = process.env['TEST_DATABASE_PROVISIONER_URL'];
   if (base === undefined) throw new Error('TEST_DATABASE_PROVISIONER_URL is required');
@@ -74,7 +82,13 @@ async function override(newCap: number, newCounter: number | null = null): Promi
 
 beforeEach(async () => {
   database = await createTestDatabase('cap-override');
-  migrator = createPool({ connectionString: database.migrationUrl, max: 2 });
+  // The real migration role on the cloned database, not the harness's admin connection: the
+  // claims below are about what `moin_migrator` may do.
+  migrator = createPool({ connectionString: migratorUrl(), max: 2 });
+  const role = await migrator.query<{ name: string; super: boolean; bypass: boolean }>(
+    'select current_user::text as name, rolsuper as super, rolbypassrls as bypass from pg_roles where rolname = current_user',
+  );
+  expect(role.rows[0]).toEqual({ name: 'moin_migrator', super: false, bypass: false });
   provisioner = createPool({ connectionString: provisionerUrl(), max: 2 });
 });
 
@@ -143,6 +157,55 @@ describe('a cap change without its audit record is refused', () => {
       client.release();
     }
     expect(await limits()).toStrictEqual({ cap: 5, counter: 0 });
+  });
+});
+
+describe('the limits row cannot be replaced and a record is single-use', () => {
+  evidenceTest('delete and truncate of the limits row are refused', async () => {
+    await expect(migrator.query('delete from provisioning_limits')).rejects.toMatchObject({
+      code: '23000',
+    });
+    await expect(migrator.query('truncate provisioning_limits')).rejects.toMatchObject({
+      code: '23000',
+    });
+    expect(await limits()).toEqual({ cap: 5, counter: 0 });
+    expect(await overrides()).toBe(0);
+  });
+
+  evidenceTest(
+    'one record authorises one change: a second reset in the same transaction is refused',
+    async () => {
+      for (let i = 0; i < 5; i += 1) await paidTenant();
+      const client = await migrator.connect();
+      try {
+        await client.query('begin');
+        await client.query('select app.override_early_access_cap($1, $2, $3, $4, $5)', [
+          5,
+          4,
+          REASON,
+          'founder',
+          APPROVAL,
+        ]);
+        // Put the counter back to 5, as a provisioning would, then replay the same reset.
+        await client.query(
+          'update provisioning_limits set accepted_paid_early_access = accepted_paid_early_access + 1',
+        );
+        await expect(
+          client.query('update provisioning_limits set accepted_paid_early_access = 4'),
+        ).rejects.toMatchObject({ code: '23000' });
+      } finally {
+        await client.query('rollback');
+        client.release();
+      }
+      expect(await limits()).toEqual({ cap: 5, counter: 5 });
+      expect(await overrides()).toBe(0);
+    },
+  );
+
+  evidenceTest('the consumed-record counter cannot be set by hand', async () => {
+    await expect(
+      migrator.query('update provisioning_limits set overrides_applied = 0 - 1'),
+    ).rejects.toMatchObject({ code: '23000' });
   });
 });
 
