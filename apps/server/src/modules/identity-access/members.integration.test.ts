@@ -471,17 +471,23 @@ describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
       // comparison would read the snapshot fixed at its first statement — before the deadline —
       // and admit.
       const issued = await issue();
-      const deadlineRow = await admin.query(
-        "update invitations set created_at = clock_timestamp() - interval '7 days' + interval '4 seconds', expires_at = clock_timestamp() + interval '4 seconds' where id = $1 returning expires_at",
+      await admin.query(
+        "update invitations set created_at = clock_timestamp() - interval '7 days' + interval '4 seconds', expires_at = clock_timestamp() + interval '4 seconds' where id = $1",
         [issued.invitationId],
       );
-      const deadline = (deadlineRow.rows[0] as { expires_at: Date }).expires_at;
+      // Compared inside the database against the stored deadline: a JavaScript Date keeps
+      // milliseconds only and would call a microsecond deadline passed up to 1 ms early.
       const databaseClockIsPast = async (): Promise<boolean> =>
         (
-          (await admin.query('select clock_timestamp() >= $1::timestamptz as past', [deadline]))
-            .rows[0] as { past: boolean }
+          (
+            await admin.query(
+              'select clock_timestamp() >= expires_at as past from invitations where id = $1',
+              [issued.invitationId],
+            )
+          ).rows[0] as { past: boolean }
         ).past;
       const holder = await database.fixturePool().connect();
+      let late: Promise<{ outcome: string }> | undefined;
       try {
         await holder.query('begin');
         // Same serialisation order as the function: advisory lock first, then the row lock.
@@ -492,7 +498,7 @@ describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
           issued.invitationId,
         ]);
         // Consumer starts now — before the deadline — and blocks on the held locks.
-        const late = withTenant(database.pool(), issued.org, (client) =>
+        late = withTenant(database.pool(), issued.org, (client) =>
           acceptInvitation(client, issued.invitationId, issued.token, randomUUID(), issued.email),
         );
         // Wait until the consumer is really blocked on the advisory lock, and prove that the
@@ -517,6 +523,10 @@ describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
         await holder.query('rollback');
         expect((await late).outcome).toBe('expired');
       } finally {
+        // A failed assertion above must not hand a connection with an open transaction and held
+        // locks back to the pool, nor leave the consumer blocked into the next case.
+        await holder.query('rollback');
+        await late?.catch(() => undefined);
         holder.release();
       }
     },
