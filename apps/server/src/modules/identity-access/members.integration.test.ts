@@ -224,6 +224,19 @@ async function ownerPair(): Promise<{ pair: SessionPair; owner: { id: string }; 
   return { pair, owner, org };
 }
 
+/** Polls `condition` every 50 ms until it holds or `timeoutMs` passes; names what it waited for. */
+async function waitFor(
+  condition: () => Promise<boolean>,
+  what: string,
+  timeoutMs = 30_000,
+): Promise<void> {
+  const until = Date.now() + timeoutMs;
+  while (!(await condition())) {
+    if (Date.now() > until) throw new Error(`timed out waiting for ${what}`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
 describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
   async function staleStepUp(pair: SessionPair) {
     const token = /__Host-moin_sid=([A-Za-z0-9_-]{43})/.exec(pair.header)?.[1] ?? '';
@@ -462,7 +475,19 @@ describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
         "update invitations set created_at = clock_timestamp() - interval '7 days' + interval '4 seconds', expires_at = clock_timestamp() + interval '4 seconds' where id = $1",
         [issued.invitationId],
       );
+      // Compared inside the database against the stored deadline: a JavaScript Date keeps
+      // milliseconds only and would call a microsecond deadline passed up to 1 ms early.
+      const databaseClockIsPast = async (): Promise<boolean> =>
+        (
+          (
+            await admin.query(
+              'select clock_timestamp() >= expires_at as past from invitations where id = $1',
+              [issued.invitationId],
+            )
+          ).rows[0] as { past: boolean }
+        ).past;
       const holder = await database.fixturePool().connect();
+      let late: Promise<{ outcome: string }> | undefined;
       try {
         await holder.query('begin');
         // Same serialisation order as the function: advisory lock first, then the row lock.
@@ -472,15 +497,36 @@ describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
         await holder.query('select * from invitations where id = $1 for update', [
           issued.invitationId,
         ]);
-        // Consumer starts now — ~4 s before the deadline — and blocks on the held locks.
-        const late = withTenant(database.pool(), issued.org, (client) =>
+        // Consumer starts now — before the deadline — and blocks on the held locks.
+        late = withTenant(database.pool(), issued.org, (client) =>
           acceptInvitation(client, issued.invitationId, issued.token, randomUUID(), issued.email),
         );
-        // Hold past the deadline, then release: the waiter proceeds and must refuse.
-        await new Promise((resolve) => setTimeout(resolve, 5000));
+        // Wait until the consumer is really blocked on the advisory lock, and prove that the
+        // database clock was still before the deadline when it was: otherwise the case would pass
+        // for the wrong reason (a consumer that arrived after the deadline is trivially refused).
+        await waitFor(
+          async () =>
+            (
+              (
+                await admin.query(
+                  "select count(*)::int as n from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock' and wait_event = 'advisory'",
+                )
+              ).rows[0] as { n: number }
+            ).n > 0,
+          'the consumer to block on the invitation lock',
+        );
+        expect(await databaseClockIsPast(), 'the consumer blocked before the deadline').toBe(false);
+        // Hold until the DATABASE clock has passed the deadline. A fixed sleep measures the
+        // process timer, which is not the clock the function judges expiry on: where the wall
+        // clock lags the monotonic one (WSL2) a 5 s sleep can end before a 4 s wall-clock deadline.
+        await waitFor(databaseClockIsPast, 'the database clock to pass the deadline');
         await holder.query('rollback');
         expect((await late).outcome).toBe('expired');
       } finally {
+        // A failed assertion above must not hand a connection with an open transaction and held
+        // locks back to the pool, nor leave the consumer blocked into the next case.
+        await holder.query('rollback');
+        await late?.catch(() => undefined);
         holder.release();
       }
     },
