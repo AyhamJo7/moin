@@ -21,7 +21,9 @@
  * the infrastructure the probes stand on, not what's under test. Seeding runs through the
  * migration-role pool; every probe runs through HTTP as `moin_app`, exactly as traffic.
  */
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomUUID } from 'node:crypto';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { Test } from '@nestjs/testing';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { createTestDatabase, evidenceTest, type TestDatabase } from '@moin/testing';
@@ -41,6 +43,15 @@ import { WorkModule } from '../work/work.module.ts';
 import { CallSimulatorModule } from '../call-simulator/call-simulator.module.ts';
 import { EXPECTED_ROUTE_COUNT, INVENTORY } from './inventory.ts';
 import { reconstructRoutes } from './routes.ts';
+import { compareWithInventory, controllersReachableFrom, routesServedBy } from './root-routes.ts';
+import { loadProductionRoots } from './production-roots.ts';
+import {
+  assertFullyProbed,
+  buildCoverageReport,
+  coverageArtifact,
+  key,
+  ProbeLedger,
+} from './probe-ledger.ts';
 import { seedTwoTenants, type SeededWorld } from './seed.ts';
 import { ABSENT_SURFACES, assertSurfacesAbsent } from './surface.ts';
 
@@ -51,6 +62,13 @@ import { ABSENT_SURFACES, assertSurfacesAbsent } from './surface.ts';
  */
 const NON_PRODUCT_ROUTES = new Set(['GET /voice/relay']);
 
+/**
+ * Controller classes that exist in the source tree but are deliberately mounted by neither
+ * production root, each with its reason. Empty today: a controller file nobody mounts is either
+ * dead code or a route that was meant to ship, and both deserve a line here.
+ */
+const UNMOUNTED_CONTROLLERS: Record<string, string> = {};
+
 const LOCAL_KEY = 'local-v1:local-development-only';
 const APP_ORIGIN = 'http://localhost:3000';
 const CSRF_HEADER = 'x-csrf-token';
@@ -60,6 +78,9 @@ let database: TestDatabase;
 let admin: ReturnType<TestDatabase['fixturePool']>;
 let app: NestFastifyApplication;
 let world: SeededWorld;
+/** Every route a probe below actually called, with the status it got and what it asserted. */
+const ledger = new ProbeLedger();
+let productionRoots: Awaited<ReturnType<typeof loadProductionRoots>>;
 const clock = fixedClock(new Date());
 clock.set(new Date());
 
@@ -129,9 +150,10 @@ async function mintSession(userId: string, freshStepUp: boolean): Promise<Seeded
   const token = randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, '').slice(0, 11);
   const digest = createHash('sha256').update(token, 'utf8').digest();
   const sessionId = randomUUID();
-  // 43-char token shape (base64url of 32 bytes, unpadded) mirrors randomSecret(); the
-  // cookie contract is shape-checked before the digest is even read.
-  const csrf = randomUUID().replace(/-/g, '').slice(0, 43).padEnd(43, 'A');
+  // The synchronizer token is derived from the session token (G07 M1), as sign-in issues it.
+  // The module boundary keeps this suite out of the identity module's internals, so the
+  // derivation is restated here; the session suite pins the same formula against sign-in.
+  const csrf = createHmac('sha256', token).update('moin-csrf-v1').digest('base64url');
   // Expiries use the TEST clock (the guards judge against the database clock, and the
   // fixed test clock is set to wall time in beforeAll — never clock_timestamp() + the
   // full ceiling, which trips the sessions_absolute_ceiling CHECK on skew).
@@ -182,6 +204,7 @@ function authed(
 }
 
 beforeAll(async () => {
+  productionRoots = await loadProductionRoots();
   database = await createTestDatabase('xsuite');
   admin = database.fixturePool();
   world = await seedTwoTenants(admin, database.pool());
@@ -198,25 +221,75 @@ afterAll(async () => {
 const LIVE_TENANT_TABLES = 55;
 
 describe('route inventory covers the whole API surface (P06.13.02)', () => {
-  evidenceTest('every mounted route has an inventory row: 100 % or block', () => {
-    // Computed from the live Fastify router — the routes the app actually serves
-    // (`printRoutes` delegates to the router's `prettyPrint`; the tree walk lives in
-    // `routes.ts`, unit-pinned against a captured tree). Compared against the
-    // inventory in BOTH directions; an empty reconstruction fails too.
-    const instance = app.getHttpAdapter().getInstance() as unknown as {
-      printRoutes(): string;
-    };
-    const printed: string = instance.printRoutes();
-    const served = reconstructRoutes(printed);
-    expect(served.size).toBeGreaterThan(0);
-    for (const known of NON_PRODUCT_ROUTES) served.delete(known);
-    const inventoried = new Set(INVENTORY.map((r) => `${r.method} ${r.path}`));
-    const unprobed = [...served].filter((route) => !inventoried.has(route));
-    const orphaned = [...inventoried].filter((route) => !served.has(route));
-    expect({ unprobed, orphaned }).toStrictEqual({ unprobed: [], orphaned: [] });
-    // Count pin: a silent shrink of both sides together still fails.
-    expect(INVENTORY.length).toBe(EXPECTED_ROUTE_COUNT);
+  evidenceTest(
+    'every route the PRODUCTION roots serve has an inventory row: 100 % or block',
+    () => {
+      // The served set is read from ApiRootModule and VoiceRootModule themselves (root-routes.ts),
+      // not from the module list this file assembles below, so a feature module added to a
+      // production root is measured the day it is added (G12 H1, mutation A). Compared in BOTH
+      // directions with the inventory.
+      const served = routesServedBy([productionRoots.api, productionRoots.voice]);
+      expect(served.size).toBeGreaterThan(0);
+      const inventoried = new Set(INVENTORY.map((r) => `${r.method} ${r.path}`));
+      expect(compareWithInventory(served, inventoried)).toStrictEqual({
+        unprobed: [],
+        orphaned: [],
+      });
+      // Count pin: a silent shrink of both sides together still fails.
+      expect(INVENTORY.length).toBe(EXPECTED_ROUTE_COUNT);
+    },
+  );
+
+  evidenceTest('the app under test mounts every production route, and nothing else', () => {
+    // The probes below run against the app this file assembles. If a production module is not
+    // mounted here its routes are inventoried but cannot be probed, and a hand-registered route
+    // (the voice socket) is neither: so the live router must equal the roots' set plus the
+    // named non-product routes.
+    const instance = app.getHttpAdapter().getInstance() as unknown as { printRoutes(): string };
+    const mounted = reconstructRoutes(instance.printRoutes());
+    expect(mounted.size).toBeGreaterThan(0);
+    for (const known of NON_PRODUCT_ROUTES) mounted.delete(known);
+    const served = routesServedBy([productionRoots.api, productionRoots.voice]);
+    expect({
+      mountedOnlyInTest: [...mounted].filter((r) => !served.has(r)).sort(),
+      productionOnly: [...served].filter((r) => !mounted.has(r)).sort(),
+    }).toStrictEqual({ mountedOnlyInTest: [], productionOnly: [] });
   });
+
+  evidenceTest(
+    'every controller file is reachable from a production root or named as unmounted',
+    () => {
+      const reachable = new Set(
+        [...controllersReachableFrom([productionRoots.api, productionRoots.voice])].map(
+          (controller) => controller.name,
+        ),
+      );
+      const found: string[] = [];
+      const walk = (dir: string): void => {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          const full = join(dir, entry.name);
+          if (entry.isDirectory()) walk(full);
+          else if (entry.name.endsWith('.controller.ts')) {
+            for (const match of readFileSync(full, 'utf8').matchAll(
+              /export class (\w+Controller)\b/g,
+            )) {
+              found.push(match[1] ?? '');
+            }
+          }
+        }
+      };
+      walk(resolve(import.meta.dirname, '../..'));
+      expect(found.length).toBeGreaterThan(0);
+      const stray = found.filter(
+        (name) => !reachable.has(name) && !(name in UNMOUNTED_CONTROLLERS),
+      );
+      expect(stray).toStrictEqual([]);
+      // A named exemption that is mounted after all, or whose file is gone, is stale.
+      expect(
+        Object.keys(UNMOUNTED_CONTROLLERS).filter((n) => reachable.has(n) || !found.includes(n)),
+      ).toStrictEqual([]);
+    },
+  );
 
   evidenceTest('unknown routes answer 404, never tenant data', async () => {
     // No file-local probe: the path sits under the real MembersController, so the
@@ -253,6 +326,7 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
             ? undefined
             : (route.body ?? { reason: 'cross-tenant probe' });
       const response = await authed(session, route.method, url, body);
+      ledger.called(key(route), response.statusCode);
       // Exact 404: P06.07.03 — cross-tenant and not-permitted both read as not-found, so
       // existence never leaks. A 403 here would be a regression (it confirms the id
       // exists but is forbidden); a 400 would mean the probe body stopped being valid.
@@ -266,6 +340,10 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
       expect(response.body).not.toContain(world.b.taskId);
       expect(response.body).not.toContain(world.b.owner.id);
       expect(response.body).not.toContain('xsuite-beta');
+      ledger.record(key(route), {
+        status: response.statusCode,
+        check: 'foreign id answers 404 and leaks no tenant B data',
+      });
     }
   });
 
@@ -280,6 +358,7 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
       email,
       role: 'staff',
     });
+    ledger.called('POST /api/members/invite', invited.statusCode);
     expect(invited.statusCode, invited.body).toBe(201);
     const invitationId = invited.json<{ invitationId: string }>().invitationId;
     expect(typeof invitationId).toBe('string');
@@ -295,11 +374,16 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
         .then((r) => (r.rows[0] as { n: number }).n),
     );
     expect(inviteInB).toBe(0);
+    ledger.record('POST /api/members/invite', {
+      status: invited.statusCode,
+      check: 'row lands in tenant A and not in B',
+    });
     const granted = await authed(session, 'POST', '/api/support/grants', {
       operatorSubject: `xsuite-probe-${Date.now()}`,
       scope: 'readonly',
       reason: 'cross-tenant probe grant creation',
     });
+    ledger.called('POST /api/support/grants', granted.statusCode);
     expect(granted.statusCode, granted.body).toBe(201);
     const grantId = granted.json<{ grantId: string }>().grantId;
     expect(typeof grantId).toBe('string');
@@ -319,16 +403,25 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
         .then((r) => (r.rows[0] as { n: number }).n),
     );
     expect(grantInB).toBe(0);
+    ledger.record('POST /api/support/grants', {
+      status: granted.statusCode,
+      check: 'row lands in tenant A and not in B',
+    });
   });
 
   evidenceTest('list routes show only the caller tenant rows', async () => {
     const session = await mintSession(world.a.owner.id, true);
     const grants = await authed(session, 'GET', '/api/support/grants');
+    ledger.called('GET /api/support/grants', grants.statusCode);
     expect(grants.statusCode).toBe(200);
     const body = grants.body;
     expect(body).toContain(world.a.grantId);
     expect(body).not.toContain(world.b.grantId);
     expect(body).not.toContain('xsuite-beta');
+    ledger.record('GET /api/support/grants', {
+      status: grants.statusCode,
+      check: "A's grant present, B's absent",
+    });
 
     // Today (M1): one task per tenant, staged by the fixture pool like the seed (no audit
     // rows, so the DB-layer counts below stay exact); A's read holds A's task only.
@@ -340,27 +433,78 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
       [world.a.organisationId, taskA, world.b.organisationId, taskB],
     );
     const todayA = await authed(session, 'GET', '/api/today');
+    ledger.called('GET /api/today', todayA.statusCode);
     expect(todayA.statusCode).toBe(200);
     expect(todayA.body).toContain(taskA);
     expect(todayA.body).not.toContain(taskB);
     expect(todayA.body).not.toContain('xsuite-beta');
+    ledger.record('GET /api/today', {
+      status: todayA.statusCode,
+      check: "A's task present, B's absent",
+    });
   });
+
+  evidenceTest(
+    'session routes act on the caller session only and leave tenant B alone',
+    async () => {
+      const sessionA = await mintSession(world.a.owner.id, true);
+      const sessionB = await mintSession(world.b.owner.id, true);
+      const stepUp = await authed(sessionA, 'POST', '/api/auth/step-up');
+      ledger.called('POST /api/auth/step-up', stepUp.statusCode);
+      expect(stepUp.statusCode, stepUp.body).toBe(302);
+      expect(String(stepUp.headers.location)).not.toContain(world.b.owner.id);
+      expect(stepUp.body).not.toContain('xsuite-beta');
+      ledger.record('POST /api/auth/step-up', {
+        status: stepUp.statusCode,
+        check: "redirects for A's own session; nothing of B",
+      });
+      const liveOf = (userId: string): Promise<number> =>
+        admin
+          .query(
+            'select count(*)::int as n from sessions where user_id = $1::uuid and revoked_at is null',
+            [userId],
+          )
+          .then((r) => (r.rows[0] as { n: number }).n);
+      const bBefore = await liveOf(world.b.owner.id);
+      expect(bBefore).toBeGreaterThan(0);
+      const signOut = await authed(sessionA, 'POST', '/api/auth/sign-out-others');
+      ledger.called('POST /api/auth/sign-out-others', signOut.statusCode);
+      expect(signOut.statusCode, signOut.body).toBe(200);
+      expect(signOut.body).not.toContain('xsuite-beta');
+      expect(await liveOf(world.b.owner.id)).toBe(bBefore);
+      expect(sessionB.header).not.toBe(sessionA.header);
+      ledger.record('POST /api/auth/sign-out-others', {
+        status: signOut.statusCode,
+        check: "ends A's other sessions only; B's sessions untouched",
+      });
+    },
+  );
 
   evidenceTest('public routes answer without tenant data', async () => {
     for (const url of ['/api/auth/login', '/healthz', '/readyz']) {
       const response = await app.inject({ method: 'GET', url });
+      ledger.called(`GET ${url}`, response.statusCode);
       expect([200, 302].includes(response.statusCode), `${url} → ${response.statusCode}`).toBe(
         true,
       );
       expect(response.body).not.toContain('xsuite-alpha');
       expect(response.body).not.toContain('xsuite-beta');
+      ledger.record(`GET ${url}`, {
+        status: response.statusCode,
+        check: 'answers without tenant data',
+      });
     }
     const callback = await app.inject({
       method: 'GET',
       url: '/api/auth/callback?code=x&state=y',
     });
+    ledger.called('GET /api/auth/callback', callback.statusCode);
     expect([400, 302].includes(callback.statusCode)).toBe(true);
     expect(callback.body).not.toContain('xsuite-alpha');
+    ledger.record('GET /api/auth/callback', {
+      status: callback.statusCode,
+      check: 'refuses a forged state without naming a tenant',
+    });
   });
 
   evidenceTest('forged webhooks are refused before tenancy', async () => {
@@ -371,9 +515,14 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
         headers: { 'content-type': 'application/x-www-form-urlencoded' },
         payload: 'CallSid=forged&From=%2B491700000000',
       });
+      ledger.called(`POST ${url}`, response.statusCode);
       expect([401, 403].includes(response.statusCode), `${url} → ${response.statusCode}`).toBe(
         true,
       );
+      ledger.record(`POST ${url}`, {
+        status: response.statusCode,
+        check: 'forged signature refused before tenancy',
+      });
     }
     // The simulated-call entry: no token and a forged token are both refused before tenancy.
     for (const authorization of [undefined, `Bearer ${SIMULATOR_TOKEN}-forged`]) {
@@ -391,8 +540,13 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
           utterance: 'Rückruf bitte',
         }),
       });
+      ledger.called('POST /api/dev/simulated-calls', response.statusCode);
       expect(response.statusCode).toBe(401);
       expect(response.body).not.toContain('xsuite-alpha');
+      ledger.record('POST /api/dev/simulated-calls', {
+        status: response.statusCode,
+        check: 'missing and forged bearer token refused before tenancy',
+      });
     }
   });
 });
@@ -729,4 +883,31 @@ describe('absent surfaces stay absent (P06.13.04)', () => {
     expect(ABSENT_SURFACES.length).toBeGreaterThan(0);
     assertSurfacesAbsent(app);
   });
+});
+
+describe('coverage is calls made, not inventory rows (P06.13.02, P06.13.05, LG-P01)', () => {
+  evidenceTest(
+    'every inventoried route was called by a probe above, and the report says so',
+    () => {
+      const report = buildCoverageReport(INVENTORY, ledger);
+      // Written before the assertion so a failing run still leaves the per-route evidence behind.
+      const out = resolve(import.meta.dirname, '../../../../../test-results/xsuite-coverage.json');
+      mkdirSync(resolve(out, '..'), { recursive: true });
+      writeFileSync(
+        out,
+        `${JSON.stringify(
+          coverageArtifact(report, {
+            commit: process.env['GITHUB_SHA'] ?? null,
+            generatedAt: new Date().toISOString(),
+          }),
+          null,
+          2,
+        )}\n`,
+      );
+      assertFullyProbed(report);
+      expect(report.executed).toBe(report.required);
+      expect(report.unprobed).toStrictEqual([]);
+      expect(report.failed).toStrictEqual([]);
+    },
+  );
 });

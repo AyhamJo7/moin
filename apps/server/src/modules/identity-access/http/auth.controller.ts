@@ -25,10 +25,10 @@ import {
 } from '../domain/session-policy.ts';
 import { SignInError, type SignInFailure } from '../application/sign-in.service.ts';
 import { type SecurityClass } from '../application/security-events.ts';
-import { randomSecret } from '../domain/secret-values.ts';
 import type { SessionService } from '../application/session.service.ts';
 import { SESSIONS, SIGN_IN, type SignInGate } from '../identity-access.tokens.ts';
 import { clearCookie, readCookie, serializeCookie } from './cookies.ts';
+import { deriveCsrfToken } from './csrf.ts';
 import { recordSecurityEvent } from './record-security-event.ts';
 import { AuthThrottleStore } from '../../platform/auth-throttle-store.ts';
 import { CONFIG } from '../../../config/config.module.ts';
@@ -168,7 +168,9 @@ export class AuthController {
         'ok',
         completed.steppedUp !== true && readCookie(cookieHeader, SESSION_COOKIE) === undefined,
       );
-      const csrfToken = randomSecret();
+      // Bound to the session just issued: derived from its token, so the guard recomputes it
+      // from the presented cookie (G07 M1).
+      const csrfToken = deriveCsrfToken(completed.sessionToken);
       await reply
         .code(302)
         .header('location', completed.location)
