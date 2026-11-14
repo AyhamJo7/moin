@@ -149,6 +149,23 @@ describe('routes served by the production root modules', () => {
     },
   );
 
+  evidenceTest('a promised module is refused, not silently skipped', () => {
+    @Controller('api/zz-promised')
+    class PromisedController {
+      @Get(':id')
+      read(): string {
+        return 'x';
+      }
+    }
+    @Module({})
+    class PromisedModule {}
+    @Module({
+      imports: [Promise.resolve({ module: PromisedModule, controllers: [PromisedController] })],
+    })
+    class RootWithPromise {}
+    expect(() => routesServedBy([RootWithPromise])).toThrow(/promised module/);
+  });
+
   evidenceTest('an inventory row that nothing serves is reported as orphaned', () => {
     const withGhost = new Set([...inventoried, 'GET /api/ghost']);
     const served = routesServedBy([ApiRootModule, VoiceRootModule]);

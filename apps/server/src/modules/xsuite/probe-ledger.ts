@@ -128,7 +128,6 @@ export function coverageArtifact(
   meta: {
     readonly commit: string | null;
     readonly generatedAt: string;
-    readonly tables?: unknown;
   },
 ): Record<string, unknown> {
   return {
@@ -139,7 +138,6 @@ export function coverageArtifact(
     executed: report.executed,
     unprobed: report.unprobed,
     failed: report.failed,
-    tables: meta.tables ?? null,
     rows: report.rows,
   };
 }
