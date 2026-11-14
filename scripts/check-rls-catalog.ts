@@ -144,6 +144,12 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.accept_invitation': 'c57c2f52ee7af4a6a2ec7796fd93f938',
   'app.take_signin_bucket': 'c4f2a268dd9cfacb9b2d5936de8925c7',
   'app.write_signin_event': 'bc65e2433de7603be03149ed8a755e69',
+  'app.override_early_access_cap': '92738f2b262ca28f2cd55c7fdf4c7e7f',
+  // The cap guards (P06.04.03): replaced by a no-op, any of them lets the cap change unaudited.
+  'app.stamp_limit_override': '7a6e6b05a6bcc2bc837a9f2b256e2f20',
+  'app.reject_override_mutation': 'e38014926ad6482e182b78e400f15e52',
+  'app.require_limit_override': 'ecb3d80f785736eef524e3db439be4eb',
+  'app.reject_limits_removal': 'c578999a3330124ed757443c4cecec8a',
   'app.live_support_grant': '627c5b62b80383a39b182444fbbb672b',
   'app.create_support_grant': '3a96737a954f4979ea553d6e2fe0ca5a',
   'app.revoke_support_grant': 'a7f4ef52e1b5f0b4e949415424f10385',
@@ -440,6 +446,13 @@ const APPROVED_DEFINERS: Readonly<
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
     executeGrantees: ['moin_app'],
+  },
+  'app.override_early_access_cap': {
+    arguments: 'integer, integer, text, text, text',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    // Called from reviewed migrations by the migration role (the owner); no runtime role.
+    executeGrantees: [],
   },
   'app.accept_invitation': {
     arguments: 'uuid, bytea, text, citext, uuid, uuid',
@@ -774,6 +787,8 @@ const PUBLIC_EXECUTE_QUERY = `
 const AUDIT_TRIGGER_TYPE = 27; // row (1) + before (2) + delete (8) + update (16)
 const TRUNCATE_TRIGGER_TYPE = 34; // before (2) + truncate (32), statement-level
 const INSERT_TRIGGER_TYPE = 7; // row (1) + before (2) + insert (4)
+const UPDATE_TRIGGER_TYPE = 19; // row (1) + before (2) + update (16)
+const DELETE_TRIGGER_TYPE = 11; // row (1) + before (2) + delete (8)
 
 /**
  * `ENABLE ALWAYS`, not the default `ENABLE`.
@@ -860,6 +875,44 @@ const APPEND_ONLY_TABLES: readonly {
     table: 'audit_chain_registry',
     trigger: 'audit_chain_registry_no_truncate',
     fn: 'app.reject_registry_mutation()',
+    triggerType: TRUNCATE_TRIGGER_TYPE,
+  },
+  // The Early Access cap (P06.04.03): the override record is append-only and ordered by the
+  // table itself, and the limits row changes only against an unused record and is never removed.
+  {
+    table: 'provisioning_limit_overrides',
+    trigger: 'provisioning_limit_overrides_stamp',
+    fn: 'app.stamp_limit_override()',
+    triggerType: INSERT_TRIGGER_TYPE,
+  },
+  {
+    table: 'provisioning_limit_overrides',
+    trigger: 'provisioning_limit_overrides_immutable',
+    fn: 'app.reject_override_mutation()',
+    triggerType: AUDIT_TRIGGER_TYPE,
+  },
+  {
+    table: 'provisioning_limit_overrides',
+    trigger: 'provisioning_limit_overrides_no_truncate',
+    fn: 'app.reject_override_mutation()',
+    triggerType: TRUNCATE_TRIGGER_TYPE,
+  },
+  {
+    table: 'provisioning_limits',
+    trigger: 'provisioning_limits_require_override',
+    fn: 'app.require_limit_override()',
+    triggerType: UPDATE_TRIGGER_TYPE,
+  },
+  {
+    table: 'provisioning_limits',
+    trigger: 'provisioning_limits_no_delete',
+    fn: 'app.reject_limits_removal()',
+    triggerType: DELETE_TRIGGER_TYPE,
+  },
+  {
+    table: 'provisioning_limits',
+    trigger: 'provisioning_limits_no_truncate',
+    fn: 'app.reject_limits_removal()',
     triggerType: TRUNCATE_TRIGGER_TYPE,
   },
 ];

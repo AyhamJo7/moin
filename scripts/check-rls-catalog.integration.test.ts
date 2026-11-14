@@ -750,6 +750,69 @@ describe('audit append-only catalog control', () => {
   });
 });
 
+describe('Early Access cap guard catalog controls (P06.04.03)', () => {
+  evidenceTest('rejects a disabled cap guard and a disabled removal guard', async () => {
+    // One literal statement per guard: no identifier is ever interpolated into SQL.
+    const guards = [
+      {
+        subject: 'provisioning_limits.provisioning_limits_require_override',
+        disable:
+          'ALTER TABLE provisioning_limits DISABLE TRIGGER provisioning_limits_require_override',
+        enable:
+          'ALTER TABLE provisioning_limits ENABLE ALWAYS TRIGGER provisioning_limits_require_override',
+      },
+      {
+        subject: 'provisioning_limits.provisioning_limits_no_delete',
+        disable: 'ALTER TABLE provisioning_limits DISABLE TRIGGER provisioning_limits_no_delete',
+        enable:
+          'ALTER TABLE provisioning_limits ENABLE ALWAYS TRIGGER provisioning_limits_no_delete',
+      },
+      {
+        subject: 'provisioning_limit_overrides.provisioning_limit_overrides_stamp',
+        disable:
+          'ALTER TABLE provisioning_limit_overrides DISABLE TRIGGER provisioning_limit_overrides_stamp',
+        enable:
+          'ALTER TABLE provisioning_limit_overrides ENABLE ALWAYS TRIGGER provisioning_limit_overrides_stamp',
+      },
+    ];
+    for (const guard of guards) {
+      await ddl(guard.disable);
+      try {
+        expect(rulesFor(await findings(), guard.subject)).toContain(
+          'audit-append-only-trigger-unsafe',
+        );
+      } finally {
+        await ddl(guard.enable);
+      }
+    }
+  });
+
+  evidenceTest('rejects a cap guard whose body was replaced by a no-op', async () => {
+    const pool = createPool({ connectionString: database.migrationUrl, max: 1 });
+    const original = (
+      await pool
+        .query<{ definition: string }>(
+          "select pg_get_functiondef('app.require_limit_override()'::regprocedure) as definition",
+        )
+        .finally(() => pool.end())
+    ).rows[0]?.definition;
+    if (original === undefined) throw new Error('no guard function');
+    await ddl(
+      // eslint-disable-next-line no-restricted-syntax -- function-level setting in a DDL fixture, not a pooled session.
+      `CREATE OR REPLACE FUNCTION app.require_limit_override() RETURNS trigger
+         LANGUAGE plpgsql SET search_path = pg_catalog, public, app, pg_temp
+         AS $$ BEGIN RETURN NEW; END $$`,
+    );
+    try {
+      expect(rulesFor(await findings(), 'app.require_limit_override')).toContain(
+        'reviewed-function-body-changed',
+      );
+    } finally {
+      await ddl(original);
+    }
+  });
+});
+
 describe('audit chain verification catalog controls', () => {
   evidenceTest('rejects a disabled and a dropped register guard', async () => {
     // A deletable registration is how a whole tenant's chain disappears from the daily sweep while
