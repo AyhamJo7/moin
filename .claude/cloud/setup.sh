@@ -2,8 +2,7 @@
 # moin cloud environment setup script.
 # Paste into claude.ai/code → environment "moin" → Setup script (see docs/control-plane/CONTROL_PLANE_REPORT.md,
 # founder action F-04). Runs as root on Ubuntu 24.04 x86_64 before the session starts; keep it under ~5 min
-# so the environment is cached. Pins must equal .nvmrc / package.json packageManager / .terraform-version
-# once P02 creates them: .claude/bin/control_plane_check.py (the first gate) enforces this.
+# so the environment is cached. Pins must equal .nvmrc / package.json packageManager / .terraform-version.
 set -euo pipefail
 
 readonly NODE_VERSION=24.21.0
