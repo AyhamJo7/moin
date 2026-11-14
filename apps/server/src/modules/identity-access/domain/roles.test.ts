@@ -7,7 +7,7 @@
  */
 import { describe, expect } from 'vitest';
 import { evidenceTest } from '@moin/testing';
-import { CAPABILITIES, isPermission, isRole, may, PERMISSIONS, ROLES } from './roles.ts';
+import { CAPABILITIES, isPermission, isRole, may, mayConfer, PERMISSIONS, ROLES } from './roles.ts';
 
 describe('the RBAC decision table (P06.07.01)', () => {
   evidenceTest('owners hold every capability', () => {
@@ -71,5 +71,28 @@ describe('the RBAC decision table (P06.07.01)', () => {
     expect(isPermission('root')).toBe(false);
     expect(ROLES).toStrictEqual(['owner', 'admin', 'staff']);
     expect(PERMISSIONS).toStrictEqual(['integration_admin', 'billing_admin']);
+  });
+});
+
+describe('conferring an additive permission is bounded by holding it (G09 M1)', () => {
+  evidenceTest('owners confer both, admins and staff confer nothing without holding it', () => {
+    expect(mayConfer('owner', [], ['billing_admin', 'integration_admin'])).toBe(true);
+    expect(mayConfer('admin', [], ['billing_admin'])).toBe(false);
+    expect(mayConfer('admin', [], ['integration_admin'])).toBe(false);
+    expect(mayConfer('staff', [], ['billing_admin'])).toBe(false);
+    expect(mayConfer('admin', [], [])).toBe(true);
+  });
+
+  evidenceTest('a holder confers only what it holds', () => {
+    expect(mayConfer('admin', ['billing_admin'], ['billing_admin'])).toBe(true);
+    expect(mayConfer('admin', ['billing_admin'], ['integration_admin'])).toBe(false);
+    expect(mayConfer('admin', ['billing_admin'], ['billing_admin', 'integration_admin'])).toBe(
+      false,
+    );
+  });
+
+  evidenceTest('unknown roles and unknown permissions confer nothing', () => {
+    expect(mayConfer('root', ['billing_admin'], ['billing_admin'])).toBe(false);
+    expect(mayConfer('owner', [], ['superuser'])).toBe(false);
   });
 });

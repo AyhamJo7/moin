@@ -43,12 +43,34 @@ COPY packages/ui/package.json packages/ui/
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile --ignore-scripts --filter @moin/server... --filter @moin/web... --filter .
 
+# ---------------------------------------------------------------- workspace closure
+#
+# Which workspace packages does the server need at run time? The earlier answer was a hand list of
+# four, and it drifted: the voice and worker roles import @moin/telephony and @moin/integrations, so
+# they died with ERR_MODULE_NOT_FOUND in an image the build and every other check accepted. The
+# answer is now derived from the dependency graph (`dependencies` and `optionalDependencies` that
+# point into the workspace, transitively, never `devDependencies`) by a script that sees only the
+# manifests, so this stage is cached until a dependency changes.
+FROM deps AS closure
+WORKDIR /app
+COPY scripts/workspace-closure.ts scripts/
+RUN node scripts/workspace-closure.ts apps/server /closure
+
 # ---------------------------------------------------------------- build
 FROM deps AS build
 WORKDIR /app
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm --filter @moin/server... build && pnpm --filter @moin/web build
+
+# ---------------------------------------------------------------- closure sources
+#
+# The `src` of exactly the packages in the closure, from the built tree (no tests, fixtures or build
+# config beyond `src`). The list comes from the closure stage.
+FROM build AS closure-src
+COPY --from=closure /closure/packages.txt /closure/packages.txt
+RUN mkdir /closure-src \
+ && while read -r dir; do mkdir -p "/closure-src/$dir" && cp -r "/app/$dir/src" "/closure-src/$dir/src"; done < /closure/packages.txt
 
 # ---------------------------------------------------------------- production dependencies
 #
@@ -64,14 +86,11 @@ ENV CI=true PNPM_HOME=/pnpm PATH=/pnpm:$PATH
 RUN corepack enable
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc* ./
-# Only the four packages @moin/server actually depends on. Shipping a package.json whose `src`
-# is not in the image turns an accidental import into a runtime failure in production rather
-# than a build failure here.
-COPY apps/server/package.json apps/server/
-COPY packages/contracts/package.json packages/contracts/
-COPY packages/db/package.json packages/db/
-COPY packages/kernel/package.json packages/kernel/
-COPY packages/observability/package.json packages/observability/
+# The server's manifest and those of exactly the workspace packages it depends on at run time,
+# derived from the dependency graph (see the closure stage). Shipping a package.json whose `src` is
+# not in the image turns an accidental import into a runtime failure in production rather than a
+# build failure here, and a hand list is how two of them went missing.
+COPY --from=closure /closure/manifests/ ./
 
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile --prod --ignore-scripts --filter @moin/server...
@@ -87,9 +106,11 @@ ENV NODE_ENV=production \
 # Security updates from bookworm-security (fixed versions available upstream).
 # CVE-2026-103111 (libpcre2-8-0) was fixed the same way before; the perl-base CVEs below
 # (CVE-2026-13221, CVE-2026-42496, CVE-2026-8376 et al.) gained fixed versions since the base
-# image was cut. Pins exact Debian security package versions (hadolint DL3008).
+# image was cut. CVE-2026-109518 (apt, libapt-pkg6.0) is fixed in 2.6.2 and failed the daily
+# image scan from 2026-11-05. Pins exact Debian security package versions (hadolint DL3008).
 RUN apt-get update -qq \
  && apt-get install -y --no-install-recommends libpcre2-8-0=10.42-1+deb12u2 perl-base=5.36.0-7+deb12u4 \
+      apt=2.6.2 libapt-pkg6.0=2.6.2 \
  && rm -rf /var/lib/apt/lists/*
 
 # The base image ships npm, npx, corepack and yarn. A review caught the earlier claim that this
@@ -112,11 +133,9 @@ COPY --from=build --chown=node:node /app/apps/server/package.json ./apps/server/
 COPY --from=prod-deps --chown=node:node /app/packages ./packages
 
 # The workspace packages ship as TypeScript sources and are type-stripped by Node 24 at runtime
-# (ADR-0002). Only `src` is added on top — no tests, no fixtures, no build config.
-COPY --from=build --chown=node:node /app/packages/contracts/src ./packages/contracts/src
-COPY --from=build --chown=node:node /app/packages/db/src ./packages/db/src
-COPY --from=build --chown=node:node /app/packages/kernel/src ./packages/kernel/src
-COPY --from=build --chown=node:node /app/packages/observability/src ./packages/observability/src
+# (ADR-0002). Only `src` is added on top — no tests, no fixtures, no build config — for every
+# package the server depends on at run time, not a list kept by hand.
+COPY --from=closure-src --chown=node:node /closure-src/ ./
 
 # The `web` role: Next's standalone server. It does NOT include `.next/static` (every script the
 # browser loads) or `public/`, so both are copied next to it; `scripts/check-web-image.sh` fetches

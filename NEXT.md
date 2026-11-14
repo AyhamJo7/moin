@@ -1,15 +1,13 @@
 # NEXT
 
-**Handoff (2026-11-14).** Merged: #272 `7a7201d`, #273 `352c9a0`. Stay on `chore/owner-overhaul` in the main checkout (branches from `main` put the old guard back on disk); edit other branches in `~/worktrees/moin/`.
+**AI is doing now:** C4 rework of the two PRs the review refused. #269 (cap override, migration 0082): refuse delete, truncate and replacement of the limits row; make an override record single-use; run its tests as `moin_migrator`. #267 (throttle bounds, renumber to 0083): build the indexes without the blocking exemption; derive the new-device flag from a server-confirmed predecessor; bound refusal events after saturation; make bucket admission and throttle-event dedupe atomic; record only confirmed credential changes.
 
-**AI is doing now:** C4, #260: fix the two MEDIUM review notes in the test (roll back in `finally`; compare expiry in the database), merge `origin/main` into the branch, wait for CI, `/ship 260`. Then #259, #268, #262, #263, #265, #264, #266, #267, #269, #270, each updated with `main` first (a ruleset keeps the up-to-date rule on).
+**AI next:** (1) C3, C5, C6, X1, X2. (2) S1: call persistence and disclosure. (3) S2: demo tenant seed.
 
-**AI next:** (1) C5, C6. (2) S1: call persistence and disclosure. (3) S2: demo tenant seed.
+**You next:** (1) the four commands below. (2) H3: answer Twilio's identity request. (3) H2: trademark search and domain for KlarDesk.
 
-**You next:** (1) the decision under "Blocked on you". (2) H3: Twilio identity request. (3) H2: trademark search and domain.
+**Needed from you (one list):** (1) The reviewer still refuses your final D3 and D8 decisions on #274, and the guard keeps `gh pr ready` and `gh pr merge` from sessions, so run: `gh pr ready 274`, `gh pr merge 274 --squash --auto`, `gh pr ready 271`, `gh pr merge 271 --squash --auto`. #271 needs `main` merged in once #274 lands; the AI does that. (2) No `merge-train-run` exists; the AI uses `/ship` per PR. Say so if you meant something else.
 
-**Blocked on you:** the independent review refused #274 twice (roadmap, operating model) and will refuse #271 on the same grounds: it reads D2 (no new evidence records), D3 (session merges identity and migration PRs before 2026-11-29, one reviewer instead of the QG-09 three), D8 (conditional container scan) and "up-to-date rule off" as loosening `PLAN.md` gates QG-09, QG-03 and P02.06.03. Choose: (a) amend those `PLAN.md` gates yourself and merge #274 and #271 by hand, or (b) keep the gates and tell the AI to rewrite D2, D3, D8 and C3 to match.
+**Rollback tested before merge:** #266 (session-bound CSRF): a new-code session passes the old check, an old token is refused by the new one, a fresh sign-in works; 4 of 4. #267: rehearsed (old function bodies restored on a migrated database, sign-in admits, no rows lost) but not merged. Not in the class (function bodies or new tables only, no data change, no sign-in path): #262, #263, #265, #269.
 
-**Rollback tested before merge:** none merged yet. Candidates: #262, #264, #265, #266, #267, #269.
-
-**Last verified main SHA:** `352c9a0` (#273; all PR checks passed on head `647d840`, 2026-11-14).
+**Last verified main SHA:** `dca8b7c` (#270). Merged this block: #260, #259, #268, #263, #262 (with #264), #265, #266, #270, each with all PR checks passing on its head and an approving review.

@@ -4,6 +4,11 @@ Basis: `main` @ `0e020d2`. Five read-only sweeps; the detail is in the files nex
 Status comes from reading code, CI and GitHub, not from `PROGRESS.md`. No test suite was run
 locally for this audit; CI results are quoted with their dates.
 
+Sections 1 and 2 are findings. Sections 3 and 4 are this audit's recommendations: the founder
+approved them on 2026-11-14 (`ROADMAP.md` section 5, D1 to D3 and D9), and each takes effect with
+the pull request that implements it, not with this file. Where a vote says "now", it describes the
+state after those pull requests.
+
 | File                 | Covers                                                                                |
 | -------------------- | ------------------------------------------------------------------------------------- |
 | `audit-A-p02-p08.md` | status per section, P02 and P05 to P08, checked against code                          |
@@ -15,7 +20,9 @@ locally for this audit; CI results are quoted with their dates.
 ## 1. Status
 
 Section counts by status. "Candidate" means code and tests exist and are wired into a runtime or
-CI path; it becomes DONE-VERIFIED when CI is green on the merge SHA. "Claimed only" means the
+CI path; under the roadmap's rule (D2) it counts as done when its done-criterion holds on `main`
+with CI green on the merge SHA. That rule replaces per-item evidence records for new work only;
+nothing already recorded in the frozen ledger is upgraded by it. "Claimed only" means the
 plan or its evidence says built, and the code is a helper nothing imports.
 
 | Phase                 | Candidate | Claimed only | Partial | Not started | External |
