@@ -22,6 +22,8 @@ export const SEEDED_TABLES: readonly string[] = [
   'support_access_grants',
   'tasks',
   'tenant_setup',
+  'audit_events',
+  'audit_heads',
 ];
 
 /** FORCE-RLS tables the harness does not seed, each with the reason it does not. */
@@ -29,10 +31,6 @@ export const UNSEEDED_TABLES: Readonly<Record<string, string>> = {
   ai_actions: 'not seeded here; module tests that touch it: governance.integration.test.ts',
   appointment_requests:
     'not seeded here; module tests that touch it: appointment-requests.integration.test.ts',
-  audit_events:
-    'not seeded here; module tests that touch it: audit-verification.integration.test.ts, audit.integration.test.ts, callback-intake.integration.test.ts',
-  audit_heads:
-    'not seeded here; module tests that touch it: audit-verification.integration.test.ts, audit.integration.test.ts, provisioning.integration.test.ts',
   booking_confirms:
     'not seeded here; no module integration test touches it, so only the RLS catalog policy check covers it',
   business_domains: 'not seeded here; module tests that touch it: import.integration.test.ts',
