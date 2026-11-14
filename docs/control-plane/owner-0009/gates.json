@@ -1,0 +1,49 @@
+{
+  "_doc": "Local gates (python3 .claude/bin/gates.py fast|full). They prove the working tree is worth pushing and need no Docker. CI on the head SHA is the proof for green: integration, build, boundaries, licences, docs checks and scans run there (.github/workflows). Integration tests locally: /preflight, then a targeted vitest run.",
+  "needs": [],
+  "restore_generated": [],
+  "gates": [
+    {
+      "name": "format",
+      "run": "pnpm exec prettier --check .",
+      "requires": ["pnpm"],
+      "timeout": 300
+    },
+    {
+      "name": "lint",
+      "run": "pnpm lint",
+      "requires": ["pnpm"],
+      "timeout": 900
+    },
+    {
+      "name": "typecheck",
+      "run": "pnpm typecheck",
+      "requires": ["pnpm"],
+      "timeout": 900
+    },
+    {
+      "name": "unit",
+      "run": "pnpm test",
+      "requires": ["pnpm"],
+      "timeout": 1800
+    },
+    {
+      "name": "migrations",
+      "run": "node scripts/check-migrations.ts",
+      "requires": ["node"],
+      "timeout": 300
+    },
+    {
+      "name": "guard",
+      "run": "python3 .claude/hooks/policy_guard.py --self-test",
+      "timeout": 60
+    }
+  ],
+  "fast": ["format", "lint", "typecheck", "guard"],
+  "stress": {
+    "run": "pnpm exec vitest run --project unit {targets}",
+    "iterations": 20,
+    "default_targets": "packages scripts apps",
+    "timeout": 2400
+  }
+}
