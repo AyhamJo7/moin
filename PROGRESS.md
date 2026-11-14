@@ -1,13 +1,15 @@
 ---
-mission: LEDGER-AB correct and compact the Status Ledger (docs only; M2C resumes after)
-status: active
+mission: FROZEN 2026-11-14. Status lives in ROADMAP.md; the next step is in NEXT.md
+status: frozen
 mode: interactive
-phase: ledger-wide correction (P06, P08–P13)
+phase: see ROADMAP.md
 tier: PILOT
-plan: docs/audits/2026-11-01-ledger-ab.md
-next: independent review of the LEDGER-AB draft PR; founder decisions on P06.04.03, P06.10.01, P06.08.02, P06.09.04
-updated: 2026-11-01
+plan: ROADMAP.md
+next: read NEXT.md (or run /next)
+updated: 2026-11-14
 ---
+
+> **Frozen on 2026-11-14.** This file is history. Do not append to it. Status: `ROADMAP.md`.
 
 # PROGRESS — moin
 
