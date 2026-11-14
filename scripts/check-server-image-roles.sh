@@ -16,6 +16,7 @@ names=()
 fail=0
 network="moin-role-check-net-$$"
 
+# shellcheck disable=SC2317,SC2329 # cleanup runs from the EXIT trap, which shellcheck cannot see.
 cleanup() {
   for name in "${names[@]}"; do
     docker rm -f "$name" >/dev/null 2>&1 || true
