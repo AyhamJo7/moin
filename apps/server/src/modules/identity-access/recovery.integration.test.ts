@@ -746,12 +746,13 @@ describe('account disable under an ownership race (G09 L1)', () => {
       // owner is the last effective one and the users_last_owner backstop refuses.
       const holder = await admin.connect();
       const prober = await admin.connect();
+      let pending: ReturnType<typeof postAs> | undefined;
       try {
         await holder.query('begin');
         await holder.query("select pg_advisory_xact_lock(hashtext('last-owner:' || $1::text))", [
           org,
         ]);
-        const pending = postAs(actorPair, '/api/recovery/disable-user', {
+        pending = postAs(actorPair, '/api/recovery/disable-user', {
           userId: other.id,
           reason: 'mfa_reset',
         });
@@ -771,6 +772,9 @@ describe('account disable under an ownership race (G09 L1)', () => {
         const response = await pending;
         expect(response.statusCode).toBe(409);
       } finally {
+        // A failure above must not leave the ownership lock held or the request pending.
+        await holder.query('rollback');
+        await pending?.catch(() => undefined);
         holder.release();
         prober.release();
       }

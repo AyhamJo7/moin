@@ -883,15 +883,19 @@ describe('ownership changes take the organisation lock before any row lock (G09 
     org: string,
     targetId: string,
     action: () => Promise<{ statusCode: number }>,
+    whileQueued?: (holder: {
+      query: (sql: string, values?: unknown[]) => Promise<unknown>;
+    }) => Promise<void>,
   ): Promise<{ rowLocked: boolean; statusCode: number }> {
     const holder = await admin.connect();
     const prober = await admin.connect();
+    let pending: Promise<{ statusCode: number }> | undefined;
     try {
       await holder.query('begin');
       await holder.query("select pg_advisory_xact_lock(hashtext('last-owner:' || $1::text))", [
         org,
       ]);
-      const pending = action();
+      pending = action();
       const deadline = Date.now() + 20_000;
       for (;;) {
         const queued = await prober.query<{ n: string }>(
@@ -914,10 +918,16 @@ describe('ownership changes take the organisation lock before any row lock (G09 
         rowLocked = true;
       }
       await prober.query('rollback');
+      await whileQueued?.(holder);
       await holder.query('commit');
       const response = await pending;
       return { rowLocked, statusCode: response.statusCode };
     } finally {
+      // A failure above must not leave the ownership lock held or the request pending into
+      // the next case.
+      await holder.query('rollback');
+      await prober.query('rollback');
+      await pending?.catch(() => undefined);
       holder.release();
       prober.release();
     }
@@ -952,6 +962,56 @@ describe('ownership changes take the organisation lock before any row lock (G09 
     );
     expect(result).toEqual({ rowLocked: false, statusCode: 200 });
   });
+
+  evidenceTest(
+    'a transfer whose owner was demoted while it waited changes nothing and audits nothing',
+    async () => {
+      const { pair, org, owner } = await ownerPair();
+      const other = await person();
+      const successor = await person();
+      await member(other.id, 'owner', 'active', org);
+      await member(successor.id, 'admin', 'active', org);
+      const liveSessions = (): Promise<string | undefined> =>
+        admin
+          .query<{ n: string }>(
+            'select count(*)::text as n from sessions where user_id = any($1::uuid[]) and revoked_at is null',
+            [[successor.id]],
+          )
+          .then((query) => query.rows[0]?.n);
+      // The successor's own live session: a promotion that is not rolled back would end it.
+      await signInPair(successor);
+      const sessionsBefore = await liveSessions();
+      expect(sessionsBefore).toBe('1');
+      const result = await rowLockedWhileQueued(
+        org,
+        successor.id,
+        () => postAs(pair, '/api/members/transfer-ownership', { userId: successor.id }),
+        async (holder) => {
+          // eslint-disable-next-line no-restricted-syntax -- fixture write of a membership row; the SET-session rule matches UPDATE ... SET verb text.
+          await holder.query("update memberships set role = 'admin' where user_id = $1", [
+            owner.id,
+          ]);
+        },
+      );
+      expect(result.statusCode).toBe(404);
+      const roles = await admin.query<{ user_id: string; role: string }>(
+        'select user_id::text, role::text from memberships where organisation_id = $1',
+        [org],
+      );
+      const roleOf = (id: string): string | undefined =>
+        roles.rows.find((row) => row.user_id === id)?.role;
+      expect(roleOf(successor.id)).toBe('admin');
+      expect(roleOf(owner.id)).toBe('admin');
+      expect(roleOf(other.id)).toBe('owner');
+      expect(await liveSessions()).toBe(sessionsBefore);
+      const audited = await admin.query<{ n: string }>(
+        `select count(*)::text as n from audit_events
+          where organisation_id = $1 and operation = 'member.transfer_ownership'`,
+        [org],
+      );
+      expect(audited.rows[0]?.n).toBe('0');
+    },
+  );
 
   evidenceTest(
     'transfer racing the removal of the transferring owner never answers 5xx',

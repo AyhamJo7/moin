@@ -333,11 +333,20 @@ export class MembersController {
     }
     // Promote first, demote self after, in ONE transaction: the last-owner backstop forbids the
     // reverse order, and this order never leaves the organisation without an owner mid-transfer.
-    // The demote targets the actor's OWN row (locked): a zero-row demote means the actor's
-    // membership vanished mid-transfer — fail closed rather than auditing a transfer that
-    // left two owners.
+    // The actor is validated under the ownership lock BEFORE anything is written: a removal or
+    // demotion that committed while this request waited on the lock makes the transfer a
+    // not-found with no promotion, no session change and no audit row. A demote that still
+    // matches no row after that check throws, so the promotion rolls back with it (INV-10).
     const transferred = await this.members
       .inOwnershipScope(async (client) => {
+        const actorIsOwner = await client
+          .query<{ n: number }>(
+            `select 1 as n from memberships
+            where user_id = $1::uuid and role = 'owner' and status = 'active' for update`,
+            [scope.actorId],
+          )
+          .then((query) => (query.rows[0]?.n ?? 0) === 1);
+        if (!actorIsOwner) return false;
         const promoted = await client
           .query<{ n: number }>(
             // eslint-disable-next-line no-restricted-syntax -- membership write through the tenant wrapper; the SET-session rule matches UPDATE ... SET verb text.
@@ -355,7 +364,9 @@ export class MembersController {
             [scope.actorId],
           )
           .then((query) => (query.rows[0]?.n ?? 0) === 1);
-        if (!demoted) return false;
+        if (!demoted) {
+          throw new Error('ownership transfer: the validated owner row could not be demoted');
+        }
         await appendAuditEvent(client, {
           source: 'api',
           operation: 'member.transfer_ownership',
