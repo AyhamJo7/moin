@@ -22,6 +22,10 @@ failure. The vote on each old rule is in `docs/audits/2026-11-14-owner-audit/REA
    that SHA, squash-merges pinned to it. Any CRITICAL or HIGH finding blocks; fix and ship again.
    Several PRs: ship them in dependency order, one command each, no manual rebases (the
    up-to-date rule is off).
+   **Rollback first** for two kinds of PR: a migration that alters or drops existing data, and
+   an identity or Keycloak change that could lock the owner out. Ship only after the rollback
+   path has been run (down path or restore on a database holding the old data; owner sign-in
+   restored on the local stack), and write one line about it in `NEXT.md`.
 7. **Record.** The same PR ticks its item in `ROADMAP.md` and rewrites `NEXT.md`. Nothing else is
    kept by hand.
 

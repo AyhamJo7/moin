@@ -1,11 +1,13 @@
 # NEXT
 
-**AI is doing now:** C1, landing the overhaul PR (audit, `ROADMAP.md`, `OPERATING.md`, lean control plane).
+**AI is doing now:** C3 (repository settings), then C4: land the open code PRs through `/ship`, in order #260, #259, #268, #262, #263, #265, #264, #266, #267, #269, #270.
 
-**AI next:** (1) C2: fix `container-scan` on main (`apt` CVE-2026-109518). (2) C3, C4: repository settings, then land the 13 open PRs in order. (3) C5, C6: prune branches, worktrees and stashes; delete dead shape helpers.
+**AI next:** (1) C5, C6: prune branches, worktrees and stashes; delete dead shape helpers. (2) S1: call persistence and disclosure. (3) S2: demo tenant seed.
 
-**You next:** (1) H1: run the two commands below. (2) H3: answer Twilio's identity request (account reported suspended). (3) H2: trademark search and domain for KlarDesk.
+**You next:** (1) H3: answer Twilio's identity request (account reported suspended). (2) H2: trademark search and domain for KlarDesk. (3) H4: request Bedrock model access in eu-central-1.
 
-**Blocked on you:** `bash docs/control-plane/owner-0009/install.sh` (installs the lean guard and settings; the old ones deny their own files), then `sudo apt-get install -y fd-find postgresql-client`.
+**Blocked on you:** nothing.
 
-**Last verified main SHA:** `0e020d2` (verify and security-scan passed 2026-11-01; scheduled container-scan failing since 2026-11-05).
+**Rollback tested before merge** (migrations that alter or drop data; identity changes that could lock you out): none merged yet. Candidates in C4: #262, #264, #265, #266, #267, #269.
+
+**Last verified main SHA:** `7a7201d` (#272; all PR checks passed on head `4cf8b6b`, 2026-11-14).
