@@ -1,4 +1,4 @@
--- 0083 — every change to the Early Access cap is an audited override (P06.04.03, INV-10;
+-- 0082 — every change to the Early Access cap is an audited override (P06.04.03, INV-10;
 -- independent acceptance read of 3510fea, MEDIUM F1).
 -- migration-check: allow create-index-blocking because no index is created on a populated table here: the override table is new in this migration and empty.
 -- migration-check: allow truncate because nothing is truncated: the word appears only in a BEFORE TRUNCATE trigger that refuses truncation of the new override table.

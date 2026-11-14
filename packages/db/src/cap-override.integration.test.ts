@@ -1,5 +1,5 @@
 /**
- * Every change to the Early Access cap is an audited override (P06.04.03, migration 0083).
+ * Every change to the Early Access cap is an audited override (P06.04.03, migration 0082).
  *
  * The independent acceptance read showed the gap: a migration that ran
  * `UPDATE provisioning_limits SET early_access_cap = 6` raised the cap with no audit row, and a
