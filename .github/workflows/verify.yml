@@ -426,10 +426,26 @@ jobs:
       - run: pnpm db:migrate
       - run: node scripts/check-rls-catalog.ts
 
+  openapi-drift:
+    name: OpenAPI and client drift (activated in P06/P07)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Not yet active
+        run: |
+          if [ -f scripts/check-openapi-drift.ts ]; then
+            echo "scripts/check-openapi-drift.ts exists — wire this job to run it." >&2
+            exit 1
+          fi
+          echo "Reserved slot: the OpenAPI drift check is created with the API surface in P06/P07."
+
   verify:
     name: verify
     runs-on: ubuntu-24.04
-    needs: [static, unit, integration, build, e2e, e2e-slice, rls-catalog]
+    needs: [static, unit, integration, build, e2e, e2e-slice, rls-catalog, openapi-drift]
     if: always()
     steps:
       # One required check to configure in the ruleset, and it cannot pass while any job failed,
