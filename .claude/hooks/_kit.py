@@ -1,4 +1,4 @@
-"""Shared helpers for the kit-only hooks (commit_guard, ts_edit_check, stop_guard,
+"""Shared helpers for the kit-only hooks (ts_edit_check, stop_guard,
 session_context, stopfailure_checkpoint). Portable hooks (git_guard, claim_check) do NOT
 import this module.
 """
