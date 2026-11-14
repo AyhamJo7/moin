@@ -24,72 +24,8 @@ TODAY = dt.date(2026, 11, 2)
 LATER = dt.date(2030, 1, 1)
 FILES = ["apps/web/src/today/card.tsx"]
 APPROVE = "LOW apps/web/src/today/card.tsx:3 naming.\n\nVERDICT: APPROVE\n"
-# Real tracked paths that define the checks, their inputs or the agent instructions.
-PERMANENT_FOUNDER_PATHS = (
-    ".github/workflows/verify.yml",
-    ".claude/policy/merge-gate.json",
-    "scripts/check-rls-catalog.ts",
-    "scripts/policy-regex.ts",
-    "scripts/mutation-sweep.ts",
-    "lefthook.yml",
-    "infrastructure/envs/prod/main.tf",
-    "BLUEPRINT.md",
-    "package.json",
-    "apps/server/package.json",
-    "pnpm-workspace.yaml",
-    "pnpm-lock.yaml",
-    "turbo.json",
-    "vitest.config.ts",
-    "packages/config/vitest.config.ts",
-    "packages/telephony/test-support/fixed-auth-token.vitest.config.ts",
-    "eslint.config.ts",
-    "playwright.config.ts",
-    "playwright.slice.config.ts",
-    ".nvmrc",
-    "renovate.json",
-    "deploy/demo/demo.sh",
-    "docker/postgres/init/00-roles.sql",
-    "apps/server/Dockerfile",
-    "docker-compose.yml",
-    "CLAUDE.md",
-    "AGENTS.md",
-    # Instruction files Codex reads, and attributes that can hide content from a reviewer.
-    "AGENTS.override.md",
-    "apps/web/AGENTS.override.md",
-    ".gitattributes",
-    "apps/web/.gitattributes",
-    # What the gates in gates.json, lefthook.yml and the workflows read beyond the entry points.
-    "packages/config/src/eslint/index.ts",
-    "packages/config/tsconfig/base.json",
-    "tsconfig.json",
-    "apps/web/tsconfig.json",
-    "packages/db/tsconfig.build.json",
-    ".dependency-cruiser.cjs",
-    ".prettierrc.json",
-    ".prettierignore",
-    ".editorconfig",
-    ".gitignore",
-    ".gitleaks.toml",
-    ".dockerignore",
-    ".tflint.hcl",
-    ".terraform-version",
-    ".env.example",
-    ".semgrep/moin.yml",
-    "apps/web/next.config.ts",
-    # Scanner suppression and configuration, root and nested, as a class.
-    ".semgrepignore",
-    ".trivyignore",
-    "apps/web/.trivyignore",
-    "trivy.yaml",
-    "trivy-secret.yaml",
-    ".gitleaksignore",
-    ".eslintignore",
-    ".hadolint.yaml",
-    "osv-scanner.toml",
-    ".npmrc",
-    "apps/web/.npmrc",
-    ".yarnrc.yml",
-)
+# The one path a session never ships (ROADMAP.md decision D3).
+PERMANENT_FOUNDER_PATHS = ("BLUEPRINT.md",)
 # Real application paths that must stay eligible for a session merge.
 ELIGIBLE_PATHS = (
     "apps/web/app/page.tsx",
@@ -111,13 +47,11 @@ ELIGIBLE_PATHS = (
 )
 ATTRIBUTES = "PLAN.md -diff export-ignore\napps/web/src/today/card.tsx -diff export-ignore\n"
 MARKER = "GATE-LOOSENED-MARKER"
-TRIAL_FOUNDER_PATHS = (
-    "packages/db/migrations/0040_roles.sql",
-    "packages/db/src/identity-store.ts",
-    "packages/db/src/auth-throttle.integration.test.ts",
-    "packages/integrations/src/webhooks.ts",
-    "packages/db/src/erasure.ts",
-)
+# The shipped trial list is empty; the date rule is exercised with a list of its own.
+TRIAL_GLOBS = ("packages/db/migrations/*",)
+TRIAL_FOUNDER_PATHS = ("packages/db/migrations/0040_roles.sql",)
+# Held paths for the command-line cases, which need more than the shipped single path.
+FIXTURE_FOUNDER_PATHS = ["BLUEPRINT.md", ".gitattributes", "package.json", ".github/*"]
 
 
 def policy(**changes: Any) -> merge_gate.Policy:
@@ -192,9 +126,10 @@ class RefusalsTest(unittest.TestCase):
     def test_trial_paths_until_the_date(self) -> None:
         for path in TRIAL_FOUNDER_PATHS:
             with self.subTest(path=path):
-                self.assert_refused("founder-merged", files=[path], today=TODAY)
+                trial = policy(founder_paths_trial=TRIAL_GLOBS)
+                self.assert_refused("founder-merged", policy=trial, files=[path], today=TODAY)
                 after = TODAY + dt.timedelta(days=1)
-                self.assertEqual(self.check(files=[path], today=after), [])
+                self.assertEqual(self.check(policy=trial, files=[path], today=after), [])
 
 
 class DriftTest(unittest.TestCase):
@@ -267,8 +202,7 @@ class ShippedPolicyTest(unittest.TestCase):
     def test_policy_loads(self) -> None:
         shipped = merge_gate.load_policy()
         self.assertEqual(shipped.base, "main")
-        self.assertIn(".github/*", shipped.founder_paths)
-        self.assertIn(".claude/*", shipped.founder_paths)
+        self.assertEqual(shipped.founder_paths, PERMANENT_FOUNDER_PATHS)
         self.assertTrue(shipped.ai_patterns)
 
     def test_tools_are_pinned_absolute_paths(self) -> None:
@@ -408,7 +342,11 @@ class CommandLineTest(unittest.TestCase):
                 tool = write(bindir, name, body.replace("#!PYTHON", f"#!{sys.executable}", 1))
                 tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
             gate = json.loads((CLAUDE_DIR / "policy/merge-gate.json").read_text(encoding="utf-8"))
-            gate.update(trial_until="2000-01-01", child_path="/usr/bin:/bin")
+            gate.update(
+                trial_until="2000-01-01",
+                child_path="/usr/bin:/bin",
+                founder_paths=FIXTURE_FOUNDER_PATHS,
+            )
             gate["tools"] = {
                 "git": shutil.which("git"),
                 "gh": str(bindir / "gh"),
