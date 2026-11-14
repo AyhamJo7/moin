@@ -45,6 +45,13 @@ export function controllersReachableFrom(roots: readonly unknown[]): Set<Constru
   const visit = (entry: unknown): void => {
     const resolved = isForwardRef(entry) ? entry.forwardRef() : entry;
     if (resolved === undefined || resolved === null || seen.has(resolved)) return;
+    // Nest awaits a promised module; this scan is synchronous and would read the metadata of
+    // the Promise, find nothing and report the module's routes as absent. Refuse it instead.
+    if (typeof (resolved as { then?: unknown }).then === 'function') {
+      throw new Error(
+        'a promised module cannot be scanned for routes: import it resolved, or extend the scan',
+      );
+    }
     seen.add(resolved);
     const moduleClass = (isDynamic(resolved) ? resolved.module : resolved) as Constructor;
     const read = (key: string): unknown[] => {

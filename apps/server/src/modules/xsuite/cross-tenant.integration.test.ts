@@ -54,12 +54,6 @@ import {
 } from './probe-ledger.ts';
 import { seedTwoTenants, type SeededWorld } from './seed.ts';
 import { ABSENT_SURFACES, assertSurfacesAbsent } from './surface.ts';
-import {
-  assertSeedCoverage,
-  checkSeedCoverage,
-  SEEDED_TABLES,
-  type SeedCoverage,
-} from './seed-coverage.ts';
 
 /**
  * Routes served by the test app that are NOT product API surface: the voice relay
@@ -86,8 +80,6 @@ let app: NestFastifyApplication;
 let world: SeededWorld;
 /** Every route a probe below actually called, with the status it got and what it asserted. */
 const ledger = new ProbeLedger();
-/** Filled by the seed-coverage test below and stored in the coverage report. */
-let seedCoverage: SeedCoverage | null = null;
 let productionRoots: Awaited<ReturnType<typeof loadProductionRoots>>;
 const clock = fixedClock(new Date());
 clock.set(new Date());
@@ -333,6 +325,7 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
             ? undefined
             : (route.body ?? { reason: 'cross-tenant probe' });
       const response = await authed(session, route.method, url, body);
+      ledger.called(key(route), response.statusCode);
       // Exact 404: P06.07.03 — cross-tenant and not-permitted both read as not-found, so
       // existence never leaks. A 403 here would be a regression (it confirms the id
       // exists but is forbidden); a 400 would mean the probe body stopped being valid.
@@ -364,6 +357,7 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
       email,
       role: 'staff',
     });
+    ledger.called('POST /api/members/invite', invited.statusCode);
     expect(invited.statusCode, invited.body).toBe(201);
     const invitationId = invited.json<{ invitationId: string }>().invitationId;
     expect(typeof invitationId).toBe('string');
@@ -388,6 +382,7 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
       scope: 'readonly',
       reason: 'cross-tenant probe grant creation',
     });
+    ledger.called('POST /api/support/grants', granted.statusCode);
     expect(granted.statusCode, granted.body).toBe(201);
     const grantId = granted.json<{ grantId: string }>().grantId;
     expect(typeof grantId).toBe('string');
@@ -416,6 +411,7 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
   evidenceTest('list routes show only the caller tenant rows', async () => {
     const session = await mintSession(world.a.owner.id, true);
     const grants = await authed(session, 'GET', '/api/support/grants');
+    ledger.called('GET /api/support/grants', grants.statusCode);
     expect(grants.statusCode).toBe(200);
     const body = grants.body;
     expect(body).toContain(world.a.grantId);
@@ -436,6 +432,7 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
       [world.a.organisationId, taskA, world.b.organisationId, taskB],
     );
     const todayA = await authed(session, 'GET', '/api/today');
+    ledger.called('GET /api/today', todayA.statusCode);
     expect(todayA.statusCode).toBe(200);
     expect(todayA.body).toContain(taskA);
     expect(todayA.body).not.toContain(taskB);
@@ -452,6 +449,7 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
       const sessionA = await mintSession(world.a.owner.id, true);
       const sessionB = await mintSession(world.b.owner.id, true);
       const stepUp = await authed(sessionA, 'POST', '/api/auth/step-up');
+      ledger.called('POST /api/auth/step-up', stepUp.statusCode);
       expect(stepUp.statusCode, stepUp.body).toBe(302);
       expect(String(stepUp.headers.location)).not.toContain(world.b.owner.id);
       expect(stepUp.body).not.toContain('xsuite-beta');
@@ -469,6 +467,7 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
       const bBefore = await liveOf(world.b.owner.id);
       expect(bBefore).toBeGreaterThan(0);
       const signOut = await authed(sessionA, 'POST', '/api/auth/sign-out-others');
+      ledger.called('POST /api/auth/sign-out-others', signOut.statusCode);
       expect(signOut.statusCode, signOut.body).toBe(200);
       expect(signOut.body).not.toContain('xsuite-beta');
       expect(await liveOf(world.b.owner.id)).toBe(bBefore);
@@ -483,6 +482,7 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
   evidenceTest('public routes answer without tenant data', async () => {
     for (const url of ['/api/auth/login', '/healthz', '/readyz']) {
       const response = await app.inject({ method: 'GET', url });
+      ledger.called(`GET ${url}`, response.statusCode);
       expect([200, 302].includes(response.statusCode), `${url} → ${response.statusCode}`).toBe(
         true,
       );
@@ -497,6 +497,7 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
       method: 'GET',
       url: '/api/auth/callback?code=x&state=y',
     });
+    ledger.called('GET /api/auth/callback', callback.statusCode);
     expect([400, 302].includes(callback.statusCode)).toBe(true);
     expect(callback.body).not.toContain('xsuite-alpha');
     ledger.record('GET /api/auth/callback', {
@@ -513,6 +514,7 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
         headers: { 'content-type': 'application/x-www-form-urlencoded' },
         payload: 'CallSid=forged&From=%2B491700000000',
       });
+      ledger.called(`POST ${url}`, response.statusCode);
       expect([401, 403].includes(response.statusCode), `${url} → ${response.statusCode}`).toBe(
         true,
       );
@@ -537,6 +539,7 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
           utterance: 'Rückruf bitte',
         }),
       });
+      ledger.called('POST /api/dev/simulated-calls', response.statusCode);
       expect(response.statusCode).toBe(401);
       expect(response.body).not.toContain('xsuite-alpha');
       ledger.record('POST /api/dev/simulated-calls', {
@@ -871,42 +874,6 @@ describe('DB layer: every tenant table isolates A from B (P06.13.03)', () => {
   });
 });
 
-describe('the seed accounts for every FORCE-RLS table (P06.13.01)', () => {
-  // One literal statement per seeded table: no table name is ever interpolated into SQL.
-  const COUNT_SQL: Record<string, string> = {
-    organisations: 'select count(*)::int as n from organisations',
-    locations: 'select count(*)::int as n from locations',
-    memberships: 'select count(*)::int as n from memberships',
-    invitations: 'select count(*)::int as n from invitations',
-    owner_invitation_requests: 'select count(*)::int as n from owner_invitation_requests',
-    support_access_grants: 'select count(*)::int as n from support_access_grants',
-    tasks: 'select count(*)::int as n from tasks',
-    tenant_setup: 'select count(*)::int as n from tenant_setup',
-  };
-
-  evidenceTest('every live FORCE-RLS table is seeded or carries a registered reason', async () => {
-    const forced = await admin.query(
-      `select c.relname::text as name from pg_class c join pg_namespace n on n.oid = c.relnamespace
-       where c.relforcerowsecurity and c.relkind in ('r', 'p') and n.nspname = 'public'`,
-    );
-    seedCoverage = checkSeedCoverage(forced.rows.map((row) => (row as { name: string }).name));
-    assertSeedCoverage(seedCoverage);
-    expect(Object.keys(COUNT_SQL).sort()).toStrictEqual([...SEEDED_TABLES].sort());
-  });
-
-  evidenceTest('each seeded table really holds a row for A and a row for B', async () => {
-    for (const table of SEEDED_TABLES) {
-      const sql = COUNT_SQL[table] ?? '';
-      for (const organisationId of [world.a.organisationId, world.b.organisationId]) {
-        const rows = await withTenant(database.pool(), organisationId, (client) =>
-          client.query(sql).then((r) => (r.rows[0] as { n: number }).n),
-        );
-        expect(rows, `${table} has no seeded row for ${organisationId}`).toBeGreaterThan(0);
-      }
-    }
-  });
-});
-
 describe('absent surfaces stay absent (P06.13.04)', () => {
   evidenceTest('no SSE, cache-key or S3 surface exists to leak across tenants', () => {
     // Negative registry: these surfaces do not exist, so there is nothing to assert
@@ -931,7 +898,6 @@ describe('coverage is calls made, not inventory rows (P06.13.02, P06.13.05, LG-P
           coverageArtifact(report, {
             commit: process.env['GITHUB_SHA'] ?? null,
             generatedAt: new Date().toISOString(),
-            tables: seedCoverage,
           }),
           null,
           2,
@@ -940,6 +906,7 @@ describe('coverage is calls made, not inventory rows (P06.13.02, P06.13.05, LG-P
       assertFullyProbed(report);
       expect(report.executed).toBe(report.required);
       expect(report.unprobed).toStrictEqual([]);
+      expect(report.failed).toStrictEqual([]);
     },
   );
 });

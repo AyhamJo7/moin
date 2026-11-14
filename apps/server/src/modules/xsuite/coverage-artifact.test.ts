@@ -43,6 +43,8 @@ describe('the stored coverage report (P06.13.05)', () => {
         /- uses: actions\/upload-artifact[^\n]*\n\s+if: \$\{\{ !cancelled\(\) \}\}/,
       );
       expect(WORKFLOW).toContain('xsuite route coverage: ');
+      // The vitest result is produced after a failed integration run too.
+      expect(WORKFLOW).toMatch(/if: \$\{\{ !cancelled\(\) \}\}\n\s+run: pnpm xsuite:report/);
     },
   );
 });

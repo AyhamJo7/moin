@@ -46,32 +46,43 @@ describe('the probe ledger counts calls, not inventory rows', () => {
     }).toThrow(/called but not inventoried: GET \/api\/elsewhere/);
   });
 
-  evidenceTest('an exemption with a reason lowers the requirement; without one it fails', () => {
+  evidenceTest('nothing lowers the requirement: one uncalled route fails, and so does none', () => {
+    // LG-P01 is 100 %: no route can be excused from the denominator.
     const [first, ...rest] = INVENTORY;
     expect(first).toBeDefined();
-    const id = key(first!);
-    const reported = buildCoverageReport(INVENTORY, ledgerFor(rest), { [id]: 'public handshake' });
-    expect(reported.exempt).toBe(1);
-    expect(reported.summary).toBe(
-      `${String(INVENTORY.length - 1)} of ${String(INVENTORY.length - 1)} probed`,
-    );
+    const report = buildCoverageReport(INVENTORY, ledgerFor(rest));
+    expect(report.required).toBe(INVENTORY.length);
     expect(() => {
-      assertFullyProbed(reported);
-    }).not.toThrow();
-    const blank = buildCoverageReport(INVENTORY, ledgerFor(rest), { [id]: ' ' });
+      assertFullyProbed(report);
+    }).toThrow(`not called: ${key(first!)}`);
     expect(() => {
-      assertFullyProbed(blank);
-    }).toThrow(/exemption without a route or a reason/);
-    const stale = buildCoverageReport(INVENTORY, ledgerFor(INVENTORY), { 'GET /gone': 'reason' });
+      assertFullyProbed(buildCoverageReport([], new ProbeLedger()));
+    }).toThrow(/the inventory is empty/);
+  });
+
+  evidenceTest('a call whose assertions did not hold is reported with its status and fails', () => {
+    const [first, ...rest] = INVENTORY;
+    expect(first).toBeDefined();
+    const ledger = ledgerFor(rest);
+    ledger.called(key(first!), 500);
+    const report = buildCoverageReport(INVENTORY, ledger);
+    expect(report.rows[0]).toMatchObject({ probed: true, passed: false, status: 500, check: null });
+    expect(report.failed).toStrictEqual([key(first!)]);
+    expect(report.unprobed).toStrictEqual([]);
     expect(() => {
-      assertFullyProbed(stale);
-    }).toThrow(/GET \/gone/);
+      assertFullyProbed(report);
+    }).toThrow(/called but its assertions did not hold/);
   });
 
   evidenceTest('the report carries one row per inventoried route with its outcome', () => {
     const report = buildCoverageReport(INVENTORY, ledgerFor(INVENTORY.slice(1)));
     expect(report.rows).toHaveLength(INVENTORY.length);
     expect(report.rows[0]).toMatchObject({ probed: false, status: null, check: null });
-    expect(report.rows[1]).toMatchObject({ probed: true, status: 200, check: 'probed' });
+    expect(report.rows[1]).toMatchObject({
+      probed: true,
+      passed: true,
+      status: 200,
+      check: 'probed',
+    });
   });
 });

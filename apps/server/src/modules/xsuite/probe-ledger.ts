@@ -3,9 +3,10 @@
  *
  * "100 % route coverage" used to mean "every served route has an inventory row". A row says a
  * probe should exist; it does not say one ran. A route added to the inventory with no probe call
- * (mutation C2 of the G12 review) kept the figure green. Each probe now records the route it
- * called and what it asserted, and the suite fails unless every inventoried route has a record or
- * a named exemption. The same ledger is the per-route report stored as the CI artifact.
+ * (mutation C2 of the G12 review) kept the figure green. Each probe now notes the call as soon as
+ * the answer arrives and records what it asserted once its assertions held, and the suite fails
+ * unless every inventoried route has a passed record. There is no exemption: 100 % means every
+ * route. The same ledger is the per-route report stored as the CI artifact.
  */
 
 import type { InventoriedRoute, RouteClass } from './inventory.ts';
@@ -17,100 +18,103 @@ export interface ProbeRecord {
   readonly check: string;
 }
 
+interface LedgerEntry {
+  readonly status: number;
+  readonly check: string | null;
+  readonly passed: boolean;
+}
+
 export interface CoverageRow {
   readonly route: string;
   readonly class: RouteClass;
+  /** The route was called. */
   readonly probed: boolean;
+  /** The assertions about the answer held. */
+  readonly passed: boolean;
   readonly status: number | null;
   readonly check: string | null;
-  readonly exemptReason: string | null;
 }
 
 export interface CoverageReport {
   readonly rows: readonly CoverageRow[];
   readonly inventoried: number;
-  readonly exempt: number;
   readonly required: number;
   readonly executed: number;
   readonly summary: string;
   readonly unprobed: readonly string[];
+  readonly failed: readonly string[];
   readonly unknownProbes: readonly string[];
-  readonly staleExemptions: readonly string[];
 }
 
 export class ProbeLedger {
-  readonly #records = new Map<string, ProbeRecord>();
+  readonly #entries = new Map<string, LedgerEntry>();
 
-  record(route: string, record: ProbeRecord): void {
-    this.#records.set(route, record);
+  /**
+   * Notes the call before its assertions run, so a probe that then fails (a 500, foreign data in
+   * the body) still shows its status in the stored report instead of looking uncalled.
+   */
+  called(route: string, status: number): void {
+    this.#entries.set(route, { status, check: null, passed: false });
   }
 
-  get(route: string): ProbeRecord | undefined {
-    return this.#records.get(route);
+  /** Records a call whose assertions held. */
+  record(route: string, record: ProbeRecord): void {
+    this.#entries.set(route, { ...record, passed: true });
+  }
+
+  get(route: string): LedgerEntry | undefined {
+    return this.#entries.get(route);
   }
 
   routes(): string[] {
-    return [...this.#records.keys()];
+    return [...this.#entries.keys()];
   }
 }
 
 export const key = (route: Pick<InventoriedRoute, 'method' | 'path'>): string =>
   `${route.method} ${route.path}`;
 
-/**
- * Routes that are inventoried but deliberately not called as tenant A, each with its reason.
- * Empty today: public, health, auth and signed routes are all called (unauthenticated or with a
- * forged credential) and recorded like the rest. An entry here must name a route that is in the
- * inventory and give a reason, or the report fails.
- */
-export const EXEMPT_FROM_PROBES: Readonly<Record<string, string>> = {};
-
 export function buildCoverageReport(
   inventory: readonly InventoriedRoute[],
   ledger: ProbeLedger,
-  exempt: Readonly<Record<string, string>> = EXEMPT_FROM_PROBES,
 ): CoverageReport {
   const inventoried = new Set(inventory.map(key));
   const rows: CoverageRow[] = inventory.map((route) => {
     const id = key(route);
-    const record = ledger.get(id);
-    const exemptReason = exempt[id] ?? null;
+    const entry = ledger.get(id);
     return {
       route: id,
       class: route.class,
-      probed: record !== undefined,
-      status: record?.status ?? null,
-      check: record?.check ?? null,
-      exemptReason,
+      probed: entry !== undefined,
+      passed: entry?.passed ?? false,
+      status: entry?.status ?? null,
+      check: entry?.check ?? null,
     };
   });
-  const required = rows.filter((row) => row.exemptReason === null);
-  const executed = required.filter((row) => row.probed);
+  const executed = rows.filter((row) => row.passed);
   return {
     rows,
     inventoried: inventory.length,
-    exempt: rows.length - required.length,
-    required: required.length,
+    required: inventory.length,
     executed: executed.length,
-    summary: `${String(executed.length)} of ${String(required.length)} probed`,
-    unprobed: required.filter((row) => !row.probed).map((row) => row.route),
+    summary: `${String(executed.length)} of ${String(inventory.length)} probed`,
+    unprobed: rows.filter((row) => !row.probed).map((row) => row.route),
+    failed: rows.filter((row) => row.probed && !row.passed).map((row) => row.route),
     unknownProbes: ledger.routes().filter((route) => !inventoried.has(route)),
-    staleExemptions: Object.entries(exempt)
-      .filter(([route, reason]) => !inventoried.has(route) || reason.trim() === '')
-      .map(([route]) => route),
   };
 }
 
-/** Throws unless every inventoried route was called or exempted with a reason. */
+/** Throws unless every inventoried route was called and its assertions held. */
 export function assertFullyProbed(report: CoverageReport): void {
   const problems: string[] = [];
   if (report.unprobed.length > 0) problems.push(`not called: ${report.unprobed.join(', ')}`);
+  if (report.failed.length > 0) {
+    problems.push(`called but its assertions did not hold: ${report.failed.join(', ')}`);
+  }
   if (report.unknownProbes.length > 0) {
     problems.push(`called but not inventoried: ${report.unknownProbes.join(', ')}`);
   }
-  if (report.staleExemptions.length > 0) {
-    problems.push(`exemption without a route or a reason: ${report.staleExemptions.join(', ')}`);
-  }
+  if (report.required === 0) problems.push('the inventory is empty');
   if (report.executed < report.required) {
     problems.push(`executed ${String(report.executed)} < required ${String(report.required)}`);
   }
@@ -124,7 +128,6 @@ export function coverageArtifact(
   meta: {
     readonly commit: string | null;
     readonly generatedAt: string;
-    readonly tables?: unknown;
   },
 ): Record<string, unknown> {
   return {
@@ -132,10 +135,9 @@ export function coverageArtifact(
     generatedAt: meta.generatedAt,
     coverage: report.summary,
     inventoried: report.inventoried,
-    exempt: report.exempt,
     executed: report.executed,
     unprobed: report.unprobed,
-    tables: meta.tables ?? null,
+    failed: report.failed,
     rows: report.rows,
   };
 }
