@@ -202,6 +202,43 @@ describe('the limits row cannot be replaced and a record is single-use', () => {
     },
   );
 
+  evidenceTest('a back-dated stray record cannot make a used record count again', async () => {
+    for (let i = 0; i < 5; i += 1) await paidTenant();
+    const client = await migrator.connect();
+    try {
+      await client.query('begin');
+      await client.query('select app.override_early_access_cap($1, $2, $3, $4, $5)', [
+        5,
+        4,
+        REASON,
+        'founder',
+        APPROVAL,
+      ]);
+      await client.query(
+        'update provisioning_limits set accepted_paid_early_access = accepted_paid_early_access + 1',
+      );
+      // An unrelated record, written directly and dated before everything: the table stamps
+      // its own order, so it becomes the newest record and matches nothing.
+      await client.query(
+        `insert into provisioning_limit_overrides
+             (seq, old_cap, new_cap, old_counter, new_counter, reason, actor, approval_ref, created_at)
+           values (0, 9, 9, 9, 9, $1, 'someone', $2, '-infinity')`,
+        [REASON, APPROVAL],
+      );
+      const stamped = await client.query<{ seq: string; dated: boolean }>(
+        "select seq::text, created_at > now() - interval '1 minute' as dated from provisioning_limit_overrides order by seq desc limit 1",
+      );
+      expect(stamped.rows[0]).toEqual({ seq: '2', dated: true });
+      await expect(
+        client.query('update provisioning_limits set accepted_paid_early_access = 4'),
+      ).rejects.toMatchObject({ code: '23000' });
+    } finally {
+      await client.query('rollback');
+      client.release();
+    }
+    expect(await limits()).toEqual({ cap: 5, counter: 5 });
+  });
+
   evidenceTest('the consumed-record counter cannot be set by hand', async () => {
     await expect(
       migrator.query('update provisioning_limits set overrides_applied = 0 - 1'),

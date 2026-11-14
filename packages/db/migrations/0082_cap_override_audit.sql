@@ -33,6 +33,7 @@
 
 CREATE TABLE provisioning_limit_overrides (
   id            uuid        NOT NULL PRIMARY KEY DEFAULT gen_random_uuid(),
+  seq           bigint      NOT NULL UNIQUE,
   txid          bigint      NOT NULL DEFAULT txid_current(),
   old_cap       integer     NOT NULL CHECK (old_cap >= 0),
   new_cap       integer     NOT NULL CHECK (new_cap >= 0),
@@ -52,6 +53,28 @@ COMMENT ON TABLE provisioning_limit_overrides IS
 REVOKE ALL ON TABLE provisioning_limit_overrides
   FROM PUBLIC, moin_app, moin_identity, moin_provisioner, moin_dispatcher, moin_support_ro,
        moin_reporting;
+
+-- The order of the records is the table's own: `seq`, the transaction and the time are stamped
+-- here whatever the writer supplied, so a record cannot be back-dated behind one that was
+-- already used.
+CREATE FUNCTION app.stamp_limit_override() RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = pg_catalog, public, app, pg_temp
+AS $$
+BEGIN
+  NEW.seq := COALESCE((SELECT max(o.seq) FROM public.provisioning_limit_overrides o), 0) + 1;
+  NEW.txid := txid_current();
+  NEW.created_at := clock_timestamp();
+  RETURN NEW;
+END
+$$;
+
+REVOKE ALL ON FUNCTION app.stamp_limit_override() FROM PUBLIC;
+
+CREATE TRIGGER provisioning_limit_overrides_stamp
+  BEFORE INSERT ON provisioning_limit_overrides
+  FOR EACH ROW EXECUTE FUNCTION app.stamp_limit_override();
+ALTER TABLE provisioning_limit_overrides ENABLE ALWAYS TRIGGER provisioning_limit_overrides_stamp;
 
 CREATE FUNCTION app.reject_override_mutation() RETURNS trigger
   LANGUAGE plpgsql
@@ -73,30 +96,27 @@ CREATE TRIGGER provisioning_limit_overrides_no_truncate
 ALTER TABLE provisioning_limit_overrides ENABLE ALWAYS TRIGGER provisioning_limit_overrides_immutable;
 ALTER TABLE provisioning_limit_overrides ENABLE ALWAYS TRIGGER provisioning_limit_overrides_no_truncate;
 
--- One override record authorises exactly one guarded change. `overrides_applied` counts the
--- records the limits row has consumed; a guarded change needs a record it has not consumed yet,
--- written in this transaction, as the newest record, for exactly this change, and consumes every
--- record up to it. A second change in the same transaction therefore needs a second record: a
+-- One override record authorises exactly one guarded change. `overrides_applied` is the `seq` of
+-- the last record the limits row consumed; a guarded change needs the newest record, with a
+-- higher `seq`, written in this transaction, for exactly this change, and consumes it. A second change in the same transaction therefore needs a second record: a
 -- reset, a provisioning and a plain reset to the same values cannot ride on one approval.
 ALTER TABLE provisioning_limits ADD COLUMN overrides_applied bigint NOT NULL DEFAULT 0;
 
 COMMENT ON COLUMN provisioning_limits.overrides_applied IS
-  'How many override records this row has consumed; maintained by the guard trigger only (P06.04.03).';
+  'The seq of the last override record this row consumed; maintained by the guard trigger only (P06.04.03).';
 
 CREATE FUNCTION app.require_limit_override() RETURNS trigger
   LANGUAGE plpgsql
   SET search_path = pg_catalog, public, app, pg_temp
 AS $$
 DECLARE
-  v_total bigint;
   v_latest public.provisioning_limit_overrides%ROWTYPE;
 BEGIN
   IF NEW.early_access_cap IS DISTINCT FROM OLD.early_access_cap
      OR NEW.accepted_paid_early_access < OLD.accepted_paid_early_access THEN
-    SELECT count(*) INTO v_total FROM public.provisioning_limit_overrides;
     SELECT * INTO v_latest FROM public.provisioning_limit_overrides
-      ORDER BY created_at DESC, id DESC LIMIT 1;
-    IF v_total <= OLD.overrides_applied
+      ORDER BY seq DESC LIMIT 1;
+    IF v_latest.seq IS NULL OR v_latest.seq <= OLD.overrides_applied
        OR v_latest.txid IS DISTINCT FROM txid_current()
        OR v_latest.old_cap IS DISTINCT FROM OLD.early_access_cap
        OR v_latest.new_cap IS DISTINCT FROM NEW.early_access_cap
@@ -106,7 +126,7 @@ BEGIN
         'changing the Early Access cap or resetting its counter needs its own unused override record written in the same transaction (app.override_early_access_cap, P06.04.03)'
         USING ERRCODE = 'integrity_constraint_violation';
     END IF;
-    NEW.overrides_applied := v_total;
+    NEW.overrides_applied := v_latest.seq;
   ELSIF NEW.overrides_applied IS DISTINCT FROM OLD.overrides_applied THEN
     RAISE EXCEPTION 'overrides_applied is maintained by the override guard only'
       USING ERRCODE = 'integrity_constraint_violation';
