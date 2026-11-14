@@ -641,6 +641,348 @@ describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
     });
     expect(response.statusCode).toBe(404);
   });
+
+  describe('conferring an additive permission is bounded by holding it (G09 M1)', () => {
+    const countInvitations = async (org: string): Promise<number> =>
+      (
+        (
+          await admin.query(
+            'select count(*)::int as n from invitations where organisation_id = $1',
+            [org],
+          )
+        ).rows[0] as { n: number }
+      ).n;
+
+    async function adminPair(org: string, permissions: readonly string[]) {
+      const adminUser = await person();
+      await member(adminUser.id, 'admin', 'active', org);
+      if (permissions.length > 0) {
+        await admin.query(
+          'update memberships set permissions = $2::text[] where organisation_id = $1 and user_id = $3',
+          [org, permissions, adminUser.id],
+        );
+      }
+      const pair = await signInPair(adminUser);
+      contexts().clearCache();
+      return pair;
+    }
+
+    evidenceTest(
+      'an admin cannot invite a billing_admin or an integration_admin: 403, no row',
+      async () => {
+        const { org } = await ownerPair();
+        const pair = await adminPair(org, []);
+        const before = await countInvitations(org);
+        for (const permissions of [
+          ['billing_admin'],
+          ['integration_admin'],
+          ['billing_admin', 'integration_admin'],
+        ]) {
+          for (const role of ['admin', 'staff']) {
+            const response = await postAs(pair, '/api/members/invite', {
+              email: `confer-${permissions.length}-${role}@example.test`,
+              role,
+              permissions,
+            });
+            expect(response.statusCode, `${role} ${permissions.join('+')}: ${response.body}`).toBe(
+              403,
+            );
+          }
+        }
+        expect(await countInvitations(org)).toBe(before);
+        // The same admin can still invite without conferring a permission.
+        const plain = await postAs(pair, '/api/members/invite', {
+          email: 'plain-staff@example.test',
+          role: 'staff',
+        });
+        expect(plain.statusCode, plain.body).toBe(201);
+        expect(await countInvitations(org)).toBe(before + 1);
+      },
+    );
+
+    evidenceTest('an admin holding billing_admin confers only billing_admin', async () => {
+      const { org } = await ownerPair();
+      const pair = await adminPair(org, ['billing_admin']);
+      const ok = await postAs(pair, '/api/members/invite', {
+        email: 'bill@example.test',
+        role: 'staff',
+        permissions: ['billing_admin'],
+      });
+      expect(ok.statusCode, ok.body).toBe(201);
+      const refused = await postAs(pair, '/api/members/invite', {
+        email: 'integ@example.test',
+        role: 'staff',
+        permissions: ['integration_admin'],
+      });
+      expect(refused.statusCode).toBe(403);
+      const both = await postAs(pair, '/api/members/invite', {
+        email: 'both@example.test',
+        role: 'staff',
+        permissions: ['billing_admin', 'integration_admin'],
+      });
+      expect(both.statusCode).toBe(403);
+    });
+
+    evidenceTest('an owner confers both permissions', async () => {
+      const { pair, org } = await ownerPair();
+      const before = await countInvitations(org);
+      const response = await postAs(pair, '/api/members/invite', {
+        email: 'both-owner@example.test',
+        role: 'admin',
+        permissions: ['billing_admin', 'integration_admin'],
+      });
+      expect(response.statusCode, response.body).toBe(201);
+      expect(await countInvitations(org)).toBe(before + 1);
+    });
+
+    describe('the issuer is judged again at acceptance (G09 M1, accept half)', () => {
+      const BOTH = ['billing_admin', 'integration_admin'];
+
+      /** An outstanding invitation conferring both permissions, issued by a live owner. */
+      async function outstanding(role = 'staff', toEmail?: string) {
+        const { pair, owner, org } = await ownerPair();
+        const email = toEmail ?? `late-${randomUUID().slice(0, 8)}@example.test`;
+        const response = await postAs(pair, '/api/members/invite', {
+          email,
+          role,
+          permissions: BOTH,
+        });
+        expect(response.statusCode, response.body).toBe(201);
+        const issued = response.json<{ invitationId: string; token: string }>();
+        return { org, owner, email, ...issued };
+      }
+
+      /** Changes the issuer's standing after the invitation was written. */
+      const reassign = (userId: string, role: string, permissions: readonly string[]) =>
+        admin.query(
+          'update memberships set permissions = $2::text[], role = $3 where user_id = $1',
+          [userId, permissions, role],
+        );
+
+      const membershipOf = async (org: string, email: string) =>
+        (
+          await admin.query<{ role: string; permissions: string[] }>(
+            `select m.role, m.permissions from memberships m join users u on u.id = m.user_id
+              where m.organisation_id = $1 and u.email = $2`,
+            [org, email],
+          )
+        ).rows[0];
+
+      evidenceTest(
+        'while the issuer still holds the authority the invitation is accepted',
+        async () => {
+          const inv = await outstanding();
+          const result = await accept(
+            inv.org,
+            inv.invitationId,
+            inv.token,
+            randomUUID(),
+            inv.email,
+          );
+          expect(result.outcome).toBe('accepted');
+          expect(await membershipOf(inv.org, inv.email)).toMatchObject({
+            role: 'staff',
+            permissions: expect.arrayContaining(BOTH) as string[],
+          });
+        },
+      );
+
+      evidenceTest('an issuer demoted to admin without permissions confers nothing', async () => {
+        const inv = await outstanding();
+        await reassign(inv.owner.id, 'admin', []);
+        const result = await accept(inv.org, inv.invitationId, inv.token, randomUUID(), inv.email);
+        expect(result.outcome).toBe('rejected');
+        expect(await membershipOf(inv.org, inv.email)).toBeUndefined();
+        // The invitation stays outstanding: nothing was consumed.
+        const row = await admin.query<{ accepted_at: Date | null }>(
+          'select accepted_at from invitations where id = $1',
+          [inv.invitationId],
+        );
+        expect(row.rows[0]?.accepted_at).toBeNull();
+      });
+
+      evidenceTest(
+        'an issuer who kept only billing_admin confers no integration_admin',
+        async () => {
+          const inv = await outstanding();
+          await reassign(inv.owner.id, 'admin', ['billing_admin']);
+          const result = await accept(
+            inv.org,
+            inv.invitationId,
+            inv.token,
+            randomUUID(),
+            inv.email,
+          );
+          expect(result.outcome).toBe('rejected');
+          expect(await membershipOf(inv.org, inv.email)).toBeUndefined();
+        },
+      );
+
+      evidenceTest('a disabled or removed issuer confers nothing', async () => {
+        const disabled = await outstanding();
+        await admin.query("update memberships set status = 'disabled' where user_id = $1", [
+          disabled.owner.id,
+        ]);
+        expect(
+          (
+            await accept(
+              disabled.org,
+              disabled.invitationId,
+              disabled.token,
+              randomUUID(),
+              disabled.email,
+            )
+          ).outcome,
+        ).toBe('rejected');
+        const removed = await outstanding();
+        await admin.query('delete from memberships where user_id = $1', [removed.owner.id]);
+        expect(
+          (
+            await accept(
+              removed.org,
+              removed.invitationId,
+              removed.token,
+              randomUUID(),
+              removed.email,
+            )
+          ).outcome,
+        ).toBe('rejected');
+      });
+
+      evidenceTest(
+        'a demotion cannot commit between the authority check and the grant (round 2)',
+        async () => {
+          // The acceptor already has an account, so acceptance blocks on that user row AFTER it
+          // has judged the issuer. While it is blocked the issuer is demoted, as the runtime
+          // role: the demotion must queue behind the acceptance (the authority read is held to
+          // commit) instead of committing first and leaving the grant standing on authority the
+          // issuer no longer has.
+          const target = await person();
+          const inv = await outstanding('staff', target.email);
+          // Warm the runtime pool so the acceptance below does not open its first connection
+          // while the row is held.
+          await Promise.all(
+            [1, 2, 3].map(() =>
+              withTenant(database.pool(), inv.org, (client) =>
+                client.query('select pg_sleep(0.2)'),
+              ),
+            ),
+          );
+          const holder = await admin.connect();
+          try {
+            await holder.query('begin');
+            await holder.query('select id from users where id = $1 for update', [target.id]);
+            const holderPid = (
+              await holder.query<{ pid: number }>('select pg_backend_pid() as pid')
+            ).rows[0]?.pid;
+            const accepting = accept(
+              inv.org,
+              inv.invitationId,
+              inv.token,
+              target.subject,
+              target.email,
+            );
+            const settled = accepting.then(
+              (value) => ({ value }),
+              (error: unknown) => ({ error }),
+            );
+            const deadline = Date.now() + 10_000;
+            const waitFor = async (sql: string, params: unknown[], what: string) => {
+              for (;;) {
+                const found = await holder.query<{ pid: number | null }>(sql, params);
+                const pid = found.rows[0]?.pid ?? null;
+                if (pid !== null) return pid;
+                if (Date.now() > deadline) throw new Error(what);
+                await new Promise((resolve) => setTimeout(resolve, 10));
+              }
+            };
+            // The acceptance, blocked on the held user row after it read the issuer.
+            const acceptPid = await waitFor(
+              `select a.pid from pg_stat_activity a
+                where a.datname = current_database() and a.wait_event_type = 'Lock'
+                  and $1::int = any(pg_blocking_pids(a.pid)) limit 1`,
+              [holderPid],
+              'acceptance never reached the held row',
+            );
+            const demotionState = { committed: false };
+            const demotion = withTenant(database.pool(), inv.org, (client) =>
+              client.query(
+                'update memberships set permissions = $2::text[], role = $3 where user_id = $1',
+                [inv.owner.id, [], 'admin'],
+              ),
+            ).then(() => {
+              demotionState.committed = true;
+            });
+            // Either the demotion commits (the defect) or it queues behind the acceptance.
+            let queuedBehindAcceptance = false;
+            while (!demotionState.committed && !queuedBehindAcceptance) {
+              const queued = await holder.query<{ pid: number }>(
+                `select a.pid from pg_stat_activity a
+                  where a.datname = current_database() and a.wait_event_type = 'Lock'
+                    and $1::int = any(pg_blocking_pids(a.pid)) limit 1`,
+                [acceptPid],
+              );
+              queuedBehindAcceptance = queued.rows.length > 0;
+              if (Date.now() > deadline)
+                throw new Error('the demotion neither committed nor queued');
+              await new Promise((resolve) => setTimeout(resolve, 10));
+            }
+            expect(demotionState.committed, 'the demotion committed mid-acceptance').toBe(false);
+            await holder.query('rollback');
+            const result = await settled;
+            if ('error' in result) throw result.error as Error;
+            await demotion;
+            // Serial order: the acceptance judged and granted first, the demotion followed.
+            expect(result.value.outcome).toBe('accepted');
+            const issuer = await admin.query<{ role: string; permissions: string[] }>(
+              'select role, permissions from memberships where user_id = $1',
+              [inv.owner.id],
+            );
+            expect(issuer.rows[0]).toMatchObject({ role: 'admin', permissions: [] });
+          } finally {
+            await holder.query('rollback').catch(() => undefined);
+            holder.release();
+          }
+        },
+        60_000,
+      );
+
+      evidenceTest('only an owner issuer confers the owner role', async () => {
+        const inv = await outstanding('owner');
+        // Keeps both permissions, so only the owner-role rule can refuse it.
+        await reassign(inv.owner.id, 'admin', BOTH);
+        const result = await accept(inv.org, inv.invitationId, inv.token, randomUUID(), inv.email);
+        expect(result.outcome).toBe('rejected');
+      });
+
+      evidenceTest(
+        'an invitation with no issuer confers admin or staff without permissions only',
+        async () => {
+          const org = (await ownerPair()).org;
+          const plain = `plain-${randomUUID().slice(0, 8)}@example.test`;
+          const loaded = `loaded-${randomUUID().slice(0, 8)}@example.test`;
+          const mint = async (email: string, role: string, permissions: string[]) => {
+            const token = randomSecret();
+            const id = randomUUID();
+            await admin.query(
+              `insert into invitations (organisation_id, id, token_hash, email, role, permissions, expires_at)
+               values ($1, $2, $3, $4, $5, $6::text[], now() + interval '7 days')`,
+              [org, id, digestOf(token), email, role, `{${permissions.join(',')}}`],
+            );
+            return { id, token };
+          };
+          const ok = await mint(plain, 'staff', []);
+          expect((await accept(org, ok.id, ok.token, randomUUID(), plain)).outcome).toBe(
+            'accepted',
+          );
+          const bad = await mint(loaded, 'staff', ['billing_admin']);
+          expect((await accept(org, bad.id, bad.token, randomUUID(), loaded)).outcome).toBe(
+            'rejected',
+          );
+        },
+      );
+    });
+  });
 });
 
 describe('membership lifecycle (P06.08.03, P06.08.04)', () => {
@@ -869,4 +1211,190 @@ describe('membership lifecycle (P06.08.03, P06.08.04)', () => {
     );
     expect(row.rows[0]?.role).toBe('owner');
   });
+});
+
+describe('ownership changes take the organisation lock before any row lock (G09 M2)', () => {
+  /**
+   * Holds the organisation's ownership lock from a separate connection, fires `action`, waits
+   * until a backend is queued on that advisory lock, and answers whether the target's
+   * membership row was already locked by the queued request. Before the fix every path locked
+   * the target row first and queued on the lock afterwards (opposite orders deadlock); after
+   * it the request queues with no row lock held.
+   */
+  async function rowLockedWhileQueued(
+    org: string,
+    targetId: string,
+    action: () => Promise<{ statusCode: number }>,
+    whileQueued?: (holder: {
+      query: (sql: string, values?: unknown[]) => Promise<unknown>;
+    }) => Promise<void>,
+  ): Promise<{ rowLocked: boolean; statusCode: number }> {
+    const holder = await admin.connect();
+    const prober = await admin.connect();
+    let pending: Promise<{ statusCode: number }> | undefined;
+    try {
+      await holder.query('begin');
+      await holder.query("select pg_advisory_xact_lock(hashtext('last-owner:' || $1::text))", [
+        org,
+      ]);
+      pending = action();
+      const deadline = Date.now() + 20_000;
+      for (;;) {
+        const queued = await prober.query<{ n: string }>(
+          `select count(*)::text as n from pg_stat_activity
+            where datname = current_database() and wait_event_type = 'Lock'
+              and wait_event = 'advisory' and pid <> pg_backend_pid()`,
+        );
+        if (queued.rows[0]?.n !== '0') break;
+        if (Date.now() > deadline) throw new Error('the request never queued on the lock');
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      await prober.query('begin');
+      let rowLocked = false;
+      try {
+        await prober.query('select 1 from memberships where user_id = $1 for update nowait', [
+          targetId,
+        ]);
+      } catch (error) {
+        if ((error as { code?: string }).code !== '55P03') throw error;
+        rowLocked = true;
+      }
+      await prober.query('rollback');
+      await whileQueued?.(holder);
+      await holder.query('commit');
+      const response = await pending;
+      return { rowLocked, statusCode: response.statusCode };
+    } finally {
+      // A failure above must not leave the ownership lock held or the request pending into
+      // the next case.
+      await holder.query('rollback');
+      await prober.query('rollback');
+      await pending?.catch(() => undefined);
+      holder.release();
+      prober.release();
+    }
+  }
+
+  evidenceTest('remove queues on the lock holding no row lock', async () => {
+    const { pair, org } = await ownerPair();
+    const staff = await person();
+    await member(staff.id, 'staff', 'active', org);
+    const result = await rowLockedWhileQueued(org, staff.id, () =>
+      postAs(pair, '/api/members/remove', { userId: staff.id }),
+    );
+    expect(result).toEqual({ rowLocked: false, statusCode: 200 });
+  });
+
+  evidenceTest('disable queues on the lock holding no row lock', async () => {
+    const { pair, org } = await ownerPair();
+    const staff = await person();
+    await member(staff.id, 'staff', 'active', org);
+    const result = await rowLockedWhileQueued(org, staff.id, () =>
+      postAs(pair, '/api/members/disable', { userId: staff.id }),
+    );
+    expect(result).toEqual({ rowLocked: false, statusCode: 200 });
+  });
+
+  evidenceTest('transfer queues on the lock holding no row lock', async () => {
+    const { pair, org } = await ownerPair();
+    const successor = await person();
+    await member(successor.id, 'admin', 'active', org);
+    const result = await rowLockedWhileQueued(org, successor.id, () =>
+      postAs(pair, '/api/members/transfer-ownership', { userId: successor.id }),
+    );
+    expect(result).toEqual({ rowLocked: false, statusCode: 200 });
+  });
+
+  evidenceTest(
+    'a transfer whose owner was demoted while it waited changes nothing and audits nothing',
+    async () => {
+      const { pair, org, owner } = await ownerPair();
+      const other = await person();
+      const successor = await person();
+      await member(other.id, 'owner', 'active', org);
+      await member(successor.id, 'admin', 'active', org);
+      const liveSessions = (): Promise<string | undefined> =>
+        admin
+          .query<{ n: string }>(
+            'select count(*)::text as n from sessions where user_id = any($1::uuid[]) and revoked_at is null',
+            [[successor.id]],
+          )
+          .then((query) => query.rows[0]?.n);
+      // The successor's own live session: a promotion that is not rolled back would end it.
+      await signInPair(successor);
+      const sessionsBefore = await liveSessions();
+      expect(sessionsBefore).toBe('1');
+      const result = await rowLockedWhileQueued(
+        org,
+        successor.id,
+        () => postAs(pair, '/api/members/transfer-ownership', { userId: successor.id }),
+        async (holder) => {
+          // eslint-disable-next-line no-restricted-syntax -- fixture write of a membership row; the SET-session rule matches UPDATE ... SET verb text.
+          await holder.query("update memberships set role = 'admin' where user_id = $1", [
+            owner.id,
+          ]);
+        },
+      );
+      expect(result.statusCode).toBe(404);
+      const roles = await admin.query<{ user_id: string; role: string }>(
+        'select user_id::text, role::text from memberships where organisation_id = $1',
+        [org],
+      );
+      const roleOf = (id: string): string | undefined =>
+        roles.rows.find((row) => row.user_id === id)?.role;
+      expect(roleOf(successor.id)).toBe('admin');
+      expect(roleOf(owner.id)).toBe('admin');
+      expect(roleOf(other.id)).toBe('owner');
+      expect(await liveSessions()).toBe(sessionsBefore);
+      const audited = await admin.query<{ n: string }>(
+        `select count(*)::text as n from audit_events
+          where organisation_id = $1 and operation = 'member.transfer_ownership'`,
+        [org],
+      );
+      expect(audited.rows[0]?.n).toBe('0');
+    },
+  );
+
+  evidenceTest(
+    'transfer racing the removal of the transferring owner never answers 5xx',
+    async () => {
+      const rounds = 12;
+      for (let round = 0; round < rounds; round += 1) {
+        // Two sign-ins per round from one test address: start each round with a full sign-in
+        // bucket, as the abuse test does, so the limiter is not what this case measures.
+        await admin.query('delete from auth_throttle_buckets');
+        const org = randomUUID();
+        await admin.query('insert into organisations (id, slug, name) values ($1, $2, $3)', [
+          org,
+          `race-${org.slice(0, 8)}`,
+          'Race Org',
+        ]);
+        const first = await person();
+        const second = await person();
+        const successor = await person();
+        await member(first.id, 'owner', 'active', org);
+        await member(second.id, 'owner', 'active', org);
+        await member(successor.id, 'admin', 'active', org);
+        const firstPair = await signInPair(first);
+        const secondPair = await signInPair(second);
+        contexts().clearCache();
+        const responses = await Promise.all([
+          postAs(firstPair, '/api/members/transfer-ownership', { userId: successor.id }),
+          postAs(secondPair, '/api/members/remove', { userId: first.id }),
+        ]);
+        const codes = responses.map((response) => response.statusCode);
+        expect(
+          codes.every((code) => code < 500),
+          `round ${String(round)}: ${codes.join(',')}`,
+        ).toBe(true);
+        const owners = await admin.query<{ n: string }>(
+          `select count(*)::text as n from memberships m join users u on u.id = m.user_id
+          where m.organisation_id = $1 and m.role = 'owner' and m.status = 'active' and u.status = 'active'`,
+          [org],
+        );
+        expect(Number(owners.rows[0]?.n)).toBeGreaterThanOrEqual(1);
+      }
+    },
+    120_000,
+  );
 });
