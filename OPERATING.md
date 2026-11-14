@@ -20,16 +20,26 @@ failure. The vote on each old rule is in `docs/audits/2026-11-14-owner-audit/REA
    `pnpm exec vitest run --project integration <file>`.
 6. **Ship.** `/ship <pr>`: waits for CI on the exact head SHA, runs the independent review on
    that SHA, squash-merges pinned to it. Any CRITICAL or HIGH finding blocks; fix and ship again.
-   Several PRs: ship them in dependency order, one command each, no manual rebases (the
-   up-to-date rule is off).
-   A PR on a control path also gets the `invariant-reviewer` agent before `/ship`; its findings go
-   into the PR.
+   The up-to-date rule on `main` stays: bring `main` into the branch first. An ordered
+   set or a stack goes through the kit's `merge-train`, after each head has its review.
    **Rollback first** for two kinds of PR: a migration that alters or drops existing data, and
    an identity or Keycloak change that could lock the owner out. Ship only after the rollback
    path has been run (down path or restore on a database holding the old data; owner sign-in
    restored on the local stack), and write one line about it in `NEXT.md`.
 7. **Record.** The same PR ticks its item in `ROADMAP.md` and rewrites `NEXT.md`. Nothing else is
    kept by hand.
+
+## Standing rules (founder, 2026-11-14)
+
+1. **Founder delegation.** The AI may merge any PR through `/ship` once CI passes on the exact head
+   SHA and one independent review approves it. Migrations that change data, and identity changes
+   that could lock the founder out, also need a tested rollback. The founder is needed only for the
+   human queue in `ROADMAP.md`.
+2. **Tie-break.** When the reviewer and a roadmap default disagree, follow the reviewer. Only an
+   explicit founder decision overrides the reviewer. Do not ask.
+3. **Never stop while a queue item can move.** Park blocked items, keep working, and collect
+   everything needed from the founder in one batched list in `NEXT.md`. Message the founder at most
+   once per working block.
 
 ## Truth
 
@@ -48,7 +58,7 @@ failure. The vote on each old rule is in `docs/audits/2026-11-14-owner-audit/REA
 | Bytecode committed                     | `.gitignore`                                                                            |
 | Push after a failed formatter          | format-on-edit hook, lefthook pre-commit and pre-push, hook bypass denied               |
 | Duplicate ledger IDs                   | no new ledger entries; `check-ledger-ids` in CI guards the frozen registry              |
-| PRs merged one message at a time       | auto-merge on, up-to-date rule off, `/ship` in a loop                                   |
+| PRs merged one message at a time       | auto-merge on, `merge-train` for ordered sets                                           |
 | Session ends before the PR             | step 3                                                                                  |
 | Lost work                              | `git_guard` hook; bundle before pruning                                                 |
 | Secrets                                | deny rules for secret files, gitleaks in pre-commit and CI                              |
