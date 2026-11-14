@@ -1,13 +1,15 @@
 # NEXT
 
-**AI is doing now:** C3 (repository settings), then C4: land the open code PRs through `/ship`, in order #260, #259, #268, #262, #263, #265, #264, #266, #267, #269, #270.
+**Handoff (2026-11-14).** Merged: #272 `7a7201d`, #273 `352c9a0`. Stay on `chore/owner-overhaul` in the main checkout (branches from `main` put the old guard back on disk); edit other branches in `~/worktrees/moin/`.
 
-**AI next:** (1) C5, C6: prune branches, worktrees and stashes; delete dead shape helpers. (2) S1: call persistence and disclosure. (3) S2: demo tenant seed.
+**AI is doing now:** C4, #260: fix the two MEDIUM review notes in the test (roll back in `finally`; compare expiry in the database), merge `origin/main` into the branch, wait for CI, `/ship 260`. Then #259, #268, #262, #263, #265, #264, #266, #267, #269, #270, each updated with `main` first (a ruleset keeps the up-to-date rule on).
 
-**You next:** (1) H3: answer Twilio's identity request (account reported suspended). (2) H2: trademark search and domain for KlarDesk. (3) H4: request Bedrock model access in eu-central-1.
+**AI next:** (1) C5, C6. (2) S1: call persistence and disclosure. (3) S2: demo tenant seed.
 
-**Blocked on you:** nothing urgent. H9 (two minutes): in `~/.claude/kit/verify-head.d/AyhamJo7__moin.json` delete the line `"OpenAPI and client drift (activated in P06/P07)",` and the lines `"container-scan",` and `"hadolint, build, trivy image",`. The AI does not edit the list that gates its own merges. Until then the empty CI job stays and `container-scan` runs on every PR.
+**You next:** (1) the decision under "Blocked on you". (2) H3: Twilio identity request. (3) H2: trademark search and domain.
 
-**Rollback tested before merge** (migrations that alter or drop data; identity changes that could lock you out): none merged yet. Candidates in C4: #262, #264, #265, #266, #267, #269.
+**Blocked on you:** the independent review refused #274 twice (roadmap, operating model) and will refuse #271 on the same grounds: it reads D2 (no new evidence records), D3 (session merges identity and migration PRs before 2026-11-29, one reviewer instead of the QG-09 three), D8 (conditional container scan) and "up-to-date rule off" as loosening `PLAN.md` gates QG-09, QG-03 and P02.06.03. Choose: (a) amend those `PLAN.md` gates yourself and merge #274 and #271 by hand, or (b) keep the gates and tell the AI to rewrite D2, D3, D8 and C3 to match.
 
-**Last verified main SHA:** `7a7201d` (#272; all PR checks passed on head `4cf8b6b`, 2026-11-14).
+**Rollback tested before merge:** none merged yet. Candidates: #262, #264, #265, #266, #267, #269.
+
+**Last verified main SHA:** `352c9a0` (#273; all PR checks passed on head `647d840`, 2026-11-14).
