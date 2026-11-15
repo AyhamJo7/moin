@@ -9,6 +9,8 @@
  * (INV-16).
  */
 import { randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { createTestDatabase, evidenceTest, type TestDatabase } from '@moin/testing';
 import { afterAll, beforeAll, beforeEach, describe, expect } from 'vitest';
 import { createPool, type Pool } from './pool.ts';
@@ -37,8 +39,8 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  // The table's own triggers keep the count, for a fixture as for the function.
   await fixtures.query('delete from auth_throttle_buckets');
-  await fixtures.query('update auth_throttle_admission set live_buckets = 0');
   await fixtures.query('delete from auth_security_events');
 });
 
@@ -59,9 +61,6 @@ async function stageBuckets(count: number, age = '0 seconds'): Promise<void> {
      select 'ip', sha256(convert_to(i::text, 'UTF8')), 100, 100, 0, clock_timestamp() - $2::interval
        from generate_series(1, $1::int) i`,
     [count, age],
-  );
-  await fixtures.query(
-    'update auth_throttle_admission set live_buckets = (select count(*) from auth_throttle_buckets)',
   );
 }
 
@@ -122,7 +121,8 @@ describe('the throttle table has a ceiling (G11 M3)', () => {
         ...Array<boolean>(4).fill(false),
       ]);
       expect(await bucketRows()).toBe(MAX_BUCKETS + 1);
-      expect(await admissionCount()).toBe(MAX_BUCKETS + 1);
+      // The overflow bucket is the one row the count leaves out.
+      expect(await admissionCount()).toBe(MAX_BUCKETS);
       // A source that already has a row keeps its own budget.
       const known = await fixtures.query<{ key_digest: Buffer }>(
         'select key_digest from auth_throttle_buckets limit 1',
@@ -153,6 +153,61 @@ describe('the ceiling holds under concurrency', () => {
     expect(await admissionCount()).toBe(await bucketRows());
     expect(await bucketRows()).toBe(16);
   });
+
+  evidenceTest(
+    'sources returning to stale buckets while newcomers sweep them never deadlock',
+    async () => {
+      // 300 stale buckets. Forty of their own sources come back at once while forty new
+      // sources are admitted and sweep: every request must be answered (a deadlock would
+      // reject one with 40P01), and the count must still equal the table.
+      await stageBuckets(300, '2 days');
+      const returning = (
+        await fixtures.query<{ key_digest: Buffer }>(
+          'select key_digest from auth_throttle_buckets order by key_digest limit 40',
+        )
+      ).rows.map((row) => row.key_digest);
+      const outcomes = await Promise.allSettled([
+        ...returning.map((digest) => take(digest, 100)),
+        ...Array.from({ length: 40 }, () => take(key(), 100)),
+      ]);
+      expect(outcomes.filter((outcome) => outcome.status === 'rejected')).toStrictEqual([]);
+      expect(await admissionCount()).toBe(await bucketRows());
+    },
+    60_000,
+  );
+
+  evidenceTest(
+    'the count stays right when the previous function body writes the table',
+    async () => {
+      // A call of the 0023 body that was in flight when 0083 committed keeps running that
+      // body. It knows nothing of the count; the table's triggers keep it anyway.
+      const previous = readFileSync(
+        resolve(import.meta.dirname, '../migrations/0023_auth_throttle.sql'),
+        'utf8',
+      );
+      const start = previous.indexOf('CREATE FUNCTION app.take_signin_bucket(');
+      const end = previous.indexOf('$$;', start);
+      const current = (
+        await fixtures.query<{ definition: string }>(
+          "select pg_get_functiondef('app.take_signin_bucket(text, bytea, double precision, double precision, double precision)'::regprocedure) as definition",
+        )
+      ).rows[0]?.definition;
+      if (start < 0 || end < 0 || current === undefined) throw new Error('no function body');
+      await stageBuckets(150, '2 days');
+      await fixtures.query(
+        previous.slice(start, end + 3).replace('CREATE FUNCTION', 'CREATE OR REPLACE FUNCTION'),
+      );
+      try {
+        await Promise.all(Array.from({ length: 12 }, () => take(key(), 100)));
+      } finally {
+        await fixtures.query(current);
+      }
+      expect(await admissionCount()).toBe(await bucketRows());
+      await Promise.all(Array.from({ length: 12 }, () => take(key(), 100)));
+      expect(await admissionCount()).toBe(await bucketRows());
+    },
+    60_000,
+  );
 
   evidenceTest('a bucket in use is not swept from under its own request', async () => {
     // One stale bucket, taken again: the request sweeps, locks its own row and keeps its

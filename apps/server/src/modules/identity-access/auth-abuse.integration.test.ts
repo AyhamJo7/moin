@@ -114,7 +114,6 @@ beforeEach(async () => {
   // file): each test starts from full buckets, like clearCache() for the request cache.
   // Production has no reset path — buckets refill by wall clock only.
   await admin.query('delete from auth_throttle_buckets');
-  await admin.query('update auth_throttle_admission set live_buckets = 0');
 });
 
 describe('a full bucket table cannot be grown by rotating sources (G11 M3)', () => {
@@ -128,7 +127,6 @@ describe('a full bucket table cannot be grown by rotating sources (G11 M3)', () 
            from generate_series(1, $1::int) i`,
         [ceiling],
       );
-      await admin.query('update auth_throttle_admission set live_buckets = $1', [ceiling]);
       await admin.query('delete from auth_security_events');
       const statuses = new Map<number, number>();
       const attempts = 320;

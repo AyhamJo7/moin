@@ -9,28 +9,42 @@
 --
 -- ## The change
 --
--- `auth_throttle_admission` holds the number of live buckets in one row. `take_signin_bucket`
--- (0023 body, replaced) admits a new source by one conditional update of that row, which either
--- takes a slot under the ceiling of 50 000 or matches nothing: there is no count of the table,
--- and at the ceiling an unknown source reads one row and takes no lock on it. A source without a
--- slot shares the scope's overflow bucket (the all-zero digest), so rotating sources can neither
--- grow the table nor buy fresh budgets, and their refused sign-ins are limited by that one shared
--- budget. A source with a row pays nothing extra. The request locks its own row before it reads
--- it, and the sweep skips locked rows and returns their slots, so a bucket in use is never swept
--- from under its request and the count follows the table.
+-- **The count.** `auth_throttle_admission` holds the number of live buckets in one row, kept by
+-- two statement triggers on the bucket table, so every writer keeps it right: the new function,
+-- a call of the previous body that was in flight when this migration committed, a fixture. The
+-- migration takes a write-blocking lock on the bucket table before it creates the triggers and
+-- seeds the count, so no write falls between the two.
 --
--- `write_signin_event` (0024 body, replaced): each write sweeps up to 100 events older than one
--- year, the retention PLAN gives security logs (Data Protection: security logs, one year), going
--- through every event class so a class nobody writes any more is swept too. A `throttle` refusal
--- is written under a lock, once per source per minute and at most sixty a minute over all
--- sources: a refused flood cannot become a write flood. The P16 retention engine takes over the
--- sweep.
+-- **Admission.** `take_signin_bucket` (0023 body, replaced) lets a source that has a bucket go
+-- straight to it: no count, no shared lock, no sweep. A source without one is admitted by one
+-- conditional update of the count row, which either reserves a slot under the ceiling of 50 000
+-- or matches nothing. At the ceiling it tries, without waiting, to be the one request that
+-- sweeps; if stale buckets go, it takes a freed slot; otherwise it shares its scope's overflow
+-- bucket (the all-zero digest, never counted and never swept). Rotating sources can therefore
+-- neither grow the table nor buy fresh budgets, and their refused sign-ins are limited by that
+-- one shared budget.
+--
+-- **Lock order.** A request locks its own source first (the advisory lock 0023 already takes),
+-- then at most the count row, and after that waits for nothing but the overflow source, whose
+-- holder never waits for the count row. Only a request that holds the count row sweeps, and it
+-- removes a stale bucket only if it can take that bucket's source lock without waiting, so a
+-- bucket is never swept from under its own request and no two requests wait on each other.
+--
+-- **Events.** `write_signin_event` (0024 body, replaced): each write sweeps up to 100 events
+-- older than one year, the retention PLAN gives security logs (Data Protection: security logs,
+-- one year), going through every event class so a class nobody writes any more is swept too. A
+-- `throttle` refusal is written under a lock, once per source per minute and at most sixty a
+-- minute over all sources: a refused flood cannot become a write flood. The P16 retention engine
+-- takes over the sweep.
 --
 -- No index is added to an existing table: an index build would block writes on a table the
 -- sign-in path writes to. The event queries are scoped to one class and use the existing
--- (class, created_at) index. Signatures, owners, search paths and EXECUTE grants are unchanged
--- (CREATE OR REPLACE keeps them); 0023 and 0024 are not edited. The catalog's reviewed body
--- digests move to the new text.
+-- (class, created_at) index. Signatures, owners, search paths and EXECUTE grants of the two
+-- replaced functions are unchanged (CREATE OR REPLACE keeps them); 0023 and 0024 are not edited.
+-- The catalog's reviewed body digests move to the new text.
+
+-- Writers wait from here to the commit; the lock is short (two triggers and one count).
+LOCK TABLE auth_throttle_buckets IN SHARE ROW EXCLUSIVE MODE;
 
 CREATE TABLE auth_throttle_admission (
   singleton    boolean NOT NULL PRIMARY KEY DEFAULT true CHECK (singleton),
@@ -38,14 +52,61 @@ CREATE TABLE auth_throttle_admission (
 );
 
 COMMENT ON TABLE auth_throttle_admission IS
-  'The number of rows in auth_throttle_buckets, kept by take_signin_bucket so a new source is admitted by one conditional update instead of a count of the table (P06.12.01). Global, one row, no identity.';
-
-INSERT INTO auth_throttle_admission (singleton, live_buckets)
-  SELECT true, count(*) FROM auth_throttle_buckets;
+  'The number of rows in auth_throttle_buckets other than the overflow buckets, kept by triggers on that table so a new source is admitted by one conditional update instead of a count of the table (P06.12.01). Global, one row, no identity.';
 
 REVOKE ALL ON TABLE auth_throttle_admission
   FROM PUBLIC, moin_app, moin_identity, moin_provisioner, moin_dispatcher, moin_support_ro,
        moin_reporting;
+
+CREATE FUNCTION app.count_throttle_bucket_inserts() RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = pg_catalog, public, app, pg_temp
+AS $$
+DECLARE
+  v_added integer;
+BEGIN
+  SELECT count(*) INTO v_added FROM added_buckets a
+    WHERE a.key_digest <> '\x0000000000000000000000000000000000000000000000000000000000000000';
+  IF v_added > 0 THEN
+    UPDATE public.auth_throttle_admission SET live_buckets = live_buckets + v_added;
+  END IF;
+  RETURN NULL;
+END
+$$;
+
+CREATE FUNCTION app.count_throttle_bucket_deletes() RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = pg_catalog, public, app, pg_temp
+AS $$
+DECLARE
+  v_removed integer;
+BEGIN
+  SELECT count(*) INTO v_removed FROM removed_buckets r
+    WHERE r.key_digest <> '\x0000000000000000000000000000000000000000000000000000000000000000';
+  IF v_removed > 0 THEN
+    UPDATE public.auth_throttle_admission
+      SET live_buckets = GREATEST(0, live_buckets - v_removed);
+  END IF;
+  RETURN NULL;
+END
+$$;
+
+REVOKE ALL ON FUNCTION app.count_throttle_bucket_inserts() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app.count_throttle_bucket_deletes() FROM PUBLIC;
+
+CREATE TRIGGER auth_throttle_buckets_count_inserts
+  AFTER INSERT ON auth_throttle_buckets
+  REFERENCING NEW TABLE AS added_buckets
+  FOR EACH STATEMENT EXECUTE FUNCTION app.count_throttle_bucket_inserts();
+CREATE TRIGGER auth_throttle_buckets_count_deletes
+  AFTER DELETE ON auth_throttle_buckets
+  REFERENCING OLD TABLE AS removed_buckets
+  FOR EACH STATEMENT EXECUTE FUNCTION app.count_throttle_bucket_deletes();
+ALTER TABLE auth_throttle_buckets ENABLE ALWAYS TRIGGER auth_throttle_buckets_count_inserts;
+ALTER TABLE auth_throttle_buckets ENABLE ALWAYS TRIGGER auth_throttle_buckets_count_deletes;
+
+INSERT INTO auth_throttle_admission (singleton, live_buckets)
+  SELECT true, count(*) FROM auth_throttle_buckets;
 
 CREATE OR REPLACE FUNCTION app.take_signin_bucket(
   p_scope text,
@@ -63,8 +124,11 @@ DECLARE
   v_updated timestamptz;
   v_now timestamptz := clock_timestamp();
   v_key bytea := p_key_digest;
-  v_exists boolean;
-  v_swept integer;
+  v_known boolean;
+  v_admitted boolean := false;
+  v_may_sweep boolean := false;
+  v_swept integer := 0;
+  v_stale record;
   -- G11 M3: the table never holds more than this many buckets plus the overflow bucket of each
   -- scope. A new source that finds no slot shares its scope's overflow bucket (the all-zero
   -- digest), so a rotating scanner cannot grow the table and cannot buy itself fresh budgets.
@@ -82,39 +146,53 @@ BEGIN
      OR p_cost IS NULL OR p_cost <= 0 THEN
     RAISE EXCEPTION 'bucket parameters out of range' USING ERRCODE = 'invalid_parameter_value';
   END IF;
+  -- First lock, always: this source. Whoever holds it is the only request working on this
+  -- source's bucket, and a sweep leaves the bucket alone while it is held.
   PERFORM pg_advisory_xact_lock(hashtext(p_scope || ':' || encode(p_key_digest, 'hex')));
-  -- Opportunistic sweep: rows untouched for over a day are dead weight (their bucket would
-  -- refill full long before). Capped at 100 per call — bounded cost on the request path. A row
-  -- another request holds is skipped, never waited for, and every swept row returns its slot.
-  DELETE FROM public.auth_throttle_buckets
-    WHERE ctid IN (
-      SELECT ctid FROM public.auth_throttle_buckets
+  SELECT true INTO v_known FROM public.auth_throttle_buckets b
+    WHERE b.scope = p_scope AND b.key_digest = p_key_digest;
+  IF v_known IS NULL THEN
+    -- A new source. The update is the admission: it reserves a slot below the ceiling by locking
+    -- the count row (the insert below raises the count through the table's trigger), or it
+    -- matches nothing and locks nothing.
+    UPDATE public.auth_throttle_admission
+      SET live_buckets = live_buckets WHERE live_buckets < c_max_buckets;
+    IF FOUND THEN
+      v_admitted := true;
+      v_may_sweep := true;
+    ELSE
+      -- Full. One request at a time may try to make room; the others do not wait for it.
+      PERFORM 1 FROM public.auth_throttle_admission FOR UPDATE SKIP LOCKED;
+      v_may_sweep := FOUND;
+    END IF;
+    IF v_may_sweep THEN
+      -- Opportunistic sweep: rows untouched for over a day are dead weight (their bucket would
+      -- refill full long before). Capped at 100 per call — bounded cost on the request path. A
+      -- bucket goes only if its source lock is free right now, so never from under a request.
+      FOR v_stale IN
+        SELECT b.ctid AS row_id, b.scope, b.key_digest FROM public.auth_throttle_buckets b
         WHERE updated_at < v_now - INTERVAL '24 hours'
         LIMIT 100
-        FOR UPDATE SKIP LOCKED
-    );
-  GET DIAGNOSTICS v_swept = ROW_COUNT;
-  IF v_swept > 0 THEN
-    UPDATE public.auth_throttle_admission
-      SET live_buckets = GREATEST(0, live_buckets - v_swept);
-  END IF;
-  -- This source's own row, locked before it is read: from here on no sweep can remove it.
-  SELECT true INTO v_exists FROM public.auth_throttle_buckets b
-    WHERE b.scope = p_scope AND b.key_digest = v_key FOR UPDATE;
-  IF v_exists IS NULL THEN
-    -- A new source takes a slot only while one is free. The update is the admission: it either
-    -- raises the count below the ceiling or matches nothing, with no count of the table.
-    UPDATE public.auth_throttle_admission
-      SET live_buckets = live_buckets + 1 WHERE live_buckets < c_max_buckets;
-    IF NOT FOUND THEN
+      LOOP
+        CONTINUE WHEN v_stale.key_digest = c_overflow;
+        IF pg_try_advisory_xact_lock(
+             hashtext(v_stale.scope || ':' || encode(v_stale.key_digest, 'hex'))) THEN
+          DELETE FROM public.auth_throttle_buckets b
+            WHERE b.ctid = v_stale.row_id AND b.scope = v_stale.scope
+              AND b.key_digest = v_stale.key_digest;
+          IF FOUND THEN
+            v_swept := v_swept + 1;
+          END IF;
+        END IF;
+      END LOOP;
+      -- At the ceiling a freed slot is this source's: the count row is still held.
+      IF v_swept > 0 THEN
+        v_admitted := true;
+      END IF;
+    END IF;
+    IF NOT v_admitted THEN
       v_key := c_overflow;
       PERFORM pg_advisory_xact_lock(hashtext(p_scope || ':' || encode(v_key, 'hex')));
-      SELECT true INTO v_exists FROM public.auth_throttle_buckets b
-        WHERE b.scope = p_scope AND b.key_digest = v_key FOR UPDATE;
-      IF v_exists IS NULL THEN
-        -- The overflow bucket itself is a row like any other for the count.
-        UPDATE public.auth_throttle_admission SET live_buckets = live_buckets + 1;
-      END IF;
     END IF;
   END IF;
   -- Refill against the STORED capacity (the ceiling that earned the current balance), then
