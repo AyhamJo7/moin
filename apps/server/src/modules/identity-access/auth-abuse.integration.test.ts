@@ -114,6 +114,53 @@ beforeEach(async () => {
   // file): each test starts from full buckets, like clearCache() for the request cache.
   // Production has no reset path — buckets refill by wall clock only.
   await admin.query('delete from auth_throttle_buckets');
+  await admin.query('update auth_throttle_admission set live_buckets = 0');
+});
+
+describe('a full bucket table cannot be grown by rotating sources (G11 M3)', () => {
+  evidenceTest(
+    'malformed callbacks from rotating addresses share one budget and write bounded events',
+    async () => {
+      const ceiling = 50_000;
+      await admin.query(
+        `insert into auth_throttle_buckets (scope, key_digest, tokens, capacity, refill_per_second)
+         select 'ip', sha256(convert_to(i::text, 'UTF8')), 100, 100, 0
+           from generate_series(1, $1::int) i`,
+        [ceiling],
+      );
+      await admin.query('update auth_throttle_admission set live_buckets = $1', [ceiling]);
+      await admin.query('delete from auth_security_events');
+      const statuses = new Map<number, number>();
+      const attempts = 320;
+      for (let i = 0; i < attempts; i += 1) {
+        const response = await app.inject({
+          method: 'GET',
+          url: '/api/auth/callback?code=x',
+          remoteAddress: `198.51.${String(100 + (i >> 8))}.${String(i & 255)}`,
+        });
+        statuses.set(response.statusCode, (statuses.get(response.statusCode) ?? 0) + 1);
+      }
+      // Every address is new, so none gets a bucket: they drain the one shared budget and
+      // are then refused, however many addresses the scanner has.
+      expect(statuses.get(429) ?? 0).toBeGreaterThan(0);
+      const buckets = await admin.query<{ n: string }>(
+        'select count(*)::text as n from auth_throttle_buckets',
+      );
+      expect(Number(buckets.rows[0]?.n)).toBe(ceiling + 1);
+      const events = await admin.query<{ class: string; n: string }>(
+        'select class, count(*)::text as n from auth_security_events group by class',
+      );
+      const count = (cls: string): number =>
+        Number(events.rows.find((row) => row.class === cls)?.n ?? 0);
+      // Refused sign-ins are limited by the shared budget, not by the number of addresses;
+      // refusals by the per-minute limit on throttle events.
+      expect(count('sign_in')).toBe(statuses.get(400) ?? 0);
+      expect(count('sign_in')).toBeLessThan(attempts - 40);
+      expect(count('throttle')).toBeGreaterThan(0);
+      expect(count('throttle')).toBeLessThanOrEqual(60);
+    },
+    180_000,
+  );
 });
 
 describe('throttling engages (P06.12.01, P06.12.03)', () => {

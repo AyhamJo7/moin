@@ -13,6 +13,9 @@ import { createTestDatabase, evidenceTest, type TestDatabase } from '@moin/testi
 import { afterAll, beforeAll, beforeEach, describe, expect } from 'vitest';
 import { createPool, type Pool } from './pool.ts';
 
+/** The ceiling in 0083. */
+const MAX_BUCKETS = 50_000;
+const OVERFLOW_CAPACITY = 3;
 const EVENT_SWEEP_CAP = 100;
 /** The global ceiling on stored throttle refusals a minute in 0083. */
 const MAX_THROTTLE_EVENTS_PER_MINUTE = 60;
@@ -35,10 +38,47 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await fixtures.query('delete from auth_throttle_buckets');
+  await fixtures.query('update auth_throttle_admission set live_buckets = 0');
   await fixtures.query('delete from auth_security_events');
 });
 
 const key = (): Buffer => randomBytes(32);
+
+async function take(digest: Buffer, capacity: number): Promise<boolean> {
+  const result = await app.query<{ allowed: boolean }>(
+    'select allowed from app.take_signin_bucket($1::text, $2::bytea, $3::double precision, $4::double precision, $5::double precision)',
+    ['ip', digest, capacity, 0, 1],
+  );
+  return result.rows[0]?.allowed === true;
+}
+
+/** Stages `count` ordinary buckets the way the function would have, count included. */
+async function stageBuckets(count: number, age = '0 seconds'): Promise<void> {
+  await fixtures.query(
+    `insert into auth_throttle_buckets (scope, key_digest, tokens, capacity, refill_per_second, updated_at)
+     select 'ip', sha256(convert_to(i::text, 'UTF8')), 100, 100, 0, clock_timestamp() - $2::interval
+       from generate_series(1, $1::int) i`,
+    [count, age],
+  );
+  await fixtures.query(
+    'update auth_throttle_admission set live_buckets = (select count(*) from auth_throttle_buckets)',
+  );
+}
+
+const admissionCount = async (): Promise<number> =>
+  Number(
+    (
+      await fixtures.query<{ n: string }>(
+        'select live_buckets::text as n from auth_throttle_admission',
+      )
+    ).rows[0]?.n,
+  );
+
+const bucketRows = async (): Promise<number> =>
+  Number(
+    (await fixtures.query<{ n: string }>('select count(*)::text as n from auth_throttle_buckets'))
+      .rows[0]?.n,
+  );
 
 async function writeEvent(cls: string, digest: Buffer): Promise<void> {
   await app.query(
@@ -59,7 +99,73 @@ const eventsOlderThanAYear = (): Promise<number> =>
     "select count(*)::text as n from auth_security_events where created_at < clock_timestamp() - interval '1 year'",
   );
 
-describe('throttle refusals cannot flood the event table (G11 M3)', () => {
+describe('the throttle table has a ceiling (G11 M3)', () => {
+  evidenceTest('below the ceiling a new source gets its own bucket', async () => {
+    const digest = key();
+    expect(await take(digest, 5)).toBe(true);
+    expect(await bucketRows()).toBe(1);
+  });
+
+  evidenceTest(
+    'past the ceiling new sources share one overflow bucket and get no row',
+    async () => {
+      await stageBuckets(MAX_BUCKETS);
+      expect(await bucketRows()).toBe(MAX_BUCKETS);
+      // Rotating sources: the first OVERFLOW_CAPACITY draw on the shared bucket, the rest are
+      // refused, and the table gains the one overflow row and nothing else.
+      const outcomes: boolean[] = [];
+      for (let i = 0; i < OVERFLOW_CAPACITY + 4; i += 1) {
+        outcomes.push(await take(key(), OVERFLOW_CAPACITY));
+      }
+      expect(outcomes).toStrictEqual([
+        ...Array<boolean>(OVERFLOW_CAPACITY).fill(true),
+        ...Array<boolean>(4).fill(false),
+      ]);
+      expect(await bucketRows()).toBe(MAX_BUCKETS + 1);
+      expect(await admissionCount()).toBe(MAX_BUCKETS + 1);
+      // A source that already has a row keeps its own budget.
+      const known = await fixtures.query<{ key_digest: Buffer }>(
+        'select key_digest from auth_throttle_buckets limit 1',
+      );
+      expect(await take(known.rows[0]?.key_digest ?? key(), 100)).toBe(true);
+      expect(await bucketRows()).toBe(MAX_BUCKETS + 1);
+    },
+    120_000,
+  );
+});
+
+describe('the ceiling holds under concurrency', () => {
+  evidenceTest(
+    'concurrent new sources at the last free slot cannot exceed the ceiling',
+    async () => {
+      await stageBuckets(MAX_BUCKETS - 1);
+      await Promise.all(Array.from({ length: 12 }, () => take(key(), 100)));
+      // One newcomer took the last slot; the others share the one overflow row.
+      expect(await bucketRows()).toBe(MAX_BUCKETS + 1);
+    },
+    120_000,
+  );
+
+  evidenceTest('the count follows the table through concurrent sweeps and admissions', async () => {
+    // 300 stale buckets: every take sweeps up to 100 of them while admitting its own source.
+    await stageBuckets(300, '2 days');
+    await Promise.all(Array.from({ length: 16 }, () => take(key(), 100)));
+    expect(await admissionCount()).toBe(await bucketRows());
+    expect(await bucketRows()).toBe(16);
+  });
+
+  evidenceTest('a bucket in use is not swept from under its own request', async () => {
+    // One stale bucket, taken again: the request sweeps, locks its own row and keeps its
+    // slot, so the count is one whichever happens first.
+    await stageBuckets(1, '2 days');
+    const known = await fixtures.query<{ key_digest: Buffer }>(
+      'select key_digest from auth_throttle_buckets',
+    );
+    expect(await take(known.rows[0]?.key_digest ?? key(), 100)).toBe(true);
+    expect(await bucketRows()).toBe(1);
+    expect(await admissionCount()).toBe(1);
+  });
+
   evidenceTest('concurrent refusals from one source store one throttle event', async () => {
     const flooded = key();
     await Promise.all(Array.from({ length: 20 }, () => writeEvent('throttle', flooded)));
@@ -75,6 +181,20 @@ describe('throttle refusals cannot flood the event table (G11 M3)', () => {
     // Other classes are not capped by it.
     await writeEvent('sign_in', key());
     expect(await eventsOfClass('sign_in')).toBe(1);
+  });
+});
+
+describe('the overall limit on throttle events holds under concurrency', () => {
+  evidenceTest('distinct sources racing for the last place store exactly one more', async () => {
+    await fixtures.query(
+      `insert into auth_security_events (id, outcome, class, reason_class, source_digest, created_at)
+       select gen_random_uuid(), 'refused', 'throttle', 'rate_limited',
+              sha256(convert_to(i::text, 'UTF8')), clock_timestamp()
+         from generate_series(1, $1::int) i`,
+      [MAX_THROTTLE_EVENTS_PER_MINUTE - 1],
+    );
+    await Promise.all(Array.from({ length: 12 }, () => writeEvent('throttle', key())));
+    expect(await eventsOfClass('throttle')).toBe(MAX_THROTTLE_EVENTS_PER_MINUTE);
   });
 });
 
