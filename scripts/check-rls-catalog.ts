@@ -142,8 +142,8 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.set_user_status': '666d8a9919ca9c07b0f35f1b1bc1e3e6',
   'app.revoke_member_sessions': 'ce61b64e0d270b6fd178cbb55e0f1646',
   'app.accept_invitation': 'c57c2f52ee7af4a6a2ec7796fd93f938',
-  'app.take_signin_bucket': '01bb0ca81ec64a389e3261317b73356a',
-  'app.write_signin_event': '96d1fb3d6d2b56ac8aed1fcd4fc023e7',
+  'app.take_signin_bucket': 'c4f2a268dd9cfacb9b2d5936de8925c7',
+  'app.write_signin_event': '867d0b2192c0d0853cdd8ab535c794a9',
   'app.override_early_access_cap': '92738f2b262ca28f2cd55c7fdf4c7e7f',
   // The cap guards (P06.04.03): replaced by a no-op, any of them lets the cap change unaudited.
   'app.stamp_limit_override': '7a6e6b05a6bcc2bc837a9f2b256e2f20',

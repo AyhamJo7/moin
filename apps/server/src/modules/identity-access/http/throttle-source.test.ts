@@ -23,6 +23,12 @@ describe('the throttle bucket source (G11 M1)', () => {
     expect(throttleSource('::ffff:192.0.2.1')).toBe('192.0.2.1');
     expect(throttleSource('::FFFF:192.0.2.1')).toBe('192.0.2.1');
     expect(throttleSource('192.0.2.1')).toBe('192.0.2.1');
+    // The hexadecimal and the fully expanded spellings are the same address.
+    expect(throttleSource('::ffff:c000:201')).toBe('192.0.2.1');
+    expect(throttleSource('0:0:0:0:0:ffff:192.0.2.1')).toBe('192.0.2.1');
+    expect(throttleSource('0:0:0:0:0:FFFF:C000:0201')).toBe('192.0.2.1');
+    // Distinct mapped addresses stay distinct.
+    expect(throttleSource('::ffff:c000:202')).toBe('192.0.2.2');
   });
 
   evidenceTest('loopback and compressed forms expand', () => {

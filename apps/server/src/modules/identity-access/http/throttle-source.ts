@@ -3,7 +3,8 @@
  *
  * A bucket per full IPv6 address gives one host that owns a /64 about 2^64 fresh budgets, so the
  * source is reduced to the unit an attacker cannot cheaply multiply: an IPv6 address becomes its
- * /64 prefix, an IPv4-mapped IPv6 address (`::ffff:a.b.c.d`) becomes the IPv4 address, and the
+ * /64 prefix, an IPv4-mapped IPv6 address (`::ffff:a.b.c.d`, in any spelling) becomes the IPv4
+ * address, and the
  * text form is canonical (lower case, fully expanded), so `2001:DB8:1:2::1` and
  * `2001:db8:1:2:0:0:0:1` land in the same bucket. Anything that is not an address stays the single
  * `invalid` bucket, as before.
@@ -16,7 +17,10 @@ const IPV6_GROUPS = 8;
 const PREFIX_GROUPS = 4;
 const HEX_GROUP = 16;
 const GROUP_WIDTH = 4;
-const IPV4_MAPPED = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i;
+const MAPPED_MARKER = 0xffff;
+const MAPPED_MARKER_GROUP = 5;
+const BYTE = 0xff;
+const BYTE_BITS = 8;
 
 /** Expands an IPv6 address to eight 16-bit groups, or undefined when it is not one. */
 function expand(address: string): number[] | undefined {
@@ -44,12 +48,20 @@ function expand(address: string): number[] | undefined {
 
 /** The canonical bucket source of `address`, or `invalid`. */
 export function throttleSource(address: string): string {
-  const mapped = IPV4_MAPPED.exec(address);
-  if (mapped !== null && isIPv4(mapped[1] ?? '')) return mapped[1] ?? INVALID;
   if (isIPv4(address)) return address;
   if (!isIPv6(address)) return INVALID;
   const groups = expand(address);
   if (groups === undefined) return INVALID;
+  // Judged on the expanded groups, so `::ffff:192.0.2.1`, `::ffff:c000:201` and
+  // `0:0:0:0:0:ffff:192.0.2.1` are all the one IPv4 address.
+  const mapped =
+    groups.slice(0, MAPPED_MARKER_GROUP).every((group) => group === 0) &&
+    groups[MAPPED_MARKER_GROUP] === MAPPED_MARKER;
+  if (mapped) {
+    const high = groups[MAPPED_MARKER_GROUP + 1] ?? 0;
+    const low = groups[MAPPED_MARKER_GROUP + 2] ?? 0;
+    return [high >> BYTE_BITS, high & BYTE, low >> BYTE_BITS, low & BYTE].join('.');
+  }
   const prefix = groups
     .slice(0, PREFIX_GROUPS)
     .map((group) => group.toString(HEX_GROUP).padStart(GROUP_WIDTH, '0'));
