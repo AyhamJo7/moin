@@ -1,6 +1,6 @@
 /**
  * The authentication throttle and security event tables are bounded (P06.12.01, P06.12.02,
- * migration 0082, security acceptance G11 M3).
+ * migration 0083, security acceptance G11 M3).
  *
  * Before 0082 a rotating scanner grew `auth_throttle_buckets` for as long as it kept rotating,
  * `auth_security_events` was never swept, and every refused request could write an event row.
@@ -13,10 +13,12 @@ import { createTestDatabase, evidenceTest, type TestDatabase } from '@moin/testi
 import { afterAll, beforeAll, beforeEach, describe, expect } from 'vitest';
 import { createPool, type Pool } from './pool.ts';
 
-/** The ceiling in 0082. */
+/** The ceiling in 0083. */
 const MAX_BUCKETS = 50_000;
 const OVERFLOW_CAPACITY = 3;
 const EVENT_SWEEP_CAP = 100;
+/** The global ceiling on stored throttle refusals a minute in 0083. */
+const MAX_THROTTLE_EVENTS_PER_MINUTE = 60;
 const OLD_EVENTS = 150;
 
 let database: TestDatabase;
@@ -111,6 +113,41 @@ describe('the throttle table has a ceiling (G11 M3)', () => {
     },
     120_000,
   );
+});
+
+describe('the ceiling holds under concurrency', () => {
+  evidenceTest(
+    'concurrent new sources at the last free slot cannot exceed the ceiling',
+    async () => {
+      await fixtures.query(
+        `insert into auth_throttle_buckets (scope, key_digest, tokens, capacity, refill_per_second)
+         select 'ip', sha256(convert_to(i::text, 'UTF8')), 100, 100, 0
+           from generate_series(1, $1::int) i`,
+        [MAX_BUCKETS - 1],
+      );
+      await Promise.all(Array.from({ length: 12 }, () => take(key(), 100)));
+      // One newcomer took the last slot; the others share the one overflow row.
+      expect(await bucketRows()).toBe(MAX_BUCKETS + 1);
+    },
+    120_000,
+  );
+
+  evidenceTest('concurrent refusals from one source store one throttle event', async () => {
+    const flooded = key();
+    await Promise.all(Array.from({ length: 20 }, () => writeEvent('throttle', flooded)));
+    expect(await eventsOfClass('throttle')).toBe(1);
+  });
+
+  evidenceTest('rotating sources cannot turn refusals into unbounded event rows', async () => {
+    // Past the bucket ceiling every rotating source is refused under its own digest.
+    for (let i = 0; i < MAX_THROTTLE_EVENTS_PER_MINUTE + 40; i += 1) {
+      await writeEvent('throttle', key());
+    }
+    expect(await eventsOfClass('throttle')).toBe(MAX_THROTTLE_EVENTS_PER_MINUTE);
+    // Other classes are not capped by it.
+    await writeEvent('sign_in', key());
+    expect(await eventsOfClass('sign_in')).toBe(1);
+  });
 });
 
 describe('security events are retained for one year (G11 M3)', () => {

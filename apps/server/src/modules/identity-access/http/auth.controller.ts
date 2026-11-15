@@ -158,15 +158,15 @@ export class AuthController {
       // completion, same lifetime as the session cookie; cleared with the sign-in cookie it is not.
       // Accepted sign-in: new family (no superseded predecessor) is the new-device
       // heuristic — documented as such, not a fingerprint.
-      // A completed step-up is a step-up event; a sign-in is a new family only when the browser
-      // presented no session at all (no predecessor to supersede, G11 M4). The server holds no
-      // device identifier, so "no session cookie" is the signal for a client it has not seen.
+      // A completed step-up is a step-up event; a sign-in is a new family unless the browser
+      // presented a live session of this same account, as the store confirmed (G11 M4). The
+      // server holds no device identifier, and a cookie's presence alone proves nothing.
       await this.#event(
         request,
         completed.steppedUp === true ? 'step_up' : 'sign_in',
         'accepted',
         'ok',
-        completed.steppedUp !== true && readCookie(cookieHeader, SESSION_COOKIE) === undefined,
+        completed.steppedUp !== true && completed.knownPredecessor !== true,
       );
       // Bound to the session just issued: derived from its token, so the guard recomputes it
       // from the presented cookie (G07 M1).

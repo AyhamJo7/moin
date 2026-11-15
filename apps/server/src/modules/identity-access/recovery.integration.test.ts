@@ -734,24 +734,27 @@ describe('recovery actions record security events (P06.12.02, G11 M4)', () => {
       )
     ).rows[0]?.n ?? -1;
 
-  evidenceTest('an MFA reset disable records the revocation and the MFA change', async () => {
-    const { pair, org } = await ownerPair();
-    const staff = await person();
-    await member(staff.id, org, 'staff');
-    const revokes = await accepted('revoke');
-    const mfa = await accepted('mfa_change');
-    const password = await accepted('password_change');
-    const response = await postAs(pair, '/api/recovery/disable-user', {
-      userId: staff.id,
-      reason: 'mfa_reset',
-    });
-    expect(response.statusCode).toBe(200);
-    expect(await accepted('revoke')).toBe(revokes + 1);
-    expect(await accepted('mfa_change')).toBe(mfa + 1);
-    expect(await accepted('password_change')).toBe(password);
-  });
+  evidenceTest(
+    'an MFA reset disable records the revocation, not an unconfirmed MFA change',
+    async () => {
+      const { pair, org } = await ownerPair();
+      const staff = await person();
+      await member(staff.id, org, 'staff');
+      const revokes = await accepted('revoke');
+      const mfa = await accepted('mfa_change');
+      const password = await accepted('password_change');
+      const response = await postAs(pair, '/api/recovery/disable-user', {
+        userId: staff.id,
+        reason: 'mfa_reset',
+      });
+      expect(response.statusCode).toBe(200);
+      expect(await accepted('revoke')).toBe(revokes + 1);
+      expect(await accepted('mfa_change')).toBe(mfa);
+      expect(await accepted('password_change')).toBe(password);
+    },
+  );
 
-  evidenceTest('a password reset revocation records the password change', async () => {
+  evidenceTest('a password reset revocation records the revocation only', async () => {
     const { pair, org } = await ownerPair();
     const staff = await person();
     await member(staff.id, org, 'staff');
@@ -763,7 +766,7 @@ describe('recovery actions record security events (P06.12.02, G11 M4)', () => {
     });
     expect(response.statusCode).toBe(200);
     expect(await accepted('revoke')).toBe(revokes + 1);
-    expect(await accepted('password_change')).toBe(password + 1);
+    expect(await accepted('password_change')).toBe(password);
   });
 
   evidenceTest('a refused recovery action records nothing', async () => {

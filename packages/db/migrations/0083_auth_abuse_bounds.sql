@@ -1,6 +1,5 @@
--- 0082 — bound the authentication throttle and security event tables (P06.12.01, P06.12.02;
+-- 0083 — bound the authentication throttle and security event tables (P06.12.01, P06.12.02;
 -- security acceptance G11 M3).
--- migration-check: allow create-index-blocking because no deployed environment exists yet and auth_security_events holds only coarse authentication outcomes on a development database; the indexes are small and the table is not on any request path that waits for them.
 --
 -- ## What was wrong
 --
@@ -21,13 +20,11 @@
 -- `throttle` refusal is stored once per source per minute. A refused flood cannot become a write
 -- flood. The P16 retention engine takes over the sweep.
 --
--- Two indexes serve the sweep and the once-per-minute check. Signatures, owners, search paths and
--- EXECUTE grants are unchanged (CREATE OR REPLACE keeps them); 0023 and 0024 are not edited. The
--- catalog's reviewed body digests move to the new text.
-
-CREATE INDEX auth_security_events_created_idx ON auth_security_events (created_at);
-CREATE INDEX auth_security_events_throttle_idx ON auth_security_events (source_digest, created_at DESC)
-  WHERE class = 'throttle';
+-- No index is added: an index build would block writes on a table the sign-in path writes to.
+-- The sweep and the two throttle checks are scoped to one event class and use the existing
+-- (class, created_at) index. Signatures, owners, search paths and EXECUTE grants are unchanged
+-- (CREATE OR REPLACE keeps them); 0023 and 0024 are not edited. The catalog's reviewed body
+-- digests move to the new text.
 
 CREATE OR REPLACE FUNCTION app.take_signin_bucket(
   p_scope text,
@@ -69,6 +66,14 @@ BEGIN
   -- (the count stops at the ceiling), and a source that already has a row pays neither.
   SELECT true INTO v_known FROM public.auth_throttle_buckets b
     WHERE b.scope = p_scope AND b.key_digest = p_key_digest;
+  IF v_known IS NULL THEN
+    -- Admission of a new source is serialised and held to the end of the transaction, so the
+    -- count and the insert below are one step: concurrent newcomers at the ceiling cannot all
+    -- see room. A source that got its row while this one waited is no longer new.
+    PERFORM pg_advisory_xact_lock(hashtext('signin-bucket-admission'));
+    SELECT true INTO v_known FROM public.auth_throttle_buckets b
+      WHERE b.scope = p_scope AND b.key_digest = p_key_digest;
+  END IF;
   IF v_known IS NULL THEN
     SELECT count(*) INTO v_rows FROM (
       SELECT 1 FROM public.auth_throttle_buckets LIMIT c_max_buckets
@@ -126,6 +131,10 @@ CREATE OR REPLACE FUNCTION app.write_signin_event(
 AS $$
 DECLARE
   v_now timestamptz := clock_timestamp();
+  -- All sources together store at most this many throttle refusals a minute: past the bucket
+  -- ceiling every rotating source is refused under a digest of its own, and those rows are the
+  -- ones an attacker makes without limit. The count of refusals lives in the buckets.
+  c_max_throttle_events_per_minute CONSTANT integer := 60;
 BEGIN
   IF p_outcome IS NULL OR p_outcome NOT IN ('accepted', 'refused') THEN
     RAISE EXCEPTION 'outcome must be accepted or refused' USING ERRCODE = 'invalid_parameter_value';
@@ -140,22 +149,32 @@ BEGIN
     RAISE EXCEPTION 'source must be a 32-byte digest' USING ERRCODE = 'invalid_parameter_value';
   END IF;
   -- G11 M3: security events are kept for one year (PLAN: security logs, one year), and the
-  -- table sweeps itself: up to 100 rows older than that go on every write, so deletion keeps
-  -- pace with insertion without a scheduler (the retention engine of P16 takes this over).
+  -- table sweeps itself: up to 100 rows of the written class older than that go on every write,
+  -- so deletion keeps pace with insertion without a scheduler and without a new index (the
+  -- retention engine of P16 takes this over).
   DELETE FROM public.auth_security_events
     WHERE ctid IN (
       SELECT ctid FROM public.auth_security_events
-        WHERE created_at < v_now - INTERVAL '1 year'
+        WHERE class = p_class AND created_at < v_now - INTERVAL '1 year'
         LIMIT 100
     );
   -- A throttle refusal is recorded once per source per minute: refusals are exactly the rows an
   -- attacker can make without limit, and the count of refusals is in the buckets, not here.
-  IF p_class = 'throttle' AND EXISTS (
-    SELECT 1 FROM public.auth_security_events e
-      WHERE e.class = 'throttle' AND e.source_digest = p_source_digest
-        AND e.created_at > v_now - INTERVAL '1 minute'
-  ) THEN
-    RETURN;
+  IF p_class = 'throttle' THEN
+    -- One writer of throttle refusals at a time, to the end of the transaction, so the two
+    -- checks and the insert are one step and concurrent refusals cannot each see none.
+    PERFORM pg_advisory_xact_lock(hashtext('signin-throttle-events'));
+    v_now := clock_timestamp();
+    IF EXISTS (
+      SELECT 1 FROM public.auth_security_events e
+        WHERE e.class = 'throttle' AND e.source_digest = p_source_digest
+          AND e.created_at > v_now - INTERVAL '1 minute'
+    ) OR (
+      SELECT count(*) FROM public.auth_security_events e
+        WHERE e.class = 'throttle' AND e.created_at > v_now - INTERVAL '1 minute'
+    ) >= c_max_throttle_events_per_minute THEN
+      RETURN;
+    END IF;
   END IF;
   INSERT INTO public.auth_security_events
     (id, outcome, class, reason_class, source_digest, is_new_family, created_at)

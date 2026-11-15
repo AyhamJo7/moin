@@ -322,15 +322,53 @@ describe('the new-device flag (P06.12.02, G11 M4)', () => {
     ).rows.map((row) => row.is_new_family);
 
   evidenceTest(
-    'only a sign-in that presents no session is flagged new; a returning browser is not',
+    'a sign-in is flagged new unless it presents a live session of the same account',
     async () => {
       const who = await person();
       await member(who.id, ORG_A);
       const since = new Date();
+      // A returning browser presents the cookie its last sign-in gave it, as a browser does.
+      const first = await signInPresenting(who);
+      const second = await signInPresenting(who, first.header);
+      await signInPresenting(who, second.header);
+      expect(await flagsSince(since)).toStrictEqual([true, false, false]);
+    },
+  );
+
+  evidenceTest(
+    "a fabricated, a revoked and another account's session cookie do not hide a new device",
+    async () => {
+      const who = await person();
+      const other = await person();
+      await member(who.id, ORG_A);
+      await member(other.id, ORG_A);
+      const since = new Date();
+      // A well-formed cookie the server never issued.
+      await signInPresenting(who, `__Host-moin_sid=${'A'.repeat(43)}`);
+      // Another account's live session.
+      const theirs = await signInPresenting(other);
+      await signInPresenting(who, theirs.header);
+      // This account's own session after it was superseded (revoked) by a later sign-in.
       const first = await signInPresenting(who);
       await signInPresenting(who, first.header);
       await signInPresenting(who, first.header);
-      expect(await flagsSince(since)).toStrictEqual([true, false, false]);
+      const flags = await admin.query<{ is_new_family: boolean }>(
+        `select is_new_family from auth_security_events
+          where class = 'sign_in' and outcome = 'accepted' and created_at >= $1
+          order by created_at`,
+        [since],
+      );
+      // fabricated: new; other (their own first): new; who with other's cookie: new; who
+      // without a cookie: new; who with a live own session: known; who with that same, now
+      // revoked, session: new.
+      expect(flags.rows.map((row) => row.is_new_family)).toStrictEqual([
+        true,
+        true,
+        true,
+        true,
+        false,
+        true,
+      ]);
     },
   );
 });

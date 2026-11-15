@@ -95,17 +95,17 @@ export class RecoveryController {
   ) {}
 
   /**
-   * The security events of a recovery action (G11 M4): the sessions it ended (`revoke`) and, for a
-   * password or MFA reset, the change itself. Best effort: never fails the action it reports.
+   * The security event of a recovery action (G11 M4): the sessions it ended (`revoke`), which
+   * this server did and can vouch for. The password or MFA change that the caller names as the
+   * reason happens at the identity provider and is not confirmed here, so no credential-change
+   * event is written from it. Best effort: never fails the action it reports.
    */
-  async #recorded(request: FastifyRequest, reason: 'password_reset' | 'mfa_reset'): Promise<void> {
-    const key = this.config.AUTH_LOCAL_TOKEN_KEY;
-    await recordSecurityEvent(this.throttleStore, key, request, 'revoke', 'accepted', 'reset');
+  async #recorded(request: FastifyRequest): Promise<void> {
     await recordSecurityEvent(
       this.throttleStore,
-      key,
+      this.config.AUTH_LOCAL_TOKEN_KEY,
       request,
-      reason === 'mfa_reset' ? 'mfa_change' : 'password_change',
+      'revoke',
       'accepted',
       'reset',
     );
@@ -150,7 +150,7 @@ export class RecoveryController {
       reason: parsed.data.reason,
     });
     if (outcome === 'done') {
-      await this.#recorded(request, parsed.data.reason);
+      await this.#recorded(request);
       return { disabled: true, containment: 'partial' as const };
     }
     if (outcome === 'last-owner') {
@@ -273,7 +273,7 @@ export class RecoveryController {
       return settled?.outcome === 'denied' ? 'denied' : 'missing';
     });
     if (outcome === 'done') {
-      await this.#recorded(request, parsed.data.reason);
+      await this.#recorded(request);
       return { revoked: true, containment: 'partial' as const };
     }
     // Missing, denied on a non-owner, and owner-existence share one 404 (P06.07.03,
