@@ -23,8 +23,9 @@
  *
  * Client IP: `request.ip` (the socket peer — what Fastify reports without trustProxy, which is
  * unset deliberately: behind ingress, X-Forwarded-For is caller-controlled and must never feed
- * a security decision). Validated to a dotted-quad/colon-hex shape; anything else hashes as a
- * single `invalid` bucket rather than bypassing. Behind the ALB (P05) the WAF rules own
+ * a security decision). Reduced to its bucket unit by `throttleSource` (an IPv6 /64, an IPv4
+ * address); anything that is not an address hashes as a single `invalid` bucket rather than
+ * bypassing. Behind the ALB (P05) the WAF rules own
  * edge throttling (EXT-09); this guard is the application layer beneath it.
  *
  * HMAC key: the local token key (`AUTH_LOCAL_TOKEN_KEY`) — a 256-bit secret already in the
@@ -40,7 +41,9 @@ import { LOGGER } from '../../../observability/logger.module.ts';
 import { CONFIG } from '../../../config/config.module.ts';
 import type { Config } from '../../../config/env.ts';
 import { AuthThrottleStore } from '../../platform/auth-throttle-store.ts';
+import { securitySourceDigest } from '../application/security-events.ts';
 import { currentSessionContext } from './current-context.ts';
+import { throttleSource } from './throttle-source.ts';
 
 /** Per-source budget: sustained strangers + burst for legitimate NAT sharing. */
 const IP_CAPACITY = 200;
@@ -54,8 +57,6 @@ const ACCOUNT_COST = 1;
 
 const PROBLEM_TYPE = '/problems/too-many-requests';
 const PROBLEM_TITLE = 'Too many requests';
-
-const IP_SHAPE = /^[0-9a-fA-F.:]{3,45}$/;
 
 @Injectable()
 export class AuthThrottleGuard implements CanActivate {
@@ -78,9 +79,10 @@ export class AuthThrottleGuard implements CanActivate {
       );
       return false;
     }
-    const ip = request.ip;
-    const shaped = IP_SHAPE.test(ip) ? ip : 'invalid';
-    const ipDigest = createHmac('sha256', key).update(`ip:${shaped}`, 'utf8').digest();
+    // The bucket is the source's canonical unit (an IPv6 /64, an IPv4 address), not the raw
+    // address: a host that owns a /64 must not get a fresh budget per address (G11 M1).
+    const source = throttleSource(request.ip);
+    const ipDigest = createHmac('sha256', key).update(`ip:${source}`, 'utf8').digest();
     let ipTaken: { allowed: boolean; retryAfterMs: number };
     try {
       ipTaken = await this.store.take('ip', ipDigest, IP_CAPACITY, IP_REFILL_PER_SECOND, IP_COST);
@@ -89,6 +91,15 @@ export class AuthThrottleGuard implements CanActivate {
       return false;
     }
     if (!ipTaken.allowed) {
+      // A refusal is a security event (P06.12.02): one row per source per minute, deduplicated
+      // by the writer so a refused flood cannot become a write flood.
+      await this.store.recordEvent(
+        'refused',
+        'throttle',
+        'rate_limited',
+        securitySourceDigest(key, `ip:${source}`),
+        false,
+      );
       await this.refuse(request, reply, 'ip', ipTaken.retryAfterMs);
       return false;
     }
@@ -174,6 +185,13 @@ export class AccountThrottleGuard implements CanActivate {
       return false;
     }
     if (!taken.allowed) {
+      await this.store.recordEvent(
+        'refused',
+        'throttle',
+        'rate_limited',
+        securitySourceDigest(key, `account:${subject}`),
+        false,
+      );
       await this.refuse(request, reply, 'account', taken.retryAfterMs);
       return false;
     }

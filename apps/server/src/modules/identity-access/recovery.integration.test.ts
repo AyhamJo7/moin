@@ -725,6 +725,62 @@ describe('disabled-account callback and races (M2)', () => {
   });
 });
 
+describe('recovery actions record security events (P06.12.02, G11 M4)', () => {
+  const accepted = async (cls: string): Promise<number> =>
+    (
+      await admin.query<{ n: number }>(
+        "select count(*)::int as n from auth_security_events where class = $1 and outcome = 'accepted' and reason_class = 'reset'",
+        [cls],
+      )
+    ).rows[0]?.n ?? -1;
+
+  evidenceTest(
+    'an MFA reset disable records the revocation, not an unconfirmed MFA change',
+    async () => {
+      const { pair, org } = await ownerPair();
+      const staff = await person();
+      await member(staff.id, org, 'staff');
+      const revokes = await accepted('revoke');
+      const mfa = await accepted('mfa_change');
+      const password = await accepted('password_change');
+      const response = await postAs(pair, '/api/recovery/disable-user', {
+        userId: staff.id,
+        reason: 'mfa_reset',
+      });
+      expect(response.statusCode).toBe(200);
+      expect(await accepted('revoke')).toBe(revokes + 1);
+      expect(await accepted('mfa_change')).toBe(mfa);
+      expect(await accepted('password_change')).toBe(password);
+    },
+  );
+
+  evidenceTest('a password reset revocation records the revocation only', async () => {
+    const { pair, org } = await ownerPair();
+    const staff = await person();
+    await member(staff.id, org, 'staff');
+    const revokes = await accepted('revoke');
+    const password = await accepted('password_change');
+    const response = await postAs(pair, '/api/recovery/revoke-sessions', {
+      userId: staff.id,
+      reason: 'password_reset',
+    });
+    expect(response.statusCode).toBe(200);
+    expect(await accepted('revoke')).toBe(revokes + 1);
+    expect(await accepted('password_change')).toBe(password);
+  });
+
+  evidenceTest('a refused recovery action records nothing', async () => {
+    const { pair } = await ownerPair();
+    const before = await accepted('revoke');
+    const response = await postAs(pair, '/api/recovery/revoke-sessions', {
+      userId: randomUUID(),
+      reason: 'password_reset',
+    });
+    expect(response.statusCode).toBe(404);
+    expect(await accepted('revoke')).toBe(before);
+  });
+});
+
 describe('account disable under an ownership race (G09 L1)', () => {
   evidenceTest(
     'disable-user that would strand the organisation answers 409, never 500',

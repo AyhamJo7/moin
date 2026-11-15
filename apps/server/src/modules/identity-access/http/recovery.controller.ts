@@ -37,15 +37,19 @@ import {
   HttpCode,
   Inject,
   Post,
+  Req,
   Res,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import type { FastifyReply } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { Logger } from '@moin/observability';
 import { LOGGER } from '../../../observability/logger.module.ts';
+import { CONFIG } from '../../../config/config.module.ts';
+import type { Config } from '../../../config/env.ts';
+import { AuthThrottleStore } from '../../platform/auth-throttle-store.ts';
 import { currentTenantScope } from '../../platform/tenant-scope.ts';
 import { MemberQueries, isRetryableConflict } from '../../platform/member-queries.ts';
 import { requireCapability } from '../application/authorization.ts';
@@ -55,6 +59,7 @@ import { RequireStepUpGuard } from './require-step-up.guard.ts';
 import { RequireRoleGuard } from './require-role.guard.ts';
 import { Require } from './role.ts';
 import { AccountThrottleGuard, AuthThrottleGuard } from './auth-throttle.guard.ts';
+import { recordSecurityEvent } from './record-security-event.ts';
 import { SessionMembershipGuard } from './session-membership.guard.ts';
 import { TenantContextInterceptor } from './tenant-context.interceptor.ts';
 
@@ -85,7 +90,26 @@ export class RecoveryController {
     private readonly members: MemberQueries,
     @Inject(SESSIONS) private readonly sessions: SessionService | null,
     @Inject(LOGGER) private readonly logger: Logger,
+    private readonly throttleStore: AuthThrottleStore,
+    @Inject(CONFIG) private readonly config: Config,
   ) {}
+
+  /**
+   * The security event of a recovery action (G11 M4): the sessions it ended (`revoke`), which
+   * this server did and can vouch for. The password or MFA change that the caller names as the
+   * reason happens at the identity provider and is not confirmed here, so no credential-change
+   * event is written from it. Best effort: never fails the action it reports.
+   */
+  async #recorded(request: FastifyRequest): Promise<void> {
+    await recordSecurityEvent(
+      this.throttleStore,
+      this.config.AUTH_LOCAL_TOKEN_KEY,
+      request,
+      'revoke',
+      'accepted',
+      'reset',
+    );
+  }
 
   /**
    * Disable the account and end every session at once (P06.09.02). Caller-tenant membership
@@ -98,7 +122,11 @@ export class RecoveryController {
   @Require('users:manage')
   @UseGuards(RequireStepUpGuard)
   @HttpCode(200)
-  async disableUser(@Body() raw: unknown, @Res({ passthrough: true }) reply: FastifyReply) {
+  async disableUser(
+    @Body() raw: unknown,
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
     const parsed = accountBody.safeParse(raw);
     if (!parsed.success) {
       return fail(reply, 400, '/problems/recovery-rejected', 'Recovery action rejected');
@@ -121,7 +149,10 @@ export class RecoveryController {
       permissions: scope.permissions,
       reason: parsed.data.reason,
     });
-    if (outcome === 'done') return { disabled: true, containment: 'partial' as const };
+    if (outcome === 'done') {
+      await this.#recorded(request);
+      return { disabled: true, containment: 'partial' as const };
+    }
     if (outcome === 'last-owner') {
       return fail(reply, 409, '/problems/recovery-rejected', 'Recovery action rejected');
     }
@@ -201,7 +232,11 @@ export class RecoveryController {
   @Require('users:manage')
   @UseGuards(RequireStepUpGuard)
   @HttpCode(200)
-  async revokeSessions(@Body() raw: unknown, @Res({ passthrough: true }) reply: FastifyReply) {
+  async revokeSessions(
+    @Body() raw: unknown,
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
     const parsed = accountBody.safeParse(raw);
     if (!parsed.success) {
       return fail(reply, 400, '/problems/recovery-rejected', 'Recovery action rejected');
@@ -237,7 +272,10 @@ export class RecoveryController {
       }
       return settled?.outcome === 'denied' ? 'denied' : 'missing';
     });
-    if (outcome === 'done') return { revoked: true, containment: 'partial' as const };
+    if (outcome === 'done') {
+      await this.#recorded(request);
+      return { revoked: true, containment: 'partial' as const };
+    }
     // Missing, denied on a non-owner, and owner-existence share one 404 (P06.07.03,
     // intentional-indistinguishability: the shape reveals nothing about which case hit).
     return fail(reply, 404, '/problems/not-found', 'Not found');

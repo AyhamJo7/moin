@@ -100,6 +100,12 @@ export interface CompletedSignIn {
   readonly cookieMaxAgeSeconds: number;
   /** True when this completion rotated a session for step-up rather than signing in. */
   readonly steppedUp?: boolean | undefined;
+  /**
+   * True when the browser presented a session the store confirmed as live and belonging to
+   * this same account. A cookie's presence proves nothing, so the new-device signal rests on
+   * this (G11 M4).
+   */
+  readonly knownPredecessor?: boolean | undefined;
 }
 
 export interface SignInDependencies {
@@ -339,6 +345,11 @@ export class SignInService {
       providerTokensContext(sessionId),
     );
 
+    // Resolved before it is superseded: an unknown, expired or fabricated cookie resolves to
+    // nothing, and another account's session is not this account's predecessor.
+    const predecessor = isSecretValue(presentedSession)
+      ? await store.resolveSession(digestOf(presentedSession))
+      : undefined;
     const granted = await store.beginSession({
       subject: identity.subject,
       tokenHash: digestOf(sessionToken),
@@ -381,6 +392,7 @@ export class SignInService {
         1,
         Math.floor((granted.absoluteExpiresAt.getTime() - now.getTime()) / MS_PER_SECOND),
       ),
+      knownPredecessor: predecessor?.userId === granted.userId,
     };
   }
 

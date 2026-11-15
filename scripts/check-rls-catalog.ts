@@ -142,8 +142,11 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.set_user_status': '666d8a9919ca9c07b0f35f1b1bc1e3e6',
   'app.revoke_member_sessions': 'ce61b64e0d270b6fd178cbb55e0f1646',
   'app.accept_invitation': 'c57c2f52ee7af4a6a2ec7796fd93f938',
-  'app.take_signin_bucket': 'c4f2a268dd9cfacb9b2d5936de8925c7',
-  'app.write_signin_event': 'bc65e2433de7603be03149ed8a755e69',
+  'app.take_signin_bucket': '94551620d539c8b12f87467b74ceee6c',
+  'app.write_signin_event': '867d0b2192c0d0853cdd8ab535c794a9',
+  // The bucket count (P06.12.01): a no-op here lets the throttle table grow past its ceiling.
+  'app.count_throttle_bucket_inserts': '10686549949a7afe00d6d88db59b4472',
+  'app.count_throttle_bucket_deletes': '7ff77aeb29ddd9baaedaec5906212265',
   'app.override_early_access_cap': '92738f2b262ca28f2cd55c7fdf4c7e7f',
   // The cap guards (P06.04.03): replaced by a no-op, any of them lets the cap change unaudited.
   'app.stamp_limit_override': '7a6e6b05a6bcc2bc837a9f2b256e2f20',

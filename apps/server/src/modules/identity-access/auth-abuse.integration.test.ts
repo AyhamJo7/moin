@@ -116,6 +116,51 @@ beforeEach(async () => {
   await admin.query('delete from auth_throttle_buckets');
 });
 
+describe('a full bucket table cannot be grown by rotating sources (G11 M3)', () => {
+  evidenceTest(
+    'malformed callbacks from rotating addresses share one budget and write bounded events',
+    async () => {
+      const ceiling = 50_000;
+      await admin.query(
+        `insert into auth_throttle_buckets (scope, key_digest, tokens, capacity, refill_per_second)
+         select 'ip', sha256(convert_to(i::text, 'UTF8')), 100, 100, 0
+           from generate_series(1, $1::int) i`,
+        [ceiling],
+      );
+      await admin.query('delete from auth_security_events');
+      const statuses = new Map<number, number>();
+      const attempts = 320;
+      for (let i = 0; i < attempts; i += 1) {
+        const response = await app.inject({
+          method: 'GET',
+          url: '/api/auth/callback?code=x',
+          remoteAddress: `198.51.${String(100 + (i >> 8))}.${String(i & 255)}`,
+        });
+        statuses.set(response.statusCode, (statuses.get(response.statusCode) ?? 0) + 1);
+      }
+      // Every address is new, so none gets a bucket: they drain the one shared budget and
+      // are then refused, however many addresses the scanner has.
+      expect(statuses.get(429) ?? 0).toBeGreaterThan(0);
+      const buckets = await admin.query<{ n: string }>(
+        'select count(*)::text as n from auth_throttle_buckets',
+      );
+      expect(Number(buckets.rows[0]?.n)).toBe(ceiling + 1);
+      const events = await admin.query<{ class: string; n: string }>(
+        'select class, count(*)::text as n from auth_security_events group by class',
+      );
+      const count = (cls: string): number =>
+        Number(events.rows.find((row) => row.class === cls)?.n ?? 0);
+      // Refused sign-ins are limited by the shared budget, not by the number of addresses;
+      // refusals by the per-minute limit on throttle events.
+      expect(count('sign_in')).toBe(statuses.get(400) ?? 0);
+      expect(count('sign_in')).toBeLessThan(attempts - 40);
+      expect(count('throttle')).toBeGreaterThan(0);
+      expect(count('throttle')).toBeLessThanOrEqual(60);
+    },
+    180_000,
+  );
+});
+
 describe('throttling engages (P06.12.01, P06.12.03)', () => {
   evidenceTest('hammering login past the IP budget answers 429 with Retry-After', async () => {
     // 200-token bucket at 1/s: sustained hammering exhausts it (each loop costs 1, refills
@@ -170,18 +215,50 @@ describe('throttling engages (P06.12.01, P06.12.03)', () => {
     },
   );
 
-  evidenceTest('throttle refusals are counted as security events (rate_limited)', async () => {
-    // Exhaust the bucket, then confirm a rate_limited row exists for the throttle class.
-    for (let i = 0; i < 400; i++) {
+  evidenceTest('a throttle refusal is recorded once as a rate_limited security event', async () => {
+    // Exhaust the bucket, keep hammering, then read the table: the refusals are one row for the
+    // source (deduplicated per minute so a refused flood cannot become a write flood), coarse,
+    // and not claimed as notified.
+    await admin.query('delete from auth_security_events');
+    let refused = 0;
+    for (let i = 0; i < 600 && refused < 5; i++) {
       const response = await app.inject({ method: 'GET', url: '/api/auth/login' });
-      if (response.statusCode === 429) break;
+      if (response.statusCode === 429) refused += 1;
     }
-    // The guard's own warn log is the throttle signal; the callback-event path above proves
-    // the writer. Here assert the bucket state instead: a further login stays refused.
-    const again = await app.inject({ method: 'GET', url: '/api/auth/login' });
-    expect(again.statusCode).toBe(429);
-    expect(again.headers['retry-after']).toBeDefined();
+    expect(refused).toBe(5);
+    const rows = await admin.query<{
+      outcome: string;
+      reason_class: string;
+      owner_notified: boolean;
+    }>(
+      "select outcome, reason_class, owner_notified from auth_security_events where class = 'throttle'",
+    );
+    expect(rows.rows).toStrictEqual([
+      { outcome: 'refused', reason_class: 'rate_limited', owner_notified: false },
+    ]);
   });
+
+  evidenceTest(
+    'addresses of one IPv6 /64 share a bucket; a neighbouring /64 does not',
+    async () => {
+      // G11 M1: a host that owns a /64 must not get a fresh budget per address.
+      const login = (remoteAddress: string) =>
+        app.inject({ method: 'GET', url: '/api/auth/login', remoteAddress });
+      let exhausted = false;
+      for (let i = 0; i < 400 && !exhausted; i++) {
+        exhausted = (await login('2001:db8:1:2::1')).statusCode === 429;
+      }
+      expect(exhausted).toBe(true);
+      // Another address of the same /64, in other spellings, is refused at once.
+      for (const neighbour of ['2001:db8:1:2::2', '2001:DB8:1:2::99', '2001:db8:1:2:ffff::1']) {
+        expect((await login(neighbour)).statusCode, neighbour).toBe(429);
+      }
+      // The next /64 has its own budget.
+      expect((await login('2001:db8:1:3::1')).statusCode).toBe(302);
+      // An IPv4-mapped address is the IPv4 address: it shares nothing with the exhausted /64.
+      expect((await login('::ffff:192.0.2.7')).statusCode).toBe(302);
+    },
+  );
 
   evidenceTest('moin_app holds no direct table grant on the bucket table', async () => {
     // MEDIUM fix: buckets advance only through the DEFINER. The app pool (moin_app role)
