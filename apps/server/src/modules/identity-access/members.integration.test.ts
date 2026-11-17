@@ -1398,3 +1398,90 @@ describe('ownership changes take the organisation lock before any row lock (G09 
     120_000,
   );
 });
+
+describe('a deadlock or serialisation failure on an ownership path is a 409 that changes nothing (X2)', () => {
+  /**
+   * Deterministic: while installed, a trigger raises the given SQLSTATE on any write to
+   * memberships or users, which every ownership path makes inside its transaction. The real
+   * conditions (two transactions locking in opposite orders, a serialisation conflict) are not
+   * needed to prove the mapping: the route must answer 409 with Retry-After, and the rollback
+   * must leave rows and audit as they were.
+   */
+  async function forcing<T>(sqlstate: '40P01' | '40001', body: () => Promise<T>): Promise<T> {
+    await admin.query(
+      `create function public.x2_force_conflict() returns trigger language plpgsql as $$
+       begin raise exception 'forced conflict' using errcode = tg_argv[0]; end $$`,
+    );
+    try {
+      // Two literal statements per code: the lint bans building SQL from values.
+      if (sqlstate === '40P01') {
+        await admin.query(
+          "create trigger x2_force before update or delete on memberships for each row execute function public.x2_force_conflict('40P01')",
+        );
+        await admin.query(
+          "create trigger x2_force before update on users for each row execute function public.x2_force_conflict('40P01')",
+        );
+      } else {
+        await admin.query(
+          "create trigger x2_force before update or delete on memberships for each row execute function public.x2_force_conflict('40001')",
+        );
+        await admin.query(
+          "create trigger x2_force before update on users for each row execute function public.x2_force_conflict('40001')",
+        );
+      }
+      return await body();
+    } finally {
+      await admin.query('drop trigger if exists x2_force on memberships');
+      await admin.query('drop trigger if exists x2_force on users');
+      await admin.query('drop function if exists public.x2_force_conflict()');
+    }
+  }
+
+  async function snapshot(org: string): Promise<unknown> {
+    const members = await admin.query(
+      `select m.user_id::text, m.role::text, m.status::text, u.status::text as user_status
+         from memberships m join users u on u.id = m.user_id
+        where m.organisation_id = $1 order by m.user_id`,
+      [org],
+    );
+    const audited = await admin.query(
+      'select count(*)::int as n from audit_events where organisation_id = $1',
+      [org],
+    );
+    return { members: members.rows, audited: audited.rows[0] };
+  }
+
+  const ROUTES = [
+    ['remove', '/api/members/remove', {}],
+    ['disable', '/api/members/disable', {}],
+    ['transfer', '/api/members/transfer-ownership', {}],
+    ['account disable', '/api/recovery/disable-user', { reason: 'password_reset' }],
+    ['account enable', '/api/recovery/enable-user', { reason: 'password_reset' }],
+  ] as const;
+
+  for (const sqlstate of ['40P01', '40001'] as const) {
+    for (const [name, url, extra] of ROUTES) {
+      evidenceTest(`${name} under ${sqlstate}: 409, Retry-After, nothing changed`, async () => {
+        const { pair, org } = await ownerPair();
+        const target = await person();
+        await member(target.id, 'admin', 'active', org);
+        if (name === 'account enable') {
+          // eslint-disable-next-line no-restricted-syntax -- fixture write; the SET-session rule matches UPDATE ... SET verb text.
+          await admin.query("update users set status = 'disabled' where id = $1", [target.id]);
+        }
+        const before = await snapshot(org);
+        const response = await forcing(sqlstate, () =>
+          postAs(pair, url, { userId: target.id, ...extra }),
+        );
+        expect(response.statusCode, response.body).toBe(409);
+        expect(response.headers['retry-after']).toBe('1');
+        expect(response.json()).toStrictEqual({
+          type: '/problems/concurrent-change',
+          title: 'Concurrent change, retry',
+          status: 409,
+        });
+        expect(await snapshot(org)).toStrictEqual(before);
+      });
+    }
+  }
+});
