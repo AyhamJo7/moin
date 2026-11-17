@@ -1,6 +1,7 @@
 # ruff: noqa: E402
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -50,7 +51,7 @@ class LinkedWorktreeContext(unittest.TestCase):
                 }
                 self.assertEqual(worktree_context.capture(payload, root), branch)
                 self.assertEqual(_kit.repo_root(str(root), "linked-session"), branch)
-                self.assertEqual(claim_check.active_root(payload), branch)
+                self.assertEqual(claim_check.active_root(payload), (branch, None))
                 self.assertNotEqual(_kit.evidence_dir(root), _kit.evidence_dir(branch))
                 root_evidence = {
                     "head": git(root, "rev-parse", "HEAD"),
@@ -84,16 +85,50 @@ class LinkedWorktreeContext(unittest.TestCase):
                 )
                 self.assertIn("different tree", claim_check.completion_problem(branch) or "")
                 git(root, "worktree", "remove", "--force", str(branch))
-                with self.assertRaisesRegex(RuntimeError, "no longer valid"):
-                    _kit.repo_root(str(root), "linked-session")
-                with self.assertRaisesRegex(RuntimeError, "no longer valid"):
-                    claim_check.active_root(payload)
+                # Stall and type checks fall back to the cwd root instead of raising.
+                self.assertEqual(_kit.repo_root(str(root), "linked-session"), root)
+                # A claim does not: no checkout's evidence covers the work of a removed worktree,
+                # not even once the work is on root, and not in a repository without gates.
+                fallback, removed = claim_check.active_root(payload)
+                self.assertEqual(fallback, root)
+                self.assertIn("was removed", removed or "")
+                claim = {**payload, "last_assistant_message": "All gates are green."}
+                with patch.dict(os.environ, {"GATES_CONFIG": "gates.json"}):
+                    _, problem = claim_check.evaluate(claim, 900)
+                self.assertIn("was removed", problem or "")
+                git(root, "merge", "--squash", "feature")
+                git(root, "commit", "-m", "squash feature")
+                self.assertIn("was removed", claim_check.active_root(payload)[1] or "")
+                other = Path(temp) / "other"
+                git(Path(temp), "clone", "-q", str(root), str(other))
+                _, problem = claim_check.evaluate({**claim, "cwd": str(other)}, 900)
+                self.assertIn("was removed", problem or "")
+                # With no checkout to fall back to at all, the claim check fails closed.
+                with patch.object(claim_check, "toplevel", return_value=None):
+                    with self.assertRaisesRegex(RuntimeError, "no checkout remains"):
+                        claim_check.active_root(payload)
                 branch.mkdir()
                 git(branch, "init", "-b", "main")
                 with self.assertRaisesRegex(RuntimeError, "no longer valid"):
                     _kit.repo_root(str(root), "linked-session")
                 with self.assertRaisesRegex(RuntimeError, "no longer valid"):
                     claim_check.active_root(payload)
+
+    def test_a_malformed_record_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            git(root, "init", "-b", "main")
+            record = root / ".claude" / "state" / "worktrees"
+            record.mkdir(parents=True)
+            key = hashlib.sha256(b"broken").hexdigest()[:24]
+            payload = {"session_id": "broken", "cwd": str(root)}
+            with patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(root)}):
+                for body in ("{}", "null"):
+                    (record / f"{key}.json").write_text(body)
+                    with self.assertRaises((KeyError, TypeError)):
+                        _kit.repo_root(str(root), "broken")
+                    with self.assertRaises((KeyError, TypeError)):
+                        claim_check.active_root(payload)
 
 
 if __name__ == "__main__":

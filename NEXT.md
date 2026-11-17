@@ -8,6 +8,6 @@
 
 **Needed from you (one list), optional:** the git guard refuses these to a session; both are archived in `~/backups/moin-pre-prune-20261117.bundle` (`refs/archive/dirty/*`, `refs/archive/stash/*`). (1) `git worktree remove --force ~/worktrees/moin/docs-ledger-status-correction` (one uncommitted edit to the frozen `PROGRESS.md`). (2) `git stash clear` (26 stashes). (3) Copy the 14 keys `pnpm preflight` reports missing from `.env.example` into `.env`.
 
-**Rollback tested before merge:** #266 (session-bound CSRF): 4 of 4. #267 (0083) and #278 (0084, sign-in throttle): previous bodies restored on a migrated database, sign-in admits, no row lost, bucket count right; 1 of 1 each. Not in the class: #262, #263, #265, #269, X4, X1, X2 (no migration; the identity change only adds a cookie on reads).
+**Rollback tested before merge:** #266 (session-bound CSRF): 4 of 4. #267 (0083) and #278 (0084, sign-in throttle): previous bodies restored on a migrated database, sign-in admits, no row lost, bucket count right; 1 of 1 each. Not in the class: #262, #263, #265, #269, X4, X1, X2 (no migration; the identity change only adds a cookie on reads), K1.
 
-**Last verified main SHA:** `1260917` (#282, X1; all PR checks passed on its head, independent review APPROVE, 2026-11-17). Done: C1 to C6, X3, X4, X1, X2 (pending merge).
+**Last verified main SHA:** `cb47910` (#283, X2; all PR checks passed on its head, independent review APPROVE, 2026-11-17). Done: C1 to C6, X1 to X4, K1 (pending merge).

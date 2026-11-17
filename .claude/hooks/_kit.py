@@ -86,8 +86,10 @@ def repo_root(cwd: str | None, session: str | None = None) -> Path | None:
     if session and project:
         key = hashlib.sha256(session.encode()).hexdigest()[:24]
         record = Path(project) / ".claude" / "state" / "worktrees" / f"{key}.json"
-        if record.exists():
-            data = json.loads(record.read_text())
+        present = record.exists()
+        data = json.loads(record.read_text()) if present else None
+        # A removed worktree falls back to the cwd root; one that exists but changed still raises.
+        if present and Path(data["worktree"]).exists():
             active = Path(data["worktree"])
             expected = Path(data["common_dir"])
             project_common = git_lines(

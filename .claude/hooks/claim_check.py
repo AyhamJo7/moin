@@ -99,38 +99,51 @@ def toplevel(start: str | None) -> Path | None:
     return Path(proc.stdout.strip()) if proc.returncode == 0 else None
 
 
-def active_root(payload: dict[str, Any]) -> Path | None:
-    """Use the worktree observed for this session, not the checkout housing this hook."""
+def git_run(path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(path), *args], capture_output=True, text=True, check=False
+    )
+
+
+def common_dir(path: Path) -> Path | None:
+    proc = git_run(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    return Path(proc.stdout.strip()).resolve() if proc.returncode == 0 else None
+
+
+def active_root(payload: dict[str, Any]) -> tuple[Path | None, str | None]:
+    """Use the worktree observed for this session, not the checkout housing this hook.
+
+    Returns the root and, when the session's worktree was removed, why no claim can be judged."""
     project = os.environ.get("CLAUDE_PROJECT_DIR")
     session = payload.get("session_id")
+    fallback = toplevel(str(payload.get("cwd") or "")) or toplevel(project)
     if project and isinstance(session, str) and session:
         key = hashlib.sha256(session.encode()).hexdigest()[:24]
         path = Path(project) / ".claude" / "state" / "worktrees" / f"{key}.json"
-        if path.exists():
-            data = json.loads(path.read_text())
+        present = path.exists()
+        data = json.loads(path.read_text()) if present else None
+        if present and not Path(data["worktree"]).exists() and fallback is None:
+            # Nothing to fall back to: fail closed, as before the fallback existed.
+            raise RuntimeError("active session worktree was removed and no checkout remains")
+        if present and not Path(data["worktree"]).exists():
+            # Removed: no other checkout's evidence stands for the work that lived there. Whether
+            # that work landed elsewhere is not judged here (a stale record, renames and pathspec
+            # tricks all defeat such a comparison), so every claim is refused, not raised.
+            return fallback, (
+                f"the session's worktree {data['worktree']} was removed, so no checkout's evidence "
+                "covers the work done there"
+            )
+        if present:
             candidate = Path(data["worktree"])
             expected = Path(data["common_dir"]).resolve()
             for checkout in (Path(project), candidate):
-                proc = subprocess.run(
-                    [
-                        "git",
-                        "-C",
-                        str(checkout),
-                        "rev-parse",
-                        "--path-format=absolute",
-                        "--git-common-dir",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
-                if proc.returncode != 0 or Path(proc.stdout.strip()).resolve() != expected:
+                if common_dir(checkout) != expected:
                     raise RuntimeError("active session worktree is no longer valid")
             root = toplevel(str(candidate))
             if root is None or root.resolve() != candidate.resolve():
                 raise RuntimeError("active session worktree was replaced")
-            return root
-    return toplevel(str(payload.get("cwd") or "")) or toplevel(project)
+            return root, None
+    return fallback, None
 
 
 def evidence_dir(root: Path) -> Path:
@@ -317,12 +330,19 @@ def evaluate(payload: dict[str, Any], max_age_s: float) -> tuple[Path | None, st
     progress = first_match(PROGRESS_PATTERNS, text)
     if not completion and not progress:
         return None, None
-    root = active_root(payload)
+    root, removed = active_root(payload)
     if root is None:
         return None, None
     configured = (root / ".claude" / "gates.json").is_file() or bool(os.environ.get("GATES_CONFIG"))
     background = bool(payload.get("background_tasks")) or bool(payload.get("session_crons"))
     problems: list[str] = []
+    if removed:
+        # Before the configuration check: a fallback without gates must not wave the claim through.
+        claim = completion or progress
+        return root, (
+            f'the final message claims "{claim}", but {removed}. Report the work as '
+            "UNVERIFIED, or verify it in a checkout that holds it."
+        )
     if completion and configured:
         problem = completion_problem(root)
         if problem:

@@ -75,6 +75,12 @@ X2: the task GET policy row states its real check (tenant only; staff read a col
 nothing; a disabled issuer and an account disable racing the acceptance are refused, each
 mutation-killed on its own; a pre-change CSRF cookie is re-issued on the next read; the
 closure test pins transitive-only and optional workspace dependencies.
+K1 (2026-11-17, added and finished the same day): when the worktree recorded for a session has
+been removed, `stop_guard` and `claim_check` fall back to the repo root of the current directory
+instead of raising; `claim_check` then refuses every completion or progress claim with the reason
+(no checkout's evidence covers work done in a removed worktree; four review rounds showed that
+judging whether the work landed elsewhere can be defeated). A worktree that exists but belongs to
+another repository, a malformed record, or no checkout to fall back to still raises.
 
 | Area                                                              | Truth                                                                                                                                                                                                                                                                                 |
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
