@@ -120,11 +120,12 @@ def active_root(payload: dict[str, Any]) -> tuple[Path | None, str | None]:
     if project and isinstance(session, str) and session:
         key = hashlib.sha256(session.encode()).hexdigest()[:24]
         path = Path(project) / ".claude" / "state" / "worktrees" / f"{key}.json"
-        data = json.loads(path.read_text()) if path.exists() else None
-        if data and not Path(data["worktree"]).exists() and fallback is None:
+        present = path.exists()
+        data = json.loads(path.read_text()) if present else None
+        if present and not Path(data["worktree"]).exists() and fallback is None:
             # Nothing to fall back to: fail closed, as before the fallback existed.
             raise RuntimeError("active session worktree was removed and no checkout remains")
-        if data and not Path(data["worktree"]).exists():
+        if present and not Path(data["worktree"]).exists():
             # Removed: no other checkout's evidence stands for the work that lived there. Whether
             # that work landed elsewhere is not judged here (a stale record, renames and pathspec
             # tricks all defeat such a comparison), so every claim is refused, not raised.
@@ -132,7 +133,7 @@ def active_root(payload: dict[str, Any]) -> tuple[Path | None, str | None]:
                 f"the session's worktree {data['worktree']} was removed, so no checkout's evidence "
                 "covers the work done there"
             )
-        if data:
+        if present:
             candidate = Path(data["worktree"])
             expected = Path(data["common_dir"]).resolve()
             for checkout in (Path(project), candidate):

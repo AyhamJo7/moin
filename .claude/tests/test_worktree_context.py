@@ -1,6 +1,7 @@
 # ruff: noqa: E402
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -112,6 +113,22 @@ class LinkedWorktreeContext(unittest.TestCase):
                     _kit.repo_root(str(root), "linked-session")
                 with self.assertRaisesRegex(RuntimeError, "no longer valid"):
                     claim_check.active_root(payload)
+
+    def test_a_malformed_record_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            git(root, "init", "-b", "main")
+            record = root / ".claude" / "state" / "worktrees"
+            record.mkdir(parents=True)
+            key = hashlib.sha256(b"broken").hexdigest()[:24]
+            payload = {"session_id": "broken", "cwd": str(root)}
+            with patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(root)}):
+                for body in ("{}", "null"):
+                    (record / f"{key}.json").write_text(body)
+                    with self.assertRaises((KeyError, TypeError)):
+                        _kit.repo_root(str(root), "broken")
+                    with self.assertRaises((KeyError, TypeError)):
+                        claim_check.active_root(payload)
 
 
 if __name__ == "__main__":
