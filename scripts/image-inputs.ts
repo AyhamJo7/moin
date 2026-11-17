@@ -16,15 +16,27 @@
 
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';
-import { dirname, matchesGlob, resolve } from 'node:path';
+import { dirname, matchesGlob, posix, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SCAN_WORKFLOW = '.github/workflows/container-scan.yml';
+/**
+ * Pattern syntax that Docker and `matchesGlob` read the same way. Anything else (character classes,
+ * `?`, braces, escapes) makes every change count as an input, so a rule this script cannot read
+ * faithfully can only cause an extra scan, never a skipped one.
+ */
+const SUPPORTED_PATTERN = /^[A-Za-z0-9._\-/*]+$/;
 
 export interface IgnoreRule {
   readonly pattern: string;
   readonly negated: boolean;
+}
+
+/** Docker cleans a pattern before matching: no leading `/` or `./`, no trailing `/`. */
+function normalise(pattern: string): string {
+  const cleaned = posix.normalize(pattern).replace(/^\/+/, '').replace(/\/+$/, '');
+  return cleaned === '.' ? '' : cleaned;
 }
 
 /** The rules of a `.dockerignore`, in order; blank lines and comments dropped. */
@@ -35,8 +47,8 @@ export function parseDockerignore(text: string): IgnoreRule[] {
     .filter((line) => line !== '' && !line.startsWith('#'))
     .map((line) =>
       line.startsWith('!')
-        ? { pattern: line.slice(1).replace(/^\/+/, ''), negated: true }
-        : { pattern: line.replace(/^\/+/, ''), negated: false },
+        ? { pattern: normalise(line.slice(1).trim()), negated: true }
+        : { pattern: normalise(line), negated: false },
     );
 }
 
@@ -58,6 +70,7 @@ export function excluded(path: string, rules: readonly IgnoreRule[]): boolean {
 
 /** True when any changed path reaches the build context or is the scan workflow itself. */
 export function touchesImage(paths: readonly string[], rules: readonly IgnoreRule[]): boolean {
+  if (paths.length > 0 && rules.some((rule) => !SUPPORTED_PATTERN.test(rule.pattern))) return true;
   return paths.some((path) => path === SCAN_WORKFLOW || !excluded(path, rules));
 }
 
