@@ -331,7 +331,7 @@ describe('a request that waited for its bucket refills against when it got it (X
       );
       const holder = await fixtures.connect();
       let pending: Promise<{ allowed: boolean }> | undefined;
-      let holderEpoch = Number.NaN;
+      let holderEpoch: number;
       try {
         await holder.query("select pg_advisory_lock(hashtext('ip:' || encode($1::bytea, 'hex')))", [
           OVERFLOW_DIGEST,
