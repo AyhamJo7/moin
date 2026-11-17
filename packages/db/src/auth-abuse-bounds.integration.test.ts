@@ -239,6 +239,214 @@ describe('the ceiling holds under concurrency', () => {
   });
 });
 
+/** One take with an explicit refill rate; the rejection, if any, is the database error. */
+async function takeWith(
+  digest: Buffer,
+  capacity: number,
+  refillPerSecond: number,
+): Promise<{ allowed: boolean }> {
+  const result = await app.query<{ allowed: boolean }>(
+    'select allowed from app.take_signin_bucket($1::text, $2::bytea, $3::double precision, $4::double precision, $5::double precision)',
+    ['ip', digest, capacity, refillPerSecond, 1],
+  );
+  return { allowed: result.rows[0]?.allowed === true };
+}
+
+/** The overflow bucket's key in 0083 and 0084: the all-zero digest. */
+const OVERFLOW_DIGEST = Buffer.alloc(32);
+
+/** Waits until some backend is queued on an advisory lock. */
+async function waitForAdvisoryWaiter(): Promise<void> {
+  for (let i = 0; ; i += 1) {
+    const queued = await fixtures.query<{ n: string }>(
+      `select count(*)::text as n from pg_stat_activity
+        where datname = current_database() and wait_event_type = 'Lock' and wait_event = 'advisory'`,
+    );
+    if (queued.rows[0]?.n !== '0') return;
+    if (i > 400) throw new Error('nothing queued on an advisory lock');
+    await new Promise((done) => setTimeout(done, 25));
+  }
+}
+
+const overflowUpdatedAt = async (): Promise<Date> => {
+  const row = (
+    await fixtures.query<{ updated_at: Date }>(
+      "select updated_at from auth_throttle_buckets where scope = 'ip' and key_digest = $1::bytea",
+      [OVERFLOW_DIGEST],
+    )
+  ).rows[0];
+  if (row === undefined) throw new Error('no overflow bucket');
+  return row.updated_at;
+};
+
+describe('a request that waited for its bucket refills against when it got it (X3)', () => {
+  evidenceTest(
+    'a newcomer that waited at saturation gets an answer, not a negative balance',
+    async () => {
+      // At the ceiling every newcomer shares the overflow bucket. One newcomer is held on its own
+      // source's lock after it has read the clock; others draw on the overflow bucket meanwhile.
+      // It must refill against the time it got the bucket: never a negative balance, and its
+      // update must be later than theirs, or the next request would earn that interval again.
+      await stageBuckets(MAX_BUCKETS);
+      const waiter = key();
+      const holder = await fixtures.connect();
+      let pending: Promise<{ allowed: boolean }> | undefined;
+      const seen = { before: Number.POSITIVE_INFINITY };
+      try {
+        await holder.query("select pg_advisory_lock(hashtext('ip:' || encode($1::bytea, 'hex')))", [
+          waiter,
+        ]);
+        pending = takeWith(waiter, 3, 5);
+        await waitForAdvisoryWaiter();
+        await new Promise((done) => setTimeout(done, 1_500));
+        for (let i = 0; i < 3; i += 1) await takeWith(key(), 3, 5);
+        seen.before = (await overflowUpdatedAt()).getTime();
+      } finally {
+        await holder.query('select pg_advisory_unlock_all()');
+        holder.release();
+      }
+      await expect(pending).resolves.toEqual({ allowed: expect.any(Boolean) as boolean });
+      const negative = await fixtures.query('select 1 from auth_throttle_buckets where tokens < 0');
+      expect(negative.rows).toStrictEqual([]);
+      const after = await overflowUpdatedAt();
+      expect(after.getTime()).toBeGreaterThan(seen.before);
+    },
+    60_000,
+  );
+
+  evidenceTest('the sweep passes over a stale row another transaction holds', async () => {
+    // An in-flight call of an earlier body holds a stale row it is deleting. A newcomer that sweeps
+    // must pass over it, not wait for it while it holds the count row.
+    await stageBuckets(5, '2 days');
+    const held = (
+      await fixtures.query<{ key_digest: Buffer }>(
+        'select key_digest from auth_throttle_buckets order by key_digest limit 1',
+      )
+    ).rows[0]?.key_digest;
+    if (held === undefined) throw new Error('no staged bucket');
+    const holder = await fixtures.connect();
+    try {
+      await holder.query('begin');
+      await holder.query('select 1 from auth_throttle_buckets where key_digest = $1 for update', [
+        held,
+      ]);
+      const finished = await Promise.race([
+        take(key(), 100).then(() => true),
+        new Promise<boolean>((done) => {
+          setTimeout(() => {
+            done(false);
+          }, 5_000);
+        }),
+      ]);
+      expect(finished, 'the newcomer waited for a row another transaction holds').toBe(true);
+    } finally {
+      await holder.query('rollback');
+      holder.release();
+    }
+    const remaining = await fixtures.query(
+      'select 1 from auth_throttle_buckets where key_digest = $1',
+      [held],
+    );
+    expect(remaining.rows).toHaveLength(1);
+  });
+
+  evidenceTest(
+    'a sweep at saturation leaves a stale overflow bucket unlocked',
+    async () => {
+      // The overflow bucket is stale and the table is full of fresh buckets, so a newcomer sweeps,
+      // frees nothing and waits for the overflow lock, held here. While it waits, the overflow row
+      // must not be locked by it: the holder of the overflow lock may need that row next.
+      await stageBuckets(MAX_BUCKETS);
+      await fixtures.query(
+        `insert into auth_throttle_buckets (scope, key_digest, tokens, capacity, refill_per_second, updated_at)
+       values ('ip', $1::bytea, 3, 3, 0, clock_timestamp() - interval '2 days')`,
+        [OVERFLOW_DIGEST],
+      );
+      const holder = await fixtures.connect();
+      let pending: Promise<boolean> | undefined;
+      try {
+        await holder.query("select pg_advisory_lock(hashtext('ip:' || encode($1::bytea, 'hex')))", [
+          OVERFLOW_DIGEST,
+        ]);
+        pending = take(key(), 3);
+        await waitForAdvisoryWaiter();
+        const prober = await fixtures.connect();
+        try {
+          await prober.query('begin');
+          const locked = await prober
+            .query(
+              'select 1 from auth_throttle_buckets where key_digest = $1::bytea for update nowait',
+              [OVERFLOW_DIGEST],
+            )
+            .then(
+              () => false,
+              (error: unknown) => {
+                if ((error as { code?: string }).code !== '55P03') throw error;
+                return true;
+              },
+            );
+          await prober.query('rollback');
+          expect(locked, 'the sweep locked the overflow bucket').toBe(false);
+        } finally {
+          prober.release();
+        }
+      } finally {
+        await holder.query('select pg_advisory_unlock_all()');
+        holder.release();
+        await pending?.catch(() => undefined);
+      }
+    },
+    60_000,
+  );
+
+  evidenceTest(
+    'an in-flight call of the 0023 body and the current body never deadlock on a stale row',
+    async () => {
+      // A call of the previous body still running when 0083 committed deletes stale rows without
+      // locking them first and then needs the count row; the current body holds the count row
+      // while it sweeps. The current sweep skips rows another transaction holds.
+      const previous = readFileSync(
+        resolve(import.meta.dirname, '../migrations/0023_auth_throttle.sql'),
+        'utf8',
+      );
+      const start = previous.indexOf('CREATE FUNCTION app.take_signin_bucket(');
+      const end = previous.indexOf('$$;', start);
+      if (start < 0 || end < 0) throw new Error('no 0023 body');
+      const legacy = previous
+        .slice(start, end + 3)
+        .replace(
+          'CREATE FUNCTION app.take_signin_bucket(',
+          'CREATE FUNCTION app.legacy_take_0023(',
+        );
+      const owner = createPool({ connectionString: database.migrationUrl, max: 12 });
+      await owner.query(legacy);
+      try {
+        await stageBuckets(400, '2 days');
+        const legacyTake = (): Promise<unknown> =>
+          owner.query(
+            'select allowed from app.legacy_take_0023($1::text, $2::bytea, $3::double precision, $4::double precision, $5::double precision)',
+            ['ip', key(), 100, 0, 1],
+          );
+        const outcomes = await Promise.allSettled(
+          Array.from({ length: 24 }, (_, i) => (i % 2 === 0 ? legacyTake() : take(key(), 100))),
+        );
+        expect(
+          outcomes
+            .filter((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected')
+            .map((outcome) => String(outcome.reason)),
+        ).toStrictEqual([]);
+        expect(await admissionCount()).toBe(await bucketRows());
+      } finally {
+        await owner.query(
+          'drop function app.legacy_take_0023(text, bytea, double precision, double precision, double precision)',
+        );
+        await owner.end();
+      }
+    },
+    60_000,
+  );
+});
+
 describe('the overall limit on throttle events holds under concurrency', () => {
   evidenceTest('distinct sources racing for the last place store exactly one more', async () => {
     await fixtures.query(
