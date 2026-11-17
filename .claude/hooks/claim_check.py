@@ -99,25 +99,27 @@ def toplevel(start: str | None) -> Path | None:
     return Path(proc.stdout.strip()) if proc.returncode == 0 else None
 
 
-def landed(root: Path, branch: str) -> bool:
-    """True when every file `branch` changed has the branch's content at `root`'s HEAD.
+def git_run(path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(path), *args], capture_output=True, text=True, check=False
+    )
 
-    Content, not ancestry: a squash merge leaves the branch tip out of HEAD's history."""
 
-    def git(*args: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            ["git", "-C", str(root), *args], capture_output=True, text=True, check=False
-        )
+def common_dir(path: Path) -> Path | None:
+    proc = git_run(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    return Path(proc.stdout.strip()).resolve() if proc.returncode == 0 else None
 
-    ref = f"refs/heads/{branch}"
-    base = git("merge-base", ref, "HEAD")
-    if base.returncode != 0:
-        return False
-    changed = git("diff", "--name-only", "-z", base.stdout.strip(), ref)
+
+def landed(root: Path, base: str, head: str) -> bool:
+    """True when every file `base..head` changed has `head`'s content at `root`'s HEAD.
+
+    Recorded commits, not a branch: a branch can be reset or deleted. Content, not ancestry: a
+    squash merge leaves `head` out of HEAD's history, and a revert after a merge must not count."""
+    changed = git_run(root, "diff", "--name-only", "-z", base, head)
     if changed.returncode != 0:
         return False
     paths = [p for p in changed.stdout.split("\0") if p]
-    return not paths or git("diff", "--quiet", ref, "HEAD", "--", *paths).returncode == 0
+    return not paths or git_run(root, "diff", "--quiet", head, "HEAD", "--", *paths).returncode == 0
 
 
 def active_root(payload: dict[str, Any]) -> tuple[Path | None, str | None]:
@@ -133,33 +135,29 @@ def active_root(payload: dict[str, Any]) -> tuple[Path | None, str | None]:
         path = Path(project) / ".claude" / "state" / "worktrees" / f"{key}.json"
         data = json.loads(path.read_text()) if path.exists() else None
         if data and not Path(data["worktree"]).exists():
-            # Removed: the fallback's evidence counts only if the branch's work is on its HEAD.
-            branch = str(data.get("branch") or "")
-            if fallback is not None and branch and landed(fallback, branch):
+            # Removed: the fallback's evidence counts only for the same repository, and only once
+            # the recorded work is on its HEAD.
+            expected = Path(data["common_dir"]).resolve()
+            head, base = str(data.get("head") or ""), str(data.get("base") or "")
+            if (
+                fallback is not None
+                and common_dir(Path(project)) == expected
+                and common_dir(fallback) == expected
+                and head
+                and base
+                and landed(fallback, base, head)
+            ):
                 return fallback, None
             return fallback, (
-                f"the session's worktree {data['worktree']} was removed and the work of its "
-                f"branch ({branch or 'not recorded'}) is not on the HEAD of {fallback}, so that "
-                "checkout's evidence does not cover it"
+                f"the session's worktree {data['worktree']} was removed and its work "
+                f"({head[:10] or 'not recorded'}) is not on the HEAD of {fallback} in the same "
+                "repository, so that checkout's evidence does not cover it"
             )
         if data:
             candidate = Path(data["worktree"])
             expected = Path(data["common_dir"]).resolve()
             for checkout in (Path(project), candidate):
-                proc = subprocess.run(
-                    [
-                        "git",
-                        "-C",
-                        str(checkout),
-                        "rev-parse",
-                        "--path-format=absolute",
-                        "--git-common-dir",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
-                if proc.returncode != 0 or Path(proc.stdout.strip()).resolve() != expected:
+                if common_dir(checkout) != expected:
                     raise RuntimeError("active session worktree is no longer valid")
             root = toplevel(str(candidate))
             if root is None or root.resolve() != candidate.resolve():

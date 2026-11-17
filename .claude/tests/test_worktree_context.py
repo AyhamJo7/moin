@@ -79,6 +79,8 @@ class LinkedWorktreeContext(unittest.TestCase):
                 self.assertIsNotNone(stop_guard.stall_check(branch, crons, state))
                 git(branch, "add", "new-work.txt")
                 git(branch, "commit", "-m", "progress in linked worktree")
+                # The hook records again after every tool call that names the worktree.
+                self.assertEqual(worktree_context.capture(payload, root), branch)
                 (_kit.evidence_dir(branch) / "latest-full.json").write_text(
                     json.dumps(root_evidence)
                 )
@@ -94,10 +96,22 @@ class LinkedWorktreeContext(unittest.TestCase):
                 with patch.dict(os.environ, {"GATES_CONFIG": "gates.json"}):
                     _, problem = claim_check.evaluate(claim, 900)
                 self.assertIn("was removed", problem or "")
+                # The recorded commit decides, not the branch: resetting it to root changes nothing.
+                work = git(root, "rev-parse", "feature")
+                git(root, "branch", "-f", "feature", "main")
+                self.assertIn("was removed", claim_check.active_root(payload)[1] or "")
                 # Once the work is on root (squash merge), root's evidence may stand for it.
-                git(root, "merge", "--squash", "feature")
+                git(root, "merge", "--squash", work)
                 git(root, "commit", "-m", "squash feature")
                 self.assertEqual(claim_check.active_root(payload), (root, None))
+                # Another repository holding the same content is not this session's checkout.
+                other = Path(temp) / "other"
+                git(Path(temp), "clone", "-q", str(root), str(other))
+                foreign = {**payload, "cwd": str(other)}
+                self.assertIn("was removed", claim_check.active_root(foreign)[1] or "")
+                # A revert after the merge takes the work off root again.
+                git(root, "revert", "--no-edit", "HEAD")
+                self.assertIn("was removed", claim_check.active_root(payload)[1] or "")
                 branch.mkdir()
                 git(branch, "init", "-b", "main")
                 with self.assertRaisesRegex(RuntimeError, "no longer valid"):
