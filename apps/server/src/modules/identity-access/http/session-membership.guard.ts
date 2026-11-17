@@ -19,7 +19,7 @@ import type { CanActivate, ExecutionContext } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Logger } from '@moin/observability';
 import { digestOf } from '../domain/secret-values.ts';
-import { CSRF_COOKIE, SESSION_COOKIE } from '../domain/session-policy.ts';
+import { ABSOLUTE_TIMEOUT_MS, CSRF_COOKIE, SESSION_COOKIE } from '../domain/session-policy.ts';
 import {
   type ContextFailure,
   RequestContextService,
@@ -28,10 +28,17 @@ import { CONFIG } from '../../../config/config.module.ts';
 import type { Config } from '../../../config/env.ts';
 import { LOGGER } from '../../../observability/logger.module.ts';
 import { REQUEST_CONTEXTS } from '../identity-access.tokens.ts';
-import { readCookie } from './cookies.ts';
-import { CSRF_HEADER, firstHeader, requiresCsrfProtection, verifyCsrf } from './csrf.ts';
+import { readCookie, serializeCookie } from './cookies.ts';
+import {
+  CSRF_HEADER,
+  deriveCsrfToken,
+  firstHeader,
+  requiresCsrfProtection,
+  verifyCsrf,
+} from './csrf.ts';
 
 const PROBLEM_TYPE = '/problems/unauthenticated';
+const MS_PER_SECOND = 1000;
 const PROBLEM_TITLE = 'Authentication is required';
 
 function resolveMode(request: FastifyRequest): 'read' | 'mutate' {
@@ -129,6 +136,19 @@ export class SessionMembershipGuard implements CanActivate {
       return false;
     }
     request.sessionContext = outcome.context;
+    // A session opened before the session-bound token (#266) holds a CSRF cookie that is not
+    // derived from it, so every mutation would answer 403 until the next sign-in. A safe request
+    // with a live session re-issues the derived token, the value sign-in sets: the page's next
+    // poll repairs it. Never on a mutation, whose proof was judged above.
+    if (!requiresCsrfProtection(request.method)) {
+      const token = deriveCsrfToken(presented);
+      if (readCookie(request.headers.cookie, CSRF_COOKIE) !== token) {
+        void reply.header(
+          'set-cookie',
+          serializeCookie(CSRF_COOKIE, token, ABSOLUTE_TIMEOUT_MS / MS_PER_SECOND),
+        );
+      }
+    }
     return true;
   }
 
