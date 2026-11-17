@@ -99,16 +99,50 @@ def toplevel(start: str | None) -> Path | None:
     return Path(proc.stdout.strip()) if proc.returncode == 0 else None
 
 
-def active_root(payload: dict[str, Any]) -> Path | None:
-    """Use the worktree observed for this session, not the checkout housing this hook."""
+def landed(root: Path, branch: str) -> bool:
+    """True when every file `branch` changed has the branch's content at `root`'s HEAD.
+
+    Content, not ancestry: a squash merge leaves the branch tip out of HEAD's history."""
+
+    def git(*args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", "-C", str(root), *args], capture_output=True, text=True, check=False
+        )
+
+    ref = f"refs/heads/{branch}"
+    base = git("merge-base", ref, "HEAD")
+    if base.returncode != 0:
+        return False
+    changed = git("diff", "--name-only", "-z", base.stdout.strip(), ref)
+    if changed.returncode != 0:
+        return False
+    paths = [p for p in changed.stdout.split("\0") if p]
+    return not paths or git("diff", "--quiet", ref, "HEAD", "--", *paths).returncode == 0
+
+
+def active_root(payload: dict[str, Any]) -> tuple[Path | None, str | None]:
+    """Use the worktree observed for this session, not the checkout housing this hook.
+
+    Returns the root and, when the session's worktree was removed before its work reached the
+    fallback checkout, why that checkout's evidence cannot stand for the session's work."""
     project = os.environ.get("CLAUDE_PROJECT_DIR")
     session = payload.get("session_id")
+    fallback = toplevel(str(payload.get("cwd") or "")) or toplevel(project)
     if project and isinstance(session, str) and session:
         key = hashlib.sha256(session.encode()).hexdigest()[:24]
         path = Path(project) / ".claude" / "state" / "worktrees" / f"{key}.json"
         data = json.loads(path.read_text()) if path.exists() else None
-        # A removed worktree falls back to the cwd root; one that exists but changed still raises.
-        if data and Path(data["worktree"]).exists():
+        if data and not Path(data["worktree"]).exists():
+            # Removed: the fallback's evidence counts only if the branch's work is on its HEAD.
+            branch = str(data.get("branch") or "")
+            if fallback is not None and branch and landed(fallback, branch):
+                return fallback, None
+            return fallback, (
+                f"the session's worktree {data['worktree']} was removed and the work of its "
+                f"branch ({branch or 'not recorded'}) is not on the HEAD of {fallback}, so that "
+                "checkout's evidence does not cover it"
+            )
+        if data:
             candidate = Path(data["worktree"])
             expected = Path(data["common_dir"]).resolve()
             for checkout in (Path(project), candidate):
@@ -130,8 +164,8 @@ def active_root(payload: dict[str, Any]) -> Path | None:
             root = toplevel(str(candidate))
             if root is None or root.resolve() != candidate.resolve():
                 raise RuntimeError("active session worktree was replaced")
-            return root
-    return toplevel(str(payload.get("cwd") or "")) or toplevel(project)
+            return root, None
+    return fallback, None
 
 
 def evidence_dir(root: Path) -> Path:
@@ -318,21 +352,21 @@ def evaluate(payload: dict[str, Any], max_age_s: float) -> tuple[Path | None, st
     progress = first_match(PROGRESS_PATTERNS, text)
     if not completion and not progress:
         return None, None
-    root = active_root(payload)
+    root, removed = active_root(payload)
     if root is None:
         return None, None
     configured = (root / ".claude" / "gates.json").is_file() or bool(os.environ.get("GATES_CONFIG"))
     background = bool(payload.get("background_tasks")) or bool(payload.get("session_crons"))
     problems: list[str] = []
     if completion and configured:
-        problem = completion_problem(root)
+        problem = removed or completion_problem(root)
         if problem:
             problems.append(
                 f'the final message claims "{completion}", but {problem}. Run `{gates_command_hint()} '
                 f"full` and report its result, or restate what was not verified as UNVERIFIED/BLOCKED."
             )
     if progress and (configured or background):
-        problem = progress_problem(root, max_age_s)
+        problem = removed or progress_problem(root, max_age_s)
         if problem:
             problems.append(
                 f'the final message claims ongoing progress ("{progress}"), but {problem}. Show a '

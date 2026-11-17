@@ -65,7 +65,9 @@ X3: migration 0084 makes the sign-in throttle read the clock under the bucket's 
 sweep only rows no other transaction holds.
 K1 (2026-11-17, added and finished the same day): when the worktree recorded for a session has
 been removed, `stop_guard` and `claim_check` fall back to the repo root of the current directory
-instead of raising; a worktree that exists but belongs to another repository still raises.
+instead of raising. A claim is judged on that root's evidence only once every file the removed
+branch changed has the branch's content there; until then the claim is blocked with the reason. A
+worktree that exists but belongs to another repository still raises.
 
 | Area                                                              | Truth                                                                                                                                                                                                                                                                                 |
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

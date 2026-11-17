@@ -50,7 +50,7 @@ class LinkedWorktreeContext(unittest.TestCase):
                 }
                 self.assertEqual(worktree_context.capture(payload, root), branch)
                 self.assertEqual(_kit.repo_root(str(root), "linked-session"), branch)
-                self.assertEqual(claim_check.active_root(payload), branch)
+                self.assertEqual(claim_check.active_root(payload), (branch, None))
                 self.assertNotEqual(_kit.evidence_dir(root), _kit.evidence_dir(branch))
                 root_evidence = {
                     "head": git(root, "rev-parse", "HEAD"),
@@ -84,8 +84,20 @@ class LinkedWorktreeContext(unittest.TestCase):
                 )
                 self.assertIn("different tree", claim_check.completion_problem(branch) or "")
                 git(root, "worktree", "remove", "--force", str(branch))
+                # Stall and type checks fall back to the cwd root instead of raising.
                 self.assertEqual(_kit.repo_root(str(root), "linked-session"), root)
-                self.assertEqual(claim_check.active_root(payload), root)
+                # A claim does not: the removed branch's work is not on root, whose evidence passes.
+                fallback, removed = claim_check.active_root(payload)
+                self.assertEqual(fallback, root)
+                self.assertIn("was removed", removed or "")
+                claim = {**payload, "last_assistant_message": "All gates are green."}
+                with patch.dict(os.environ, {"GATES_CONFIG": "gates.json"}):
+                    _, problem = claim_check.evaluate(claim, 900)
+                self.assertIn("was removed", problem or "")
+                # Once the work is on root (squash merge), root's evidence may stand for it.
+                git(root, "merge", "--squash", "feature")
+                git(root, "commit", "-m", "squash feature")
+                self.assertEqual(claim_check.active_root(payload), (root, None))
                 branch.mkdir()
                 git(branch, "init", "-b", "main")
                 with self.assertRaisesRegex(RuntimeError, "no longer valid"):
