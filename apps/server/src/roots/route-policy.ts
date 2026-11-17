@@ -55,7 +55,8 @@ export const ROUTE_POLICY: Readonly<Record<string, RoutePolicy>> = {
     provenBy: 'apps/server/src/modules/work/callback-today.integration.test.ts',
   },
   'GET /api/tasks/:id': {
-    serviceLevel: TASK_RULE,
+    serviceLevel:
+      'any member reads one task of their own tenant (tenant scope from the session; another tenant’s task is the same 404 as none); the answer is id, status and version only, so staff may read a colleague’s task, and acting on it stays under the task rule',
     provenBy: 'apps/server/src/modules/work/owner-completes-callback.integration.test.ts',
   },
   'POST /api/tasks/:id/complete': {

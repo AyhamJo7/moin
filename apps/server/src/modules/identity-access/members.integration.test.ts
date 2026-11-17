@@ -849,100 +849,147 @@ describe('invitations (P06.08.01, P06.08.02, P06.08.04)', () => {
         ).toBe('rejected');
       });
 
-      evidenceTest(
-        'a demotion cannot commit between the authority check and the grant (round 2)',
-        async () => {
-          // The acceptor already has an account, so acceptance blocks on that user row AFTER it
-          // has judged the issuer. While it is blocked the issuer is demoted, as the runtime
-          // role: the demotion must queue behind the acceptance (the authority read is held to
-          // commit) instead of committing first and leaving the grant standing on authority the
-          // issuer no longer has.
-          const target = await person();
-          const inv = await outstanding('staff', target.email);
-          // Warm the runtime pool so the acceptance below does not open its first connection
-          // while the row is held.
-          await Promise.all(
-            [1, 2, 3].map(() =>
-              withTenant(database.pool(), inv.org, (client) =>
-                client.query('select pg_sleep(0.2)'),
-              ),
-            ),
+      /**
+       * Blocks an acceptance AFTER it has judged the issuer (the acceptor already has an account,
+       * and its user row is held here), runs `change` as the runtime role, and reports whether the
+       * change committed while the acceptance was still open (the defect) or queued behind it.
+       */
+      async function changeDuringAcceptance(
+        change: (org: string, issuerId: string) => Promise<unknown>,
+        prepare?: (issuerId: string) => Promise<unknown>,
+      ): Promise<{ committedMidway: boolean; outcome: string; issuerId: string }> {
+        const target = await person();
+        const inv = await outstanding('staff', target.email);
+        await prepare?.(inv.owner.id);
+        // Warm the runtime pool so the acceptance below does not open its first connection
+        // while the row is held.
+        await Promise.all(
+          [1, 2, 3].map(() =>
+            withTenant(database.pool(), inv.org, (client) => client.query('select pg_sleep(0.2)')),
+          ),
+        );
+        const holder = await admin.connect();
+        try {
+          await holder.query('begin');
+          await holder.query('select id from users where id = $1 for update', [target.id]);
+          const holderPid = (await holder.query<{ pid: number }>('select pg_backend_pid() as pid'))
+            .rows[0]?.pid;
+          const settled = accept(
+            inv.org,
+            inv.invitationId,
+            inv.token,
+            target.subject,
+            target.email,
+          ).then(
+            (value) => ({ value }),
+            (error: unknown) => ({ error }),
           );
-          const holder = await admin.connect();
-          try {
-            await holder.query('begin');
-            await holder.query('select id from users where id = $1 for update', [target.id]);
-            const holderPid = (
-              await holder.query<{ pid: number }>('select pg_backend_pid() as pid')
-            ).rows[0]?.pid;
-            const accepting = accept(
-              inv.org,
-              inv.invitationId,
-              inv.token,
-              target.subject,
-              target.email,
-            );
-            const settled = accepting.then(
-              (value) => ({ value }),
-              (error: unknown) => ({ error }),
-            );
-            const deadline = Date.now() + 10_000;
-            const waitFor = async (sql: string, params: unknown[], what: string) => {
-              for (;;) {
-                const found = await holder.query<{ pid: number | null }>(sql, params);
-                const pid = found.rows[0]?.pid ?? null;
-                if (pid !== null) return pid;
-                if (Date.now() > deadline) throw new Error(what);
-                await new Promise((resolve) => setTimeout(resolve, 10));
-              }
-            };
-            // The acceptance, blocked on the held user row after it read the issuer.
-            const acceptPid = await waitFor(
-              `select a.pid from pg_stat_activity a
-                where a.datname = current_database() and a.wait_event_type = 'Lock'
-                  and $1::int = any(pg_blocking_pids(a.pid)) limit 1`,
-              [holderPid],
-              'acceptance never reached the held row',
-            );
-            const demotionState = { committed: false };
-            const demotion = withTenant(database.pool(), inv.org, (client) =>
-              client.query(
-                'update memberships set permissions = $2::text[], role = $3 where user_id = $1',
-                [inv.owner.id, [], 'admin'],
-              ),
-            ).then(() => {
-              demotionState.committed = true;
-            });
-            // Either the demotion commits (the defect) or it queues behind the acceptance.
-            let queuedBehindAcceptance = false;
-            while (!demotionState.committed && !queuedBehindAcceptance) {
-              const queued = await holder.query<{ pid: number }>(
+          const deadline = Date.now() + 10_000;
+          const blockedBy = async (pid: number | undefined): Promise<number | null> =>
+            (
+              await holder.query<{ pid: number }>(
                 `select a.pid from pg_stat_activity a
                   where a.datname = current_database() and a.wait_event_type = 'Lock'
                     and $1::int = any(pg_blocking_pids(a.pid)) limit 1`,
-                [acceptPid],
-              );
-              queuedBehindAcceptance = queued.rows.length > 0;
-              if (Date.now() > deadline)
-                throw new Error('the demotion neither committed nor queued');
-              await new Promise((resolve) => setTimeout(resolve, 10));
-            }
-            expect(demotionState.committed, 'the demotion committed mid-acceptance').toBe(false);
-            await holder.query('rollback');
-            const result = await settled;
-            if ('error' in result) throw result.error as Error;
-            await demotion;
-            // Serial order: the acceptance judged and granted first, the demotion followed.
-            expect(result.value.outcome).toBe('accepted');
-            const issuer = await admin.query<{ role: string; permissions: string[] }>(
-              'select role, permissions from memberships where user_id = $1',
-              [inv.owner.id],
-            );
-            expect(issuer.rows[0]).toMatchObject({ role: 'admin', permissions: [] });
-          } finally {
-            await holder.query('rollback').catch(() => undefined);
-            holder.release();
+                [pid],
+              )
+            ).rows[0]?.pid ?? null;
+          // The acceptance, blocked on the held user row after it read the issuer.
+          let acceptPid: number | null = null;
+          while (acceptPid === null) {
+            acceptPid = await blockedBy(holderPid);
+            if (Date.now() > deadline) throw new Error('acceptance never reached the held row');
+            await new Promise((resolve) => setTimeout(resolve, 10));
           }
+          const state = { committed: false };
+          const changed = change(inv.org, inv.owner.id).then(() => {
+            state.committed = true;
+          });
+          // Either the change commits (the defect) or it queues behind the acceptance.
+          let queued = false;
+          while (!state.committed && !queued) {
+            queued = (await blockedBy(acceptPid)) !== null;
+            if (Date.now() > deadline) throw new Error('the change neither committed nor queued');
+            await new Promise((resolve) => setTimeout(resolve, 10));
+          }
+          const committedMidway = state.committed;
+          await holder.query('rollback');
+          const result = await settled;
+          if ('error' in result) throw result.error as Error;
+          await changed;
+          return { committedMidway, outcome: result.value.outcome, issuerId: inv.owner.id };
+        } finally {
+          await holder.query('rollback').catch(() => undefined);
+          holder.release();
+        }
+      }
+
+      evidenceTest(
+        'a demotion cannot commit between the authority check and the grant (round 2)',
+        async () => {
+          // The demotion must queue behind the acceptance (the authority read is held to commit)
+          // instead of committing first and leaving the grant standing on authority the issuer
+          // no longer has.
+          const run = await changeDuringAcceptance((org, issuerId) =>
+            withTenant(database.pool(), org, (client) =>
+              client.query(
+                'update memberships set permissions = $2::text[], role = $3 where user_id = $1',
+                [issuerId, [], 'admin'],
+              ),
+            ),
+          );
+          expect(run.committedMidway, 'the demotion committed mid-acceptance').toBe(false);
+          // Serial order: the acceptance judged and granted first, the demotion followed.
+          expect(run.outcome).toBe('accepted');
+          const issuer = await admin.query<{ role: string; permissions: string[] }>(
+            'select role, permissions from memberships where user_id = $1',
+            [run.issuerId],
+          );
+          expect(issuer.rows[0]).toMatchObject({ role: 'admin', permissions: [] });
+        },
+        60_000,
+      );
+
+      evidenceTest(
+        'an issuer whose account is disabled confers nothing, even with an active membership (X2)',
+        async () => {
+          const inv = await outstanding();
+          // eslint-disable-next-line no-restricted-syntax -- fixture write; the SET-session rule matches UPDATE ... SET verb text.
+          await admin.query("update users set status = 'disabled' where id = $1", [inv.owner.id]);
+          const result = await accept(
+            inv.org,
+            inv.invitationId,
+            inv.token,
+            randomUUID(),
+            inv.email,
+          );
+          expect(result.outcome).toBe('rejected');
+          expect(await membershipOf(inv.org, inv.email)).toBeUndefined();
+        },
+      );
+
+      evidenceTest(
+        'an account disable cannot commit between the authority check and the grant (X2)',
+        async () => {
+          // The issuer is an admin holding both permissions, so disabling the account takes no
+          // ownership lock: only the account row held FOR SHARE by the acceptance makes it wait.
+          const run = await changeDuringAcceptance(
+            (org, issuerId) =>
+              withTenant(database.pool(), org, (client) =>
+                client.query(
+                  "select * from app.set_user_status($1::uuid, 'disabled', 'password_reset', $1::uuid, $2::uuid)",
+                  [issuerId, randomUUID()],
+                ),
+              ),
+            (issuerId) => reassign(issuerId, 'admin', BOTH),
+          );
+          expect(run.committedMidway, 'the account disable committed mid-acceptance').toBe(false);
+          expect(run.outcome).toBe('accepted');
+          const issuer = await admin.query<{ status: string }>(
+            'select status from users where id = $1',
+            [run.issuerId],
+          );
+          expect(issuer.rows[0]?.status).toBe('disabled');
         },
         60_000,
       );
@@ -1397,4 +1444,91 @@ describe('ownership changes take the organisation lock before any row lock (G09 
     },
     120_000,
   );
+});
+
+describe('a deadlock or serialisation failure on an ownership path is a 409 that changes nothing (X2)', () => {
+  /**
+   * Deterministic: while installed, a trigger raises the given SQLSTATE on any write to
+   * memberships or users, which every ownership path makes inside its transaction. The real
+   * conditions (two transactions locking in opposite orders, a serialisation conflict) are not
+   * needed to prove the mapping: the route must answer 409 with Retry-After, and the rollback
+   * must leave rows and audit as they were.
+   */
+  async function forcing<T>(sqlstate: '40P01' | '40001', body: () => Promise<T>): Promise<T> {
+    await admin.query(
+      `create function public.x2_force_conflict() returns trigger language plpgsql as $$
+       begin raise exception 'forced conflict' using errcode = tg_argv[0]; end $$`,
+    );
+    try {
+      // Two literal statements per code: the lint bans building SQL from values.
+      if (sqlstate === '40P01') {
+        await admin.query(
+          "create trigger x2_force before update or delete on memberships for each row execute function public.x2_force_conflict('40P01')",
+        );
+        await admin.query(
+          "create trigger x2_force before update on users for each row execute function public.x2_force_conflict('40P01')",
+        );
+      } else {
+        await admin.query(
+          "create trigger x2_force before update or delete on memberships for each row execute function public.x2_force_conflict('40001')",
+        );
+        await admin.query(
+          "create trigger x2_force before update on users for each row execute function public.x2_force_conflict('40001')",
+        );
+      }
+      return await body();
+    } finally {
+      await admin.query('drop trigger if exists x2_force on memberships');
+      await admin.query('drop trigger if exists x2_force on users');
+      await admin.query('drop function if exists public.x2_force_conflict()');
+    }
+  }
+
+  async function snapshot(org: string): Promise<unknown> {
+    const members = await admin.query(
+      `select m.user_id::text, m.role::text, m.status::text, u.status::text as user_status
+         from memberships m join users u on u.id = m.user_id
+        where m.organisation_id = $1 order by m.user_id`,
+      [org],
+    );
+    const audited = await admin.query(
+      'select count(*)::int as n from audit_events where organisation_id = $1',
+      [org],
+    );
+    return { members: members.rows, audited: audited.rows[0] };
+  }
+
+  const ROUTES = [
+    ['remove', '/api/members/remove', {}],
+    ['disable', '/api/members/disable', {}],
+    ['transfer', '/api/members/transfer-ownership', {}],
+    ['account disable', '/api/recovery/disable-user', { reason: 'password_reset' }],
+    ['account enable', '/api/recovery/enable-user', { reason: 'password_reset' }],
+  ] as const;
+
+  for (const sqlstate of ['40P01', '40001'] as const) {
+    for (const [name, url, extra] of ROUTES) {
+      evidenceTest(`${name} under ${sqlstate}: 409, Retry-After, nothing changed`, async () => {
+        const { pair, org } = await ownerPair();
+        const target = await person();
+        await member(target.id, 'admin', 'active', org);
+        if (name === 'account enable') {
+          // eslint-disable-next-line no-restricted-syntax -- fixture write; the SET-session rule matches UPDATE ... SET verb text.
+          await admin.query("update users set status = 'disabled' where id = $1", [target.id]);
+        }
+        const before = await snapshot(org);
+        const response = await forcing(sqlstate, () =>
+          postAs(pair, url, { userId: target.id, ...extra }),
+        );
+        expect(response.statusCode, response.body).toBe(409);
+        expect(response.headers['retry-after']).toBe('1');
+        expect(response.json()).toStrictEqual({
+          type: '/problems/concurrent-change',
+          title: 'Concurrent change, retry',
+          status: 409,
+        });
+        expect(await snapshot(org)).toStrictEqual(before);
+      });
+    }
+  }
 });

@@ -545,6 +545,46 @@ describe('CSRF synchronizer token plus Origin check (P06.06.06)', () => {
   );
 
   evidenceTest(
+    'a session holding a pre-change CSRF cookie is repaired by its next read, then mutates (X2)',
+    async () => {
+      // Before #266 the cookie held a random token, not one derived from the session. Such a
+      // session must not be stuck on 403 until it signs in again: a read re-issues the token.
+      const cookies = await signedInCookies();
+      const stale = 'Q'.repeat(43);
+      const staleHeaders = {
+        cookie: `${cookies.header}; __Host-moin_csrf=${stale}`,
+        origin: APP_ORIGIN,
+        'x-csrf-token': stale,
+      };
+      const refused = await app.inject({ method: 'POST', url: '/probe', headers: staleHeaders });
+      expect(refused.statusCode).toBe(403);
+      // A refused mutation re-issues nothing: the proof was judged, not repaired.
+      expect(setCookies(refused.headers)).toStrictEqual([]);
+      const read = await app.inject({
+        method: 'GET',
+        url: '/probe',
+        headers: { cookie: staleHeaders.cookie },
+      });
+      expect(read.statusCode).toBe(200);
+      const reissued = setCookies(read.headers).find((c) => c.startsWith('__Host-moin_csrf='));
+      expect(CSRF_COOKIE_CONTRACT.exec(reissued ?? '')?.[1]).toBe(cookies.csrfToken);
+      const retried = await app.inject({
+        method: 'POST',
+        url: '/probe',
+        headers: csrfHeaders(cookies),
+      });
+      expect(retried.statusCode).toBe(201);
+      // A read that already carries the right cookie sets nothing.
+      const current = await app.inject({
+        method: 'GET',
+        url: '/probe',
+        headers: { cookie: `${cookies.header}; ${cookies.csrfCookie}` },
+      });
+      expect(setCookies(current.headers)).toStrictEqual([]);
+    },
+  );
+
+  evidenceTest(
     'an absent Origin is refused when the request says it is cross-site (L1)',
     async () => {
       const cookies = await signedInCookies();

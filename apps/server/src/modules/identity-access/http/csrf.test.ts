@@ -64,6 +64,18 @@ describe('the CSRF verdict (P06.06.06)', () => {
     });
   });
 
+  evidenceTest(
+    'the double-submit cookie is checked on its own: a right header, a wrong cookie',
+    () => {
+      // The header is the token derived from this session, so the session check passes; only the
+      // cookie comparison can refuse it.
+      expect(verifyCsrf({ ...valid(), cookie: deriveCsrfToken(randomSecret()) })).toStrictEqual({
+        ok: false,
+        reason: 'token-invalid',
+      });
+    },
+  );
+
   evidenceTest('a mismatched origin fails even with a valid token', () => {
     expect(verifyCsrf({ ...valid(), origin: 'https://evil.example' })).toStrictEqual({
       ok: false,
