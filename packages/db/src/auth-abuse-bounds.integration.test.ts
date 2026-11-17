@@ -239,6 +239,108 @@ describe('the ceiling holds under concurrency', () => {
   });
 });
 
+/** One take with an explicit refill rate; the rejection, if any, is the database error. */
+async function takeWith(
+  digest: Buffer,
+  capacity: number,
+  refillPerSecond: number,
+): Promise<{ allowed: boolean }> {
+  const result = await app.query<{ allowed: boolean }>(
+    'select allowed from app.take_signin_bucket($1::text, $2::bytea, $3::double precision, $4::double precision, $5::double precision)',
+    ['ip', digest, capacity, refillPerSecond, 1],
+  );
+  return { allowed: result.rows[0]?.allowed === true };
+}
+
+describe('a request that waited for its bucket refills against when it got it (X3)', () => {
+  evidenceTest(
+    'a newcomer that waited at saturation gets an answer, not a negative balance',
+    async () => {
+      // At the ceiling every newcomer shares the overflow bucket. One newcomer is held on its own
+      // source's lock after it has read the clock; others draw on the overflow bucket meanwhile.
+      // Refilling against the clock it read on entry would subtract tokens and break the check
+      // on the balance; read again under the lock it gets an ordinary yes or no.
+      await stageBuckets(MAX_BUCKETS);
+      const waiter = key();
+      const holder = await fixtures.connect();
+      let pending: Promise<{ allowed: boolean }> | undefined;
+      try {
+        await holder.query("select pg_advisory_lock(hashtext('ip:' || encode($1::bytea, 'hex')))", [
+          waiter,
+        ]);
+        pending = takeWith(waiter, 3, 5);
+        for (let i = 0; ; i += 1) {
+          const queued = await fixtures.query<{ n: string }>(
+            `select count(*)::text as n from pg_stat_activity
+              where datname = current_database() and wait_event_type = 'Lock' and wait_event = 'advisory'`,
+          );
+          if (queued.rows[0]?.n !== '0') break;
+          if (i > 400) throw new Error('the newcomer never queued on its source lock');
+          await new Promise((done) => setTimeout(done, 25));
+        }
+        await new Promise((done) => setTimeout(done, 1_500));
+        for (let i = 0; i < 3; i += 1) await takeWith(key(), 3, 5);
+      } finally {
+        await holder.query('select pg_advisory_unlock_all()');
+        holder.release();
+      }
+      await expect(pending).resolves.toEqual({ allowed: expect.any(Boolean) as boolean });
+      const balances = await fixtures.query<{ tokens: number }>(
+        'select tokens from auth_throttle_buckets where tokens < 0',
+      );
+      expect(balances.rows).toStrictEqual([]);
+    },
+    60_000,
+  );
+
+  evidenceTest(
+    'an in-flight call of the 0023 body and the current body never deadlock on a stale row',
+    async () => {
+      // A call of the previous body still running when 0083 committed deletes stale rows without
+      // locking them first and then needs the count row; the current body holds the count row
+      // while it sweeps. The current sweep skips rows another transaction holds.
+      const previous = readFileSync(
+        resolve(import.meta.dirname, '../migrations/0023_auth_throttle.sql'),
+        'utf8',
+      );
+      const start = previous.indexOf('CREATE FUNCTION app.take_signin_bucket(');
+      const end = previous.indexOf('$$;', start);
+      if (start < 0 || end < 0) throw new Error('no 0023 body');
+      const legacy = previous
+        .slice(start, end + 3)
+        .replace(
+          'CREATE FUNCTION app.take_signin_bucket(',
+          'CREATE FUNCTION app.legacy_take_0023(',
+        );
+      const owner = createPool({ connectionString: database.migrationUrl, max: 12 });
+      await owner.query(legacy);
+      try {
+        await stageBuckets(400, '2 days');
+        const legacyTake = (): Promise<unknown> =>
+          owner.query(
+            'select allowed from app.legacy_take_0023($1::text, $2::bytea, $3::double precision, $4::double precision, $5::double precision)',
+            ['ip', key(), 100, 0, 1],
+          );
+        const outcomes = await Promise.allSettled(
+          Array.from({ length: 24 }, (_, i) => (i % 2 === 0 ? legacyTake() : take(key(), 100))),
+        );
+        expect(
+          outcomes
+            .filter((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected')
+            .map((outcome) => String(outcome.reason)),
+        ).toStrictEqual([]);
+        expect(await admissionCount()).toBe(await bucketRows());
+      } finally {
+        await owner.query(
+          'drop function app.legacy_take_0023(text, bytea, double precision, double precision, double precision)',
+        );
+        await owner.end();
+      }
+    },
+    60_000,
+  );
+});
+
 describe('the overall limit on throttle events holds under concurrency', () => {
   evidenceTest('distinct sources racing for the last place store exactly one more', async () => {
     await fixtures.query(
