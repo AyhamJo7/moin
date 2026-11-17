@@ -29,8 +29,32 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # The decision below compares the pull request with its base.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      # P02.06.03 as amended on 2026-11-14: on a pull request the image is built and scanned only
+      # when the change can alter it. scripts/image-inputs.ts reads .dockerignore, so the build
+      # context and this decision cannot drift apart. Both checks still report on every pull
+      # request; pushes to main and the daily schedule always build and scan.
+      - name: Does this change touch the image?
+        id: inputs
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" != 'pull_request' ]; then
+            echo "image=true" >> "$GITHUB_OUTPUT"
+          else
+            node scripts/image-inputs.ts --base "$BASE_SHA" --head "$HEAD_SHA"
+          fi
 
       - name: hadolint
+        if: steps.inputs.outputs.image == 'true'
         run: |
           docker run --rm -i \
             hadolint/hadolint@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d \
@@ -40,15 +64,18 @@ jobs:
       # "exec format error". The package-manager check below used to read that failure as "the tool
       # is absent" and pass; with emulation it actually runs `command -v` inside the image.
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        if: steps.inputs.outputs.image == 'true'
         with:
           platforms: arm64
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        if: steps.inputs.outputs.image == 'true'
 
       # linux/arm64 is the target (Graviton). Nothing else pins the architecture, so an image
       # built on this x86 runner without it would be an amd64 image promoted under the
       # one-digest-per-release claim (INV-17) and would fail to start in production.
       - name: Build the server image
+        if: steps.inputs.outputs.image == 'true'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -61,6 +88,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Assert the image is what it claims to be
+        if: steps.inputs.outputs.image == 'true'
         run: |
           arch=$(docker image inspect moin-server:ci --format '{{.Architecture}}')
           user=$(docker image inspect moin-server:ci --format '{{.Config.User}}')
@@ -79,20 +107,24 @@ jobs:
 
       # The schema runner reads `../migrations` next to its own source; see the script.
       - name: Assert the image carries the SQL migrations
+        if: steps.inputs.outputs.image == 'true'
         run: scripts/check-server-image.sh moin-server:ci
 
       # api, voice and worker of the same image, started the way a deployment runs them. The image
       # once lacked two workspace packages the voice and worker roles import, and nothing else here
       # starts those roles.
       - name: The packaged api, voice and worker roles start
+        if: steps.inputs.outputs.image == 'true'
         run: scripts/check-server-image-roles.sh moin-server:ci
 
       # The `web` role of the same image: start it read-only and fetch the page and every script it
       # references. A build that succeeds but leaves `.next/static` out serves HTML with dead scripts.
       - name: The packaged owner app serves its pages and static assets
+        if: steps.inputs.outputs.image == 'true'
         run: scripts/check-web-image.sh moin-server:ci
 
       - name: Trivy image scan
+        if: steps.inputs.outputs.image == 'true'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: image
@@ -102,6 +134,13 @@ jobs:
           # pull request until upstream acts, which teaches people to bypass the gate.
           ignore-unfixed: true
           exit-code: '1'
+
+      - name: No image input changed
+        if: steps.inputs.outputs.image != 'true'
+        run: |
+          echo "No path this pull request changes reaches the build context, so the image is" \
+            "neither built nor scanned here. Pushes to main and the daily scheduled scan still are." \
+            | tee -a "$GITHUB_STEP_SUMMARY"
 
   container-scan:
     name: container-scan
