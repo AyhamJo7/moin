@@ -69,8 +69,17 @@ def capture(payload: dict[str, object], project: Path) -> Path | None:
         # Immutable commits, not a branch name: once the worktree is removed, claim_check compares
         # the files `base..head` changed against the fallback checkout to see whether the work landed.
         head = git_out(root, "rev-parse", "HEAD")
-        base = git_out(root, "merge-base", "HEAD", git_out(project_root, "rev-parse", "HEAD"))
-        (state / f"{key}.json").write_text(
+        record = state / f"{key}.json"
+        try:
+            earlier = json.loads(record.read_text())
+        except (OSError, ValueError):
+            earlier = {}
+        # The first fork point recorded for this worktree is kept: once the project checkout has
+        # taken the work, a fresh merge-base would equal head and leave nothing to compare.
+        base = (
+            str(earlier.get("base") or "") if earlier.get("worktree") == str(root) else ""
+        ) or git_out(root, "merge-base", "HEAD", git_out(project_root, "rev-parse", "HEAD"))
+        record.write_text(
             json.dumps(
                 {"worktree": str(root), "common_dir": str(common), "head": head, "base": base}
             )

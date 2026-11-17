@@ -356,15 +356,22 @@ def evaluate(payload: dict[str, Any], max_age_s: float) -> tuple[Path | None, st
     configured = (root / ".claude" / "gates.json").is_file() or bool(os.environ.get("GATES_CONFIG"))
     background = bool(payload.get("background_tasks")) or bool(payload.get("session_crons"))
     problems: list[str] = []
+    if removed:
+        # Before the configuration check: a fallback without gates must not wave the claim through.
+        claim = completion or progress
+        return root, (
+            f'the final message claims "{claim}", but {removed}. Report the work as '
+            "UNVERIFIED, or verify it in a checkout that holds it."
+        )
     if completion and configured:
-        problem = removed or completion_problem(root)
+        problem = completion_problem(root)
         if problem:
             problems.append(
                 f'the final message claims "{completion}", but {problem}. Run `{gates_command_hint()} '
                 f"full` and report its result, or restate what was not verified as UNVERIFIED/BLOCKED."
             )
     if progress and (configured or background):
-        problem = removed or progress_problem(root, max_age_s)
+        problem = progress_problem(root, max_age_s)
         if problem:
             problems.append(
                 f'the final message claims ongoing progress ("{progress}"), but {problem}. Show a '
