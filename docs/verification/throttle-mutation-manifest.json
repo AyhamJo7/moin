@@ -70,5 +70,17 @@
       "file": "packages/db/src/auth-abuse-bounds.integration.test.ts",
       "fullName": "a request that waited for its bucket refills against when it got it (X3) > a sweep at saturation leaves a stale overflow bucket unlocked"
     }
+  },
+  {
+    "id": "T7-clock-read-before-overflow-lock",
+    "invariant": "X4: a newcomer at saturation refills against the time it holds the overflow lock",
+    "expected": "The clock is read before the wait for the overflow lock: a holder's update lands later, the refill clamps to nothing and the newcomer writes a time older than the holder's.",
+    "file": "packages/db/migrations/0084_throttle_clock_and_sweep.sql",
+    "find": "    IF NOT v_admitted THEN\n      v_key := c_overflow;\n      PERFORM pg_advisory_xact_lock(hashtext(p_scope || ':' || encode(v_key, 'hex')));\n    END IF;\n  END IF;\n  -- The clock is read again now that this request holds the lock of the bucket it will use: the\n  -- reading taken on entry is older than any change a request that held the lock before it\n  -- committed, and refilling against it would subtract tokens. The interval never goes negative.\n  v_now := clock_timestamp();\n",
+    "replace": "    v_now := clock_timestamp();\n    IF NOT v_admitted THEN\n      v_key := c_overflow;\n      PERFORM pg_advisory_xact_lock(hashtext(p_scope || ':' || encode(v_key, 'hex')));\n    END IF;\n  END IF;\n",
+    "killingTest": {
+      "file": "packages/db/src/auth-abuse-bounds.integration.test.ts",
+      "fullName": "a request that waited for its bucket refills against when it got it (X3) > a newcomer queued on the overflow lock refills from the holder’s update (X4)"
+    }
   }
 ]
