@@ -121,6 +121,9 @@ def active_root(payload: dict[str, Any]) -> tuple[Path | None, str | None]:
         key = hashlib.sha256(session.encode()).hexdigest()[:24]
         path = Path(project) / ".claude" / "state" / "worktrees" / f"{key}.json"
         data = json.loads(path.read_text()) if path.exists() else None
+        if data and not Path(data["worktree"]).exists() and fallback is None:
+            # Nothing to fall back to: fail closed, as before the fallback existed.
+            raise RuntimeError("active session worktree was removed and no checkout remains")
         if data and not Path(data["worktree"]).exists():
             # Removed: no other checkout's evidence stands for the work that lived there. Whether
             # that work landed elsewhere is not judged here (a stale record, renames and pathspec

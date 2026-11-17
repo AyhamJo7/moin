@@ -102,6 +102,10 @@ class LinkedWorktreeContext(unittest.TestCase):
                 git(Path(temp), "clone", "-q", str(root), str(other))
                 _, problem = claim_check.evaluate({**claim, "cwd": str(other)}, 900)
                 self.assertIn("was removed", problem or "")
+                # With no checkout to fall back to at all, the claim check fails closed.
+                with patch.object(claim_check, "toplevel", return_value=None):
+                    with self.assertRaisesRegex(RuntimeError, "no checkout remains"):
+                        claim_check.active_root(payload)
                 branch.mkdir()
                 git(branch, "init", "-b", "main")
                 with self.assertRaisesRegex(RuntimeError, "no longer valid"):
