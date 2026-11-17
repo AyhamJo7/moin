@@ -314,6 +314,63 @@ describe('a request that waited for its bucket refills against when it got it (X
     60_000,
   );
 
+  evidenceTest(
+    'a newcomer queued on the overflow lock refills from the holder’s update (X4)',
+    async () => {
+      // At the ceiling a newcomer waits for the overflow lock. The holder empties the overflow
+      // bucket before it lets go. The newcomer must refill against the time it got the lock:
+      // reading the clock before that wait refills nothing and writes a time older than the
+      // holder's.
+      const refillPerSecond = 1;
+      const capacity = 3;
+      await stageBuckets(MAX_BUCKETS);
+      await fixtures.query(
+        `insert into auth_throttle_buckets (scope, key_digest, tokens, capacity, refill_per_second, updated_at)
+         values ('ip', $1::bytea, 0, $2, $3, clock_timestamp())`,
+        [OVERFLOW_DIGEST, capacity, refillPerSecond],
+      );
+      const holder = await fixtures.connect();
+      let pending: Promise<{ allowed: boolean }> | undefined;
+      let holderEpoch: number;
+      try {
+        await holder.query("select pg_advisory_lock(hashtext('ip:' || encode($1::bytea, 'hex')))", [
+          OVERFLOW_DIGEST,
+        ]);
+        pending = takeWith(key(), capacity, refillPerSecond);
+        await waitForAdvisoryWaiter();
+        // Long enough that a clock read before the wait is clearly older than the update below.
+        await new Promise((done) => setTimeout(done, 1_500));
+        const updated = await holder.query<{ at: string }>(
+          `update auth_throttle_buckets set tokens = 0, updated_at = clock_timestamp()
+            where scope = 'ip' and key_digest = $1::bytea
+            returning extract(epoch from updated_at)::text as at`,
+          [OVERFLOW_DIGEST],
+        );
+        holderEpoch = Number(updated.rows[0]?.at);
+        // Long enough that the refill from the holder's update covers one take.
+        await new Promise((done) => setTimeout(done, 1_500));
+      } finally {
+        await holder.query('select pg_advisory_unlock_all()');
+        holder.release();
+      }
+      await expect(pending).resolves.toEqual({ allowed: true });
+      const after = (
+        await fixtures.query<{ at: string; tokens: number }>(
+          `select extract(epoch from updated_at)::text as at, tokens from auth_throttle_buckets
+            where scope = 'ip' and key_digest = $1::bytea`,
+          [OVERFLOW_DIGEST],
+        )
+      ).rows[0];
+      if (after === undefined) throw new Error('no overflow bucket');
+      const afterEpoch = Number(after.at);
+      expect(afterEpoch).toBeGreaterThan(holderEpoch);
+      // One token taken from what accrued since the holder's update, and nothing more.
+      const accrued = Math.min(capacity, (afterEpoch - holderEpoch) * refillPerSecond);
+      expect(after.tokens).toBeCloseTo(accrued - 1, 6);
+    },
+    60_000,
+  );
+
   evidenceTest('the sweep passes over a stale row another transaction holds', async () => {
     // An in-flight call of an earlier body holds a stale row it is deleting. A newcomer that sweeps
     // must pass over it, not wait for it while it holds the count row.
