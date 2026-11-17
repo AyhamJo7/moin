@@ -1,9 +1,10 @@
 import { describe, expect } from 'vitest';
 import { evidenceTest } from '@moin/testing';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { closureOf } from './workspace-closure.ts';
 
 const REPO = resolve(import.meta.dirname, '..');
 
@@ -75,4 +76,38 @@ describe('the server image ships the workspace packages the server imports (P02.
       readFileSync(join(out, 'packages.txt'), 'utf8').split('\n').filter(Boolean),
     ).toStrictEqual(listed);
   });
+
+  evidenceTest(
+    'a transitive-only and an optional workspace dependency are in, dev ones are not',
+    () => {
+      // A synthetic workspace, so the shape is pinned whatever the real graph looks like today:
+      // root -> a -> b (b is no direct dependency of root), root -optional-> c, and dev edges to d
+      // and e that must not be followed.
+      const ws = mkdtempSync(join(tmpdir(), 'moin-closure-shape-'));
+      const write = (dir: string, manifest: Record<string, unknown>): string => {
+        const path = join(ws, dir);
+        mkdirSync(path, { recursive: true });
+        writeFileSync(join(path, 'package.json'), JSON.stringify(manifest));
+        return path;
+      };
+      const packages = new Map([
+        ['@x/a', write('packages/a', { dependencies: { '@x/b': 'workspace:*' } })],
+        ['@x/b', write('packages/b', { devDependencies: { '@x/e': 'workspace:*' } })],
+        ['@x/c', write('packages/c', {})],
+        ['@x/d', write('packages/d', {})],
+        ['@x/e', write('packages/e', {})],
+      ]);
+      const root = write('apps/root', {
+        dependencies: { '@x/a': 'workspace:*', 'left-pad': '1.3.0' },
+        optionalDependencies: { '@x/c': 'workspace:*' },
+        devDependencies: { '@x/d': 'workspace:*' },
+      });
+      expect(closureOf(root, packages)).toStrictEqual([
+        root,
+        packages.get('@x/a'),
+        packages.get('@x/b'),
+        packages.get('@x/c'),
+      ]);
+    },
+  );
 });

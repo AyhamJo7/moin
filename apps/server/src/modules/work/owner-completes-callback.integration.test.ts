@@ -776,6 +776,24 @@ describe('who may act on a task: owners and admins any, staff own or unassigned 
   );
 
   evidenceTest(
+    'staff read a colleague’s task: its state only, the same answer the owner gets',
+    async () => {
+      // GET checks the tenant and nothing else: the answer is id, status and version, which Today
+      // already shows every member. Completing it stays the assignee's (the test above).
+      const staff = await member('staff');
+      const colleague = await member('staff');
+      const { taskId } = await newCallback();
+      await assign(taskId, colleague.person.id);
+      const read = (cookie: string) =>
+        app.inject({ method: 'GET', url: taskPath(taskId), headers: { cookie } });
+      const asStaff = await read(staff.browser.cookie);
+      expect(asStaff.statusCode).toBe(200);
+      expect(asStaff.json()).toStrictEqual({ id: taskId, status: 'open', version: 2 });
+      expect(asStaff.json()).toStrictEqual((await read(owner.cookie)).json());
+    },
+  );
+
+  evidenceTest(
     'a task reassigned after the staff member saw it is refused, with the old and the new version',
     async () => {
       const staff = await member('staff');
