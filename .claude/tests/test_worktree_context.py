@@ -79,8 +79,6 @@ class LinkedWorktreeContext(unittest.TestCase):
                 self.assertIsNotNone(stop_guard.stall_check(branch, crons, state))
                 git(branch, "add", "new-work.txt")
                 git(branch, "commit", "-m", "progress in linked worktree")
-                # The hook records again after every tool call that names the worktree.
-                self.assertEqual(worktree_context.capture(payload, root), branch)
                 (_kit.evidence_dir(branch) / "latest-full.json").write_text(
                     json.dumps(root_evidence)
                 )
@@ -88,7 +86,8 @@ class LinkedWorktreeContext(unittest.TestCase):
                 git(root, "worktree", "remove", "--force", str(branch))
                 # Stall and type checks fall back to the cwd root instead of raising.
                 self.assertEqual(_kit.repo_root(str(root), "linked-session"), root)
-                # A claim does not: the removed branch's work is not on root, whose evidence passes.
+                # A claim does not: no checkout's evidence covers the work of a removed worktree,
+                # not even once the work is on root, and not in a repository without gates.
                 fallback, removed = claim_check.active_root(payload)
                 self.assertEqual(fallback, root)
                 self.assertIn("was removed", removed or "")
@@ -96,67 +95,19 @@ class LinkedWorktreeContext(unittest.TestCase):
                 with patch.dict(os.environ, {"GATES_CONFIG": "gates.json"}):
                     _, problem = claim_check.evaluate(claim, 900)
                 self.assertIn("was removed", problem or "")
-                # The recorded commit decides, not the branch: resetting it to root changes nothing.
-                work = git(root, "rev-parse", "feature")
-                git(root, "branch", "-f", "feature", "main")
-                self.assertIn("was removed", claim_check.active_root(payload)[1] or "")
-                # Once the work is on root (squash merge), root's evidence may stand for it.
-                git(root, "merge", "--squash", work)
+                git(root, "merge", "--squash", "feature")
                 git(root, "commit", "-m", "squash feature")
-                self.assertEqual(claim_check.active_root(payload), (root, None))
-                # Another repository holding the same content is not this session's checkout.
+                self.assertIn("was removed", claim_check.active_root(payload)[1] or "")
                 other = Path(temp) / "other"
                 git(Path(temp), "clone", "-q", str(root), str(other))
-                foreign = {**payload, "cwd": str(other)}
-                self.assertIn("was removed", claim_check.active_root(foreign)[1] or "")
-                # Even though the clone has no gates configuration, the claim is not waved through.
                 _, problem = claim_check.evaluate({**claim, "cwd": str(other)}, 900)
                 self.assertIn("was removed", problem or "")
-                # A revert after the merge takes the work off root again.
-                git(root, "revert", "--no-edit", "HEAD")
-                self.assertIn("was removed", claim_check.active_root(payload)[1] or "")
                 branch.mkdir()
                 git(branch, "init", "-b", "main")
                 with self.assertRaisesRegex(RuntimeError, "no longer valid"):
                     _kit.repo_root(str(root), "linked-session")
                 with self.assertRaisesRegex(RuntimeError, "no longer valid"):
                     claim_check.active_root(payload)
-
-    def test_a_recapture_after_the_merge_keeps_the_fork_point(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp) / "root"
-            root.mkdir()
-            git(root, "init", "-b", "main")
-            git(root, "config", "user.email", "test@example.test")
-            git(root, "config", "user.name", "Test")
-            (root / "base.txt").write_text("base")
-            git(root, "add", "base.txt")
-            git(root, "commit", "-m", "base")
-            branch = Path(temp) / "branch"
-            git(root, "worktree", "add", "-b", "feature", str(branch))
-            env = {k: v for k, v in os.environ.items() if k != "GATES_CONFIG"}
-            env["CLAUDE_PROJECT_DIR"] = str(root)
-            with patch.dict(os.environ, env, clear=True):
-                payload: dict[str, Any] = {
-                    "session_id": "ff-session",
-                    "cwd": str(root),
-                    "tool_input": {"command": f"cd {branch} && git status"},
-                    "last_assistant_message": "All gates are green.",
-                }
-                (branch / "work.txt").write_text("work")
-                git(branch, "add", "work.txt")
-                git(branch, "commit", "-m", "work")
-                worktree_context.capture(payload, root)
-                # main takes the work by fast-forward; a recapture now sees merge-base == head.
-                git(root, "merge", "--ff-only", "feature")
-                worktree_context.capture(payload, root)
-                self.assertEqual(claim_check.active_root(payload)[1], None)
-                git(root, "revert", "--no-edit", "HEAD")
-                git(root, "worktree", "remove", "--force", str(branch))
-                self.assertIn("was removed", claim_check.active_root(payload)[1] or "")
-                # The temp repository has no gates configuration: the claim is still blocked.
-                _, problem = claim_check.evaluate(payload, 900)
-                self.assertIn("was removed", problem or "")
 
 
 if __name__ == "__main__":

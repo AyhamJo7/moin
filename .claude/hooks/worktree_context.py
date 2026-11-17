@@ -24,13 +24,6 @@ def git_path(path: Path, *args: str) -> Path | None:
     return Path(proc.stdout.strip()).resolve() if proc.returncode == 0 else None
 
 
-def git_out(path: Path, *args: str) -> str:
-    proc = subprocess.run(
-        ["git", "-C", str(path), *args], capture_output=True, text=True, check=False
-    )
-    return proc.stdout.strip() if proc.returncode == 0 else ""
-
-
 def candidates(payload: dict[str, object]) -> list[Path]:
     tool = payload.get("tool_input")
     if not isinstance(tool, dict):
@@ -66,23 +59,8 @@ def capture(payload: dict[str, object], project: Path) -> Path | None:
         state = project_root / ".claude" / "state" / "worktrees"
         state.mkdir(parents=True, exist_ok=True)
         key = hashlib.sha256(session.encode()).hexdigest()[:24]
-        # Immutable commits, not a branch name: once the worktree is removed, claim_check compares
-        # the files `base..head` changed against the fallback checkout to see whether the work landed.
-        head = git_out(root, "rev-parse", "HEAD")
-        record = state / f"{key}.json"
-        try:
-            earlier = json.loads(record.read_text())
-        except (OSError, ValueError):
-            earlier = {}
-        # The first fork point recorded for this worktree is kept: once the project checkout has
-        # taken the work, a fresh merge-base would equal head and leave nothing to compare.
-        base = (
-            str(earlier.get("base") or "") if earlier.get("worktree") == str(root) else ""
-        ) or git_out(root, "merge-base", "HEAD", git_out(project_root, "rev-parse", "HEAD"))
-        record.write_text(
-            json.dumps(
-                {"worktree": str(root), "common_dir": str(common), "head": head, "base": base}
-            )
+        (state / f"{key}.json").write_text(
+            json.dumps({"worktree": str(root), "common_dir": str(common)})
         )
         return root
     return None
