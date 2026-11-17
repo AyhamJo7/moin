@@ -16,7 +16,8 @@ describe('the stored coverage report (P06.13.05)', () => {
     for (const route of INVENTORY.slice(1)) {
       ledger.record(key(route), { status: 404, check: 'foreign id answers 404' });
     }
-    const artifact = coverageArtifact(buildCoverageReport(INVENTORY, ledger), {
+    const served = new Set(INVENTORY.map(key));
+    const artifact = coverageArtifact(buildCoverageReport(INVENTORY, ledger, served), {
       commit: 'abc',
       generatedAt: '2026-11-01T00:00:00.000Z',
     });
