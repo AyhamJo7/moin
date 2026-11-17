@@ -10,7 +10,9 @@
 -- The sweep selected stale rows without locking them. A call of the 0023 body still in flight
 -- while 0083 committed could have deleted such a row and be waiting for the count row, which this
 -- request held while waiting for the same stale row: a deadlock. Sweep candidates are now taken
--- `FOR UPDATE SKIP LOCKED`, so a row another transaction holds is passed over.
+-- `FOR UPDATE SKIP LOCKED`, so a row another transaction holds is passed over, and the overflow
+-- buckets are filtered out before that lock: holding one while waiting for the overflow lock
+-- would deadlock with the request that holds that lock.
 --
 -- Only the function body changes: signature, owner, search path and EXECUTE grant are kept
 -- (CREATE OR REPLACE), 0083 is not edited, and the catalog's reviewed body digest moves.
@@ -79,12 +81,14 @@ BEGIN
       FOR v_stale IN
         SELECT b.ctid AS row_id, b.scope, b.key_digest FROM public.auth_throttle_buckets b
         WHERE updated_at < v_now - INTERVAL '24 hours'
+          -- The overflow buckets are never swept; filtered here, before the lock, because a
+          -- locked overflow row would be held while this request waits for the overflow lock.
+          AND b.key_digest <> c_overflow
         LIMIT 100
         -- A row another transaction holds (an in-flight call of an earlier body deleting it) is
         -- passed over, never waited for: waiting here while holding the count row deadlocks.
         FOR UPDATE SKIP LOCKED
       LOOP
-        CONTINUE WHEN v_stale.key_digest = c_overflow;
         IF pg_try_advisory_xact_lock(
              hashtext(v_stale.scope || ':' || encode(v_stale.key_digest, 'hex'))) THEN
           DELETE FROM public.auth_throttle_buckets b

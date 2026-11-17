@@ -34,5 +34,41 @@
       "file": "packages/db/src/auth-throttle.integration.test.ts",
       "fullName": "auth throttle buckets (0023) > concurrent takes never grant more than the bucket holds"
     }
+  },
+  {
+    "id": "T4-clock-not-reread",
+    "invariant": "X3: a request refills against the time it holds its bucket's lock",
+    "expected": "The clock read on entry is older than the update of a request that took the bucket meanwhile: the refill clamps to nothing and writes an older updated_at, so the next request earns the same interval again.",
+    "file": "packages/db/migrations/0084_throttle_clock_and_sweep.sql",
+    "find": "  v_now := clock_timestamp();\n",
+    "replace": "",
+    "killingTest": {
+      "file": "packages/db/src/auth-abuse-bounds.integration.test.ts",
+      "fullName": "a request that waited for its bucket refills against when it got it (X3) > a newcomer that waited at saturation gets an answer, not a negative balance"
+    }
+  },
+  {
+    "id": "T5-sweep-waits-on-held-rows",
+    "invariant": "X3: the sweep never waits for a stale row another transaction holds",
+    "expected": "A stale row held by an in-flight call of an earlier body is waited for while this request holds the count row: a deadlock.",
+    "file": "packages/db/migrations/0084_throttle_clock_and_sweep.sql",
+    "find": "        FOR UPDATE SKIP LOCKED\n",
+    "replace": "",
+    "killingTest": {
+      "file": "packages/db/src/auth-abuse-bounds.integration.test.ts",
+      "fullName": "a request that waited for its bucket refills against when it got it (X3) > the sweep passes over a stale row another transaction holds"
+    }
+  },
+  {
+    "id": "T6-overflow-locked-by-sweep",
+    "invariant": "X3: the sweep never locks an overflow bucket",
+    "expected": "A stale overflow row is locked by the sweep and held while the request waits for the overflow lock, against a request that holds that lock and waits for the row.",
+    "file": "packages/db/migrations/0084_throttle_clock_and_sweep.sql",
+    "find": "          AND b.key_digest <> c_overflow\n",
+    "replace": "",
+    "killingTest": {
+      "file": "packages/db/src/auth-abuse-bounds.integration.test.ts",
+      "fullName": "a request that waited for its bucket refills against when it got it (X3) > a sweep at saturation leaves a stale overflow bucket unlocked"
+    }
   }
 ]

@@ -252,43 +252,149 @@ async function takeWith(
   return { allowed: result.rows[0]?.allowed === true };
 }
 
+/** The overflow bucket's key in 0083 and 0084: the all-zero digest. */
+const OVERFLOW_DIGEST = Buffer.alloc(32);
+
+/** Waits until some backend is queued on an advisory lock. */
+async function waitForAdvisoryWaiter(): Promise<void> {
+  for (let i = 0; ; i += 1) {
+    const queued = await fixtures.query<{ n: string }>(
+      `select count(*)::text as n from pg_stat_activity
+        where datname = current_database() and wait_event_type = 'Lock' and wait_event = 'advisory'`,
+    );
+    if (queued.rows[0]?.n !== '0') return;
+    if (i > 400) throw new Error('nothing queued on an advisory lock');
+    await new Promise((done) => setTimeout(done, 25));
+  }
+}
+
+const overflowUpdatedAt = async (): Promise<Date> => {
+  const row = (
+    await fixtures.query<{ updated_at: Date }>(
+      "select updated_at from auth_throttle_buckets where scope = 'ip' and key_digest = $1::bytea",
+      [OVERFLOW_DIGEST],
+    )
+  ).rows[0];
+  if (row === undefined) throw new Error('no overflow bucket');
+  return row.updated_at;
+};
+
 describe('a request that waited for its bucket refills against when it got it (X3)', () => {
   evidenceTest(
     'a newcomer that waited at saturation gets an answer, not a negative balance',
     async () => {
       // At the ceiling every newcomer shares the overflow bucket. One newcomer is held on its own
       // source's lock after it has read the clock; others draw on the overflow bucket meanwhile.
-      // Refilling against the clock it read on entry would subtract tokens and break the check
-      // on the balance; read again under the lock it gets an ordinary yes or no.
+      // It must refill against the time it got the bucket: never a negative balance, and its
+      // update must be later than theirs, or the next request would earn that interval again.
       await stageBuckets(MAX_BUCKETS);
       const waiter = key();
       const holder = await fixtures.connect();
       let pending: Promise<{ allowed: boolean }> | undefined;
+      const seen = { before: Number.POSITIVE_INFINITY };
       try {
         await holder.query("select pg_advisory_lock(hashtext('ip:' || encode($1::bytea, 'hex')))", [
           waiter,
         ]);
         pending = takeWith(waiter, 3, 5);
-        for (let i = 0; ; i += 1) {
-          const queued = await fixtures.query<{ n: string }>(
-            `select count(*)::text as n from pg_stat_activity
-              where datname = current_database() and wait_event_type = 'Lock' and wait_event = 'advisory'`,
-          );
-          if (queued.rows[0]?.n !== '0') break;
-          if (i > 400) throw new Error('the newcomer never queued on its source lock');
-          await new Promise((done) => setTimeout(done, 25));
-        }
+        await waitForAdvisoryWaiter();
         await new Promise((done) => setTimeout(done, 1_500));
         for (let i = 0; i < 3; i += 1) await takeWith(key(), 3, 5);
+        seen.before = (await overflowUpdatedAt()).getTime();
       } finally {
         await holder.query('select pg_advisory_unlock_all()');
         holder.release();
       }
       await expect(pending).resolves.toEqual({ allowed: expect.any(Boolean) as boolean });
-      const balances = await fixtures.query<{ tokens: number }>(
-        'select tokens from auth_throttle_buckets where tokens < 0',
+      const negative = await fixtures.query('select 1 from auth_throttle_buckets where tokens < 0');
+      expect(negative.rows).toStrictEqual([]);
+      const after = await overflowUpdatedAt();
+      expect(after.getTime()).toBeGreaterThan(seen.before);
+    },
+    60_000,
+  );
+
+  evidenceTest('the sweep passes over a stale row another transaction holds', async () => {
+    // An in-flight call of an earlier body holds a stale row it is deleting. A newcomer that sweeps
+    // must pass over it, not wait for it while it holds the count row.
+    await stageBuckets(5, '2 days');
+    const held = (
+      await fixtures.query<{ key_digest: Buffer }>(
+        'select key_digest from auth_throttle_buckets order by key_digest limit 1',
+      )
+    ).rows[0]?.key_digest;
+    if (held === undefined) throw new Error('no staged bucket');
+    const holder = await fixtures.connect();
+    try {
+      await holder.query('begin');
+      await holder.query('select 1 from auth_throttle_buckets where key_digest = $1 for update', [
+        held,
+      ]);
+      const finished = await Promise.race([
+        take(key(), 100).then(() => true),
+        new Promise<boolean>((done) => {
+          setTimeout(() => {
+            done(false);
+          }, 5_000);
+        }),
+      ]);
+      expect(finished, 'the newcomer waited for a row another transaction holds').toBe(true);
+    } finally {
+      await holder.query('rollback');
+      holder.release();
+    }
+    const remaining = await fixtures.query(
+      'select 1 from auth_throttle_buckets where key_digest = $1',
+      [held],
+    );
+    expect(remaining.rows).toHaveLength(1);
+  });
+
+  evidenceTest(
+    'a sweep at saturation leaves a stale overflow bucket unlocked',
+    async () => {
+      // The overflow bucket is stale and the table is full of fresh buckets, so a newcomer sweeps,
+      // frees nothing and waits for the overflow lock, held here. While it waits, the overflow row
+      // must not be locked by it: the holder of the overflow lock may need that row next.
+      await stageBuckets(MAX_BUCKETS);
+      await fixtures.query(
+        `insert into auth_throttle_buckets (scope, key_digest, tokens, capacity, refill_per_second, updated_at)
+       values ('ip', $1::bytea, 3, 3, 0, clock_timestamp() - interval '2 days')`,
+        [OVERFLOW_DIGEST],
       );
-      expect(balances.rows).toStrictEqual([]);
+      const holder = await fixtures.connect();
+      let pending: Promise<boolean> | undefined;
+      try {
+        await holder.query("select pg_advisory_lock(hashtext('ip:' || encode($1::bytea, 'hex')))", [
+          OVERFLOW_DIGEST,
+        ]);
+        pending = take(key(), 3);
+        await waitForAdvisoryWaiter();
+        const prober = await fixtures.connect();
+        try {
+          await prober.query('begin');
+          const locked = await prober
+            .query(
+              'select 1 from auth_throttle_buckets where key_digest = $1::bytea for update nowait',
+              [OVERFLOW_DIGEST],
+            )
+            .then(
+              () => false,
+              (error: unknown) => {
+                if ((error as { code?: string }).code !== '55P03') throw error;
+                return true;
+              },
+            );
+          await prober.query('rollback');
+          expect(locked, 'the sweep locked the overflow bucket').toBe(false);
+        } finally {
+          prober.release();
+        }
+      } finally {
+        await holder.query('select pg_advisory_unlock_all()');
+        holder.release();
+        await pending?.catch(() => undefined);
+      }
     },
     60_000,
   );
