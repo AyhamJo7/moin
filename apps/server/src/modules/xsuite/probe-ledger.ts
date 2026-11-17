@@ -26,7 +26,12 @@ interface LedgerEntry {
 
 export interface CoverageRow {
   readonly route: string;
-  readonly class: RouteClass;
+  /** Null for a route the production roots serve that has no inventory row. */
+  readonly class: RouteClass | null;
+  /** A production root serves the route. */
+  readonly served: boolean;
+  /** The inventory lists the route. */
+  readonly inventoried: boolean;
   /** The route was called. */
   readonly probed: boolean;
   /** The assertions about the answer held. */
@@ -44,6 +49,10 @@ export interface CoverageReport {
   readonly unprobed: readonly string[];
   readonly failed: readonly string[];
   readonly unknownProbes: readonly string[];
+  /** Served by a production root, missing from the inventory. */
+  readonly notInventoried: readonly string[];
+  /** In the inventory, served by no production root. */
+  readonly notServed: readonly string[];
 }
 
 export class ProbeLedger {
@@ -74,39 +83,59 @@ export class ProbeLedger {
 export const key = (route: Pick<InventoriedRoute, 'method' | 'path'>): string =>
   `${route.method} ${route.path}`;
 
+/**
+ * The denominator is every route the inventory lists or a production root serves (`served`, read
+ * from the roots by `routesServedBy`), so a route discovered on a root but missing from the
+ * inventory lowers the figure instead of staying outside it. Only a route that is both served and
+ * inventoried, and whose probe passed, counts as executed.
+ */
 export function buildCoverageReport(
   inventory: readonly InventoriedRoute[],
   ledger: ProbeLedger,
+  served: ReadonlySet<string>,
 ): CoverageReport {
-  const inventoried = new Set(inventory.map(key));
-  const rows: CoverageRow[] = inventory.map((route) => {
-    const id = key(route);
+  const inventoried = new Map(inventory.map((route) => [key(route), route]));
+  const all = [...inventoried.keys(), ...[...served].filter((id) => !inventoried.has(id)).sort()];
+  const rows: CoverageRow[] = all.map((id) => {
     const entry = ledger.get(id);
     return {
       route: id,
-      class: route.class,
+      class: inventoried.get(id)?.class ?? null,
+      served: served.has(id),
+      inventoried: inventoried.has(id),
       probed: entry !== undefined,
       passed: entry?.passed ?? false,
       status: entry?.status ?? null,
       check: entry?.check ?? null,
     };
   });
-  const executed = rows.filter((row) => row.passed);
+  const executed = rows.filter((row) => row.passed && row.served && row.inventoried);
   return {
     rows,
     inventoried: inventory.length,
-    required: inventory.length,
+    required: rows.length,
     executed: executed.length,
-    summary: `${String(executed.length)} of ${String(inventory.length)} probed`,
+    summary: `${String(executed.length)} of ${String(rows.length)} probed`,
     unprobed: rows.filter((row) => !row.probed).map((row) => row.route),
     failed: rows.filter((row) => row.probed && !row.passed).map((row) => row.route),
     unknownProbes: ledger.routes().filter((route) => !inventoried.has(route)),
+    notInventoried: rows.filter((row) => !row.inventoried).map((row) => row.route),
+    notServed: rows.filter((row) => !row.served).map((row) => row.route),
   };
 }
 
-/** Throws unless every inventoried route was called and its assertions held. */
+/**
+ * Throws unless the inventory equals the served routes and every one was called and its
+ * assertions held.
+ */
 export function assertFullyProbed(report: CoverageReport): void {
   const problems: string[] = [];
+  if (report.notInventoried.length > 0) {
+    problems.push(`served but not inventoried: ${report.notInventoried.join(', ')}`);
+  }
+  if (report.notServed.length > 0) {
+    problems.push(`inventoried but served by no production root: ${report.notServed.join(', ')}`);
+  }
   if (report.unprobed.length > 0) problems.push(`not called: ${report.unprobed.join(', ')}`);
   if (report.failed.length > 0) {
     problems.push(`called but its assertions did not hold: ${report.failed.join(', ')}`);
@@ -138,6 +167,8 @@ export function coverageArtifact(
     executed: report.executed,
     unprobed: report.unprobed,
     failed: report.failed,
+    notInventoried: report.notInventoried,
+    notServed: report.notServed,
     rows: report.rows,
   };
 }

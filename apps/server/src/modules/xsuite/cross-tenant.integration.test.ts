@@ -26,7 +26,13 @@ import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { Test } from '@nestjs/testing';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
-import { createTestDatabase, evidenceTest, type TestDatabase } from '@moin/testing';
+import {
+  createTestDatabase,
+  evidenceTest,
+  liveTenantTables,
+  type TestDatabase,
+  unseededTenantTables,
+} from '@moin/testing';
 import { withTenant } from '@moin/db';
 import { fixedClock } from '@moin/kernel';
 import { afterAll, beforeAll, describe, expect } from 'vitest';
@@ -52,7 +58,7 @@ import {
   key,
   ProbeLedger,
 } from './probe-ledger.ts';
-import { seedTwoTenants, type SeededWorld } from './seed.ts';
+import { seedTwoTenants, TENANT_A, TENANT_B, type SeededWorld } from './seed.ts';
 import { ABSENT_SURFACES, assertSurfacesAbsent } from './surface.ts';
 
 /**
@@ -135,6 +141,7 @@ async function build(): Promise<NestFastifyApplication> {
 
 /** A session cookie pair minted by direct row insert (seeded, not signed-in). */
 interface SeededSession {
+  readonly id: string;
   readonly header: string;
   readonly csrfToken: string;
   readonly csrfCookie: string;
@@ -176,6 +183,7 @@ async function mintSession(userId: string, freshStepUp: boolean): Promise<Seeded
     );
   }
   return {
+    id: sessionId,
     header: `__Host-moin_sid=${token}`,
     csrfToken: csrf,
     csrfCookie: `__Host-moin_csrf=${csrf}`,
@@ -465,17 +473,30 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
             [userId],
           )
           .then((r) => (r.rows[0] as { n: number }).n);
+      const revoked = (sessionId: string): Promise<boolean> =>
+        admin
+          .query('select revoked_at is not null as r from sessions where id = $1::uuid', [
+            sessionId,
+          ])
+          .then((r) => (r.rows[0] as { r: boolean }).r);
+      // A second device of A's owner: the one session sign-out-others must end.
+      const otherA = await mintSession(world.a.owner.id, true);
       const bBefore = await liveOf(world.b.owner.id);
       expect(bBefore).toBeGreaterThan(0);
       const signOut = await authed(sessionA, 'POST', '/api/auth/sign-out-others');
       ledger.called('POST /api/auth/sign-out-others', signOut.statusCode);
       expect(signOut.statusCode, signOut.body).toBe(200);
       expect(signOut.body).not.toContain('xsuite-beta');
+      expect(await revoked(otherA.id), "A's other session").toBe(true);
+      expect(await revoked(sessionA.id), "the caller's session").toBe(false);
+      expect(await revoked(sessionB.id), "B's session").toBe(false);
       expect(await liveOf(world.b.owner.id)).toBe(bBefore);
-      expect(sessionB.header).not.toBe(sessionA.header);
+      // And the router agrees: the caller still reads, the ended session no longer does.
+      expect((await authed(sessionA, 'GET', '/api/today')).statusCode).toBe(200);
+      expect((await authed(otherA, 'GET', '/api/today')).statusCode).toBe(401);
       ledger.record('POST /api/auth/sign-out-others', {
         status: signOut.statusCode,
-        check: "ends A's other sessions only; B's sessions untouched",
+        check: "ends A's other session; the caller's and B's sessions survive",
       });
     },
   );
@@ -859,6 +880,43 @@ describe('DB layer: every tenant table isolates A from B (P06.13.03)', () => {
     });
   });
 
+  evidenceTest('every tenant table holds a row of each tenant (P06.13.01)', async () => {
+    // The drift check. Seeding follows the catalog, so this fails only if a table cannot be
+    // seeded or the seed stops covering one; the control below shows it names such a table.
+    expect(await unseededTenantTables(admin, [TENANT_A, TENANT_B])).toStrictEqual([]);
+    await admin.query('create table public.xsuite_drift_probe (organisation_id uuid not null)');
+    try {
+      expect(await unseededTenantTables(admin, [TENANT_A, TENANT_B])).toStrictEqual([
+        `xsuite_drift_probe (${TENANT_A})`,
+        `xsuite_drift_probe (${TENANT_B})`,
+      ]);
+    } finally {
+      await admin.query('drop table public.xsuite_drift_probe');
+    }
+  });
+
+  evidenceTest('in every tenant table, A sees none of the rows B holds', async () => {
+    // B has a row in every tenant table (the test above), so each zero here is a real refusal.
+    const pool = database.pool();
+    const leaks: string[] = [];
+    for (const table of await liveTenantTables(admin)) {
+      // eslint-disable-next-line no-restricted-syntax -- identifiers come from pg_catalog, never input.
+      const sql = `select count(*)::int as n from ${table.qualified} where ${table.tenantColumn} = $1`;
+      const seen = await withTenant(pool, world.a.organisationId, (client) =>
+        client.query<{ n: number }>(sql, [world.b.organisationId]).then(
+          (r) => r.rows[0]?.n ?? 0,
+          (error: unknown) => {
+            // No SELECT privilege for the app role is a refusal too.
+            if ((error as { code?: string }).code === '42501') return 0;
+            throw error;
+          },
+        ),
+      );
+      if (seen !== 0) leaks.push(`${table.name}: ${String(seen)}`);
+    }
+    expect(leaks).toStrictEqual([]);
+  });
+
   evidenceTest('a forged organisation setting cannot escape the tenant', async () => {
     // P06.03.07 (request half): the tenant comes from the session, never from a caller
     // claim. At the DB layer the analogue is WITH CHECK — an insert naming B's org
@@ -889,7 +947,11 @@ describe('coverage is calls made, not inventory rows (P06.13.02, P06.13.05, LG-P
   evidenceTest(
     'every inventoried route was called by a probe above, and the report says so',
     () => {
-      const report = buildCoverageReport(INVENTORY, ledger);
+      const report = buildCoverageReport(
+        INVENTORY,
+        ledger,
+        routesServedBy([productionRoots.api, productionRoots.voice]),
+      );
       // Written before the assertion so a failing run still leaves the per-route evidence behind.
       const out = resolve(import.meta.dirname, '../../../../../test-results/xsuite-coverage.json');
       mkdirSync(resolve(out, '..'), { recursive: true });
