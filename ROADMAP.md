@@ -63,6 +63,9 @@ refuses them to a session, one worktree with an uncommitted change and the 26 st
 unused `apps/web/lib/realtime.ts` are gone; `platform/worker.ts` moved into A1.
 X3: migration 0084 makes the sign-in throttle read the clock under the bucket's lock and
 sweep only rows no other transaction holds.
+K1 (2026-11-17, added and finished the same day): when the worktree recorded for a session has
+been removed, `stop_guard` and `claim_check` fall back to the repo root of the current directory
+instead of raising; a worktree that exists but belongs to another repository still raises.
 
 | Area                                                              | Truth                                                                                                                                                                                                                                                                                 |
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

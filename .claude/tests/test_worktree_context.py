@@ -84,10 +84,8 @@ class LinkedWorktreeContext(unittest.TestCase):
                 )
                 self.assertIn("different tree", claim_check.completion_problem(branch) or "")
                 git(root, "worktree", "remove", "--force", str(branch))
-                with self.assertRaisesRegex(RuntimeError, "no longer valid"):
-                    _kit.repo_root(str(root), "linked-session")
-                with self.assertRaisesRegex(RuntimeError, "no longer valid"):
-                    claim_check.active_root(payload)
+                self.assertEqual(_kit.repo_root(str(root), "linked-session"), root)
+                self.assertEqual(claim_check.active_root(payload), root)
                 branch.mkdir()
                 git(branch, "init", "-b", "main")
                 with self.assertRaisesRegex(RuntimeError, "no longer valid"):

@@ -106,8 +106,9 @@ def active_root(payload: dict[str, Any]) -> Path | None:
     if project and isinstance(session, str) and session:
         key = hashlib.sha256(session.encode()).hexdigest()[:24]
         path = Path(project) / ".claude" / "state" / "worktrees" / f"{key}.json"
-        if path.exists():
-            data = json.loads(path.read_text())
+        data = json.loads(path.read_text()) if path.exists() else None
+        # A removed worktree falls back to the cwd root; one that exists but changed still raises.
+        if data and Path(data["worktree"]).exists():
             candidate = Path(data["worktree"])
             expected = Path(data["common_dir"]).resolve()
             for checkout in (Path(project), candidate):
