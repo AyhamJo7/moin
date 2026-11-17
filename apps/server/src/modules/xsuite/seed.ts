@@ -6,16 +6,18 @@
  * may create organisations and users — P06.04/P06.06 by design); the probes run as
  * `moin_app` through the Nest app or `withTenant`, exactly as traffic does.
  *
- * Tenant tables today (from `apply_tenant_rls` call sites): organisations, locations,
- * tenant_setup, owner_invitation_requests, audit_heads, audit_events, memberships,
- * invitations, support_access_grants. Global tables (users, sessions, auth_transactions)
- * hold the two persons and their sessions instead.
+ * The rows the HTTP probes reach for (organisations, locations, memberships, invitations,
+ * support grants, tasks, tenant setup, owner invitation requests, one audit event) are written by
+ * hand with meaningful values. Every other tenant table, read from the live catalog, gets one
+ * generic row of each tenant from the shared seeder (`seedTenantRow`), so a table a later
+ * migration adds is in the world the day it exists; `unseededTenantTables` is the drift check.
+ * Global tables (users, sessions, auth_transactions) hold the two persons and their sessions.
  *
  * Synthetic data only (INV-16): fixed UUIDs and `@example.test` addresses.
  */
 import { randomUUID } from 'node:crypto';
 import { withTenant } from '@moin/db';
-import type { TestDatabase } from '@moin/testing';
+import { countTenantRows, liveTenantTables, seedTenantRow, type TestDatabase } from '@moin/testing';
 
 /** The migration-role fixture pool: stage setup and result inspection, never behaviour. */
 type FixturePool = ReturnType<TestDatabase['fixturePool']>;
@@ -184,5 +186,13 @@ export async function seedTwoTenants(
 
   const a = await seedTenant(TENANT_A, 'xsuite-alpha', 'Xsuite Alpha GmbH', ownerA, adminA);
   const b = await seedTenant(TENANT_B, 'xsuite-beta', 'Xsuite Beta GmbH', ownerB, adminB);
+  // Every tenant table the rows above leave empty gets one generic row of each tenant.
+  for (const table of await liveTenantTables(admin)) {
+    for (const org of [TENANT_A, TENANT_B]) {
+      if ((await countTenantRows(admin, table, org)) > 0) continue;
+      const failure = await seedTenantRow(admin, table, org);
+      if (failure !== undefined) throw new Error(`cannot seed ${table.name}: ${failure}`);
+    }
+  }
   return { a, b };
 }

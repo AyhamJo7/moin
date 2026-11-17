@@ -74,10 +74,13 @@ EV-P06-038).
 ## The throttle bucket sweep (P06.12.01)
 
 - **Manifest:** [`throttle-mutation-manifest.json`](throttle-mutation-manifest.json): the sweep
-  window, the per-call sweep cap and the balance check in `app.take_signin_bucket` (migration 0023).
+  window, the per-call sweep cap and the balance check (`T1` to `T3`), and where the clock is
+  read and which rows the sweep locks (`T4` to `T7`), in `app.take_signin_bucket` (migration 0084).
 - **Latest report:** [`throttle-mutation-report.md`](throttle-mutation-report.md)
 
-All three variants run in the `integration` project against `packages/db/src/auth-throttle.integration.test.ts`.
+Every variant runs in the `integration` project: `T1` to `T3` against
+`packages/db/src/auth-throttle.integration.test.ts`, `T4` to `T7` against
+`packages/db/src/auth-abuse-bounds.integration.test.ts`.
 `T1` and `T2` survive the older `auth-abuse` stale-sweep test (measured by pointing the same
 variants at it), which is why that file exists. `T1` is a throttle bypass: with a shorter window,
 an exhausted bucket is swept and recreated full.

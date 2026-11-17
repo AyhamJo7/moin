@@ -8,6 +8,17 @@
 export { createTestDatabase, TEMPLATE_DATABASE } from './pg/template.ts';
 export type { TestDatabase } from './pg/template.ts';
 
+// The catalog-driven tenant seeder: one row of a tenant in every tenant table, for the write
+// matrix and the cross-tenant suite's two-tenant world (P06.13.01).
+export {
+  countTenantRows,
+  liveTenantTables,
+  seedTenantRow,
+  unseededTenantTables,
+  UNSEEDABLE,
+} from './pg/tenant-seed.ts';
+export type { Column, TenantTable } from './pg/tenant-seed.ts';
+
 export {
   Seeded,
   germanPerson,
