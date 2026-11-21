@@ -144,6 +144,12 @@ and **whether it is defensible at all is an open EXT-02 question**.
 | `call_events.call_id`                        | Contact  | yes (references)                                              | same                                      | hard delete | —            |
 | `call_events.kind`                           | Contact  | no alone (event catalogue, no free text)                      | same                                      | hard delete | —            |
 | `call_events.detail`                         | Contact  | no alone (opaque int marker)                                  | same                                      | hard delete | —            |
+| `call_disclosures.call_id`                   | Contact  | yes (references)                                              | same                                      | hard delete | —            |
+| `call_disclosures.disclosure_version`        | Contact  | no alone (template version tag)                               | same                                      | hard delete | —            |
+| `call_disclosures.issued_at`                 | Contact  | no alone (timestamp)                                          | same                                      | hard delete | —            |
+| `call_disclosure_playbacks.call_id`          | Contact  | yes (references)                                              | same                                      | hard delete | —            |
+| `call_disclosure_playbacks.outcome`          | Contact  | no alone (closed evidence catalogue)                          | same                                      | hard delete | —            |
+| `call_disclosure_playbacks.recorded_at`      | Contact  | no alone (timestamp)                                          | same                                      | hard delete | —            |
 | `messages.conversation_id`                   | Contact  | yes (references)                                              | same                                      | hard delete | —            |
 | `messages.thread_ref`                        | Contact  | yes in combination (which thread belongs to whom)             | same                                      | hard delete | —            |
 | `interaction_outcomes.conversation_id`       | Contact  | yes (references)                                              | same                                      | hard delete | —            |

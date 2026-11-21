@@ -1,8 +1,9 @@
 /**
- * Routed inbound webhook (P11.02.06): an active number answers with the
- * disclosure ConversationRelay TwiML (INV-03 end to end); a quarantined
- * number gets the neutral message; duplicate webhooks mint independent
- * single-use tokens without a duplicate row. Fresh DB, synthetic numbers.
+ * Routed inbound webhook (P11.02.06, ROADMAP S1): an active number stores the call and the
+ * disclosure version it is issued, and answers with the disclosure ConversationRelay TwiML in the
+ * tenant's name (INV-03 end to end); a quarantined number gets the neutral message and stores
+ * nothing; a duplicate webhook is deduplicated by the database (INV-11). Playback evidence is
+ * stored apart from the issue. Fresh DB, synthetic numbers, the runtime role's pool.
  */
 import { randomBytes, randomUUID } from 'node:crypto';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
@@ -22,8 +23,10 @@ import { LOGGER } from '../../../observability/logger.module.ts';
 import { noMeasurementSink } from '../application/relay-connection.ts';
 import { createRouteResolver, type RouteResolver } from '../../platform/route-resolver.ts';
 import { ROUTE_RESOLVER } from '../../platform/route-resolver.module.ts';
-import { createInMemoryCallDedup } from '../application/call-dedup.ts';
-import { CALL_DEDUP, CLOCK, MEASUREMENT_SINK, SESSION_TOKENS } from '../voice.tokens.ts';
+import { TENANT_POOL } from '../../platform/tenant-pool.module.ts';
+import { VoiceCalls } from '../../platform/voice-calls.ts';
+import { DISCLOSURE_VERSION } from '../domain/disclosure.ts';
+import { CLOCK, MEASUREMENT_SINK, SESSION_TOKENS } from '../voice.tokens.ts';
 import { TwilioSignatureGuard } from './twilio-signature.guard.ts';
 import { VoiceController } from './voice.controller.ts';
 
@@ -35,6 +38,7 @@ let admin: ReturnType<TestDatabase['fixturePool']>;
 let resolver: RouteResolver;
 let app: NestFastifyApplication;
 let tokens: SessionTokenStore;
+let calls: VoiceCalls;
 
 let seq = 200;
 function number(): string {
@@ -67,9 +71,11 @@ beforeAll(async () => {
       { provide: CLOCK, useValue: systemClock },
       { provide: MEASUREMENT_SINK, useValue: noMeasurementSink },
       { provide: ROUTE_RESOLVER, useValue: resolver },
-      { provide: CALL_DEDUP, useValue: createInMemoryCallDedup() },
+      { provide: TENANT_POOL, useValue: database.pool() },
+      VoiceCalls,
     ],
   }).compile();
+  calls = moduleRef.get(VoiceCalls);
 
   app = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
   await app.init();
@@ -157,38 +163,166 @@ describe('routed inbound webhook (P11.02.06)', () => {
     expect((tokens as ReturnType<typeof createInMemorySessionTokenStore>).size).toBe(before);
   });
 
-  evidenceTest('duplicate CallSid replays without a second effect (INV-11)', async () => {
-    const { org: orgId, location } = await org(`d-${randomUUID().slice(0, 8)}`);
+  evidenceTest(
+    'a duplicate CallSid stores one call and one disclosure, and the replay token is the tenant’s (INV-11)',
+    async () => {
+      const { org: orgId, location } = await org(`d-${randomUUID().slice(0, 8)}`);
+      const e164 = await routed(orgId, location);
+      const params = inboundParams(e164);
+      const first = await post('/voice/inbound', params);
+      const second = await post('/voice/inbound', params);
+      expect(first.statusCode).toBe(200);
+      expect(second.statusCode).toBe(200);
+      // The same TwiML but for the single-use token each delivery mints.
+      expect(withoutToken(second.body)).toBe(withoutToken(first.body));
+      expect(await stored(params.CallSid)).toStrictEqual({ calls: 1, disclosures: 1 });
+      // The replay's token opens a session for the same tenant, not a placeholder one.
+      expect(await consumeSessionToken(tokens, tokenOf(second.body), Date.now())).toMatchObject({
+        ok: true,
+        tenantId: orgId,
+      });
+    },
+  );
+
+  evidenceTest('a routed call stores the call and the disclosure version as issued', async () => {
+    const { org: orgId, location } = await org(`s-${randomUUID().slice(0, 8)}`);
+    const e164 = await routed(orgId, location);
+    const params = inboundParams(e164);
+    expect((await post('/voice/inbound', params)).statusCode).toBe(200);
+    const row = await admin.query<{
+      organisation_id: string;
+      from_number: string;
+      to_number: string;
+      disclosure_version: string;
+    }>(
+      `select c.organisation_id, c.from_number, c.to_number, d.disclosure_version
+         from calls c join call_disclosures d on d.call_id = c.id
+        where c.provider_call_sid = $1`,
+      [params.CallSid],
+    );
+    expect(row.rows).toStrictEqual([
+      {
+        organisation_id: orgId,
+        from_number: params.From,
+        to_number: e164,
+        disclosure_version: DISCLOSURE_VERSION,
+      },
+    ]);
+  });
+
+  evidenceTest(
+    'the spoken name is the tenant’s: profile name first, then its own name',
+    async () => {
+      const { org: orgId, location } = await org(`n-${randomUUID().slice(0, 8)}`);
+      const e164 = await routed(orgId, location);
+      // No profile name yet: the organisation's registered name.
+      const plain = await post('/voice/inbound', inboundParams(e164));
+      expect(plain.body).toContain('digitalen Assistenten von Route Org.');
+      await admin.query(
+        `insert into business_profile (organisation_id, id, category, name)
+       values ($1, $2, 'business_name', 'Pizzeria Sole')`,
+        [orgId, randomUUID()],
+      );
+      const named = await post('/voice/inbound', inboundParams(e164));
+      expect(named.body).toContain('digitalen Assistenten von Pizzeria Sole.');
+      expect(named.body).not.toContain('Testanschluss');
+    },
+  );
+
+  evidenceTest('a quarantined number stores no call', async () => {
+    const { org: orgId, location } = await org(`q-${randomUUID().slice(0, 8)}`);
     const e164 = number();
     await admin.query(
       'insert into number_routes (e164, route_organisation_id, location_id, status) values ($1, $2, $3, $4)',
-      [e164, orgId, location, 'active'],
+      [e164, orgId, location, 'quarantined'],
     );
-    // Same CallSid twice (Twilio retries): the replay answers 200 with the
-    // same TwiML shape and mints no second claim — first write wins.
-    const params = {
-      CallSid: `CA${randomUUID().replace(/-/g, '').slice(0, 32)}`,
-      From: '+4917612345678',
-      To: e164,
-      AccountSid: 'AC00000000000000000000000000000001',
-    };
-    const first = await post('/voice/inbound', params);
-    const second = await post('/voice/inbound', params);
-    expect(first.statusCode).toBe(200);
-    expect(second.statusCode).toBe(200);
-    expect(first.body).toContain('<ConversationRelay');
-    expect(second.body).toContain('<ConversationRelay');
-    const before = (tokens as ReturnType<typeof createInMemorySessionTokenStore>).size;
-    await post('/voice/inbound', params);
-    // The replay path mints a fresh single-use token per response (tokens
-    // cannot be reused), but the dedup claim stays single.
-    expect(
-      (tokens as ReturnType<typeof createInMemorySessionTokenStore>).size,
-    ).toBeGreaterThanOrEqual(before);
-    const routes = await admin.query<{ n: number }>(
-      'select count(*)::int as n from number_routes where e164 = $1',
-      [e164],
-    );
-    expect(routes.rows[0]?.n).toBe(1);
+    const params = inboundParams(e164);
+    expect((await post('/voice/inbound', params)).statusCode).toBe(200);
+    expect(await stored(params.CallSid)).toStrictEqual({ calls: 0, disclosures: 0 });
   });
 });
+
+describe('disclosure playback evidence is apart from the issue (S1, INV-03)', () => {
+  async function issuedCall(): Promise<{ orgId: string; callSid: string }> {
+    const { org: orgId, location } = await org(`p-${randomUUID().slice(0, 8)}`);
+    const params = inboundParams(await routed(orgId, location));
+    expect((await post('/voice/inbound', params)).statusCode).toBe(200);
+    return { orgId, callSid: params.CallSid };
+  }
+
+  const playbacks = (callSid: string) =>
+    admin
+      .query<{ outcome: string }>(
+        `select p.outcome from call_disclosure_playbacks p join calls c on c.id = p.call_id
+          where c.provider_call_sid = $1`,
+        [callSid],
+      )
+      .then((r) => r.rows.map((row) => row.outcome));
+
+  evidenceTest('an issued call has no playback evidence until the relay reports it', async () => {
+    const { callSid } = await issuedCall();
+    // Absent: issued, never played.
+    expect(await playbacks(callSid)).toStrictEqual([]);
+  });
+
+  evidenceTest('a confirmed playback stands; a later close does not downgrade it', async () => {
+    const { orgId, callSid } = await issuedCall();
+    expect(await calls.recordPlayback(orgId, callSid, 'confirmed')).toBe(true);
+    expect(await calls.recordPlayback(orgId, callSid, 'interrupted')).toBe(true);
+    expect(await playbacks(callSid)).toStrictEqual(['confirmed']);
+  });
+
+  evidenceTest('an interrupted playback is recorded as such', async () => {
+    const { orgId, callSid } = await issuedCall();
+    expect(await calls.recordPlayback(orgId, callSid, 'interrupted')).toBe(true);
+    expect(await playbacks(callSid)).toStrictEqual(['interrupted']);
+  });
+
+  evidenceTest('evidence for another tenant’s call, or an unknown one, is refused', async () => {
+    const { callSid } = await issuedCall();
+    const { org: other } = await org(`x-${randomUUID().slice(0, 8)}`);
+    expect(await calls.recordPlayback(other, callSid, 'confirmed')).toBe(false);
+    expect(await calls.recordPlayback(other, 'CAunknown', 'confirmed')).toBe(false);
+    expect(await playbacks(callSid)).toStrictEqual([]);
+  });
+});
+
+async function routed(orgId: string, location: string): Promise<string> {
+  const e164 = number();
+  await admin.query(
+    'insert into number_routes (e164, route_organisation_id, location_id, status) values ($1, $2, $3, $4)',
+    [e164, orgId, location, 'active'],
+  );
+  return e164;
+}
+
+function inboundParams(e164: string) {
+  return {
+    CallSid: `CA${randomUUID().replace(/-/g, '').slice(0, 32)}`,
+    From: '+4917612345678',
+    To: e164,
+    AccountSid: 'AC00000000000000000000000000000001',
+  };
+}
+
+const TOKEN = /<Parameter name="sessionToken" value="([^"]+)" \/>/u;
+
+function tokenOf(body: string): string {
+  const token = TOKEN.exec(body)?.[1];
+  if (token === undefined) throw new Error('no session token in the TwiML');
+  return token;
+}
+
+function withoutToken(body: string): string {
+  return body.replace(TOKEN, '<Parameter name="sessionToken" />');
+}
+
+async function stored(callSid: string): Promise<{ calls: number; disclosures: number }> {
+  const result = await admin.query<{ calls: number; disclosures: number }>(
+    `select (select count(*)::int from calls where provider_call_sid = $1) as calls,
+            (select count(*)::int from call_disclosures d join calls c on c.id = d.call_id
+              where c.provider_call_sid = $1) as disclosures`,
+    [callSid],
+  );
+  return result.rows[0] ?? { calls: -1, disclosures: -1 };
+}

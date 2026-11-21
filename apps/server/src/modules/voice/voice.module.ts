@@ -23,19 +23,25 @@ import { CONFIG } from '../../config/config.module.ts';
 import type { Config } from '../../config/env.ts';
 import { LOGGER } from '../../observability/logger.module.ts';
 import { RouteResolverModule } from '../platform/route-resolver.module.ts';
-import { noMeasurementSink, type MeasurementSink } from './application/relay-connection.ts';
+import { TenantPoolModule } from '../platform/tenant-pool.module.ts';
+import { VoiceCalls } from '../platform/voice-calls.ts';
+import {
+  noMeasurementSink,
+  type MeasurementSink,
+  type PlaybackRecorder,
+} from './application/relay-connection.ts';
 import { VoiceController } from './http/voice.controller.ts';
 import { TwilioSignatureGuard } from './http/twilio-signature.guard.ts';
 import { createFileMeasurementSink } from './infrastructure/measurement-sink.ts';
 import { registerRelayTransport } from './infrastructure/relay-transport.ts';
-import { createInMemoryCallDedup } from './application/call-dedup.ts';
-import { CALL_DEDUP, CLOCK, MEASUREMENT_SINK, SESSION_TOKENS } from './voice.tokens.ts';
+import { CLOCK, MEASUREMENT_SINK, SESSION_TOKENS } from './voice.tokens.ts';
 
 @Module({
-  imports: [RouteResolverModule],
+  imports: [RouteResolverModule, TenantPoolModule],
   controllers: [VoiceController],
   providers: [
     TwilioSignatureGuard,
+    VoiceCalls,
     { provide: CLOCK, useValue: systemClock },
     {
       // In-process for the spike. A second voice instance would not see the first one's tokens,
@@ -51,12 +57,6 @@ import { CALL_DEDUP, CLOCK, MEASUREMENT_SINK, SESSION_TOKENS } from './voice.tok
           ? noMeasurementSink
           : createFileMeasurementSink(config.VOICE_MEASUREMENT_SINK),
     },
-    {
-      // In-process CallSid claims. Same scaling note as the session tokens:
-      // a second voice instance needs Valkey; the port is already the one.
-      provide: CALL_DEDUP,
-      useFactory: () => createInMemoryCallDedup(),
-    },
   ],
 })
 export class VoiceModule implements OnModuleInit {
@@ -66,6 +66,7 @@ export class VoiceModule implements OnModuleInit {
     @Inject(SESSION_TOKENS) private readonly tokens: SessionTokenStore,
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(MEASUREMENT_SINK) private readonly sink: MeasurementSink,
+    private readonly calls: VoiceCalls,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -75,6 +76,34 @@ export class VoiceModule implements OnModuleInit {
       clock: this.clock,
       logger: this.logger,
       sink: this.sink,
+      playback: this.#playback(),
     });
+  }
+
+  /**
+   * Playback evidence (S1, INV-03) is written off the call's real-time path: the caller never
+   * waits for it, and a failed write is logged, never thrown into the relay session.
+   */
+  #playback(): PlaybackRecorder {
+    return {
+      record: (tenantId, callSid, outcome) => {
+        this.calls.recordPlayback(tenantId, callSid, outcome).then(
+          (stored) => {
+            if (!stored) {
+              this.logger.warn(
+                { outcome: 'playback-without-disclosure' },
+                'no issued disclosure for the session',
+              );
+            }
+          },
+          () => {
+            this.logger.error(
+              { outcome: 'playback-not-recorded' },
+              'disclosure playback evidence was not stored',
+            );
+          },
+        );
+      },
+    };
   }
 }

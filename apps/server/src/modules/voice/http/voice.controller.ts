@@ -34,11 +34,11 @@ import type { Config } from '../../../config/env.ts';
 import { LOGGER } from '../../../observability/logger.module.ts';
 import type { RouteResolver } from '../../platform/route-resolver.ts';
 import { ROUTE_RESOLVER } from '../../platform/route-resolver.module.ts';
-import type { CallDedupStore } from '../application/call-dedup.ts';
+import { VoiceCalls } from '../../platform/voice-calls.ts';
 import { routeInboundCall } from '../application/inbound-route.ts';
-import { buildDisclosure } from '../domain/disclosure.ts';
+import { buildDisclosure, DISCLOSURE_VERSION } from '../domain/disclosure.ts';
 import { RELAY_PATH, SESSION_TOKEN_PARAMETER } from '../domain/relay-contract.ts';
-import { CALL_DEDUP, CLOCK, SESSION_TOKENS } from '../voice.tokens.ts';
+import { CLOCK, SESSION_TOKENS } from '../voice.tokens.ts';
 import { TwilioSignatureGuard } from './twilio-signature.guard.ts';
 
 const HTTP_OK = 200;
@@ -52,8 +52,8 @@ export class VoiceController {
     @Inject(LOGGER) private readonly logger: Logger,
     @Inject(SESSION_TOKENS) private readonly tokens: SessionTokenStore,
     @Inject(CLOCK) private readonly clock: Clock,
+    private readonly calls: VoiceCalls,
     @Optional() @Inject(ROUTE_RESOLVER) private readonly resolver?: RouteResolver | null,
-    @Optional() @Inject(CALL_DEDUP) private readonly dedup?: CallDedupStore | null,
   ) {}
 
   /**
@@ -61,8 +61,10 @@ export class VoiceController {
    *
    * The dialled number (`To`) resolves to its tenant first (P11.01): unknown
    * or quarantined numbers get the neutral message, never another tenant.
-   * Routed calls mint a per-call session token (sixty seconds, single use)
-   * and answer with the disclosure TwiML. INV-12: the dialled number never
+   * Routed calls store the call and the disclosure version it is issued
+   * (S1), mint a per-call session token (sixty seconds, single use) and
+   * answer with the disclosure TwiML in the tenant's name. INV-12: the
+   * dialled number never
    * reaches the logs.
    */
   @Post('inbound')
@@ -80,31 +82,6 @@ export class VoiceController {
 
     const body = (request.body ?? {}) as Record<string, string>;
     const dialled = body['To'] ?? '';
-    // INV-11: a retried webhook for the same CallSid replays the recorded
-    // TwiML shape without minting a second token or a second effect. The
-    // replay carries a fresh token (single-use tokens cannot be reused), but
-    // the dedup claim is written once — first write wins.
-    const callSid = body['CallSid'] ?? '';
-    const seen =
-      callSid !== '' && this.dedup !== undefined && this.dedup !== null
-        ? await this.dedup.find(callSid)
-        : null;
-    if (seen !== null) {
-      this.logger.info(
-        { route: '/voice/inbound', outcome: `${seen.outcome}-replay`, direction: 'inbound' },
-        'replaying a duplicate webhook',
-      );
-      if (seen.outcome === 'unassigned-number') {
-        const unassigned = await routeInboundCall('invalid', {
-          resolveRoute: () => Promise.resolve([]),
-          // Replay of a counted outcome: the metric was emitted on the
-          // first delivery, not again here.
-          countUnassigned: () => undefined,
-        });
-        if (!unassigned.routed) return unassigned.twiml;
-      }
-      return this.buildRoutedTwiML(websocketOrigin, publicOrigin);
-    }
     const decision = await routeInboundCall(dialled, {
       resolveRoute: (e164) =>
         this.resolver === undefined || this.resolver === null
@@ -117,28 +94,41 @@ export class VoiceController {
         );
       },
     });
-    if (!decision.routed) {
-      if (callSid !== '' && this.dedup !== undefined && this.dedup !== null) {
-        await this.dedup.claim({ callSid, outcome: 'unassigned-number', token: null });
-      }
-      return decision.twiml;
-    }
+    // An unassigned number stores nothing (there is no tenant to store it in), and the neutral
+    // answer is the same for every delivery of the webhook.
+    if (!decision.routed) return decision.twiml;
 
+    // INV-11: the call row is the dedup. A retried webhook for the same CallSid finds it and
+    // writes nothing; the disclosure version stays the one first issued. The replay still mints a
+    // fresh token for the same tenant, because tokens are single use.
+    const recorded = await this.calls.recordInbound({
+      organisationId: decision.organisationId,
+      callSid: body['CallSid'] ?? '',
+      from: body['From'],
+      to: dialled,
+      disclosureVersion: DISCLOSURE_VERSION,
+    });
     const issued = await issueSessionToken(
       this.tokens,
       decision.organisationId,
       this.clock.now().getTime(),
     );
-    if (callSid !== '' && this.dedup !== undefined && this.dedup !== null) {
-      await this.dedup.claim({ callSid, outcome: 'twiml-issued', token: issued.token });
-    }
 
     this.logger.info(
-      { route: '/voice/inbound', outcome: 'twiml-issued', direction: 'inbound' },
+      {
+        route: '/voice/inbound',
+        outcome: recorded.created ? 'twiml-issued' : 'twiml-issued-replay',
+        direction: 'inbound',
+      },
       'answering an inbound call',
     );
 
-    return this.buildRoutedTwiML(websocketOrigin, publicOrigin, issued.token);
+    return this.buildRoutedTwiML(
+      websocketOrigin,
+      publicOrigin,
+      issued.token,
+      recorded.businessName,
+    );
   }
 
   /**
@@ -146,17 +136,16 @@ export class VoiceController {
    * travels as a value the type system requires, and there is no other way
    * to emit `<ConversationRelay>` from this controller.
    */
-  private async buildRoutedTwiML(
+  private buildRoutedTwiML(
     websocketOrigin: string,
     publicOrigin: string,
-    token?: string,
-  ): Promise<string> {
-    const sessionToken =
-      token ?? (await issueSessionToken(this.tokens, 'replay', this.clock.now().getTime())).token;
+    sessionToken: string,
+    businessName: string,
+  ): string {
     return buildConversationRelayTwiML({
       websocketUrl: `${websocketOrigin}${RELAY_PATH}`,
       actionUrl: `${publicOrigin}/voice/session-end`,
-      disclosure: buildDisclosure(this.config.VOICE_BUSINESS_NAME),
+      disclosure: buildDisclosure(businessName),
       language: this.config.VOICE_LANGUAGE,
       transcription: {
         provider: this.config.VOICE_TRANSCRIPTION_PROVIDER,

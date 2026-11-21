@@ -32,7 +32,8 @@ class TenantPoolLifecycle implements OnApplicationShutdown {
 }
 
 export function createTenantPool(config: Config): Pool | null {
-  if (config.SERVER_ROLE !== 'api') return null;
+  // The api role serves sessions; the voice role stores calls and their disclosures (S1).
+  if (config.SERVER_ROLE !== 'api' && config.SERVER_ROLE !== 'voice') return null;
   return createPool({
     connectionString: config.DATABASE_URL,
     max: POOL_MAX_CONNECTIONS,

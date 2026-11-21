@@ -13,8 +13,8 @@ import { loadConfig, type Config } from '../../../config/env.ts';
 import { LOGGER } from '../../../observability/logger.module.ts';
 import { noMeasurementSink } from '../application/relay-connection.ts';
 import { ROUTE_RESOLVER } from '../../platform/route-resolver.module.ts';
-import { createInMemoryCallDedup } from '../application/call-dedup.ts';
-import { CALL_DEDUP, CLOCK, MEASUREMENT_SINK, SESSION_TOKENS } from '../voice.tokens.ts';
+import { VoiceCalls } from '../../platform/voice-calls.ts';
+import { CLOCK, MEASUREMENT_SINK, SESSION_TOKENS } from '../voice.tokens.ts';
 import { TwilioSignatureGuard } from './twilio-signature.guard.ts';
 import { VoiceController } from './voice.controller.ts';
 
@@ -34,9 +34,11 @@ const CONFIG_VALUE: Config = loadConfig({
 
 let app: NestFastifyApplication;
 let tokens: SessionTokenStore;
+let calls: { recordInbound: ReturnType<typeof vi.fn>; recordPlayback: ReturnType<typeof vi.fn> };
 
 beforeEach(async () => {
   tokens = createInMemorySessionTokenStore();
+  calls = { recordInbound: vi.fn(), recordPlayback: vi.fn() };
   const moduleRef = await Test.createTestingModule({
     controllers: [VoiceController],
     providers: [
@@ -56,7 +58,7 @@ beforeEach(async () => {
         provide: ROUTE_RESOLVER,
         useValue: null,
       },
-      { provide: CALL_DEDUP, useValue: createInMemoryCallDedup() },
+      { provide: VoiceCalls, useValue: calls },
     ],
   }).compile();
 
@@ -136,6 +138,8 @@ describe('POST /voice/inbound', () => {
     expect(second.body).toBe(first.body);
     const store = tokens as ReturnType<typeof createInMemorySessionTokenStore>;
     expect(store.size).toBe(0);
+    // An unassigned number has no tenant to store a call in.
+    expect(calls.recordInbound).not.toHaveBeenCalled();
   });
 
   it('rejects a tampered body and a wrong account URL (P11.03.01/.04)', async () => {

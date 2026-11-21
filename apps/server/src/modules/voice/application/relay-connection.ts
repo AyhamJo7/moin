@@ -50,6 +50,16 @@ export const noMeasurementSink: MeasurementSink = {
   },
 };
 
+/**
+ * Where disclosure playback evidence goes (S1, INV-03). `confirmed`: a caller turn arrived, which
+ * the provider sends only after the non-interruptible greeting has finished. `interrupted`: the
+ * session authenticated and then closed before any caller turn. A socket that never authenticated
+ * records nothing: no greeting was played (absent). Must not throw or block the call.
+ */
+export interface PlaybackRecorder {
+  record(tenantId: string, callSid: string, outcome: 'confirmed' | 'interrupted'): void;
+}
+
 export interface ConnectionIo {
   send(frame: string): void;
   close(code: number): void;
@@ -61,6 +71,7 @@ export interface RelayConnectionDeps {
   readonly clock: Clock;
   readonly logger: Logger;
   readonly sink: MeasurementSink;
+  readonly playback?: PlaybackRecorder | undefined;
 }
 
 type State = 'awaiting-auth' | 'open' | 'closed';
@@ -68,6 +79,8 @@ type State = 'awaiting-auth' | 'open' | 'closed';
 export class RelayConnection {
   #state: State = 'awaiting-auth';
   #session: RelaySession | undefined;
+  #call: { readonly tenantId: string; readonly callSid: string } | undefined;
+  #playbackRecorded = false;
 
   constructor(private readonly deps: RelayConnectionDeps) {}
 
@@ -105,6 +118,9 @@ export class RelayConnection {
       return;
     }
 
+    if (decoded.kind === 'message' && decoded.message.type === 'prompt') {
+      this.#recordPlayback('confirmed');
+    }
     const step = session.handleFrame(decoded, receivedAtMs);
     for (const message of step.send) {
       this.deps.io.send(encodeOutbound(message));
@@ -128,6 +144,14 @@ export class RelayConnection {
   /** Called when the socket closes for any reason, including the far end hanging up. */
   onClose(): void {
     this.#state = 'closed';
+    this.#recordPlayback('interrupted');
+  }
+
+  /** Once per session, and only for an authenticated one: the first verdict stands. */
+  #recordPlayback(outcome: 'confirmed' | 'interrupted'): void {
+    if (this.#call === undefined || this.#playbackRecorded) return;
+    this.#playbackRecorded = true;
+    this.deps.playback?.record(this.#call.tenantId, this.#call.callSid, outcome);
   }
 
   async #authenticate(
@@ -168,6 +192,7 @@ export class RelayConnection {
     }
 
     this.#state = 'open';
+    this.#call = { tenantId: verdict.tenantId, callSid: decoded.message.callSid };
     const session = new RelaySession(verdict.tenantId, this.deps.clock);
     this.#session = session;
     this.deps.logger.info(

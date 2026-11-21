@@ -14,7 +14,11 @@ import {
   SESSION_TOKEN_PARAMETER,
 } from '../domain/relay-contract.ts';
 import { MEASUREMENT_SCRIPT } from '../domain/measurement-script.ts';
-import { RelayConnection, type MeasurementSink } from './relay-connection.ts';
+import {
+  RelayConnection,
+  type MeasurementSink,
+  type PlaybackRecorder,
+} from './relay-connection.ts';
 import type { SessionSummary } from './relay-session.ts';
 
 const T0 = Date.UTC(2026, 8, 29, 9, 0, 0);
@@ -28,6 +32,12 @@ function harness(store: SessionTokenStore = createInMemorySessionTokenStore()) {
   const sent: string[] = [];
   const closed: number[] = [];
   const recorded: SessionSummary[] = [];
+  const playbacks: [string, string, string][] = [];
+  const playback: PlaybackRecorder = {
+    record(tenantId, callSid, outcome) {
+      playbacks.push([tenantId, callSid, outcome]);
+    },
+  };
   const clock = fixedClock(new Date(T0));
   const sink: MeasurementSink = {
     record(summary) {
@@ -43,8 +53,9 @@ function harness(store: SessionTokenStore = createInMemorySessionTokenStore()) {
     clock,
     logger: fakeLogger(),
     sink,
+    playback,
   });
-  return { connection, sent, closed, recorded, clock, store };
+  return { connection, sent, closed, recorded, playbacks, clock, store };
 }
 
 function setupFrame(token: string | undefined): string {
@@ -192,5 +203,51 @@ describe('RelayConnection session flow', () => {
       );
     }
     expect(h.recorded[0]?.tenantId).toBe(TENANT);
+  });
+});
+
+describe('RelayConnection disclosure playback evidence (S1, INV-03)', () => {
+  const prompt = JSON.stringify({ type: 'prompt', voicePrompt: 'Hallo', last: true });
+
+  it('confirms playback on the first caller turn, once', async () => {
+    const h = harness();
+    const issued = await issueSessionToken(h.store, TENANT, T0);
+    await h.connection.onFrame(setupFrame(issued.token), T0);
+    expect(h.playbacks).toStrictEqual([]);
+    await h.connection.onFrame(prompt, T0 + 1);
+    await h.connection.onFrame(prompt, T0 + 2);
+    h.connection.onClose();
+    expect(h.playbacks).toStrictEqual([[TENANT, 'CA1', 'confirmed']]);
+  });
+
+  it('records an interrupted playback when the session closes before any caller turn', async () => {
+    const h = harness();
+    const issued = await issueSessionToken(h.store, TENANT, T0);
+    await h.connection.onFrame(setupFrame(issued.token), T0);
+    h.connection.onClose();
+    h.connection.onClose();
+    expect(h.playbacks).toStrictEqual([[TENANT, 'CA1', 'interrupted']]);
+  });
+
+  it.each([
+    ['never sends setup', () => Promise.resolve()],
+    [
+      'presents no token',
+      async (h: ReturnType<typeof harness>) => {
+        await h.connection.onFrame(setupFrame(undefined), T0);
+      },
+    ],
+    [
+      'presents a forged token',
+      async (h: ReturnType<typeof harness>) => {
+        await h.connection.onFrame(setupFrame('Z'.repeat(43)), T0);
+      },
+    ],
+  ])('records nothing (absent) for a socket that %s', async (_label, act) => {
+    const h = harness();
+    await act(h);
+    await h.connection.onFrame(prompt, T0 + 1);
+    h.connection.onClose();
+    expect(h.playbacks).toStrictEqual([]);
   });
 });
