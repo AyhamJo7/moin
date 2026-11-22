@@ -29,6 +29,8 @@ export interface InventoriedRoute {
   readonly foreignId?: 'invitation' | 'grant' | 'user' | 'task' | undefined;
   /** Minimal valid body; the foreign id is merged into it by the probe. */
   readonly body?: Record<string, unknown> | undefined;
+  /** The route requires an Idempotency-Key (P08.04): the probe sends a fresh one. */
+  readonly idempotent?: true | undefined;
 }
 
 /**
@@ -130,6 +132,7 @@ export const INVENTORY: readonly InventoriedRoute[] = [
     class: 'tenant-id',
     foreignId: 'task',
     body: { version: 1 },
+    idempotent: true,
   },
   // health — unauthenticated, thin bodies, no tenant data by construction.
   { method: 'GET', path: '/healthz', class: 'public' },

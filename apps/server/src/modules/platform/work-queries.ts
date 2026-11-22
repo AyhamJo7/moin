@@ -14,9 +14,11 @@
 
 import { Inject, Injectable } from '@nestjs/common';
 import {
+  IdempotencyMismatchError,
   TaskVersionConflictError,
   captureCallbackRequest,
   completeTask,
+  executeIdempotent,
   getTask,
   listTodayTasks,
   lockTask,
@@ -42,11 +44,31 @@ function holds(role: string, permissions: readonly string[]): boolean {
   }
 }
 
+/** What a completion answers with, and all its replay stores: no title, no content (INV-12). */
+export interface CompletedTask {
+  readonly id: string;
+  readonly status: Task['status'];
+  readonly version: number;
+}
+
 export type CompleteOutcome =
-  | { readonly kind: 'completed'; readonly task: Task }
+  | { readonly kind: 'completed'; readonly task: CompletedTask }
   | { readonly kind: 'conflict' }
   | { readonly kind: 'forbidden' }
-  | { readonly kind: 'missing' };
+  | { readonly kind: 'missing' }
+  /** The Idempotency-Key already names a different action (another task, version or member). */
+  | { readonly kind: 'key-reused' }
+  /** Another request holds the task or its key: nothing changed; trying again is safe. */
+  | { readonly kind: 'busy' };
+
+/**
+ * The transaction waited too long for a row another request holds (statement timeout, lock not
+ * available), or lost a deadlock or serialisation race: nothing changed, and trying again is safe.
+ */
+function contended(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  return code === '57014' || code === '55P03' || code === '40P01' || code === '40001';
+}
 
 @Injectable()
 export class WorkQueries {
@@ -83,7 +105,11 @@ export class WorkQueries {
    * lifecycle conflict throws out of `withTenant`, which rolls the whole walk back, and is
    * reported here as `conflict`; a task row the tenant cannot see is `missing`, whoever owns it.
    */
-  async complete(taskId: string, version: number): Promise<CompleteOutcome> {
+  async complete(
+    taskId: string,
+    version: number,
+    idempotencyKey?: string,
+  ): Promise<CompleteOutcome> {
     const scope = this.scope();
     try {
       return await withTenant(
@@ -95,7 +121,8 @@ export class WorkQueries {
           // The member's standing is read again after the task is locked: disabling a member
           // unassigns their tasks (trigger), so a request that passed the session guard just
           // before would otherwise find the task unassigned and act on it. The role judged is
-          // the committed one, not the one the guard resolved earlier.
+          // the committed one, not the one the guard resolved earlier. A replay passes this too:
+          // a stored answer is never handed to someone who may no longer act on the task.
           const standing = await client.query<{ role: string }>(
             "select role from memberships where user_id = $1 and status = 'active'",
             [scope.actorId],
@@ -107,12 +134,28 @@ export class WorkQueries {
             role === 'staff' &&
             (task.assigneeUserId === null || task.assigneeUserId === scope.actorId);
           if (!anyTask && !ownOrUnassigned) return { kind: 'forbidden' };
-          return { kind: 'completed', task: await completeTask(client, taskId, version) };
+          const walk = async (): Promise<CompletedTask> => {
+            const done = await completeTask(client, taskId, version);
+            return { id: done.id, status: done.status, version: done.version };
+          };
+          if (idempotencyKey === undefined) return { kind: 'completed', task: await walk() };
+          // One action per key (P08.04): this task, this version, this member. The same key
+          // again replays the committed answer for 24 hours; with anything else it is refused. A
+          // conflict rolls the key back with everything else, so repeating it decides again.
+          const { result } = await executeIdempotent(client, {
+            operation: 'task.complete',
+            key: idempotencyKey,
+            body: { taskId, version, actor: scope.actorId },
+            execute: walk,
+          });
+          return { kind: 'completed', task: result };
         },
         { actorId: scope.actorId, correlationId: auditCorrelationId() },
       );
     } catch (error) {
       if (error instanceof TaskVersionConflictError) return { kind: 'conflict' };
+      if (error instanceof IdempotencyMismatchError) return { kind: 'key-reused' };
+      if (contended(error)) return { kind: 'busy' };
       throw error;
     }
   }

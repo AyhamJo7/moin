@@ -21,6 +21,7 @@ import {
   TODAY_CONTRACT_VERSIONED,
   TODAY_PATH,
   CSRF_HEADER_NAME,
+  IDEMPOTENCY_KEY_HEADER,
   taskCompletePath,
   taskPath,
   todayResponseSchema,
@@ -230,14 +231,18 @@ function today(who: Browser | null = owner, on: NestFastifyApplication = app) {
   });
 }
 
-/** A browser-shaped POST: both cookies, the echoed token, and the app's own origin. */
+/**
+ * A browser-shaped POST: both cookies, the echoed token, the app's own origin, and a fresh
+ * Idempotency-Key unless `key` names one (`null` sends none).
+ */
 function complete(
   taskId: string,
   version: unknown,
   who: Browser | null = owner,
-  extra: { headers?: Record<string, string>; body?: unknown } = {},
+  extra: { headers?: Record<string, string>; body?: unknown; key?: string | null } = {},
   on: NestFastifyApplication = app,
 ) {
+  const key = extra.key === undefined ? randomUUID() : extra.key;
   return on.inject({
     method: 'POST',
     url: taskCompletePath(taskId),
@@ -245,6 +250,7 @@ function complete(
       'content-type': 'application/json',
       origin: APP_ORIGIN,
       ...(who === null ? {} : { cookie: who.cookie, [CSRF_HEADER_NAME]: who.csrf }),
+      ...(key === null ? {} : { [IDEMPOTENCY_KEY_HEADER]: key }),
       ...extra.headers,
     },
     payload: JSON.stringify(extra.body ?? { version }),
@@ -639,6 +645,214 @@ describe('owner completes a callback task (M2A)', () => {
   );
 });
 
+async function idempotencyRows(key: string) {
+  const result = await admin.query<{ operation: string; status: string }>(
+    'select operation, status from idempotency_keys where key = $1',
+    [key],
+  );
+  return result.rows;
+}
+
+// Each test acts as its own admin member: the per-account throttle would otherwise spend the
+// owner's budget that later tests rely on.
+describe('one completion per Idempotency-Key (P08.04, A1c)', () => {
+  evidenceTest('the same key again replays the answer and acts once', async () => {
+    const me = (await member('admin')).browser;
+    const { taskId } = await newCallback();
+    const key = randomUUID();
+    const first = await complete(taskId, 1, me, { key });
+    expect(first.statusCode).toBe(200);
+    const auditAfter = await auditCount(restaurant);
+    const rowAfter = await taskRow(taskId);
+    const again = await complete(taskId, 1, me, { key });
+    expect(again.statusCode).toBe(200);
+    expect(again.json()).toStrictEqual(first.json());
+    // Without the key the repeat would be a stale version (409); with it nothing moved.
+    expect(await taskRow(taskId)).toStrictEqual(rowAfter);
+    expect(await auditCount(restaurant)).toBe(auditAfter);
+    expect(await statusEvents(taskId)).toHaveLength(COMPLETION_MOVES);
+    expect(await idempotencyRows(key)).toStrictEqual([
+      { operation: 'task.complete', status: 'succeeded' },
+    ]);
+  });
+
+  evidenceTest(
+    'the key reused for another task, version or member is a 422 that acts on nothing',
+    async () => {
+      const me = (await member('admin')).browser;
+      const { taskId } = await newCallback();
+      const other = await newCallback();
+      const colleague = await member('admin');
+      const key = randomUUID();
+      expect((await complete(taskId, 1, me, { key })).statusCode).toBe(200);
+      const otherBefore = await frozen(other.taskId);
+      const auditBefore = await auditCount(restaurant);
+      for (const [what, response] of [
+        ['another task', await complete(other.taskId, 1, me, { key })],
+        ['another version', await complete(taskId, 2, me, { key })],
+        ['another member', await complete(taskId, 1, colleague.browser, { key })],
+      ] as const) {
+        expect(response.statusCode, what).toBe(422);
+        expect(response.json(), what).toStrictEqual({
+          type: '/problems/idempotency-key-reused',
+          title: 'Idempotency-Key already used',
+          status: 422,
+        });
+      }
+      expect(await frozen(other.taskId)).toStrictEqual(otherBefore);
+      expect(await auditCount(restaurant)).toBe(auditBefore);
+    },
+  );
+
+  evidenceTest('two requests with one key at once complete the task once', async () => {
+    const me = (await member('admin')).browser;
+    const { taskId } = await newCallback();
+    const key = randomUUID();
+    const [a, b] = await Promise.all([
+      complete(taskId, 1, me, { key }),
+      complete(taskId, 1, me, { key }),
+    ]);
+    expect([a.statusCode, b.statusCode]).toStrictEqual([200, 200]);
+    expect(a.json()).toStrictEqual(b.json());
+    expect(await statusEvents(taskId)).toHaveLength(COMPLETION_MOVES);
+    expect(await taskRow(taskId)).toMatchObject({ status: 'done', version: 1 + COMPLETION_MOVES });
+  });
+
+  evidenceTest('a refusal or a conflict keeps no key, so the same key decides again', async () => {
+    const me = (await member('admin')).browser;
+    const { taskId } = await newCallback();
+    const key = randomUUID();
+    const stale = await complete(taskId, 7, me, { key });
+    expect(stale.statusCode).toBe(409);
+    expect(await idempotencyRows(key)).toStrictEqual([]);
+    expect((await complete(randomUUID(), 1, me, { key })).statusCode).toBe(404);
+    expect(await idempotencyRows(key)).toStrictEqual([]);
+  });
+
+  evidenceTest('a malformed key is a 400 before anything is read or written', async () => {
+    const me = (await member('admin')).browser;
+    const { taskId } = await newCallback();
+    const before = await frozen(taskId);
+    const auditBefore = await auditCount(restaurant);
+    for (const key of ['', 'not-a-uuid', `${randomUUID()}x`]) {
+      const response = await complete(taskId, 1, me, { key });
+      expect(response.statusCode, key).toBe(400);
+      expect(response.json(), key).toStrictEqual({
+        type: '/problems/idempotency-key-invalid',
+        title: 'Idempotency-Key invalid',
+        status: 400,
+      });
+    }
+    expect(await frozen(taskId)).toStrictEqual(before);
+    expect(await auditCount(restaurant)).toBe(auditBefore);
+  });
+
+  evidenceTest(
+    'an owner tab on the previous app, sending no key, still completes once',
+    async () => {
+      const me = (await member('admin')).browser;
+      const { taskId } = await newCallback();
+      const done = await complete(taskId, 1, me, { key: null });
+      expect(done.statusCode).toBe(200);
+      expect(await statusEvents(taskId)).toHaveLength(COMPLETION_MOVES);
+      // Without a key there is nothing to replay: the repeat is the stale version it is.
+      expect((await complete(taskId, 1, me, { key: null })).statusCode).toBe(409);
+    },
+  );
+
+  evidenceTest('a replay is answered only to a member who may still act on the task', async () => {
+    const colleague = await member('admin');
+    const staff = await member('staff');
+    const { taskId } = await newCallback();
+    await assign(taskId, staff.person.id);
+    const key = randomUUID();
+    expect((await complete(taskId, 2, colleague.browser, { key })).statusCode).toBe(200);
+    // The session guard ends a changed member's session, so the service's own check is shown
+    // with the scope the guard resolved before the change (as for a request already in flight).
+    const queries = app.get(WorkQueries);
+    const sawThem = { organisationId: restaurant, actorId: colleague.person.id, permissions: [] };
+    // Demoted to staff, on a task assigned to someone else: the stored answer is not theirs.
+    await admin.query(
+      // eslint-disable-next-line no-restricted-syntax -- fixture write on the migration role; the SET-session rule matches UPDATE ... SET verb text.
+      "update memberships set role = 'staff', version = version + 1 where user_id = $1",
+      [colleague.person.id],
+    );
+    expect(
+      await runInTenantScope({ ...sawThem, role: 'admin' }, () => queries.complete(taskId, 2, key)),
+    ).toStrictEqual({ kind: 'forbidden' });
+    // Disabled: refused before any replay as well.
+    await admin.query(
+      "update memberships set status = 'disabled', version = version + 1 where user_id = $1",
+      [colleague.person.id],
+    );
+    expect(
+      await runInTenantScope({ ...sawThem, role: 'admin' }, () => queries.complete(taskId, 2, key)),
+    ).toStrictEqual({ kind: 'forbidden' });
+    // Through the API the changed member's session is refused outright.
+    expect([401, 403]).toContain(
+      (await complete(taskId, 2, colleague.browser, { key })).statusCode,
+    );
+  });
+
+  evidenceTest(
+    'the same key with the task id in other letter case is the same request',
+    async () => {
+      const me = (await member('admin')).browser;
+      const { taskId } = await newCallback();
+      const key = randomUUID();
+      const first = await complete(taskId, 1, me, { key });
+      expect(first.statusCode).toBe(200);
+      const again = await complete(taskId.toUpperCase(), 1, me, { key });
+      expect(again.statusCode).toBe(200);
+      expect(again.json()).toStrictEqual(first.json());
+      expect(await statusEvents(taskId)).toHaveLength(COMPLETION_MOVES);
+    },
+  );
+
+  evidenceTest(
+    'a request held up by another past its time limit is a 409 that changes nothing',
+    async () => {
+      const me = (await member('admin')).browser;
+      const { taskId } = await newCallback();
+      const before = await frozen(taskId);
+      const holder = await admin.connect();
+      try {
+        await holder.query('begin');
+        await holder.query('select 1 from tasks where id = $1 for update', [taskId]);
+        const response = await complete(taskId, 1, me);
+        expect(response.statusCode).toBe(409);
+        expect(response.headers['retry-after']).toBe('1');
+        expect(response.json()).toStrictEqual({
+          type: '/problems/busy',
+          title: 'Try again',
+          status: 409,
+        });
+      } finally {
+        await holder.query('rollback');
+        holder.release();
+      }
+      expect(await frozen(taskId)).toStrictEqual(before);
+    },
+  );
+
+  evidenceTest(
+    'expired keys of the tenant are deleted by later keyed requests, not kept',
+    async () => {
+      const me = (await member('admin')).browser;
+      const expired = randomUUID();
+      await admin.query(
+        `insert into idempotency_keys
+         (organisation_id, id, operation, key, request_hash, status, expires_at)
+       values ($1, $2, 'task.complete', $3, 'x', 'succeeded', now() - interval '1 minute')`,
+        [restaurant, randomUUID(), expired],
+      );
+      const { taskId } = await newCallback();
+      expect((await complete(taskId, 1, me)).statusCode).toBe(200);
+      expect(await idempotencyRows(expired)).toStrictEqual([]);
+    },
+  );
+});
+
 describe('who may complete a task (M2A)', () => {
   evidenceTest(
     'another tenant’s owner gets the same 404 as for a missing task, and changes nothing',
@@ -936,11 +1150,11 @@ describe('who may act on a task: owners and admins any, staff own or unassigned 
 
       // The disabled member's task is now unassigned, which a stale "staff" scope would allow.
       const gone = await runInTenantScope(asGuardSawThem(staff.person, 'staff'), () =>
-        queries.complete(mine.taskId, 3),
+        queries.complete(mine.taskId, 3, randomUUID()),
       );
       // The demoted admin's stale "admin" scope would allow a colleague's task.
       const stale = await runInTenantScope(asGuardSawThem(demoted.person, 'admin'), () =>
-        queries.complete(theirs.taskId, 2),
+        queries.complete(theirs.taskId, 2, randomUUID()),
       );
       expect(gone).toStrictEqual({ kind: 'forbidden' });
       expect(stale).toStrictEqual({ kind: 'forbidden' });

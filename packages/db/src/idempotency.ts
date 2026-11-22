@@ -32,6 +32,9 @@ export function hashRequest(body: unknown): string {
     .digest('hex');
 }
 
+/** Expired keys of the tenant deleted per keyed request, so the purge never grows a request. */
+export const IDEMPOTENCY_PURGE_BATCH = 100;
+
 function checkOperation(operation: string): string {
   const trimmed = operation.trim();
   if (trimmed.length === 0 || trimmed.length > 80) {
@@ -66,6 +69,17 @@ export async function executeIdempotent<T>(
   const operation = checkOperation(input.operation);
   const key = checkKey(input.key);
   const digest = hashRequest(input.body);
+  // Retention (24 h, data inventory): every keyed request of a tenant deletes a bounded batch of
+  // that tenant's expired keys, whoever presented them, skipping rows another transaction holds.
+  // A key is never replayed after expiry in any case (below).
+  await client.query(
+    `delete from idempotency_keys
+      where organisation_id = app.current_org()
+        and id in (select id from idempotency_keys
+                    where organisation_id = app.current_org() and expires_at <= now()
+                    limit $1::integer for update skip locked)`,
+    [IDEMPOTENCY_PURGE_BATCH],
+  );
   // Expired rows never block a reuse: delete-then-insert is one statement,
   // so concurrent reuses still serialise on the unique index.
   await client.query(
