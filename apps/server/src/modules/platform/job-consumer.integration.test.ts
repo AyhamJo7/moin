@@ -2,6 +2,13 @@
  * The job consumer against real PostgreSQL (as `moin_app`, FORCE RLS) and a real SQS-compatible
  * emulator (P08.05.01–.04, INV-11, INV-19). The job type and every handler here are test fixtures:
  * they prove the worker infrastructure, not a production callback-to-outbox pipeline.
+ *
+ * The async failure scenarios run here against the real consumer (P08.11.01): duplicate and
+ * delayed delivery (the worker side of FS-01), two workers racing one job (FS-10), a crash after
+ * the commit and before the delete, and a backend killed before the commit (FS-18), a backlog that
+ * drains without loss within the concurrency limit (the worker side of FS-14), a handler failure
+ * recorded and hidden for the backoff, and the dead-letter paths. What each test proves, and what
+ * stays open, is in `docs/verification/failure-injection-report.md`.
  */
 import { createPool, type Pool } from '@moin/db/pool';
 import { enqueueJob, withTenant, type JobHandler } from '@moin/db';
@@ -17,6 +24,11 @@ const ORG_A = '11111111-1111-4111-8111-111111111111';
 const ORG_B = '22222222-2222-4222-8222-222222222222';
 const SENTINEL = 'caller-Maria-Schmidt-+4930123456';
 const VISIBILITY_S = 2;
+const CONCURRENCY = 2;
+/** More jobs than the consumer's concurrency, so draining takes several receives. */
+const BACKLOG_JOBS = 7;
+/** Long enough for the consumer to poll again, short of the visibility timeout. */
+const HOLD_MS = 1_200;
 
 let database: TestDatabase;
 let app: Pool;
@@ -154,7 +166,7 @@ function makeConsumer(
     logger,
     isShuttingDown,
     options: {
-      concurrency: 2,
+      concurrency: CONCURRENCY,
       visibilitySeconds: VISIBILITY_S,
       waitSeconds: 1,
       drainTimeoutMs: 5_000,
@@ -191,6 +203,7 @@ describe('job consumer over SQS and PostgreSQL', () => {
     },
   );
 
+  // FS-01.
   evidenceTest('duplicate deliveries of one message do not repeat the effect', async () => {
     const job = await seed();
     for (let i = 0; i < 3; i += 1) await queues.queues.jobs.send(job.body);
@@ -202,6 +215,7 @@ describe('job consumer over SQS and PostgreSQL', () => {
     expect(await queues.queues.jobs.receive({ max: 10, waitSeconds: 0 })).toHaveLength(0);
   });
 
+  // FS-10.
   evidenceTest('two workers racing on one logical job create one effect', async () => {
     const job = await seed();
     let runs = 0;
@@ -220,8 +234,79 @@ describe('job consumer over SQS and PostgreSQL', () => {
     expect(await queues.queues.jobs.receive({ max: 10, waitSeconds: 0 })).toHaveLength(0);
   });
 
+  // FS-14: a backlog larger than the consumer's concurrency drains completely, each job once.
+  evidenceTest('a backlog drains without loss, one effect per job', async () => {
+    const jobs = await Promise.all(Array.from({ length: BACKLOG_JOBS }, () => seed()));
+    for (const job of jobs) await queues.queues.jobs.send(job.body);
+    makeConsumer(registry(writeEffect)).start();
+    await until(async () => {
+      const states = await Promise.all(jobs.map((job) => ledger(job.envelope.jobId)));
+      return states.every((state) => state?.status === 'succeeded');
+    });
+    for (const job of jobs) expect(await effects(job.envelope.jobId)).toBe(1);
+    await sleep(VISIBILITY_S * 1000 + 500);
+    expect(await queues.counts('jobs')).toEqual({ visible: 0, leased: 0 });
+    expect(await queues.counts('deadLetter')).toEqual({ visible: 0, leased: 0 });
+  });
+
+  // FS-14: the consumer never runs more jobs at once than its slots, and a third starts only
+  // when a slot frees.
+  evidenceTest('a backlog runs within the concurrency limit', async () => {
+    const jobs = await Promise.all(Array.from({ length: BACKLOG_JOBS }, () => seed()));
+    for (const job of jobs) await queues.queues.jobs.send(job.body);
+    let running = 0;
+    let started = 0;
+    let peak = 0;
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const held: JobHandler = async (ctx) => {
+      running += 1;
+      started += 1;
+      peak = Math.max(peak, running);
+      await gate;
+      await writeEffect(ctx);
+      running -= 1;
+    };
+    makeConsumer(registry(held)).start();
+    await until(() => Promise.resolve(started === CONCURRENCY));
+    await sleep(HOLD_MS);
+    expect(started).toBe(CONCURRENCY);
+    release();
+    await until(async () => {
+      const states = await Promise.all(jobs.map((job) => ledger(job.envelope.jobId)));
+      return states.every((state) => state?.status === 'succeeded');
+    });
+    expect(peak).toBe(CONCURRENCY);
+    for (const job of jobs) expect(await effects(job.envelope.jobId)).toBe(1);
+  });
+
+  // FS-01, delayed delivery: a copy that arrives after the job finished is acknowledged and
+  // changes nothing. The delay is injected at the queue: the copy's lease is held, so it surfaces
+  // only when its visibility timeout ends.
+  evidenceTest('a copy delivered late is acknowledged without a second effect', async () => {
+    const job = await seed();
+    await queues.queues.jobs.send(job.body);
+    await queues.queues.jobs.send(job.body);
+    const late = await receiveOne(queues.queues.jobs);
+    const leasedAt = Date.now();
+    expect(late).toBeDefined();
+    makeConsumer(registry(writeEffect)).start();
+    await until(async () => (await ledger(job.envelope.jobId))?.status === 'succeeded');
+    // The job finished while the late copy was still held back.
+    expect(Date.now() - leasedAt).toBeLessThan(VISIBILITY_S * 1000);
+    await until(async () => {
+      const counts = await queues.counts('jobs');
+      return counts.visible === 0 && counts.leased === 0;
+    });
+    expect(await effects(job.envelope.jobId)).toBe(1);
+    expect((await ledger(job.envelope.jobId))?.attempt).toBe(1);
+    expect(await queues.counts('deadLetter')).toEqual({ visible: 0, leased: 0 });
+  });
+
   evidenceTest(
-    'a transient failure is retried under the policy and the message is hidden for the backoff',
+    'a handler failure is recorded and the message is hidden for the backoff',
     async () => {
       const job = await seed();
       await queues.queues.jobs.send(job.body);
@@ -384,6 +469,7 @@ describe('job consumer over SQS and PostgreSQL', () => {
     },
   );
 
+  // FS-18.
   evidenceTest(
     'a crash after the commit and before the delete does not repeat the effect',
     async () => {
@@ -418,6 +504,7 @@ describe('job consumer over SQS and PostgreSQL', () => {
     },
   );
 
+  // FS-18, the other side of the commit.
   evidenceTest(
     'a crash before the commit leaves the message for redelivery and no effect behind',
     async () => {
