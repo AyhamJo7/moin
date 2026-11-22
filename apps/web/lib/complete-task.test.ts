@@ -74,20 +74,24 @@ describe('completeTask: confirmed outcomes', () => {
     expect((init?.headers as Record<string, string>)[CSRF_HEADER_NAME]).toBe(TOKEN);
   });
 
-  it('names each action with its own Idempotency-Key, and a repeat of it with the same one', async () => {
+  it('names each action with its own Idempotency-Key, and repeats an unknown one under it', async () => {
     const seen: Seen[] = [];
+    const key = (i: number) =>
+      (seen[i]?.init?.headers as Record<string, string> | undefined)?.[IDEMPOTENCY_KEY_HEADER];
+    // An unknown outcome (the answer was lost, the read-back proves nothing): the repeat of the
+    // same action carries the same key, so a request that committed meanwhile is replayed.
+    await completeTask(TASK_ID, 1, COOKIES, script(['network-error', 'network-error'], seen));
     await completeTask(TASK_ID, 1, COOKIES, script([{ status: 200, body: DONE }], seen));
-    await completeTask(TASK_ID, 1, COOKIES, script([{ status: 200, body: DONE }], seen));
-    const keys = seen.map(
-      (s) => (s.init?.headers as Record<string, string>)[IDEMPOTENCY_KEY_HEADER],
-    );
-    expect(keys[0]).toMatch(
+    expect(key(0)).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
     );
-    expect(keys[1]).not.toBe(keys[0]);
-    const given = '0b9a4c8e-6f2d-4c1a-9e7b-3d5f1a2b4c6d';
-    await completeTask(TASK_ID, 1, COOKIES, script([{ status: 200, body: DONE }], seen), given);
-    expect((seen[2]?.init?.headers as Record<string, string>)[IDEMPOTENCY_KEY_HEADER]).toBe(given);
+    expect(key(2)).toBe(key(0));
+    // A known outcome ends the action: the next one gets a new key.
+    await completeTask(TASK_ID, 1, COOKIES, script([{ status: 200, body: DONE }], seen));
+    expect(key(3)).not.toBe(key(0));
+    // Another version is another action.
+    await completeTask(TASK_ID, 2, COOKIES, script(['network-error', 'network-error'], seen));
+    expect(key(4)).not.toBe(key(3));
   });
 
   it('a key the API reports as already used is a rejection: nothing was written', async () => {

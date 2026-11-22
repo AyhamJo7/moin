@@ -87,12 +87,16 @@ the commit (FS-18), and a backlog that drains within the concurrency limit. The 
 `platform/worker.ts` loop and its test are deleted. `docs/verification/failure-injection-report.md`
 marks FS-01 and FS-14 as partial and lists what stays open in P08.11: the callback path (S4, N1),
 database failover, the backlog alarm and autoscaling (T1), and the SSE switch to polling (A2).
-A1c: `POST /api/tasks/:id/complete`, the one mutating owner route, requires an `Idempotency-Key`
-(a UUID; 400 without one). The key and the completion commit in one transaction, keyed by task,
-version and member: the same key again replays the answer without acting twice, also while the
-first request still runs, and the key reused for another task, version or member is a 422. A
-refusal or conflict keeps no key. The owner app sends a fresh key per action. Still open in A1:
-outbox dispatch (A1b, blocked, see `NEXT.md`), the chaos test (A1d), timers and the sweeps.
+A1c: `POST /api/tasks/:id/complete`, the one mutating owner route, takes an `Idempotency-Key` (a
+UUID). The owner app sends one per action and keeps it until the outcome is known, so a retry of a
+lost answer is replayed. The key and the completion commit in one transaction, keyed by task,
+version and member, after the member's right to act is checked again, replays included. The same
+key again returns the committed answer without acting twice; reused for another task, version or
+member it is a 422. A refusal or conflict keeps no key, a contended request is a 409 with
+`Retry-After`, and each keyed request deletes a bounded batch of the tenant's expired keys. The key
+is optional while tabs that loaded the previous app send none; requiring it is a later step (it
+needs the scheduled retention sweep, P16, first). Still open in A1: outbox dispatch (A1b, blocked,
+see `NEXT.md`), the chaos test (A1d), timers and the sweeps.
 
 | Area                                                              | Truth                                                                                                                                                                                                                                                                                 |
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

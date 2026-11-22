@@ -46,6 +46,13 @@ export type CompleteResult =
    */
   | { readonly kind: 'unknown' };
 
+/**
+ * The key of each action whose outcome is not known yet, by task and version: a repeat of that
+ * action carries the same key, so a request that committed after its answer was lost is replayed
+ * rather than refused as stale. A known outcome, or another version, starts a new action.
+ */
+const pendingKeys = new Map<string, string>();
+
 /** How long the browser waits before the outcome is reported as unknown. */
 export const COMPLETE_TIMEOUT_MS = 10_000;
 
@@ -72,10 +79,24 @@ export async function completeTask(
   version: number,
   cookieHeader: string,
   fetchImpl: typeof fetch = fetch,
-  idempotencyKey: string = crypto.randomUUID(),
 ): Promise<CompleteResult> {
   const token = readCsrfToken(cookieHeader);
   if (token === undefined) return { kind: 'signed-out' };
+  const action = `${taskId}:${String(version)}`;
+  const idempotencyKey = pendingKeys.get(action) ?? crypto.randomUUID();
+  pendingKeys.set(action, idempotencyKey);
+  const result = await send(taskId, version, token, idempotencyKey, fetchImpl);
+  if (result.kind !== 'unknown') pendingKeys.delete(action);
+  return result;
+}
+
+async function send(
+  taskId: string,
+  version: number,
+  token: string,
+  idempotencyKey: string,
+  fetchImpl: typeof fetch,
+): Promise<CompleteResult> {
   let response: Response;
   try {
     response = await fetchImpl(taskCompletePath(taskId), {

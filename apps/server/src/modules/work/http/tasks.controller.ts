@@ -12,9 +12,12 @@
  *
  * `complete` takes the version the owner saw. It walks the one task state machine (`completeTask`,
  * P07.06) inside one transaction, so a lost race, a stale version or an illegal move is a 409 and
- * changes nothing. It needs an `Idempotency-Key` (a UUID, P08.04): the same key again returns the
- * committed answer without acting twice, also while the first request is still running; the key
- * reused for another task, version or member is a 422. A missing or malformed key is a 400. A task another tenant owns and a task that does not exist are the same 404
+ * changes nothing. It takes an `Idempotency-Key` (a UUID, P08.04): the same key again returns the
+ * committed answer without acting twice, also while the first request is still running, and only
+ * to a member who may still act on the task; the key reused for another task, version or member is
+ * a 422, and a malformed key a 400. The key is optional while owner tabs that loaded the previous
+ * app still send none; requiring it is a later step. A request that waited too long for a row
+ * another request holds is a 409 with `Retry-After`: nothing changed. A task another tenant owns and a task that does not exist are the same 404
  * (P06.07.03). Answers name the outcome and nothing else (INV-12): no title, number or SQL.
  */
 
@@ -50,6 +53,8 @@ import {
 } from '../../identity-access/session-guards.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Seconds a client waits before repeating a contended completion. */
+const BUSY_RETRY_AFTER_S = 1;
 
 interface ProblemBody {
   readonly type: string;
@@ -92,15 +97,25 @@ export class TasksController {
     @Res({ passthrough: true }) reply: FastifyReply,
   ): Promise<TaskState | ProblemBody> {
     if (!UUID.test(id)) return fail(reply, 404, '/problems/not-found', 'Not found');
-    const key = idempotencyKeySchema.safeParse(rawKey);
-    if (!key.success) {
-      return fail(reply, 400, '/problems/idempotency-key-required', 'Idempotency-Key required');
+    const key = rawKey === undefined ? undefined : idempotencyKeySchema.safeParse(rawKey);
+    if (key?.success === false) {
+      return fail(reply, 400, '/problems/idempotency-key-invalid', 'Idempotency-Key invalid');
     }
     const parsed = completeTaskRequestSchema.safeParse(raw);
     if (!parsed.success) {
       return fail(reply, 400, '/problems/task-rejected', 'Task change rejected');
     }
-    const outcome = await this.work.complete(id, parsed.data.version, key.data.toLowerCase());
+    // One spelling of each id, so the same key with an equivalent id is the same request.
+    const outcome = await this.work.complete(
+      id.toLowerCase(),
+      parsed.data.version,
+      key?.data.toLowerCase(),
+    );
+    if (outcome.kind === 'busy') {
+      this.logger.info({ outcome: 'task_complete_busy' }, 'a contended task completion');
+      void reply.header('retry-after', String(BUSY_RETRY_AFTER_S));
+      return fail(reply, 409, '/problems/busy', 'Try again');
+    }
     if (outcome.kind === 'key-reused') {
       this.logger.warn({ outcome: 'idempotency_key_reused' }, 'refused a reused idempotency key');
       return fail(reply, 422, '/problems/idempotency-key-reused', 'Idempotency-Key already used');

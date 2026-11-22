@@ -718,7 +718,7 @@ describe('one completion per Idempotency-Key (P08.04, A1c)', () => {
     expect(await taskRow(taskId)).toMatchObject({ status: 'done', version: 1 + COMPLETION_MOVES });
   });
 
-  evidenceTest('a refusal keeps no key, so the same key decides again', async () => {
+  evidenceTest('a refusal or a conflict keeps no key, so the same key decides again', async () => {
     const me = (await member('admin')).browser;
     const { taskId } = await newCallback();
     const key = randomUUID();
@@ -729,24 +729,126 @@ describe('one completion per Idempotency-Key (P08.04, A1c)', () => {
     expect(await idempotencyRows(key)).toStrictEqual([]);
   });
 
+  evidenceTest('a malformed key is a 400 before anything is read or written', async () => {
+    const me = (await member('admin')).browser;
+    const { taskId } = await newCallback();
+    const before = await frozen(taskId);
+    const auditBefore = await auditCount(restaurant);
+    for (const key of ['', 'not-a-uuid', `${randomUUID()}x`]) {
+      const response = await complete(taskId, 1, me, { key });
+      expect(response.statusCode, key).toBe(400);
+      expect(response.json(), key).toStrictEqual({
+        type: '/problems/idempotency-key-invalid',
+        title: 'Idempotency-Key invalid',
+        status: 400,
+      });
+    }
+    expect(await frozen(taskId)).toStrictEqual(before);
+    expect(await auditCount(restaurant)).toBe(auditBefore);
+  });
+
   evidenceTest(
-    'a missing or malformed key is a 400 before anything is read or written',
+    'an owner tab on the previous app, sending no key, still completes once',
+    async () => {
+      const me = (await member('admin')).browser;
+      const { taskId } = await newCallback();
+      const done = await complete(taskId, 1, me, { key: null });
+      expect(done.statusCode).toBe(200);
+      expect(await statusEvents(taskId)).toHaveLength(COMPLETION_MOVES);
+      // Without a key there is nothing to replay: the repeat is the stale version it is.
+      expect((await complete(taskId, 1, me, { key: null })).statusCode).toBe(409);
+    },
+  );
+
+  evidenceTest('a replay is answered only to a member who may still act on the task', async () => {
+    const colleague = await member('admin');
+    const staff = await member('staff');
+    const { taskId } = await newCallback();
+    await assign(taskId, staff.person.id);
+    const key = randomUUID();
+    expect((await complete(taskId, 2, colleague.browser, { key })).statusCode).toBe(200);
+    // The session guard ends a changed member's session, so the service's own check is shown
+    // with the scope the guard resolved before the change (as for a request already in flight).
+    const queries = app.get(WorkQueries);
+    const sawThem = { organisationId: restaurant, actorId: colleague.person.id, permissions: [] };
+    // Demoted to staff, on a task assigned to someone else: the stored answer is not theirs.
+    await admin.query(
+      // eslint-disable-next-line no-restricted-syntax -- fixture write on the migration role; the SET-session rule matches UPDATE ... SET verb text.
+      "update memberships set role = 'staff', version = version + 1 where user_id = $1",
+      [colleague.person.id],
+    );
+    expect(
+      await runInTenantScope({ ...sawThem, role: 'admin' }, () => queries.complete(taskId, 2, key)),
+    ).toStrictEqual({ kind: 'forbidden' });
+    // Disabled: refused before any replay as well.
+    await admin.query(
+      "update memberships set status = 'disabled', version = version + 1 where user_id = $1",
+      [colleague.person.id],
+    );
+    expect(
+      await runInTenantScope({ ...sawThem, role: 'admin' }, () => queries.complete(taskId, 2, key)),
+    ).toStrictEqual({ kind: 'forbidden' });
+    // Through the API the changed member's session is refused outright.
+    expect([401, 403]).toContain(
+      (await complete(taskId, 2, colleague.browser, { key })).statusCode,
+    );
+  });
+
+  evidenceTest(
+    'the same key with the task id in other letter case is the same request',
+    async () => {
+      const me = (await member('admin')).browser;
+      const { taskId } = await newCallback();
+      const key = randomUUID();
+      const first = await complete(taskId, 1, me, { key });
+      expect(first.statusCode).toBe(200);
+      const again = await complete(taskId.toUpperCase(), 1, me, { key });
+      expect(again.statusCode).toBe(200);
+      expect(again.json()).toStrictEqual(first.json());
+      expect(await statusEvents(taskId)).toHaveLength(COMPLETION_MOVES);
+    },
+  );
+
+  evidenceTest(
+    'a request held up by another past its time limit is a 409 that changes nothing',
     async () => {
       const me = (await member('admin')).browser;
       const { taskId } = await newCallback();
       const before = await frozen(taskId);
-      const auditBefore = await auditCount(restaurant);
-      for (const key of [null, '', 'not-a-uuid', `${randomUUID()}x`]) {
-        const response = await complete(taskId, 1, me, { key });
-        expect(response.statusCode, String(key)).toBe(400);
-        expect(response.json(), String(key)).toStrictEqual({
-          type: '/problems/idempotency-key-required',
-          title: 'Idempotency-Key required',
-          status: 400,
+      const holder = await admin.connect();
+      try {
+        await holder.query('begin');
+        await holder.query('select 1 from tasks where id = $1 for update', [taskId]);
+        const response = await complete(taskId, 1, me);
+        expect(response.statusCode).toBe(409);
+        expect(response.headers['retry-after']).toBe('1');
+        expect(response.json()).toStrictEqual({
+          type: '/problems/busy',
+          title: 'Try again',
+          status: 409,
         });
+      } finally {
+        await holder.query('rollback');
+        holder.release();
       }
       expect(await frozen(taskId)).toStrictEqual(before);
-      expect(await auditCount(restaurant)).toBe(auditBefore);
+    },
+  );
+
+  evidenceTest(
+    'expired keys of the tenant are deleted by later keyed requests, not kept',
+    async () => {
+      const me = (await member('admin')).browser;
+      const expired = randomUUID();
+      await admin.query(
+        `insert into idempotency_keys
+         (organisation_id, id, operation, key, request_hash, status, expires_at)
+       values ($1, $2, 'task.complete', $3, 'x', 'succeeded', now() - interval '1 minute')`,
+        [restaurant, randomUUID(), expired],
+      );
+      const { taskId } = await newCallback();
+      expect((await complete(taskId, 1, me)).statusCode).toBe(200);
+      expect(await idempotencyRows(expired)).toStrictEqual([]);
     },
   );
 });

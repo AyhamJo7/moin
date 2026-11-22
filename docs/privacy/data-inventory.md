@@ -342,6 +342,14 @@ P08.04 (migration 0065) adds the `idempotency_keys` table. The request body is
 never stored — only its SHA-256 — and the stored response replays 24 h
 (expires_at is the retention hook).
 
+Since A1c the only writer is `POST /api/tasks/:id/complete`. The hashed request is the task id,
+the version and the acting member's id; the stored response is the task's id, status and version,
+nothing else. A key past `expires_at` is never replayed. Expired keys are deleted by the tenant's
+next keyed request, a bounded batch at a time; a tenant with no further keyed request keeps them
+until the scheduled retention sweep (P16), and tenant offboarding deletes them with the
+organisation (`ON DELETE CASCADE`). The member's id enters only the one-way request hash; no
+column holds it readably, so a subject's erasure or export reads nothing here.
+
 | Field                           | Category | Personal?                                         | Retention | Method      | Subprocessor |
 | ------------------------------- | -------- | ------------------------------------------------- | --------- | ----------- | ------------ |
 | `idempotency_keys.operation`    | Platform | no — fixed operation catalogue                    | 24 h      | hard delete | —            |
