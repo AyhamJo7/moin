@@ -281,6 +281,7 @@ export { enqueueJob, JobConflictError } from './jobs.ts';
 export {
   dispatchOutboxBatch,
   insertOutboxEvent,
+  outboxEventSuperseded,
   outboxLagSeconds,
   type OutboxEvent,
 } from './outbox.ts';

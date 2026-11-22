@@ -13,7 +13,9 @@
  * The outbox dispatcher (P08.02.02) runs here too, on its own `moin_dispatcher` pool, when
  * `DISPATCHER_DATABASE_URL` is set; unset, it does not run and the worker says so once at startup.
  * Its route table is empty until a production event type has a job: an unrouted event stays in
- * the outbox, backing off, and is never published.
+ * the outbox, backing off, and is never published. The worker consumes one queue
+ * (`SQS_QUEUE_JOBS`), so every workload a ledger row names resolves to it until per-workload
+ * queues are deployed (P08.01.02).
  */
 
 import {
@@ -47,6 +49,8 @@ const OUTBOX_ROUTES: ReadonlyMap<string, JobType> = new Map();
 const OUTBOX_INTERVAL_MS = 2_000;
 const OUTBOX_TENANT_PAGE = 100;
 const OUTBOX_BATCH = 50;
+/** At most this, and at most half the shutdown grace, so a stalled send cannot outlast it. */
+const OUTBOX_SEND_TIMEOUT_MS = 5_000;
 const DISPATCHER_POOL_MAX = 2;
 const DISPATCHER_ROLE = 'moin_dispatcher';
 
@@ -107,6 +111,7 @@ class OutboxDispatcherService implements OnApplicationBootstrap, OnModuleDestroy
     @Inject(JOB_QUEUES) queues: SqsQueues,
     @Inject(LOGGER) private readonly logger: Logger,
     @Inject(SHUTDOWN_STATE) shutdownState: ShutdownState,
+    @Inject(CONFIG) config: Config,
   ) {
     this.#dispatcher =
       dispatcherPool === null
@@ -114,7 +119,7 @@ class OutboxDispatcherService implements OnApplicationBootstrap, OnModuleDestroy
         : new OutboxDispatcher({
             appPool,
             dispatcherPool,
-            queue: queues.jobs,
+            queueFor: () => queues.jobs,
             routes: OUTBOX_ROUTES,
             logger,
             isShuttingDown: () => shutdownState.isShuttingDown(),
@@ -122,6 +127,7 @@ class OutboxDispatcherService implements OnApplicationBootstrap, OnModuleDestroy
               intervalMs: OUTBOX_INTERVAL_MS,
               tenantPageSize: OUTBOX_TENANT_PAGE,
               batchSize: OUTBOX_BATCH,
+              sendTimeoutMs: Math.min(OUTBOX_SEND_TIMEOUT_MS, config.SHUTDOWN_GRACE_MS / 2),
             },
           });
   }

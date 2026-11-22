@@ -398,6 +398,20 @@ const schema = baseSchema.superRefine((value, ctx) => {
         message: 'must not carry user, options or role query parameters, which override its role',
       });
     }
+    // One database: the dispatcher marks an event in the database where the app pool writes its
+    // job. Two databases that share a tenant id would mark in one and enqueue in the other.
+    const app = new URL(value.DATABASE_URL);
+    if (
+      dispatcher.hostname !== app.hostname ||
+      dispatcher.port !== app.port ||
+      dispatcher.pathname !== app.pathname
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['DISPATCHER_DATABASE_URL'],
+        message: 'must name the same host, port and database as DATABASE_URL',
+      });
+    }
     if (dispatcher.username !== 'moin_dispatcher') {
       ctx.addIssue({
         code: 'custom',

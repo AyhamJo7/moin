@@ -17,7 +17,7 @@
  * the alarm (> 2 min) lives in ops, this function is its input.
  */
 
-import { randomUUID } from 'node:crypto';
+import { uuidv7 } from '@moin/kernel';
 import type { TenantClient } from './tenant.ts';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
@@ -75,7 +75,8 @@ export async function insertOutboxEvent(
     throw new RangeError('aggregate version must be an integer ≥ 1');
   }
   checkPayload(input.payload ?? {});
-  const id = randomUUID();
+  // UUIDv7, like every job id (P08.01.01): the dispatcher uses the event id as its job's id.
+  const id = uuidv7();
   await client.query(
     `insert into outbox
        (id, organisation_id, aggregate, aggregate_id, aggregate_ver, event_type, payload)
@@ -120,6 +121,7 @@ export async function dispatchOutboxBatch(
   client: TenantClient,
   publish: (event: OutboxEvent) => Promise<void>,
   limit = 50,
+  shouldStop: () => boolean = () => false,
 ): Promise<PublishResult> {
   if (!Number.isInteger(limit) || limit <= 0 || limit > 200) {
     throw new RangeError('limit must be 1..200');
@@ -145,6 +147,8 @@ export async function dispatchOutboxBatch(
   );
   let published = 0;
   for (const row of claimed.rows) {
+    // Draining: the rows not yet published stay undispatched and are released at commit.
+    if (shouldStop()) break;
     const event: OutboxEvent = {
       id: row.id,
       organisationId: row.organisation_id,
@@ -170,4 +174,32 @@ export async function dispatchOutboxBatch(
     }
   }
   return { published };
+}
+
+/**
+ * Per-aggregate ordering at the consumer (P08.02.04). True when a newer version of the same
+ * aggregate has already been handled: its event's job (job id and correlation id are the event
+ * id, see the worker's outbox dispatcher) succeeded. A handler of a routed outbox event calls this
+ * first, inside its tenant transaction, and does nothing when it returns true, so an event that
+ * backed off and arrives after a newer one cannot overwrite it. Unknown ids answer false.
+ */
+export async function outboxEventSuperseded(
+  client: TenantClient,
+  eventId: string,
+): Promise<boolean> {
+  if (!UUID_RE.test(eventId)) throw new RangeError('event id must be a uuid');
+  const found = await client.query<{ superseded: boolean }>(
+    `select exists (
+       select 1
+         from outbox newer
+         join job_runs job on job.id = newer.id and job.status = 'succeeded'
+        where newer.aggregate = source.aggregate
+          and newer.aggregate_id = source.aggregate_id
+          and newer.aggregate_ver > source.aggregate_ver
+     ) as superseded
+       from outbox source
+      where source.id = $1::uuid`,
+    [eventId],
+  );
+  return found.rows[0]?.superseded === true;
 }

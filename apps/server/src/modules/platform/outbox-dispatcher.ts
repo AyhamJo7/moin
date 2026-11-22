@@ -9,26 +9,32 @@
  *
  * Per event, inside the dispatcher's tenant transaction, which holds the row:
  * 1. the event type is routed to a job type; an unrouted event fails and backs off, undispatched;
- * 2. the job row is written and committed in its own app-pool transaction, with the outbox id as
- *    job id and correlation id, so a retry finds the same job (`JobConflictError`);
- * 3. the envelope is sent to the jobs queue;
+ * 2. the job row is written and committed in its own app-pool transaction, with the outbox id
+ *    (a UUIDv7) as job id and correlation id. A retry finds that job and checks it is this event's
+ *    job of this type and version; one that is not stays undispatched and backs off;
+ * 3. the job's envelope, built from its ledger row, is sent to the queue that row names, within a
+ *    deadline;
  * 4. the row is marked dispatched and the transaction commits.
  *
  * The consumer never receives an envelope before its job row is committed. A crash after step 2
  * leaves the row undispatched and the next tick sends; a crash after step 3 sends a second
- * envelope with the same identity, which the consumer runs once (P08.02.04, FS-01).
+ * envelope with the same identity, which the consumer runs once (P08.02.04, FS-01). On shutdown
+ * no further row is taken, and an in-flight send ends at its deadline.
+ *
+ * A handler of a routed event calls `outboxEventSuperseded` first, so an event that backed off and
+ * arrives after a newer version of the same aggregate changes nothing (P08.02.04).
  */
 
 import {
   dispatchOutboxBatch,
   enqueueJob,
-  JobConflictError,
   registeredTenants,
   withTenant,
   type OutboxEvent,
+  type TenantClient,
 } from '@moin/db';
 import type { Pool } from '@moin/db/pool';
-import type { JobType, JobEnvelope } from '@moin/kernel';
+import { JOB_TYPES, type JobType, type JobEnvelope } from '@moin/kernel';
 import type { JobQueue } from '@moin/integrations';
 import type { Logger } from '@moin/observability';
 
@@ -41,12 +47,15 @@ export interface OutboxDispatcherOptions {
   readonly tenantPageSize: number;
   /** Outbox rows claimed per tenant per tick. */
   readonly batchSize: number;
+  /** A send that has not finished by then fails, and the row backs off. */
+  readonly sendTimeoutMs: number;
 }
 
 export interface OutboxDispatcherDeps {
   readonly appPool: Pool;
   readonly dispatcherPool: Pool;
-  readonly queue: JobQueue;
+  /** The queue for a job's workload, as its ledger row names it (`queueFor`, P08.01.02). */
+  readonly queueFor: (workload: string) => JobQueue;
   /** Outbox event type to the job that handles it. An event type not listed is not published. */
   readonly routes: ReadonlyMap<string, JobType>;
   readonly logger: Logger;
@@ -62,6 +71,19 @@ export interface DispatchReport {
 
 export class UnroutedEventError extends Error {
   public override readonly name = 'UnroutedEventError';
+}
+
+/** The job under the event's id is not this event's job of this type and version. */
+export class JobIdentityConflictError extends Error {
+  public override readonly name = 'JobIdentityConflictError';
+}
+
+interface LedgerJob {
+  readonly type: string;
+  readonly version: number;
+  readonly correlation_id: string;
+  readonly queue_name: string;
+  readonly payload: Record<string, string>;
 }
 
 export class OutboxDispatcher {
@@ -101,6 +123,7 @@ export class OutboxDispatcher {
             client,
             (event) => this.#publish(organisationId, event),
             options.batchSize,
+            () => this.#halted(),
           ),
         );
         published += result.published;
@@ -126,32 +149,62 @@ export class OutboxDispatcher {
       );
       throw new UnroutedEventError('outbox event type has no job route');
     }
+    const { appPool } = this.#deps;
+    // Read, then write: the dispatcher's transaction holds the outbox row, so no other dispatcher
+    // handles this event meanwhile. A job already there is an earlier attempt that committed it
+    // and stopped before the mark; it is checked below, never written again.
+    const job = await withTenant(appPool, organisationId, async (client) => {
+      const earlier = await ledgerJob(client, event.id);
+      if (earlier !== undefined) return earlier;
+      await enqueueJob(client, {
+        jobId: event.id,
+        type,
+        version: JOB_VERSION,
+        correlationId: event.id,
+        payload: event.payload,
+      });
+      return ledgerJob(client, event.id);
+    });
+    if (
+      job?.type !== type ||
+      job.version !== JOB_VERSION ||
+      job.correlation_id !== event.id.toLowerCase() ||
+      !isJobType(job.type)
+    ) {
+      // A route changed between attempts, or the id is taken by another job: sending would hand
+      // the consumer an envelope its ledger refuses, after the row was marked dispatched.
+      this.#deps.logger.error(
+        { outcome: 'job identity conflict', eventType: event.eventType },
+        'outbox event id names a different job; left undispatched',
+      );
+      throw new JobIdentityConflictError('outbox event id names a different job');
+    }
     const envelope: JobEnvelope = {
       jobId: event.id,
-      type,
-      version: JOB_VERSION,
+      type: job.type,
+      version: job.version,
       organisationId,
-      correlationId: event.id,
+      correlationId: job.correlation_id,
       traceContext: null,
       attempt: 0,
       notBefore: null,
-      payload: event.payload,
+      payload: job.payload,
     };
+    await this.#withDeadline(this.#deps.queueFor(job.queue_name).send(JSON.stringify(envelope)));
+  }
+
+  async #withDeadline(send: Promise<void>): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error('queue send exceeded its deadline'));
+      }, this.#deps.options.sendTimeoutMs);
+    });
     try {
-      await withTenant(this.#deps.appPool, organisationId, (client) =>
-        enqueueJob(client, {
-          jobId: envelope.jobId,
-          type,
-          version: JOB_VERSION,
-          correlationId: envelope.correlationId,
-          payload: envelope.payload,
-        }),
-      );
-    } catch (error) {
-      // An earlier attempt committed the job and stopped before marking the row: send again.
-      if (!(error instanceof JobConflictError)) throw error;
+      await Promise.race([send, deadline]);
+    } finally {
+      clearTimeout(timer);
     }
-    await this.#deps.queue.send(JSON.stringify(envelope));
   }
 
   #halted(): boolean {
@@ -175,4 +228,17 @@ export class OutboxDispatcher {
       });
     }
   }
+}
+
+function isJobType(value: string): value is JobType {
+  return (JOB_TYPES as readonly string[]).includes(value);
+}
+
+async function ledgerJob(client: TenantClient, jobId: string): Promise<LedgerJob | undefined> {
+  const found = await client.query<LedgerJob & Record<string, unknown>>(
+    `select type, version, correlation_id::text, queue_name, payload
+       from job_runs where id = $1::uuid`,
+    [jobId],
+  );
+  return found.rows[0];
 }

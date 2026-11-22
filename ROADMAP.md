@@ -87,8 +87,13 @@ the commit (FS-18), and a backlog that drains within the concurrency limit. The 
 `platform/worker.ts` loop and its test are deleted. `docs/verification/failure-injection-report.md`
 marks FS-01 and FS-14 as partial and lists what stays open in P08.11: the callback path (S4, N1),
 database failover, the backlog alarm and autoscaling (T1), and the SSE switch to polling (A2).
-A1b: the worker dispatches the outbox. It claims and marks rows as `moin_dispatcher` (outbox
-only) and writes job rows as `moin_app`, paging tenants from the reviewed register. A job row commits
+A1b: the worker dispatches the outbox. It claims and marks rows as `moin_dispatcher` and writes
+job rows as `moin_app`, paging tenants from the reviewed register. Migration 0085 leaves
+`moin_dispatcher` SELECT on the outbox and UPDATE of its three dispatch-state columns, nothing
+else. A retry checks that the job under the event's id is that event's job before resending it,
+sends go to the queue the ledger row names within a deadline, a draining worker takes no further
+row, and both credentials must name the same database. A handler of a routed event calls
+`outboxEventSuperseded` first, so an older version arriving after a newer one changes nothing. A job row commits
 before its envelope is sent, with the outbox id as job and correlation id, so a crash before the
 mark resends the same job and the consumer runs it once. The credential (`DISPATCHER_DATABASE_URL`)
 is accepted for the worker only; without it the worker logs `outbox dispatcher off`. The route table

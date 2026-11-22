@@ -10,6 +10,6 @@
 
 **Needed from you (one list), optional:** the git guard refuses these to a session; both are archived in `~/backups/moin-pre-prune-20261117.bundle` (`refs/archive/dirty/*`, `refs/archive/stash/*`). (1) `git worktree remove --force ~/worktrees/moin/docs-ledger-status-correction` (one uncommitted edit to the frozen `PROGRESS.md`). (2) `git stash clear` (26 stashes). (3) Copy the 14 keys `pnpm preflight` reports missing from `.env.example` into `.env` (sessions may not edit `.env`; tests run with `.env.example` exported).
 
-**Rollback tested before merge:** #266 (session-bound CSRF): 4 of 4. #267 (0083) and #278 (0084, sign-in throttle): previous bodies restored on a migrated database, sign-in admits, no row lost, bucket count right; 1 of 1 each. Not in the class: X1 to X4, K1, A1a, A1b (no migration, no identity change).
+**Rollback tested before merge:** #266 (session-bound CSRF): 4 of 4. #267 (0083) and #278 (0084, sign-in throttle): previous bodies restored on a migrated database, sign-in admits, no row lost, bucket count right; 1 of 1 each. Not in the class: X1 to X4, K1, A1a (no migration, no identity change), A1b (0085 only revokes grants no running code used; no data change).
 
 **Last verified main SHA:** `d1db474` (#286, A1a; verify, codeql, container-scan and security-scan passed on it, 2026-11-22). Done: C1 to C6, X1 to X4, K1, A1a (#286, follow-ups #287), A1b (#288, pending merge).

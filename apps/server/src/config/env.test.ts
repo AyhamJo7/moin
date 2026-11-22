@@ -499,6 +499,19 @@ describe('the outbox dispatcher credential (P08.02.02)', () => {
     }
   });
 
+  evidenceTest('must name the same database as DATABASE_URL', () => {
+    for (const other of [
+      'postgres://moin_dispatcher:x@127.0.0.1:5432/moin',
+      'postgres://moin_dispatcher:x@localhost:6543/moin',
+      'postgres://moin_dispatcher:x@localhost:5432/moin_copy',
+    ]) {
+      expect(
+        () => loadConfig({ ...VALID, ...worker, DISPATCHER_DATABASE_URL: other }),
+        other,
+      ).toThrow(ConfigurationError);
+    }
+  });
+
   it('is secret-bearing, so describeConfig never prints it', () => {
     const described = describeConfig(
       loadConfig({ ...VALID, ...worker, DISPATCHER_DATABASE_URL: DISPATCHER }),
