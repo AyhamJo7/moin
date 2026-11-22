@@ -377,14 +377,15 @@ describe('outbox dispatcher', () => {
         ),
       ),
     ).rejects.toThrow(/permission denied/u);
-    for (const table of ['job_runs', 'timers', 'provider_inbox']) {
-      await expect(dispatcherPool.query(`select 1 from ${table} limit 1`), table).rejects.toThrow(
-        /permission denied/u,
-      );
-      await expect(
-        dispatcherPool.query(`update ${table} set id = id where false`),
-        table,
-      ).rejects.toThrow(/permission denied/u);
+    for (const probe of [
+      'select 1 from job_runs limit 1',
+      'update job_runs set id = id where false',
+      'select 1 from timers limit 1',
+      'update timers set id = id where false',
+      'select 1 from provider_inbox limit 1',
+      'update provider_inbox set id = id where false',
+    ]) {
+      await expect(dispatcherPool.query(probe), probe).rejects.toThrow(/permission denied/u);
     }
     // On the outbox, the dispatch state only; the event itself is not the dispatcher's to change.
     await expect(
