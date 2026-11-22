@@ -68,6 +68,14 @@ export const taskCompletePath = (taskId: string): string => `${taskPath(taskId)}
 export const CSRF_HEADER_NAME = 'x-csrf-token';
 export const CSRF_COOKIE_NAME = '__Host-moin_csrf';
 
+/**
+ * The header that names one owner action (P08.04.01). The app sends a fresh UUID per action and
+ * the same one when it repeats that action; the API runs the action once per key and replays its
+ * answer for 24 hours.
+ */
+export const IDEMPOTENCY_KEY_HEADER = 'idempotency-key';
+export const idempotencyKeySchema = z.uuid();
+
 /** `POST /api/tasks/:id/complete`: the version the owner saw, never a status or a tenant. */
 export const completeTaskRequestSchema = z.strictObject({
   version: z.number().int().positive(),

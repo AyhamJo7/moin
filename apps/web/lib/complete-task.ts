@@ -15,6 +15,7 @@
 import {
   CSRF_COOKIE_NAME,
   CSRF_HEADER_NAME,
+  IDEMPOTENCY_KEY_HEADER,
   taskCompletePath,
   taskPath,
   taskStateSchema,
@@ -28,7 +29,7 @@ export type CompleteResult =
    * wrote it).
    */
   | { readonly kind: 'completed'; readonly confirmedBy: 'response' | 'readback' }
-  /** The API refused the request as malformed: nothing was written. */
+  /** The API refused the request as malformed, or its key as already used: nothing was written. */
   | { readonly kind: 'rejected' }
   /** Someone changed the task first: nothing was written; the view must be reloaded. */
   | { readonly kind: 'conflict' }
@@ -71,6 +72,7 @@ export async function completeTask(
   version: number,
   cookieHeader: string,
   fetchImpl: typeof fetch = fetch,
+  idempotencyKey: string = crypto.randomUUID(),
 ): Promise<CompleteResult> {
   const token = readCsrfToken(cookieHeader);
   if (token === undefined) return { kind: 'signed-out' };
@@ -82,6 +84,7 @@ export async function completeTask(
         accept: 'application/json',
         'content-type': 'application/json',
         [CSRF_HEADER_NAME]: token,
+        [IDEMPOTENCY_KEY_HEADER]: idempotencyKey,
       },
       body: JSON.stringify({ version }),
       credentials: 'same-origin',
@@ -97,6 +100,7 @@ export async function completeTask(
         ? { kind: 'completed', confirmedBy: 'response' }
         : reconcile(taskId, fetchImpl);
     case 400:
+    case 422:
       return { kind: 'rejected' };
     case 401:
       return { kind: 'signed-out' };

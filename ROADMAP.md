@@ -87,8 +87,12 @@ the commit (FS-18), and a backlog that drains within the concurrency limit. The 
 `platform/worker.ts` loop and its test are deleted. `docs/verification/failure-injection-report.md`
 marks FS-01 and FS-14 as partial and lists what stays open in P08.11: the callback path (S4, N1),
 database failover, the backlog alarm and autoscaling (T1), and the SSE switch to polling (A2).
-Still open in A1: outbox dispatch (A1b), the Idempotency-Key middleware (A1c) and the chaos test
-(A1d).
+A1c: `POST /api/tasks/:id/complete`, the one mutating owner route, requires an `Idempotency-Key`
+(a UUID; 400 without one). The key and the completion commit in one transaction, keyed by task,
+version and member: the same key again replays the answer without acting twice, also while the
+first request still runs, and the key reused for another task, version or member is a 422. A
+refusal or conflict keeps no key. The owner app sends a fresh key per action. Still open in A1:
+outbox dispatch (A1b, blocked, see `NEXT.md`), the chaos test (A1d), timers and the sweeps.
 
 | Area                                                              | Truth                                                                                                                                                                                                                                                                                 |
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -119,7 +123,7 @@ done-criterion holds on `main` with CI green on the merge SHA.
 | S3  | Deterministic turn loop         | relay session answers from an approved card verbatim, detects callback, lead and appointment intents, reads the number back, handles silence and barge-in, routes life-safety phrases to the script                                                                                        | S1, S2         | L    |     |
 | S4  | Capture and finalise            | session end writes outcome and task through the P07 services; the finaliser closes dropped sessions; a confirmed callback that arrives after finalisation adopts the fallback task (either order converges); no interaction without outcome or open task (test kills the session mid-call) | S3             | M    |     |
 | S5  | Local call driver and slice E2E | script sends a signed webhook, speaks over WSS, ends the session; one browser test: call, Heute shows the task, owner completes it                                                                                                                                                         | S4             | M    |     |
-| A1  | Background runtime              | worker handlers registered for outbox dispatch, timers, finaliser and reconciler sweeps; publisher wired; Idempotency-Key middleware on mutating routes; chaos test kills a worker mid-job (the FS ports to `JobConsumer` are done, A1a)                                                   | C4             | L    | b   |
+| A1  | Background runtime              | worker handlers registered for outbox dispatch, timers, finaliser and reconciler sweeps; publisher wired; Idempotency-Key middleware on mutating routes; chaos test kills a worker mid-job (done: FS ports, A1a; Idempotency-Key on task completion, A1c)                                  | C4             | L    | b   |
 | A2  | SSE                             | `GET /api/v1/events` with replay; Heute uses it with a stale indicator and falls back to polling                                                                                                                                                                                           | A1             | M    |     |
 | N1  | Notifications                   | call outcome triggers a notification row and an email through the SMTP port (Mailpit locally); escalation timer fires through A1; in-app list on Heute. Channels per DG-12 default                                                                                                         | A1, S4         | M    |     |
 | O1  | Sign-in and onboarding          | login page, invitation accept route with email, operator command that provisions a tenant; E2E: invite, accept, sign in                                                                                                                                                                    | C4             | M    | b   |

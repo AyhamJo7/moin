@@ -12,7 +12,9 @@
  *
  * `complete` takes the version the owner saw. It walks the one task state machine (`completeTask`,
  * P07.06) inside one transaction, so a lost race, a stale version or an illegal move is a 409 and
- * changes nothing. A task another tenant owns and a task that does not exist are the same 404
+ * changes nothing. It needs an `Idempotency-Key` (a UUID, P08.04): the same key again returns the
+ * committed answer without acting twice, also while the first request is still running; the key
+ * reused for another task, version or member is a 422. A missing or malformed key is a 400. A task another tenant owns and a task that does not exist are the same 404
  * (P06.07.03). Answers name the outcome and nothing else (INV-12): no title, number or SQL.
  */
 
@@ -20,6 +22,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   HttpCode,
   Inject,
   Param,
@@ -29,7 +32,13 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
-import { completeTaskRequestSchema, taskStateSchema, type TaskState } from '@moin/contracts';
+import {
+  IDEMPOTENCY_KEY_HEADER,
+  completeTaskRequestSchema,
+  idempotencyKeySchema,
+  taskStateSchema,
+  type TaskState,
+} from '@moin/contracts';
 import type { Logger } from '@moin/observability';
 import { LOGGER } from '../../../observability/logger.module.ts';
 import { WorkQueries } from '../../platform/work-queries.ts';
@@ -79,14 +88,23 @@ export class TasksController {
   async complete(
     @Param('id') id: string,
     @Body() raw: unknown,
+    @Headers(IDEMPOTENCY_KEY_HEADER) rawKey: unknown,
     @Res({ passthrough: true }) reply: FastifyReply,
   ): Promise<TaskState | ProblemBody> {
     if (!UUID.test(id)) return fail(reply, 404, '/problems/not-found', 'Not found');
+    const key = idempotencyKeySchema.safeParse(rawKey);
+    if (!key.success) {
+      return fail(reply, 400, '/problems/idempotency-key-required', 'Idempotency-Key required');
+    }
     const parsed = completeTaskRequestSchema.safeParse(raw);
     if (!parsed.success) {
       return fail(reply, 400, '/problems/task-rejected', 'Task change rejected');
     }
-    const outcome = await this.work.complete(id, parsed.data.version);
+    const outcome = await this.work.complete(id, parsed.data.version, key.data.toLowerCase());
+    if (outcome.kind === 'key-reused') {
+      this.logger.warn({ outcome: 'idempotency_key_reused' }, 'refused a reused idempotency key');
+      return fail(reply, 422, '/problems/idempotency-key-reused', 'Idempotency-Key already used');
+    }
     if (outcome.kind === 'missing') return fail(reply, 404, '/problems/not-found', 'Not found');
     if (outcome.kind === 'forbidden') {
       // In-tenant, authenticated, not allowed: 403 like the role guard (P06.07.03). The task is

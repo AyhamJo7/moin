@@ -14,9 +14,11 @@
 
 import { Inject, Injectable } from '@nestjs/common';
 import {
+  IdempotencyMismatchError,
   TaskVersionConflictError,
   captureCallbackRequest,
   completeTask,
+  executeIdempotent,
   getTask,
   listTodayTasks,
   lockTask,
@@ -42,11 +44,29 @@ function holds(role: string, permissions: readonly string[]): boolean {
   }
 }
 
+/** What a completion answers with, and all its replay stores: no title, no content (INV-12). */
+export interface CompletedTask {
+  readonly id: string;
+  readonly status: Task['status'];
+  readonly version: number;
+}
+
 export type CompleteOutcome =
-  | { readonly kind: 'completed'; readonly task: Task }
+  | { readonly kind: 'completed'; readonly task: CompletedTask }
   | { readonly kind: 'conflict' }
   | { readonly kind: 'forbidden' }
-  | { readonly kind: 'missing' };
+  | { readonly kind: 'missing' }
+  /** The Idempotency-Key already names a different action (another task, version or member). */
+  | { readonly kind: 'key-reused' };
+
+/** A refusal leaves the transaction, so nothing it began (the idempotency row included) stays. */
+class Refusal extends Error {
+  public override readonly name = 'Refusal';
+
+  public constructor(public readonly outcome: CompleteOutcome) {
+    super('task completion refused');
+  }
+}
 
 @Injectable()
 export class WorkQueries {
@@ -83,36 +103,55 @@ export class WorkQueries {
    * lifecycle conflict throws out of `withTenant`, which rolls the whole walk back, and is
    * reported here as `conflict`; a task row the tenant cannot see is `missing`, whoever owns it.
    */
-  async complete(taskId: string, version: number): Promise<CompleteOutcome> {
+  async complete(
+    taskId: string,
+    version: number,
+    idempotencyKey: string,
+  ): Promise<CompleteOutcome> {
     const scope = this.scope();
     try {
       return await withTenant(
         this.tenantPool(),
         scope.organisationId,
         async (client): Promise<CompleteOutcome> => {
-          const task = await lockTask(client, taskId);
-          if (task === null) return { kind: 'missing' };
-          // The member's standing is read again after the task is locked: disabling a member
-          // unassigns their tasks (trigger), so a request that passed the session guard just
-          // before would otherwise find the task unassigned and act on it. The role judged is
-          // the committed one, not the one the guard resolved earlier.
-          const standing = await client.query<{ role: string }>(
-            "select role from memberships where user_id = $1 and status = 'active'",
-            [scope.actorId],
-          );
-          const role = standing.rows[0]?.role;
-          if (role === undefined) return { kind: 'forbidden' };
-          const anyTask = holds(role, scope.permissions);
-          const ownOrUnassigned =
-            role === 'staff' &&
-            (task.assigneeUserId === null || task.assigneeUserId === scope.actorId);
-          if (!anyTask && !ownOrUnassigned) return { kind: 'forbidden' };
-          return { kind: 'completed', task: await completeTask(client, taskId, version) };
+          // One action per key (P08.04): this task, this version, this member. The same key again
+          // replays the committed answer for 24 hours; with anything else it is refused. Only a
+          // completion that commits keeps its key: a refusal or a conflict rolls the key back with
+          // everything else, so repeating it decides again.
+          const { result } = await executeIdempotent(client, {
+            operation: 'task.complete',
+            key: idempotencyKey,
+            body: { taskId, version, actor: scope.actorId },
+            execute: async (): Promise<CompletedTask> => {
+              const task = await lockTask(client, taskId);
+              if (task === null) throw new Refusal({ kind: 'missing' });
+              // The member's standing is read again after the task is locked: disabling a member
+              // unassigns their tasks (trigger), so a request that passed the session guard just
+              // before would otherwise find the task unassigned and act on it. The role judged is
+              // the committed one, not the one the guard resolved earlier.
+              const standing = await client.query<{ role: string }>(
+                "select role from memberships where user_id = $1 and status = 'active'",
+                [scope.actorId],
+              );
+              const role = standing.rows[0]?.role;
+              if (role === undefined) throw new Refusal({ kind: 'forbidden' });
+              const anyTask = holds(role, scope.permissions);
+              const ownOrUnassigned =
+                role === 'staff' &&
+                (task.assigneeUserId === null || task.assigneeUserId === scope.actorId);
+              if (!anyTask && !ownOrUnassigned) throw new Refusal({ kind: 'forbidden' });
+              const done = await completeTask(client, taskId, version);
+              return { id: done.id, status: done.status, version: done.version };
+            },
+          });
+          return { kind: 'completed', task: result };
         },
         { actorId: scope.actorId, correlationId: auditCorrelationId() },
       );
     } catch (error) {
+      if (error instanceof Refusal) return error.outcome;
       if (error instanceof TaskVersionConflictError) return { kind: 'conflict' };
+      if (error instanceof IdempotencyMismatchError) return { kind: 'key-reused' };
       throw error;
     }
   }

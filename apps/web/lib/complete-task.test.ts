@@ -4,7 +4,7 @@
  * (never a guessed failure). No browser needed: the cookie string and `fetch` are parameters.
  */
 import { describe, expect, it } from 'vitest';
-import { CSRF_COOKIE_NAME, CSRF_HEADER_NAME } from '@moin/contracts';
+import { CSRF_COOKIE_NAME, CSRF_HEADER_NAME, IDEMPOTENCY_KEY_HEADER } from '@moin/contracts';
 import { allKeys } from './i18n.ts';
 import {
   completeMessage,
@@ -72,6 +72,27 @@ describe('completeTask: confirmed outcomes', () => {
     expect(init?.credentials).toBe('same-origin');
     expect(init?.body).toBe('{"version":1}');
     expect((init?.headers as Record<string, string>)[CSRF_HEADER_NAME]).toBe(TOKEN);
+  });
+
+  it('names each action with its own Idempotency-Key, and a repeat of it with the same one', async () => {
+    const seen: Seen[] = [];
+    await completeTask(TASK_ID, 1, COOKIES, script([{ status: 200, body: DONE }], seen));
+    await completeTask(TASK_ID, 1, COOKIES, script([{ status: 200, body: DONE }], seen));
+    const keys = seen.map(
+      (s) => (s.init?.headers as Record<string, string>)[IDEMPOTENCY_KEY_HEADER],
+    );
+    expect(keys[0]).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+    );
+    expect(keys[1]).not.toBe(keys[0]);
+    const given = '0b9a4c8e-6f2d-4c1a-9e7b-3d5f1a2b4c6d';
+    await completeTask(TASK_ID, 1, COOKIES, script([{ status: 200, body: DONE }], seen), given);
+    expect((seen[2]?.init?.headers as Record<string, string>)[IDEMPOTENCY_KEY_HEADER]).toBe(given);
+  });
+
+  it('a key the API reports as already used is a rejection: nothing was written', async () => {
+    const result = await completeTask(TASK_ID, 1, COOKIES, script([{ status: 422, body: {} }]));
+    expect(result).toStrictEqual({ kind: 'rejected' });
   });
 
   it('without a CSRF cookie sends nothing and says the owner is signed out', async () => {

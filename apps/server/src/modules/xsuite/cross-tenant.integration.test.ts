@@ -33,6 +33,7 @@ import {
   type TestDatabase,
   unseededTenantTables,
 } from '@moin/testing';
+import { IDEMPOTENCY_KEY_HEADER } from '@moin/contracts';
 import { withTenant } from '@moin/db';
 import { fixedClock } from '@moin/kernel';
 import { afterAll, beforeAll, describe, expect } from 'vitest';
@@ -333,7 +334,13 @@ describe('cross-tenant probes: A calls with B ids (P06.13.02)', () => {
           : route.method === 'GET'
             ? undefined
             : (route.body ?? { reason: 'cross-tenant probe' });
-      const response = await authed(session, route.method, url, body);
+      const response = await authed(
+        session,
+        route.method,
+        url,
+        body,
+        route.idempotent === true ? { [IDEMPOTENCY_KEY_HEADER]: randomUUID() } : {},
+      );
       ledger.called(key(route), response.statusCode);
       // Exact 404: P06.07.03 — cross-tenant and not-permitted both read as not-found, so
       // existence never leaks. A 403 here would be a regression (it confirms the id
