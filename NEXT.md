@@ -10,6 +10,6 @@
 
 **Needed from you (one list), optional:** the git guard refuses these to a session; both are archived in `~/backups/moin-pre-prune-20261117.bundle` (`refs/archive/dirty/*`, `refs/archive/stash/*`). (1) `git worktree remove --force ~/worktrees/moin/docs-ledger-status-correction` (one uncommitted edit to the frozen `PROGRESS.md`). (2) `git stash clear` (26 stashes). (3) Copy the 14 keys `pnpm preflight` reports missing from `.env.example` into `.env` (sessions may not edit `.env`; tests run with `.env.example` exported).
 
-**Rollback tested before merge:** #266 (session-bound CSRF): 4 of 4. #267 (0083) and #278 (0084, sign-in throttle): previous bodies restored on a migrated database, sign-in admits, no row lost, bucket count right; 1 of 1 each. Not in the class: X1 to X4, K1, S2 (no migration).
+**Rollback tested before merge:** #266 (session-bound CSRF): 4 of 4. #267 (0083) and #278 (0084, sign-in throttle): previous bodies restored on a migrated database, sign-in admits, no row lost, bucket count right; 1 of 1 each. Not in the class: X1 to X4, K1, S2 (no migration, and no identity or Keycloak change: the seed creates no users, the realm file is unchanged).
 
 **Last verified main SHA:** `4ccc5da` (#280, K1; verify, codeql, container-scan and security-scan passed on it, 2026-11-17). Done: C1 to C6, X1 to X4, K1, S2 (pending merge).

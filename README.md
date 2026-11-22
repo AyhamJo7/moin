@@ -55,8 +55,11 @@ container images; a first run also pulls about 1.7 GB of them. The full walkthro
 to do when a step fails, is in
 [`docs/development/local-setup.md`](docs/development/local-setup.md).
 
-`pnpm db:seed` exists and currently applies **no rows**: the demo tenants "Musterrestaurant" and
-"Musterbetrieb SHK" are defined, and the tenancy schema exists (P06), but seeding them is still open.
+`pnpm db:seed` creates the demo tenants "Musterrestaurant" and "Musterbetrieb SHK" with opening
+hours and FAQ cards. It writes only to a database marked for fixture data, which the local Postgres
+bootstrap does; a volume created before that marker existed needs the one line in
+`docker/postgres/init/02-fixture-data.sql`. The owners sign in once invitation acceptance lands
+(ROADMAP O1).
 
 ## Repository layout
 
@@ -93,7 +96,7 @@ Nothing is "done" without evidence: see [`CONTRIBUTING.md`](CONTRIBUTING.md#evid
 
 Only synthetic data ever enters development and test environments. Production data never leaves
 production (INV-16). The demo tenants "Musterrestaurant" and "Musterbetrieb SHK" are defined in
-`packages/db/src/seed.ts`; their rows arrive with the tenancy schema in P06.
+`packages/db/src/seed.ts`, with test-range phone numbers and `.example` addresses.
 
 ## Licence
 

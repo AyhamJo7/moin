@@ -47,10 +47,11 @@ function hasSeparator(run: string): boolean {
 const CUE_WINDOW_CHARS = 25;
 
 // Capitalised words with non-German sequences — hint only, never reject. After the capital, the
-// word ends in "qu" or in three consonants, or has a "y" that is not its last letter. Two linear
-// passes instead of one pattern: `[a-zäöüß]*` followed by `y[a-zäöüß]+` overlapped and ran in
-// quadratic time on a capital followed by a long run of "y".
-const CAPITALISED_WORD_RE = /\b[A-ZÄÖÜ][a-zäöüß]*/gu;
+// word ends in "qu" or in three consonants, or has a "y" that is not its last letter. A word ends
+// at a word boundary, so "Ayyy1" (an identifier, not a word) is not one. Two linear passes instead
+// of one pattern: `[a-zäöüß]*` followed by `y[a-zäöüß]+` overlapped and ran in quadratic time on a
+// capital followed by a long run of "y".
+const CAPITALISED_WORD_RE = /\b[A-ZÄÖÜ][a-zäöüß]*\b/gu;
 const FOREIGN_TAIL_RE = /qu$|[bcdfghjklmnpqrstvwxz]{3}$|y[a-zäöüß]/u;
 
 function foreignName(text: string): string | null {

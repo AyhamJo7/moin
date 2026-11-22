@@ -106,11 +106,14 @@ async function persisted(database: TestDatabase, slug: string) {
           where o.slug = $1 and f.active order by f.canonical`,
       )
     ).map((row) => [row.canonical, row.spoken]),
-    owners: await one<{ email: string; subject: string }>(
-      `select u.email::text as email, u.cognito_sub as subject from memberships m
-         join users u on u.id = m.user_id
-         join organisations o on o.id = m.organisation_id
-        where o.slug = $1 and m.role = 'owner' and m.status = 'active'`,
+    invitations: await one<{ email: string; state: string }>(
+      `select r.email, r.state from owner_invitation_requests r
+         join organisations o on o.id = r.organisation_id
+        where o.slug = $1`,
+    ),
+    members: await one(
+      `select m.id from memberships m join organisations o on o.id = m.organisation_id
+        where o.slug = $1`,
     ),
     audits: await one<{
       operation: string;
@@ -120,17 +123,29 @@ async function persisted(database: TestDatabase, slug: string) {
       `select a.operation, a.actor_id::text, a.correlation_id::text from audit_events a
          join organisations o on o.id = a.organisation_id
         where o.slug = $1
-          and a.operation in ('membership.grant', 'hours.set', 'faq.upsert', 'seed.complete')
+          and a.operation in ('hours.set', 'faq.upsert', 'seed.complete')
         order by a.seq`,
     ),
   };
 }
 
-function realmSubject(email: string): string | undefined {
-  const realm = JSON.parse(readFileSync(REALM, 'utf8')) as {
-    users: { id?: string; email: string }[];
-  };
-  return realm.users.find((user) => user.email === email)?.id;
+function realmEmails(): string[] {
+  const realm = JSON.parse(readFileSync(REALM, 'utf8')) as { users: { email: string }[] };
+  return realm.users.map((user) => user.email);
+}
+
+/** The migrator URL of `url` with a session setting passed as a connection option. */
+function withSessionMarker(url: string): string {
+  const withOption = new URL(url);
+  withOption.searchParams.set('options', '-c moin.fixture_data=allowed');
+  return withOption.toString();
+}
+
+async function organisationCount(database: TestDatabase): Promise<number> {
+  const rows = await database
+    .fixturePool()
+    .query<{ n: number }>('select count(*)::int as n from organisations');
+  return rows.rows[0]?.n ?? -1;
 }
 
 describe('the demo seed (S2)', () => {
@@ -146,41 +161,37 @@ describe('the demo seed (S2)', () => {
     }
   });
 
-  evidenceTest('binds each owner to its subject in the local Keycloak realm', async () => {
-    await seed(main.url);
-    for (const [slug, want] of Object.entries(EXPECTED)) {
-      const subject = realmSubject(want.ownerEmail);
-      expect(subject, want.ownerEmail).toMatch(/^[0-9a-f-]{36}$/u);
-      expect((await persisted(main.database, slug)).owners, slug).toStrictEqual([
-        { email: want.ownerEmail, subject },
-      ]);
-    }
-  });
-
   evidenceTest(
-    'audits the grant and the content as one seed run, with no person as the actor',
+    'invites a local realm user as owner and creates no user or membership',
     async () => {
       await seed(main.url);
-      for (const slug of Object.keys(EXPECTED)) {
-        const { audits } = await persisted(main.database, slug);
-        expect(
-          audits.map((row) => row.operation),
-          slug,
-        ).toStrictEqual([
-          'membership.grant',
-          'hours.set',
-          'faq.upsert',
-          'faq.upsert',
-          'faq.upsert',
-          'seed.complete',
-        ]);
-        expect(new Set(audits.map((row) => row.actor_id)), slug).toStrictEqual(new Set([null]));
-        const runs = new Set(audits.map((row) => row.correlation_id));
-        expect(runs.size, slug).toBe(1);
-        expect([...runs][0], slug).toMatch(/^[0-9a-f-]{36}$/u);
+      for (const [slug, want] of Object.entries(EXPECTED)) {
+        expect(realmEmails(), slug).toContain(want.ownerEmail);
+        const got = await persisted(main.database, slug);
+        expect(got.invitations, slug).toStrictEqual([{ email: want.ownerEmail, state: 'pending' }]);
+        expect(got.members, slug).toStrictEqual([]);
       }
+      const users = await main.database
+        .fixturePool()
+        .query<{ n: number }>('select count(*)::int as n from users');
+      expect(users.rows[0]?.n).toBe(0);
     },
   );
+
+  evidenceTest('audits the content as one seed run, with no person as the actor', async () => {
+    await seed(main.url);
+    for (const slug of Object.keys(EXPECTED)) {
+      const { audits } = await persisted(main.database, slug);
+      expect(
+        audits.map((row) => row.operation),
+        slug,
+      ).toStrictEqual(['hours.set', 'faq.upsert', 'faq.upsert', 'faq.upsert', 'seed.complete']);
+      expect(new Set(audits.map((row) => row.actor_id)), slug).toStrictEqual(new Set([null]));
+      const runs = new Set(audits.map((row) => row.correlation_id));
+      expect(runs.size, slug).toBe(1);
+      expect([...runs][0], slug).toMatch(/^[0-9a-f-]{36}$/u);
+    }
+  });
 
   evidenceTest('a rerun after an operator edited the seeded data changes nothing', async () => {
     await seed(main.url);
@@ -205,10 +216,23 @@ describe('the demo seed, guarded (S2)', () => {
     async () => {
       const unmarked = await freshDatabase('seed-unmarked', false);
       await expect(seed(unmarked.url)).rejects.toBeInstanceOf(SeedRefusedError);
-      const rows = await unmarked.database
-        .fixturePool()
-        .query<{ n: number }>('select count(*)::int as n from organisations');
-      expect(rows.rows[0]?.n).toBe(0);
+      expect(await organisationCount(unmarked.database)).toBe(0);
+    },
+  );
+
+  evidenceTest(
+    'refuses a marker that only the connection or the role carries, not the database',
+    async () => {
+      const unmarked = await freshDatabase('seed-session-marker', false);
+      await expect(seed(withSessionMarker(unmarked.url))).rejects.toBeInstanceOf(SeedRefusedError);
+      await unmarked.database.fixturePool().query(
+        `do $$ begin
+           execute format('alter role moin_migrator in database %I set moin.fixture_data = %L',
+                          current_database(), 'allowed');
+         end $$`,
+      );
+      await expect(seed(unmarked.url)).rejects.toBeInstanceOf(SeedRefusedError);
+      expect(await organisationCount(unmarked.database)).toBe(0);
     },
   );
 
@@ -219,7 +243,7 @@ describe('the demo seed, guarded (S2)', () => {
       const got = await persisted(fresh.database, slug);
       expect(got.hours, slug).toStrictEqual(want.hours);
       expect(got.faqs, slug).toStrictEqual(want.faqs);
-      expect(got.owners, slug).toHaveLength(1);
+      expect(got.invitations, slug).toHaveLength(1);
       expect(
         got.audits.filter((row) => row.operation === 'seed.complete'),
         slug,
@@ -227,7 +251,7 @@ describe('the demo seed, guarded (S2)', () => {
     }
   });
 
-  evidenceTest('a failure rolls the tenant back: no owner, no grant, no audit', async () => {
+  evidenceTest('a failure rolls the tenant back, provisioning included', async () => {
     const fresh = await freshDatabase('seed-rollback');
     const base = DEMO_TENANTS[0];
     if (base === undefined) throw new Error('no demo tenant');
@@ -236,23 +260,30 @@ describe('the demo seed, guarded (S2)', () => {
       slug: 'kaputtbetrieb',
       name: 'Kaputtbetrieb',
       requestId: '5eed0000-0000-4000-8000-0000000000f1',
-      owner: {
-        id: '5eed0000-0000-4000-8000-0000000000f2',
-        subject: '5eed0000-0000-4000-8000-0000000000f3',
-        email: 'inhaber@kaputtbetrieb.example',
-      },
-      // Digit runs fail the spoken lint inside createFaqCard, after the grant was written.
+      ownerEmail: 'inhaber@kaputtbetrieb.example',
+      // Digit runs fail the spoken lint inside createFaqCard, after provisioning and the hours.
       faqs: [{ canonical: 'Wie ist Ihre Nummer?', spoken: 'Rufen Sie 040 1234567 an.' }],
     };
     await expect(seed(fresh.url, [broken])).rejects.toThrow(/spoken lint/u);
-    const got = await persisted(fresh.database, 'kaputtbetrieb');
-    expect(got.organisations).toHaveLength(1);
-    expect(got.owners).toStrictEqual([]);
-    expect(got.hours).toStrictEqual([]);
-    expect(got.audits).toStrictEqual([]);
-    const users = await fresh.database
-      .fixturePool()
-      .query('select 1 from users where id = $1', [broken.owner.id]);
-    expect(users.rows).toStrictEqual([]);
+    const left = await fresh.database.fixturePool().query(
+      `select (select count(*) from organisations)::int as organisations,
+              (select count(*) from locations)::int as locations,
+              (select count(*) from tenant_setup)::int as setup,
+              (select count(*) from owner_invitation_requests)::int as invitations,
+              (select count(*) from provisioning_requests)::int as requests,
+              (select count(*) from opening_rules)::int as hours,
+              (select count(*) from audit_events)::int as audits`,
+    );
+    expect(left.rows).toStrictEqual([
+      {
+        organisations: 0,
+        locations: 0,
+        setup: 0,
+        invitations: 0,
+        requests: 0,
+        hours: 0,
+        audits: 0,
+      },
+    ]);
   });
 });

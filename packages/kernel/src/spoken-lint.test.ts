@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { lintSpokenAnswer } from './spoken-lint.ts';
 
-/** Long enough that the quadratic pattern took seconds; the linear check takes milliseconds. */
-const LONG_RUN = 30_000;
+/** Long enough that the quadratic pattern takes seconds; the linear check takes milliseconds. */
+const LONG_RUN = 200_000;
 const LINEAR_BUDGET_MS = 500;
 
 describe('spoken lint', () => {
@@ -20,6 +20,8 @@ describe('spoken lint', () => {
     ['Wir öffnen im Herbst wieder.', 'Herbst'],
     ['Wir liefern nach Hamburg.', null],
     ['Frau Schmidt ruft zurück.', null],
+    // An identifier is not a word: the hint goes to the name after it.
+    ['Ayyy1 Herr Nguyen berät Sie gerne.', 'Nguyen'],
   ])('hints a phonetic spelling for %s', (text, word) => {
     const hints = lintSpokenAnswer(text).hints.join(' ');
     if (word === null) expect(hints).toBe('');

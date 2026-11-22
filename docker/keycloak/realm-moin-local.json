@@ -50,7 +50,6 @@
   ],
   "users": [
     {
-      "id": "5eed0000-0000-4000-8000-0000000000c1",
       "username": "inhaber@musterrestaurant.example",
       "email": "inhaber@musterrestaurant.example",
       "emailVerified": true,
@@ -66,7 +65,6 @@
       ]
     },
     {
-      "id": "5eed0000-0000-4000-8000-0000000000c2",
       "username": "mitarbeiter@musterbetrieb-shk.example",
       "email": "mitarbeiter@musterbetrieb-shk.example",
       "emailVerified": true,

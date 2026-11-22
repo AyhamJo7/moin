@@ -148,19 +148,50 @@ export async function withTenant<T>(
     correlationId: options.correlationId ?? outer?.correlationId,
   };
 
+  return inTransaction(pool, async (client) => enterTenant(client, context, fn));
+}
+
+/**
+ * Like `withTenant`, for work that runs inside an organisation it creates first. `create` runs at
+ * the start of the same transaction, with no tenant context, and returns the new organisation's
+ * id; `fn` then runs scoped to it. The organisation and everything `fn` writes commit together or
+ * not at all.
+ */
+export async function withNewTenant<T>(
+  pool: Pool,
+  create: (client: TenantClient) => Promise<string>,
+  fn: (client: TenantClient) => Promise<T>,
+  options: WithTenantOptions = {},
+): Promise<T> {
+  if (storage.getStore() !== undefined) {
+    throw new TenantContextError(
+      'a new organisation must be created outside any tenant transaction',
+    );
+  }
   return inTransaction(pool, async (client) => {
-    // Transaction-local. The `true` is the whole argument of this module.
-    await client.query('select set_config($1, $2, true)', [TENANT_SETTING, organisationId]);
-    // Correlation alongside the tenant, same transaction-local scope: in-database audit writers
-    // (invitation acceptance, account recovery) read it back for their rows. Empty string when
-    // unset — NULLIF at the read site turns it into NULL, so a missing correlation can never
-    // fail an audit write.
-    await client.query('select set_config($1, $2, true)', [
-      CORRELATION_SETTING,
-      context.correlationId ?? '',
-    ]);
-    return storage.run(context, async () => fn(wrap(client)));
+    const organisationId = await create(wrap(client));
+    assertOrganisationId(organisationId);
+    const context: TenantContext = { organisationId, ...options };
+    return enterTenant(client, context, fn);
   });
+}
+
+async function enterTenant<T>(
+  client: PoolClient,
+  context: TenantContext,
+  fn: (client: TenantClient) => Promise<T>,
+): Promise<T> {
+  // Transaction-local. The `true` is the whole argument of this module.
+  await client.query('select set_config($1, $2, true)', [TENANT_SETTING, context.organisationId]);
+  // Correlation alongside the tenant, same transaction-local scope: in-database audit writers
+  // (invitation acceptance, account recovery) read it back for their rows. Empty string when
+  // unset — NULLIF at the read site turns it into NULL, so a missing correlation can never
+  // fail an audit write.
+  await client.query('select set_config($1, $2, true)', [
+    CORRELATION_SETTING,
+    context.correlationId ?? '',
+  ]);
+  return storage.run(context, async () => fn(wrap(client)));
 }
 
 /**
