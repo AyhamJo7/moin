@@ -5,10 +5,17 @@
  * `withTenant`, via `executeJob`. The queue connection is resolved at startup, so a missing queue
  * or a mistyped name refuses to start (`ConfigurationError`) instead of polling nothing.
  *
- * The registry is empty in this slice: no production job type has a handler yet (the outbox
- * dispatcher and the post-call finaliser arrive with their own slices). A delivery for a type
- * without a handler is recorded as a transient `handler-unavailable` failure and follows the
- * retry schedule to the DLQ; it is never acknowledged as processed.
+ * The registry is empty in this slice: no production job type has a handler yet (the post-call
+ * finaliser arrives with its own slice). A delivery for a type without a handler is recorded as a
+ * transient `handler-unavailable` failure and follows the retry schedule to the DLQ; it is never
+ * acknowledged as processed.
+ *
+ * The outbox dispatcher (P08.02.02) runs here too, on its own `moin_dispatcher` pool, when
+ * `DISPATCHER_DATABASE_URL` is set; unset, it does not run and the worker says so once at startup.
+ * Its route table is empty until a production event type has a job: an unrouted event stays in
+ * the outbox, backing off, and is never published. No workload queue is mapped either: a route
+ * needs its workload's queue in `OUTBOX_QUEUES`, and the dispatcher refuses to start with a route
+ * whose workload has none (P08.01.02).
  */
 
 import {
@@ -20,7 +27,9 @@ import {
   type OnModuleDestroy,
 } from '@nestjs/common';
 import { createPool, type Pool } from '@moin/db/pool';
-import { connectSqsQueues, type SqsQueues } from '@moin/integrations';
+import { connectSqsQueues, type JobQueue, type SqsQueues } from '@moin/integrations';
+import type { JobType } from '@moin/kernel';
+import { dispatcherPoolIsRestricted } from '@moin/db';
 import type { Logger } from '@moin/observability';
 import { CONFIG } from '../../config/config.module.ts';
 import { ConfigurationError, type Config } from '../../config/env.ts';
@@ -29,10 +38,23 @@ import { SHUTDOWN_STATE } from '../../health/health.tokens.ts';
 import type { ShutdownState } from '../../health/shutdown-state.ts';
 import { LOGGER } from '../../observability/logger.module.ts';
 import { JobConsumer, JobHandlerRegistry } from './job-consumer.ts';
+import { OutboxDispatcher } from './outbox-dispatcher.ts';
 
 export const JOB_HANDLERS = Symbol('JOB_HANDLERS');
 const WORKER_POOL = Symbol('WORKER_POOL');
 const JOB_QUEUES = Symbol('JOB_QUEUES');
+const DISPATCHER_POOL = Symbol('DISPATCHER_POOL');
+
+/** Outbox event type to job type. Empty until a production event has a handler. */
+const OUTBOX_ROUTES: ReadonlyMap<string, JobType> = new Map();
+/** Workload (`queueFor`) to the queue the dispatcher sends it to. Empty while no route exists. */
+const OUTBOX_QUEUES: ReadonlyMap<string, JobQueue> = new Map<string, JobQueue>();
+const OUTBOX_INTERVAL_MS = 2_000;
+const OUTBOX_TENANT_PAGE = 100;
+const OUTBOX_BATCH = 50;
+/** At most this, and at most half the shutdown grace, so a stalled send cannot outlast it. */
+const OUTBOX_SEND_TIMEOUT_MS = 5_000;
+const DISPATCHER_POOL_MAX = 2;
 
 const POOL_MAX_CONNECTIONS = 10;
 const CONNECTION_TIMEOUT_MS = 5_000;
@@ -82,14 +104,71 @@ class JobConsumerService implements OnApplicationBootstrap, OnModuleDestroy {
 }
 
 @Injectable()
+class OutboxDispatcherService implements OnApplicationBootstrap, OnModuleDestroy {
+  readonly #dispatcher: OutboxDispatcher | null;
+
+  public constructor(
+    @Inject(WORKER_POOL) appPool: Pool,
+    @Inject(DISPATCHER_POOL) private readonly dispatcherPool: Pool | null,
+    @Inject(LOGGER) private readonly logger: Logger,
+    @Inject(SHUTDOWN_STATE) shutdownState: ShutdownState,
+    @Inject(CONFIG) config: Config,
+  ) {
+    this.#dispatcher =
+      dispatcherPool === null
+        ? null
+        : new OutboxDispatcher({
+            appPool,
+            dispatcherPool,
+            queues: OUTBOX_QUEUES,
+            routes: OUTBOX_ROUTES,
+            logger,
+            isShuttingDown: () => shutdownState.isShuttingDown(),
+            options: {
+              intervalMs: OUTBOX_INTERVAL_MS,
+              tenantPageSize: OUTBOX_TENANT_PAGE,
+              batchSize: OUTBOX_BATCH,
+              sendTimeoutMs: Math.min(OUTBOX_SEND_TIMEOUT_MS, config.SHUTDOWN_GRACE_MS / 2),
+            },
+          });
+  }
+
+  public async onApplicationBootstrap(): Promise<void> {
+    if (this.#dispatcher === null || this.dispatcherPool === null) {
+      this.logger.warn(
+        { outcome: 'outbox dispatcher off' },
+        'DISPATCHER_DATABASE_URL is not set; the outbox is not dispatched',
+      );
+      return;
+    }
+    // A credential for another role, or one whose grants are wider than migration 0085 leaves
+    // them (a database not yet migrated), refuses startup with a fixed message: the driver's
+    // error can carry the host and the user (INV-12, INV-15).
+    const restricted = await dispatcherPoolIsRestricted(this.dispatcherPool).catch(() => false);
+    if (!restricted) {
+      throw new ConfigurationError([
+        'DISPATCHER_DATABASE_URL: the pool is not moin_dispatcher limited to the outbox (migration 0085), or the database is unreachable',
+      ]);
+    }
+    this.#dispatcher.start();
+  }
+
+  public async onModuleDestroy(): Promise<void> {
+    await this.#dispatcher?.stop();
+  }
+}
+
+@Injectable()
 class WorkerResources implements OnApplicationShutdown {
   public constructor(
     @Inject(WORKER_POOL) private readonly pool: Pool,
     @Inject(JOB_QUEUES) private readonly queues: SqsQueues,
+    @Inject(DISPATCHER_POOL) private readonly dispatcherPool: Pool | null,
   ) {}
 
   public async onApplicationShutdown(): Promise<void> {
     this.queues.close();
+    await this.dispatcherPool?.end();
     await this.pool.end();
   }
 }
@@ -128,7 +207,24 @@ class WorkerResources implements OnApplicationShutdown {
         });
       },
     },
+    {
+      provide: DISPATCHER_POOL,
+      inject: [CONFIG],
+      useFactory: (config: Config): Pool | null =>
+        config.DISPATCHER_DATABASE_URL === undefined
+          ? null
+          : createPool({
+              connectionString: config.DISPATCHER_DATABASE_URL,
+              max: DISPATCHER_POOL_MAX,
+              connectionTimeoutMillis: CONNECTION_TIMEOUT_MS,
+              idleTimeoutMillis: IDLE_TIMEOUT_MS,
+              statement_timeout: STATEMENT_TIMEOUT_MS,
+              idle_in_transaction_session_timeout: IDLE_IN_TRANSACTION_TIMEOUT_MS,
+              application_name: `${config.SERVICE_NAME}-${config.SERVER_ROLE}-outbox`,
+            }),
+    },
     JobConsumerService,
+    OutboxDispatcherService,
     WorkerResources,
   ],
 })

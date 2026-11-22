@@ -114,6 +114,17 @@ const baseSchema = z.object({
     z.url({ protocol: /^postgres(ql)?$/ }).optional(),
   ),
 
+  /**
+   * The worker role's outbox pool: `moin_dispatcher`, which may read and mark outbox rows and reach
+   * no other table (P08.02.02). Unset, the worker runs no outbox dispatcher; it never falls back to
+   * the `moin_app` credential. Holds the resolved credential; the task definition references the
+   * ARN.
+   */
+  DISPATCHER_DATABASE_URL: secret(
+    'DISPATCHER_DATABASE_URL',
+    z.url({ protocol: /^postgres(ql)?$/ }).optional(),
+  ),
+
   /** P06.05.04: one OIDC contract, selected by deployment rather than by business logic. */
   OIDC_PROVIDER: z.enum(OIDC_PROVIDERS).optional(),
   OIDC_ISSUER_URL: secret('OIDC_ISSUER_URL', z.url({ protocol: /^https?$/ }).optional()),
@@ -363,6 +374,81 @@ const schema = baseSchema.superRefine((value, ctx) => {
       message:
         'must connect as moin_identity, the only role that may execute the session functions',
     });
+  }
+
+  if (value.DISPATCHER_DATABASE_URL !== undefined) {
+    if (value.SERVER_ROLE !== 'worker') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['DISPATCHER_DATABASE_URL'],
+        message: "is the worker role's outbox credential and must not reach any other role",
+      });
+    }
+    // Checked only once both parse: the messages name the variable and never echo a value.
+    const dispatcher = URL.canParse(value.DISPATCHER_DATABASE_URL)
+      ? new URL(value.DISPATCHER_DATABASE_URL)
+      : undefined;
+    const app = URL.canParse(value.DATABASE_URL) ? new URL(value.DATABASE_URL) : undefined;
+    if (dispatcher === undefined || app === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [dispatcher === undefined ? 'DISPATCHER_DATABASE_URL' : 'DATABASE_URL'],
+        message: 'is not a connection URL',
+      });
+      return;
+    }
+    // As for the identity URL: these parameters would connect as a role the username check never
+    // saw.
+    if (
+      [...dispatcher.searchParams.keys()].some((key) =>
+        ['user', 'options', 'role'].includes(key.toLowerCase()),
+      )
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['DISPATCHER_DATABASE_URL'],
+        message: 'must not carry user, options or role query parameters, which override its role',
+      });
+    }
+    // One database: the dispatcher marks an event in the database where the app pool writes its
+    // job. Two databases that share a tenant id would mark in one and enqueue in the other. The
+    // driver lets query parameters override the host, port and database, so neither URL may carry
+    // them; the URL components are then the connection's.
+    for (const [name, url] of [
+      ['DISPATCHER_DATABASE_URL', dispatcher],
+      ['DATABASE_URL', app],
+    ] as const) {
+      if (
+        [...url.searchParams.keys()].some((key) =>
+          ['host', 'hostaddr', 'port', 'dbname', 'database'].includes(key.toLowerCase()),
+        )
+      ) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [name],
+          message:
+            'must not carry host, hostaddr, port, dbname or database query parameters while the outbox dispatcher is configured',
+        });
+      }
+    }
+    if (
+      dispatcher.hostname !== app.hostname ||
+      dispatcher.port !== app.port ||
+      dispatcher.pathname !== app.pathname
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['DISPATCHER_DATABASE_URL'],
+        message: 'must name the same host, port and database as DATABASE_URL',
+      });
+    }
+    if (dispatcher.username !== 'moin_dispatcher') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['DISPATCHER_DATABASE_URL'],
+        message: 'must connect as moin_dispatcher, the role limited to the outbox',
+      });
+    }
   }
 
   if (

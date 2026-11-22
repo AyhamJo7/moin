@@ -53,8 +53,15 @@ export interface JobQueue {
   remove(message: QueueMessage): Promise<void>;
   /** Re-hides the message for `seconds` (0 releases it at once). */
   hide(message: QueueMessage, seconds: number): Promise<void>;
-  /** Publishes a body with string attributes, e.g. a DLQ reason code. */
-  send(body: string, attributes?: Readonly<Record<string, string>>): Promise<void>;
+  /**
+   * Publishes a body with string attributes, e.g. a DLQ reason code. An aborted `signal` cancels
+   * the request itself, not only the wait for it.
+   */
+  send(
+    body: string,
+    attributes?: Readonly<Record<string, string>>,
+    options?: { readonly signal?: AbortSignal | undefined },
+  ): Promise<void>;
 }
 
 export interface SqsQueueConfig {
@@ -126,6 +133,7 @@ class SqsJobQueue implements JobQueue {
   public async send(
     body: string,
     attributes: Readonly<Record<string, string>> = {},
+    options: { readonly signal?: AbortSignal | undefined } = {},
   ): Promise<void> {
     await this.#client.send(
       new SendMessageCommand({
@@ -138,6 +146,7 @@ class SqsJobQueue implements JobQueue {
           ]),
         ),
       }),
+      options.signal === undefined ? {} : { abortSignal: options.signal },
     );
   }
 }

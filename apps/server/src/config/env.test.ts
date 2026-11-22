@@ -438,3 +438,124 @@ describe('the identity database credential (P06.06, ADR-0003)', () => {
     expect(described['IDENTITY_DATABASE_URL']).toBe('[redacted]');
   });
 });
+
+describe('the outbox dispatcher credential (P08.02.02)', () => {
+  const DISPATCHER = 'postgres://moin_dispatcher:s3cr3t-dispatcher@localhost:5432/moin';
+  const worker = { SERVER_ROLE: 'worker', SQS_REGION: 'eu-central-1', SQS_QUEUE_JOBS: 'moin-jobs' };
+
+  it('is accepted for the worker role', () => {
+    expect(
+      loadConfig({ ...VALID, ...worker, DISPATCHER_DATABASE_URL: DISPATCHER })
+        .DISPATCHER_DATABASE_URL,
+    ).toBe(DISPATCHER);
+  });
+
+  evidenceTest('is refused for api, voice and migrate', () => {
+    const voice = {
+      TWILIO_AUTH_TOKEN: 'local-development-only',
+      VOICE_PUBLIC_ORIGIN: 'https://voice.example.de',
+      VOICE_WEBSOCKET_ORIGIN: 'wss://voice.example.de',
+    };
+    for (const SERVER_ROLE of ['api', 'voice', 'migrate']) {
+      let problems: readonly string[] = [];
+      try {
+        loadConfig({ ...VALID, ...voice, SERVER_ROLE, DISPATCHER_DATABASE_URL: DISPATCHER });
+      } catch (error) {
+        problems = error instanceof ConfigurationError ? error.problems : [];
+      }
+      expect(
+        problems.some((problem) => problem.startsWith('DISPATCHER_DATABASE_URL:')),
+        SERVER_ROLE,
+      ).toBe(true);
+      expect(problems.join('\n')).not.toContain('s3cr3t-dispatcher');
+    }
+  });
+
+  evidenceTest('must connect as moin_dispatcher, never moin_app, the owner or the migrator', () => {
+    for (const user of ['moin_app', 'moin_owner', 'moin_migrator']) {
+      expect(
+        () =>
+          loadConfig({
+            ...VALID,
+            ...worker,
+            DISPATCHER_DATABASE_URL: `postgres://${user}:x@localhost:5432/moin`,
+          }),
+        user,
+      ).toThrow(ConfigurationError);
+    }
+  });
+
+  evidenceTest('refuses query parameters that would connect as another role', () => {
+    for (const query of ['?user=moin_app', '?options=-c%20role%3Dmoin_owner', '?ROLE=moin_app']) {
+      expect(
+        () =>
+          loadConfig({
+            ...VALID,
+            ...worker,
+            DISPATCHER_DATABASE_URL: `postgres://moin_dispatcher:x@localhost:5432/moin${query}`,
+          }),
+        query,
+      ).toThrow(ConfigurationError);
+    }
+  });
+
+  evidenceTest('must name the same database as DATABASE_URL', () => {
+    for (const other of [
+      'postgres://moin_dispatcher:x@127.0.0.1:5432/moin',
+      'postgres://moin_dispatcher:x@localhost:6543/moin',
+      'postgres://moin_dispatcher:x@localhost:5432/moin_copy',
+    ]) {
+      expect(
+        () => loadConfig({ ...VALID, ...worker, DISPATCHER_DATABASE_URL: other }),
+        other,
+      ).toThrow(ConfigurationError);
+    }
+  });
+
+  evidenceTest('refuses host, port or database overrides on either URL', () => {
+    for (const query of ['?port=6543', '?host=127.0.0.1', '?hostaddr=127.0.0.1', '?dbname=x']) {
+      expect(
+        () =>
+          loadConfig({
+            ...VALID,
+            ...worker,
+            DISPATCHER_DATABASE_URL: `${DISPATCHER}${query}`,
+          }),
+        `dispatcher ${query}`,
+      ).toThrow(ConfigurationError);
+      expect(
+        () =>
+          loadConfig({
+            ...VALID,
+            ...worker,
+            DATABASE_URL: `${VALID.DATABASE_URL}${query}`,
+            DISPATCHER_DATABASE_URL: DISPATCHER,
+          }),
+        `app ${query}`,
+      ).toThrow(ConfigurationError);
+    }
+  });
+
+  evidenceTest('a malformed URL is named, not echoed, and not thrown raw', () => {
+    let problems: readonly string[] = [];
+    try {
+      loadConfig({
+        ...VALID,
+        ...worker,
+        DISPATCHER_DATABASE_URL: 'postgres://moin_dispatcher:s3cr3t-dispatcher@[bad/moin',
+      });
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConfigurationError);
+      problems = error instanceof ConfigurationError ? error.problems : [];
+    }
+    expect(problems.some((problem) => problem.startsWith('DISPATCHER_DATABASE_URL:'))).toBe(true);
+    expect(problems.join('\n')).not.toContain('s3cr3t-dispatcher');
+  });
+
+  it('is secret-bearing, so describeConfig never prints it', () => {
+    const described = describeConfig(
+      loadConfig({ ...VALID, ...worker, DISPATCHER_DATABASE_URL: DISPATCHER }),
+    );
+    expect(described['DISPATCHER_DATABASE_URL']).toBe('[redacted]');
+  });
+});

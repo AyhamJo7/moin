@@ -17,7 +17,7 @@
  * the alarm (> 2 min) lives in ops, this function is its input.
  */
 
-import { randomUUID } from 'node:crypto';
+import { uuidv7 } from '@moin/kernel';
 import type { TenantClient } from './tenant.ts';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
@@ -75,7 +75,8 @@ export async function insertOutboxEvent(
     throw new RangeError('aggregate version must be an integer ≥ 1');
   }
   checkPayload(input.payload ?? {});
-  const id = randomUUID();
+  // UUIDv7, like every job id (P08.01.01): the dispatcher uses the event id as its job's id.
+  const id = uuidv7();
   await client.query(
     `insert into outbox
        (id, organisation_id, aggregate, aggregate_id, aggregate_ver, event_type, payload)
@@ -120,6 +121,7 @@ export async function dispatchOutboxBatch(
   client: TenantClient,
   publish: (event: OutboxEvent) => Promise<void>,
   limit = 50,
+  shouldStop: () => boolean = () => false,
 ): Promise<PublishResult> {
   if (!Number.isInteger(limit) || limit <= 0 || limit > 200) {
     throw new RangeError('limit must be 1..200');
@@ -145,6 +147,8 @@ export async function dispatchOutboxBatch(
   );
   let published = 0;
   for (const row of claimed.rows) {
+    // Draining: the rows not yet published stay undispatched and are released at commit.
+    if (shouldStop()) break;
     const event: OutboxEvent = {
       id: row.id,
       organisationId: row.organisation_id,
@@ -163,11 +167,86 @@ export async function dispatchOutboxBatch(
       const backoff = BACKOFF_S[Math.min(row.attempts, BACKOFF_S.length - 1)] ?? 1800;
       await client.query(
         `update outbox set attempts = attempts + 1,
-           next_attempt_at = now() + ($1::integer || ' seconds')::interval
+           next_attempt_at = clock_timestamp() + ($1::integer || ' seconds')::interval
          where id = $2::uuid`,
         [backoff, row.id],
       );
     }
   }
   return { published };
+}
+
+/**
+ * Per-aggregate ordering at the consumer (P08.02.04). True when a newer version of the same
+ * aggregate has already been handled: its event's job (job id and correlation id are the event
+ * id, see the worker's outbox dispatcher) succeeded.
+ *
+ * A handler of a routed outbox event calls this first, inside the transaction that applies its
+ * effect, and does nothing when it returns true. The call takes a transaction lock on the
+ * aggregate, held until that transaction ends, so handlers of one aggregate run one at a time: an
+ * older event that passed the check cannot apply its effect after a newer one committed, and one
+ * that waits sees the newer job's success once the lock is released (the job's status commits with
+ * its effect). Unknown ids answer false.
+ */
+export async function outboxEventSuperseded(
+  client: TenantClient,
+  eventId: string,
+): Promise<boolean> {
+  if (!UUID_RE.test(eventId)) throw new RangeError('event id must be a uuid');
+  const source = await client.query<{ aggregate: string; aggregate_id: string }>(
+    `select aggregate, aggregate_id::text from outbox where id = $1::uuid`,
+    [eventId],
+  );
+  const event = source.rows[0];
+  if (event === undefined) return false;
+  await client.query(
+    `select pg_advisory_xact_lock(hashtext(app.current_org()::text || ':' || $1 || ':' || $2))`,
+    [event.aggregate, event.aggregate_id],
+  );
+  // A new statement, so it sees what committed while this one waited for the lock.
+  const found = await client.query<{ superseded: boolean }>(
+    `select exists (
+       select 1
+         from outbox newer
+         join job_runs job on job.id = newer.id and job.status = 'succeeded'
+        where newer.aggregate = source.aggregate
+          and newer.aggregate_id = source.aggregate_id
+          and newer.aggregate_ver > source.aggregate_ver
+     ) as superseded
+       from outbox source
+      where source.id = $1::uuid`,
+    [eventId],
+  );
+  return found.rows[0]?.superseded === true;
+}
+
+/**
+ * Whether a pool connects as `moin_dispatcher` with exactly the outbox grants of migration 0085:
+ * SELECT on the outbox and UPDATE of its dispatch state only, nothing on the job ledger, timers or
+ * provider inbox, and no privileged role attribute. The worker refuses to dispatch otherwise, so
+ * a credential that reaches a database without 0085 never starts (P08.02.02).
+ */
+export async function dispatcherPoolIsRestricted(pool: {
+  query: (sql: string) => Promise<{ rows: unknown[] }>;
+}): Promise<boolean> {
+  const result = await pool.query(`
+    select current_user = 'moin_dispatcher'
+       and not r.rolsuper and not r.rolbypassrls and not r.rolcreaterole and not r.rolcreatedb
+       and has_table_privilege('outbox', 'SELECT')
+       and not has_table_privilege('outbox', 'INSERT')
+       and not has_table_privilege('outbox', 'DELETE')
+       and has_column_privilege('outbox', 'dispatched_at', 'UPDATE')
+       and not has_column_privilege('outbox', 'event_type', 'UPDATE')
+       and not has_column_privilege('outbox', 'payload', 'UPDATE')
+       and not has_column_privilege('outbox', 'organisation_id', 'UPDATE')
+       and not has_table_privilege('job_runs', 'SELECT')
+       and not has_table_privilege('job_runs', 'UPDATE')
+       and not has_table_privilege('job_runs', 'INSERT')
+       and not has_table_privilege('timers', 'SELECT')
+       and not has_table_privilege('timers', 'UPDATE')
+       and not has_table_privilege('provider_inbox', 'SELECT')
+       and not has_table_privilege('provider_inbox', 'UPDATE') as ok
+      from pg_roles r where r.rolname = current_user`);
+  const row = result.rows[0] as { ok?: unknown } | undefined;
+  return row?.ok === true;
 }
