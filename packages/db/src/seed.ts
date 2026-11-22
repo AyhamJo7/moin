@@ -6,16 +6,26 @@
  * verticals the pilot targets and a seed that does not look like the real thing hides real bugs:
  * German names with umlauts, five-digit PLZ, and E.164 numbers in the reserved test ranges.
  *
- * Each tenant goes through the production door, `app.provision_tenant`, with a fixed request id,
- * so a second run returns the same tenant instead of a new one. The owner, the opening hours and
- * the owner-written FAQ cards follow inside that tenant (`withTenant`, FORCE RLS), through the same
- * services the product uses, with the owner as the acting user so each write is audited as theirs.
- * Every step writes only what is missing: running the seed twice applies nothing the second time.
+ * - **Only on a database marked for fixture data.** The local Postgres bootstrap and the test
+ *   databases set `moin.fixture_data = 'allowed'`; production never does. On any other database
+ *   the seed refuses before its first write.
+ * - **Through the production doors.** Each tenant comes from `app.provision_tenant` with a fixed
+ *   request id, so a rerun returns the same tenant. Everything else for that tenant runs in one
+ *   transaction inside it (`withTenant`, FORCE RLS): the owner (a user bound to the local Keycloak
+ *   realm's fixed subject, and an active owner membership with a `membership.grant` audit event),
+ *   the opening hours through `setWeeklyRules` and the FAQ cards through `createFaqCard`.
+ * - **Attributed to the seed run, not to a person.** No acting user; every audit row of the run
+ *   shares the run's correlation id, and `seed.complete` (source `provisioning`) closes it.
+ * - **Once per tenant.** The transaction holds a per-tenant advisory lock and checks for
+ *   `seed.complete` first: a rerun, a concurrent run, or a run after an operator edited the
+ *   seeded hours or cards changes nothing. A failure rolls the whole tenant back.
  *
  * It runs on the migration connection (`pnpm db:seed`): the migration role owns the tables and
  * the provisioning function, and is still subject to FORCE RLS inside each tenant.
  */
 
+import { randomUUID } from 'node:crypto';
+import { appendAuditEvent } from './audit.ts';
 import { createFaqCard } from './faq.ts';
 import { setWeeklyRules, type RuleInput } from './hours.ts';
 import { createPool } from './pool.ts';
@@ -37,6 +47,7 @@ export interface DemoTenant {
   /** Fixed, so `provision_tenant` recognises a rerun. */
   readonly requestId: string;
   readonly templateRef: string;
+  /** `subject` is the user's fixed id in `docker/keycloak/realm-moin-local.json`. */
   readonly owner: { readonly id: string; readonly subject: string; readonly email: string };
   readonly hours: readonly RuleInput[];
   readonly faqs: readonly DemoFaq[];
@@ -60,8 +71,8 @@ export const DEMO_TENANTS: readonly DemoTenant[] = [
     templateRef: 'restaurant@1.0',
     owner: {
       id: '5eed0000-0000-4000-8000-0000000000a1',
-      subject: 'seed-musterrestaurant-owner',
-      email: 'inhaberin@musterrestaurant.example',
+      subject: '5eed0000-0000-4000-8000-0000000000c1',
+      email: 'inhaber@musterrestaurant.example',
     },
     hours: [WEEKDAY.tue, WEEKDAY.wed, WEEKDAY.thu, WEEKDAY.fri, WEEKDAY.sat, WEEKDAY.sun].map(
       (weekday) => ({ weekday, opensMin: at(11, 30), closesMin: at(22) }),
@@ -92,8 +103,9 @@ export const DEMO_TENANTS: readonly DemoTenant[] = [
     templateRef: 'handwerk-shk@1.0',
     owner: {
       id: '5eed0000-0000-4000-8000-0000000000b1',
-      subject: 'seed-musterbetrieb-shk-owner',
-      email: 'meister@musterbetrieb-shk.example',
+      // The local realm's one SHK user.
+      subject: '5eed0000-0000-4000-8000-0000000000c2',
+      email: 'mitarbeiter@musterbetrieb-shk.example',
     },
     hours: [WEEKDAY.mon, WEEKDAY.tue, WEEKDAY.wed, WEEKDAY.thu, WEEKDAY.fri].map((weekday) => ({
       weekday,
@@ -123,11 +135,30 @@ export interface SeedOutcome {
   readonly skipped: string[];
 }
 
-export async function seed(connectionString: string): Promise<SeedOutcome> {
+/** The database setting that marks a database as one the seed may write to. */
+export const FIXTURE_DATA_SETTING = 'moin.fixture_data';
+
+export class SeedRefusedError extends Error {
+  public override readonly name = 'SeedRefusedError';
+}
+
+export async function seed(
+  connectionString: string,
+  tenants: readonly DemoTenant[] = DEMO_TENANTS,
+): Promise<SeedOutcome> {
   const pool = createPool({ connectionString, max: 1, application_name: 'moin-seed' });
   try {
+    const marker = await pool.query<{ value: string | null }>(
+      'select current_setting($1, true) as value',
+      [FIXTURE_DATA_SETTING],
+    );
+    if (marker.rows[0]?.value !== 'allowed') {
+      throw new SeedRefusedError(
+        `this database is not marked for fixture data (${FIXTURE_DATA_SETTING}); nothing was written`,
+      );
+    }
     let applied = 0;
-    for (const tenant of DEMO_TENANTS) applied += await seedTenant(pool, tenant);
+    for (const tenant of tenants) applied += await seedTenant(pool, tenant);
     return { applied, skipped: [] };
   } finally {
     await pool.end();
@@ -151,44 +182,57 @@ async function seedTenant(
   );
   const organisationId = provisioned.rows[0]?.id;
   if (organisationId === undefined) throw new Error(`provisioning ${tenant.slug} returned no id`);
-  const user = await pool.query(
+  return withTenant(pool, organisationId, (client) => seedInside(client, tenant), {
+    correlationId: randomUUID(),
+  });
+}
+
+async function seedInside(client: TenantClient, tenant: DemoTenant): Promise<number> {
+  // One seed run per tenant at a time; the first one to finish marks the tenant done.
+  await client.query('select pg_advisory_xact_lock(hashtext($1))', [`seed:${tenant.requestId}`]);
+  const done = await client.query(
+    "select 1 from audit_events where operation = 'seed.complete' limit 1",
+  );
+  if (done.rows.length > 0) return 0;
+
+  const user = await client.query(
     `insert into users (id, cognito_sub, email, status) values ($1, $2, $3, 'active')
      on conflict (id) do nothing`,
     [tenant.owner.id, tenant.owner.subject, tenant.owner.email],
   );
   let applied = user.rowCount ?? 0;
-  applied += await withTenant(pool, organisationId, (client) => seedInside(client, tenant), {
-    actorId: tenant.owner.id,
-  });
-  return applied;
-}
-
-async function seedInside(client: TenantClient, tenant: DemoTenant): Promise<number> {
+  const membershipId = randomUUID();
   const membership = await client.query(
     `insert into memberships (organisation_id, id, user_id, role, status)
-     values (app.current_org(), gen_random_uuid(), $1, 'owner', 'active')
+     values (app.current_org(), $1, $2, 'owner', 'active')
      on conflict (organisation_id, user_id) do nothing`,
-    [tenant.owner.id],
+    [membershipId, tenant.owner.id],
   );
-  let applied = membership.rowCount ?? 0;
+  if ((membership.rowCount ?? 0) > 0) {
+    applied += 1;
+    await appendAuditEvent(client, {
+      source: 'provisioning',
+      operation: 'membership.grant',
+      targetKind: 'membership',
+      targetId: membershipId,
+      result: 'succeeded',
+    });
+  }
   const location = await client.query<{ id: string }>(
     'select id from locations order by created_at limit 1',
   );
   const locationId = location.rows[0]?.id;
   if (locationId === undefined) throw new Error(`${tenant.slug} has no location`);
-  const rules = await client.query<{ n: number }>(
-    'select count(*)::int as n from opening_rules where location_id = $1',
-    [locationId],
-  );
-  if ((rules.rows[0]?.n ?? 0) === 0)
-    applied += await setWeeklyRules(client, locationId, tenant.hours);
+  applied += await setWeeklyRules(client, locationId, tenant.hours);
   for (const faq of tenant.faqs) {
-    const existing = await client.query('select 1 from faq_cards where canonical = $1', [
-      faq.canonical,
-    ]);
-    if (existing.rows.length > 0) continue;
     await createFaqCard(client, { canonical: faq.canonical, spoken: faq.spoken });
     applied += 1;
   }
+  await appendAuditEvent(client, {
+    source: 'provisioning',
+    operation: 'seed.complete',
+    targetKind: 'organisation',
+    result: 'succeeded',
+  });
   return applied;
 }
