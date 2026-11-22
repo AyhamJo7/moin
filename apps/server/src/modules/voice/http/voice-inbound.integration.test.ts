@@ -16,7 +16,6 @@ import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fa
 import { Test } from '@nestjs/testing';
 import { afterAll, beforeAll, describe, expect, vi } from 'vitest';
 import { systemClock } from '@moin/kernel';
-import { createPool, type Pool } from '@moin/db/pool';
 import {
   computeSignature,
   consumeSessionToken,
@@ -33,7 +32,7 @@ import { SYNTHETIC_ACCOUNT_SID } from '../application/inbound-route.ts';
 import { noMeasurementSink, RelayConnection } from '../application/relay-connection.ts';
 import { createRouteResolver, type RouteResolver } from '../../platform/route-resolver.ts';
 import { ROUTE_RESOLVER } from '../../platform/route-resolver.module.ts';
-import { TENANT_POOL } from '../../platform/tenant-pool.module.ts';
+import { createTenantPool, TENANT_POOL } from '../../platform/tenant-pool.module.ts';
 import { VoiceCalls } from '../../platform/voice-calls.ts';
 import { DISCLOSURE_VERSION } from '../domain/disclosure.ts';
 import { CLOCK, MEASUREMENT_SINK, SESSION_TOKENS } from '../voice.tokens.ts';
@@ -61,10 +60,12 @@ function number(): string {
   return `+4930111223${String(seq).padStart(2, '0')}`;
 }
 
-const config = () =>
+type TenantPool = NonNullable<ReturnType<typeof createTenantPool>>;
+
+const config = (databaseUrl = 'postgres://moin_app:pw@localhost:5432/moin') =>
   loadConfig({
     SERVER_ROLE: 'voice',
-    DATABASE_URL: 'postgres://moin_app:pw@localhost:5432/moin',
+    DATABASE_URL: databaseUrl,
     TWILIO_AUTH_TOKEN: AUTH_TOKEN,
     VOICE_PUBLIC_ORIGIN: PUBLIC_ORIGIN,
     VOICE_WEBSOCKET_ORIGIN: 'wss://voice.example.de',
@@ -73,7 +74,7 @@ const config = () =>
 async function voiceApp(deps: {
   readonly tokens: SessionTokenStore;
   readonly resolver: RouteResolver;
-  readonly tenantPool: Pool;
+  readonly tenantPool: TenantPool;
 }): Promise<NestFastifyApplication> {
   const moduleRef = await Test.createTestingModule({
     controllers: [VoiceController],
@@ -470,7 +471,8 @@ describe('a retried webhook (S1, INV-01, INV-03, INV-11)', () => {
 
 describe('a database that cannot be reached (S1, INV-19)', () => {
   async function outageApp(which: 'routing' | 'tenant'): Promise<NestFastifyApplication> {
-    const deadPool = createPool({ connectionString: unreachableUrl, max: 1 });
+    const deadPool = createTenantPool(config(unreachableUrl));
+    if (deadPool === null) throw new Error('the voice role has a tenant pool');
     const deadResolver = createRouteResolver(unreachableUrl, 'voice-inbound-outage');
     const created = await voiceApp({
       tokens: createInMemorySessionTokenStore(),
@@ -500,14 +502,9 @@ describe('a database that cannot be reached (S1, INV-19)', () => {
 
 describe('the routing function’s privileges (S1, INV-01)', () => {
   evidenceTest('moin_app executes route_call but cannot read call_routes directly', async () => {
-    const runtime = createPool({ connectionString: database.appUrl, max: 1 });
-    try {
-      await expect(runtime.query('select * from call_routes')).rejects.toMatchObject({
-        code: '42501',
-      });
-    } finally {
-      await runtime.end();
-    }
+    await expect(database.pool().query('select * from call_routes')).rejects.toMatchObject({
+      code: '42501',
+    });
     const grants = await admin.query<{ role: string; can: boolean }>(
       `select r.rolname as role,
               has_function_privilege(r.oid, 'app.route_call(text, text)', 'EXECUTE') as can
