@@ -193,11 +193,11 @@ function registry(handler: JobHandler, type: 'sweep-run' | 'postcall-finalise' =
 function watched(queue: JobQueue): {
   queue: JobQueue;
   received: string[];
-  hidden: number[];
+  hidden: { messageId: string; seconds: number }[];
   removed: string[];
 } {
   const received: string[] = [];
-  const hidden: number[] = [];
+  const hidden: { messageId: string; seconds: number }[] = [];
   const removed: string[] = [];
   return {
     received,
@@ -215,7 +215,7 @@ function watched(queue: JobQueue): {
       },
       hide: async (message, seconds) => {
         await queue.hide(message, seconds);
-        hidden.push(seconds);
+        hidden.push({ messageId: message.messageId, seconds });
       },
       send: (body, attributes) => queue.send(body, attributes),
     },
@@ -277,22 +277,36 @@ describe('job consumer over SQS and PostgreSQL', () => {
     for (let i = 0; i < 4; i += 1) await queues.queues.jobs.send(job.body);
     const first = watched(queues.queues.jobs);
     const second = watched(queues.queues.jobs);
+    const acknowledged = (): string[] => [...first.removed, ...second.removed];
+    let busy: string | undefined;
     try {
       const options = { concurrency: 1, busyRetrySeconds: BUSY_RETRY_S };
       makeConsumer(registry(held), options, first.queue).start();
       makeConsumer(registry(held), options, second.queue).start();
-      const busy = (worker: { hidden: number[] }): boolean => worker.hidden.includes(BUSY_RETRY_S);
-      await until(() => Promise.resolve(runs === 1 && (busy(first) || busy(second))));
+      const busyCopy = (): string | undefined =>
+        [...first.hidden, ...second.hidden].find((hide) => hide.seconds === BUSY_RETRY_S)
+          ?.messageId;
+      // A second handler entry ends the wait at once, so a duplicate run fails on the count below
+      // rather than as a timeout.
+      await until(() => Promise.resolve(runs > 1 || busyCopy() !== undefined));
       expect(runs).toBe(1);
+      busy = busyCopy();
+      // Held: the busy copy is neither acknowledged nor dead-lettered while the job is running.
+      await sleep(HOLD_MS);
+      expect(acknowledged()).not.toContain(busy);
+      expect(await queues.counts('deadLetter')).toEqual({ visible: 0, leased: 0 });
       expect(await effects(job.envelope.jobId)).toBe(0);
     } finally {
       gate.open();
     }
     await until(async () => (await ledger(job.envelope.jobId))?.status === 'succeeded');
+    // After the commit, the busy copy comes back and is acknowledged, not dead-lettered.
+    await until(() => Promise.resolve(acknowledged().includes(busy ?? '')));
     await until(async () => {
       const counts = await queues.counts('jobs');
       return counts.visible === 0 && counts.leased === 0;
     });
+    expect(await queues.counts('deadLetter')).toEqual({ visible: 0, leased: 0 });
     expect(runs).toBe(1);
     expect(await effects(job.envelope.jobId)).toBe(1);
   });
