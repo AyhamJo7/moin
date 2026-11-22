@@ -12,4 +12,4 @@
 
 **Rollback tested before merge:** #266 (session-bound CSRF): 4 of 4. #267 (0083) and #278 (0084, sign-in throttle): previous bodies restored on a migrated database, sign-in admits, no row lost, bucket count right; 1 of 1 each. Not in the class: X1 to X4, K1, A1a (no migration, no identity change).
 
-**Last verified main SHA:** `4ccc5da` (#280, K1; verify, codeql, container-scan and security-scan passed on it, 2026-11-17). Done: C1 to C6, X1 to X4, K1, A1a (pending merge).
+**Last verified main SHA:** `4ccc5da` (#280, K1; verify, codeql, container-scan and security-scan passed on it, 2026-11-17). Done: C1 to C6, X1 to X4, K1, A1a (#286, `d1db474`; its review follow-ups, deterministic race, slot and late-delivery tests and FS-18 marked partial, are in the PR that carries this line).
