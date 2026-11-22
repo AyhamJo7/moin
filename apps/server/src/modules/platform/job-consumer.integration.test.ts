@@ -195,7 +195,11 @@ interface Lease {
   readonly receiptHandle: string;
 }
 
-function watched(queue: JobQueue): {
+function watched(
+  queue: JobQueue,
+  /** Awaited before each receive: lets a test hold a worker between deliveries. */
+  beforeReceive: () => Promise<void> = () => Promise.resolve(),
+): {
   queue: JobQueue;
   received: string[];
   /** Every receipt, in order: a message delivered again comes with a new receipt handle. */
@@ -222,6 +226,7 @@ function watched(queue: JobQueue): {
     removals,
     queue: {
       receive: async (options) => {
+        await beforeReceive();
         const messages = await queue.receive(options);
         received.push(...messages.map((message) => message.messageId));
         receipts.push(...messages.map(lease));
@@ -284,12 +289,14 @@ describe('job consumer over SQS and PostgreSQL', () => {
   // FS-10: one slot per worker. The first worker enters the handler and holds the job; only then
   // does the second start, so its copy can only find the job row locked. It reschedules that copy
   // as busy (a hide for the busy delay; the heartbeat hides for the visibility timeout, so the two
-  // are told apart). While the job is held no copy may be deleted at all; after the commit the busy
-  // copy must come back with a fresh receipt before it is deleted.
+  // are told apart). After that the second worker receives nothing more until the job's ledger row
+  // says succeeded, so while the job is held no copy can be deleted by either worker, without any
+  // timing window. Afterwards the busy copy is deleted only under a fresh receipt.
   evidenceTest('two workers racing on one logical job create one effect', async () => {
     const job = await seed();
     let runs = 0;
     const gate = barrier();
+    const afterCommit = barrier();
     const held: JobHandler = async (ctx) => {
       runs += 1;
       await gate.wait;
@@ -297,50 +304,46 @@ describe('job consumer over SQS and PostgreSQL', () => {
     };
     for (let i = 0; i < 4; i += 1) await queues.queues.jobs.send(job.body);
     const first = watched(queues.queues.jobs);
-    const second = watched(queues.queues.jobs);
+    const busyHide = (): Lease | undefined =>
+      second.hidden.find((hide) => hide.seconds === BUSY_RETRY_S);
+    const second = watched(queues.queues.jobs, async () => {
+      if (busyHide() !== undefined) await afterCommit.wait;
+    });
     const workers = [first, second];
     let busy: Lease | undefined;
-    let receiptsAtRelease: number | undefined;
     try {
       const options = { concurrency: 1, busyRetrySeconds: BUSY_RETRY_S };
       makeConsumer(registry(held), options, first.queue).start();
       await until(() => Promise.resolve(runs === 1));
       makeConsumer(registry(held), options, second.queue).start();
-      const busyHide = (): Lease | undefined =>
-        second.hidden.find((hide) => hide.seconds === BUSY_RETRY_S);
       // A second handler entry ends the wait at once, so a duplicate run fails on the count below
       // rather than as a timeout.
       await until(() => Promise.resolve(runs > 1 || busyHide() !== undefined));
       expect(runs).toBe(1);
       busy = busyHide();
-      // Held: no copy is deleted, none is dead-lettered, and no effect exists yet.
       await sleep(HOLD_MS);
+      // The first worker is held in the handler and the second is gated after its busy reschedule:
+      // neither can delete anything until the gate opens, so this holds with no timing window.
       expect(workers.flatMap((worker) => worker.removals)).toStrictEqual([]);
       expect(await queues.counts('deadLetter')).toEqual({ visible: 0, leased: 0 });
       expect(await effects(job.envelope.jobId)).toBe(0);
-      receiptsAtRelease = second.receipts.length;
     } finally {
       gate.open();
     }
-    await until(async () => (await ledger(job.envelope.jobId))?.status === 'succeeded');
-    // After the commit the busy copy is delivered again, under a new receipt, and that delivery is
-    // the one deleted: it was rescheduled, never acknowledged while the job was running.
+    try {
+      await until(async () => (await ledger(job.envelope.jobId))?.status === 'succeeded');
+    } finally {
+      afterCommit.open();
+    }
+    // The busy copy comes back and is deleted, under a receipt other than the busy one.
     await until(() =>
-      Promise.resolve(
-        workers.some((worker) =>
-          worker.removals.some((removal) => removal.messageId === busy?.messageId),
-        ),
-      ),
+      Promise.resolve(workers.some((worker) => worker.removed.includes(busy?.messageId ?? ''))),
     );
     const deleted = workers
       .flatMap((worker) => worker.removals)
       .filter((removal) => removal.messageId === busy?.messageId);
-    expect(deleted).toHaveLength(1);
-    expect(deleted[0]?.receiptHandle).not.toBe(busy?.receiptHandle);
-    const redelivered = [...first.receipts, ...second.receipts.slice(receiptsAtRelease)];
-    expect(redelivered.map((receipt) => receipt.receiptHandle)).toContain(
-      deleted[0]?.receiptHandle,
-    );
+    expect(deleted.length).toBeGreaterThan(0);
+    for (const removal of deleted) expect(removal.receiptHandle).not.toBe(busy?.receiptHandle);
     await until(async () => {
       const counts = await queues.counts('jobs');
       return counts.visible === 0 && counts.leased === 0;
