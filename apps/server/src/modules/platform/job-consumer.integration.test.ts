@@ -30,6 +30,8 @@ const CONCURRENCY = 2;
 const BACKLOG_JOBS = 7;
 /** Long enough for the consumer to poll again, short of the visibility timeout. */
 const HOLD_MS = 1_200;
+/** The busy reschedule delay, distinct from the visibility timeout the heartbeat uses. */
+const BUSY_RETRY_S = 1;
 /** Far longer than the test: the held-back copy surfaces only when the test releases it. */
 const LATE_LEASE_S = 60;
 
@@ -187,16 +189,19 @@ function registry(handler: JobHandler, type: 'sweep-run' | 'postcall-finalise' =
   return new JobHandlerRegistry().register(type, 1, handler);
 }
 
-/** A queue that records which messages a consumer received and deleted. */
+/** A queue that records which messages a consumer received, hid (for how long) and deleted. */
 function watched(queue: JobQueue): {
   queue: JobQueue;
   received: string[];
+  hidden: number[];
   removed: string[];
 } {
   const received: string[] = [];
+  const hidden: number[] = [];
   const removed: string[] = [];
   return {
     received,
+    hidden,
     removed,
     queue: {
       receive: async (options) => {
@@ -208,7 +213,10 @@ function watched(queue: JobQueue): {
         await queue.remove(message);
         removed.push(message.messageId);
       },
-      hide: (message, seconds) => queue.hide(message, seconds),
+      hide: async (message, seconds) => {
+        await queue.hide(message, seconds);
+        hidden.push(seconds);
+      },
       send: (body, attributes) => queue.send(body, attributes),
     },
   };
@@ -254,8 +262,9 @@ describe('job consumer over SQS and PostgreSQL', () => {
     expect(await queues.queues.jobs.receive({ max: 10, waitSeconds: 0 })).toHaveLength(0);
   });
 
-  // FS-10: one slot per worker, and the first holds the job inside its handler, so the copies the
-  // other worker receives arrive while the job is held.
+  // FS-10: one slot per worker, and the first holds the job inside its handler until the other has
+  // found the job row locked and rescheduled its copy as busy (a hide for the busy delay; the
+  // heartbeat hides for the visibility timeout, so the two are told apart).
   evidenceTest('two workers racing on one logical job create one effect', async () => {
     const job = await seed();
     let runs = 0;
@@ -269,20 +278,23 @@ describe('job consumer over SQS and PostgreSQL', () => {
     const first = watched(queues.queues.jobs);
     const second = watched(queues.queues.jobs);
     try {
-      makeConsumer(registry(held), { concurrency: 1 }, first.queue).start();
-      makeConsumer(registry(held), { concurrency: 1 }, second.queue).start();
-      await until(() =>
-        Promise.resolve(runs === 1 && first.received.length > 0 && second.received.length > 0),
-      );
+      const options = { concurrency: 1, busyRetrySeconds: BUSY_RETRY_S };
+      makeConsumer(registry(held), options, first.queue).start();
+      makeConsumer(registry(held), options, second.queue).start();
+      const busy = (worker: { hidden: number[] }): boolean => worker.hidden.includes(BUSY_RETRY_S);
+      await until(() => Promise.resolve(runs === 1 && (busy(first) || busy(second))));
       expect(runs).toBe(1);
+      expect(await effects(job.envelope.jobId)).toBe(0);
     } finally {
       gate.open();
     }
     await until(async () => (await ledger(job.envelope.jobId))?.status === 'succeeded');
-    await sleep(VISIBILITY_S * 1000 + 1500);
+    await until(async () => {
+      const counts = await queues.counts('jobs');
+      return counts.visible === 0 && counts.leased === 0;
+    });
     expect(runs).toBe(1);
     expect(await effects(job.envelope.jobId)).toBe(1);
-    expect(await queues.queues.jobs.receive({ max: 10, waitSeconds: 0 })).toHaveLength(0);
   });
 
   // FS-14: a backlog larger than the consumer's concurrency drains completely, each job once.
@@ -353,6 +365,10 @@ describe('job consumer over SQS and PostgreSQL', () => {
     expect(consumer.received).not.toContain(late.messageId);
     await queues.queues.jobs.hide(late, 0);
     await until(() => Promise.resolve(consumer.removed.includes(late.messageId)));
+    await until(async () => {
+      const counts = await queues.counts('jobs');
+      return counts.visible === 0 && counts.leased === 0;
+    });
     expect(await effects(job.envelope.jobId)).toBe(1);
     expect((await ledger(job.envelope.jobId))?.attempt).toBe(1);
     expect(await queues.counts('deadLetter')).toEqual({ visible: 0, leased: 0 });
