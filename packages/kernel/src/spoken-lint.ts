@@ -46,10 +46,20 @@ function hasSeparator(run: string): boolean {
 // around THIS run's span (either side: "987654, Ihre Telefonnummer" also counts).
 const CUE_WINDOW_CHARS = 25;
 
-// Capitalised words with non-German sequences (q without u, double consonants
-// outside German patterns, w/v/y clusters) — hint only, never reject.
-const FOREIGN_NAME_RE =
-  /\b[A-ZÄÖÜ][a-zäöüß]*(?:qu(?![aeiou])|[bcdfghjklmnpqrstvwxz]{3,}|y[a-zäöüß]+)\b/u;
+// Capitalised words with non-German sequences — hint only, never reject. After the capital, the
+// word ends in "qu" or in three consonants, or has a "y" that is not its last letter. A word ends
+// at a word boundary, so "Ayyy1" (an identifier, not a word) is not one. Two linear passes instead
+// of one pattern: `[a-zäöüß]*` followed by `y[a-zäöüß]+` overlapped and ran in quadratic time on a
+// capital followed by a long run of "y".
+const CAPITALISED_WORD_RE = /\b[A-ZÄÖÜ][a-zäöüß]*\b/gu;
+const FOREIGN_TAIL_RE = /qu$|[bcdfghjklmnpqrstvwxz]{3}$|y[a-zäöüß]/u;
+
+function foreignName(text: string): string | null {
+  for (const word of text.matchAll(CAPITALISED_WORD_RE)) {
+    if (FOREIGN_TAIL_RE.test(word[0].slice(1))) return word[0];
+  }
+  return null;
+}
 
 export function lintSpokenAnswer(text: string): SpokenLint {
   const errors: string[] = [];
@@ -80,10 +90,10 @@ export function lintSpokenAnswer(text: string): SpokenLint {
       );
     }
   }
-  const foreign = FOREIGN_NAME_RE.exec(trimmed);
+  const foreign = foreignName(trimmed);
   if (foreign !== null) {
     hints.push(
-      `consider a phonetic hint for "${foreign[0]}" (STT read-back catches mispronunciation at runtime)`,
+      `consider a phonetic hint for "${foreign}" (STT read-back catches mispronunciation at runtime)`,
     );
   }
   return { ok: errors.length === 0, errors, hints };
