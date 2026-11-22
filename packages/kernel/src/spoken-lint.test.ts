@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { lintSpokenAnswer } from './spoken-lint.ts';
 
+/** Long enough that the quadratic pattern took seconds; the linear check takes milliseconds. */
+const LONG_RUN = 30_000;
+const LINEAR_BUDGET_MS = 500;
+
 describe('spoken lint', () => {
   it('accepts clean short answers, with hints only for foreign names', () => {
     const clean = lintSpokenAnswer('Unsere Adresse lautet Hauptstraße 12, 20354 Hamburg.');
@@ -9,6 +13,25 @@ describe('spoken lint', () => {
     const hinted = lintSpokenAnswer('Herr Nguyen berät Sie gerne.');
     expect(hinted.ok).toBe(true);
     expect(hinted.hints.length).toBeGreaterThan(0);
+  });
+
+  it.each([
+    ['Herr Nguyen berät Sie gerne.', 'Nguyen'],
+    ['Wir öffnen im Herbst wieder.', 'Herbst'],
+    ['Wir liefern nach Hamburg.', null],
+    ['Frau Schmidt ruft zurück.', null],
+  ])('hints a phonetic spelling for %s', (text, word) => {
+    const hints = lintSpokenAnswer(text).hints.join(' ');
+    if (word === null) expect(hints).toBe('');
+    else expect(hints).toContain(`"${word}"`);
+  });
+
+  // The foreign-name check used to backtrack quadratically on a capital followed by many "y" when
+  // no word boundary follows (here a digit), so the match fails only after every split was tried.
+  it('lints a long run of repeated letters in linear time', () => {
+    const started = performance.now();
+    lintSpokenAnswer(`A${'y'.repeat(LONG_RUN)}1`);
+    expect(performance.now() - started).toBeLessThan(LINEAR_BUDGET_MS);
   });
 
   it('rejects URLs, long digit runs and overlong text', () => {
