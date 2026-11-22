@@ -34,7 +34,7 @@ import {
   type TenantClient,
 } from '@moin/db';
 import type { Pool } from '@moin/db/pool';
-import { JOB_TYPES, type JobType, type JobEnvelope } from '@moin/kernel';
+import { JOB_TYPES, lintEnvelope, queueFor, type JobType, type JobEnvelope } from '@moin/kernel';
 import type { JobQueue } from '@moin/integrations';
 import type { Logger } from '@moin/observability';
 
@@ -54,8 +54,11 @@ export interface OutboxDispatcherOptions {
 export interface OutboxDispatcherDeps {
   readonly appPool: Pool;
   readonly dispatcherPool: Pool;
-  /** The queue for a job's workload, as its ledger row names it (`queueFor`, P08.01.02). */
-  readonly queueFor: (workload: string) => JobQueue;
+  /**
+   * The queue of each workload a ledger row can name (`queueFor`, P08.01.02). Every route's
+   * workload must be here, or the dispatcher refuses to be built.
+   */
+  readonly queues: ReadonlyMap<string, JobQueue>;
   /** Outbox event type to the job that handles it. An event type not listed is not published. */
   readonly routes: ReadonlyMap<string, JobType>;
   readonly logger: Logger;
@@ -93,6 +96,11 @@ export class OutboxDispatcher {
   #wake: (() => void) | undefined;
 
   public constructor(deps: OutboxDispatcherDeps) {
+    for (const type of deps.routes.values()) {
+      if (!deps.queues.has(queueFor(type))) {
+        throw new Error(`no queue is configured for the ${queueFor(type)} workload of a route`);
+      }
+    }
     this.#deps = deps;
   }
 
@@ -169,7 +177,8 @@ export class OutboxDispatcher {
       job?.type !== type ||
       job.version !== JOB_VERSION ||
       job.correlation_id !== event.id.toLowerCase() ||
-      !isJobType(job.type)
+      !isJobType(job.type) ||
+      !samePayload(job.payload, event.payload)
     ) {
       // A route changed between attempts, or the id is taken by another job: sending would hand
       // the consumer an envelope its ledger refuses, after the row was marked dispatched.
@@ -190,18 +199,31 @@ export class OutboxDispatcher {
       notBefore: null,
       payload: job.payload,
     };
-    await this.#withDeadline(this.#deps.queueFor(job.queue_name).send(JSON.stringify(envelope)));
+    // The envelope contract (ID-only payload, P08) is checked on every send, a resend included.
+    const lint = lintEnvelope(envelope);
+    const queue = this.#deps.queues.get(job.queue_name);
+    if (!lint.ok || queue === undefined) {
+      this.#deps.logger.error(
+        { outcome: lint.ok ? 'no queue for workload' : 'envelope invalid' },
+        'outbox event not sent; left undispatched',
+      );
+      throw new JobIdentityConflictError('outbox event cannot be sent as its job');
+    }
+    await this.#send(queue, JSON.stringify(envelope));
   }
 
-  async #withDeadline(send: Promise<void>): Promise<void> {
+  /** Sends within the deadline; at the deadline the request itself is aborted. */
+  async #send(queue: JobQueue, body: string): Promise<void> {
+    const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => {
+        controller.abort();
         reject(new Error('queue send exceeded its deadline'));
       }, this.#deps.options.sendTimeoutMs);
     });
     try {
-      await Promise.race([send, deadline]);
+      await Promise.race([queue.send(body, {}, { signal: controller.signal }), deadline]);
     } finally {
       clearTimeout(timer);
     }
@@ -241,4 +263,16 @@ async function ledgerJob(client: TenantClient, jobId: string): Promise<LedgerJob
     [jobId],
   );
   return found.rows[0];
+}
+
+/** The ledger's payload is exactly the event's: same keys, same ids. */
+function samePayload(
+  stored: Readonly<Record<string, string>>,
+  event: Readonly<Record<string, string>>,
+): boolean {
+  const keys = Object.keys(stored);
+  return (
+    keys.length === Object.keys(event).length &&
+    keys.every((key) => Object.hasOwn(event, key) && event[key] === stored[key])
+  );
 }

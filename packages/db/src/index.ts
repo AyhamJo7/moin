@@ -280,6 +280,7 @@ export type {
 export { enqueueJob, JobConflictError } from './jobs.ts';
 export {
   dispatchOutboxBatch,
+  dispatcherPoolIsRestricted,
   insertOutboxEvent,
   outboxEventSuperseded,
   outboxLagSeconds,

@@ -512,6 +512,46 @@ describe('the outbox dispatcher credential (P08.02.02)', () => {
     }
   });
 
+  evidenceTest('refuses host, port or database overrides on either URL', () => {
+    for (const query of ['?port=6543', '?host=127.0.0.1', '?hostaddr=127.0.0.1', '?dbname=x']) {
+      expect(
+        () =>
+          loadConfig({
+            ...VALID,
+            ...worker,
+            DISPATCHER_DATABASE_URL: `${DISPATCHER}${query}`,
+          }),
+        `dispatcher ${query}`,
+      ).toThrow(ConfigurationError);
+      expect(
+        () =>
+          loadConfig({
+            ...VALID,
+            ...worker,
+            DATABASE_URL: `${VALID.DATABASE_URL}${query}`,
+            DISPATCHER_DATABASE_URL: DISPATCHER,
+          }),
+        `app ${query}`,
+      ).toThrow(ConfigurationError);
+    }
+  });
+
+  evidenceTest('a malformed URL is named, not echoed, and not thrown raw', () => {
+    let problems: readonly string[] = [];
+    try {
+      loadConfig({
+        ...VALID,
+        ...worker,
+        DISPATCHER_DATABASE_URL: 'postgres://moin_dispatcher:s3cr3t-dispatcher@[bad/moin',
+      });
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConfigurationError);
+      problems = error instanceof ConfigurationError ? error.problems : [];
+    }
+    expect(problems.some((problem) => problem.startsWith('DISPATCHER_DATABASE_URL:'))).toBe(true);
+    expect(problems.join('\n')).not.toContain('s3cr3t-dispatcher');
+  });
+
   it('is secret-bearing, so describeConfig never prints it', () => {
     const described = describeConfig(
       loadConfig({ ...VALID, ...worker, DISPATCHER_DATABASE_URL: DISPATCHER }),

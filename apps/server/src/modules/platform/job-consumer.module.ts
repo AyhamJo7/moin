@@ -13,9 +13,9 @@
  * The outbox dispatcher (P08.02.02) runs here too, on its own `moin_dispatcher` pool, when
  * `DISPATCHER_DATABASE_URL` is set; unset, it does not run and the worker says so once at startup.
  * Its route table is empty until a production event type has a job: an unrouted event stays in
- * the outbox, backing off, and is never published. The worker consumes one queue
- * (`SQS_QUEUE_JOBS`), so every workload a ledger row names resolves to it until per-workload
- * queues are deployed (P08.01.02).
+ * the outbox, backing off, and is never published. No workload queue is mapped either: a route
+ * needs its workload's queue in `OUTBOX_QUEUES`, and the dispatcher refuses to start with a route
+ * whose workload has none (P08.01.02).
  */
 
 import {
@@ -27,8 +27,9 @@ import {
   type OnModuleDestroy,
 } from '@nestjs/common';
 import { createPool, type Pool } from '@moin/db/pool';
-import { connectSqsQueues, type SqsQueues } from '@moin/integrations';
+import { connectSqsQueues, type JobQueue, type SqsQueues } from '@moin/integrations';
 import type { JobType } from '@moin/kernel';
+import { dispatcherPoolIsRestricted } from '@moin/db';
 import type { Logger } from '@moin/observability';
 import { CONFIG } from '../../config/config.module.ts';
 import { ConfigurationError, type Config } from '../../config/env.ts';
@@ -46,13 +47,14 @@ const DISPATCHER_POOL = Symbol('DISPATCHER_POOL');
 
 /** Outbox event type to job type. Empty until a production event has a handler. */
 const OUTBOX_ROUTES: ReadonlyMap<string, JobType> = new Map();
+/** Workload (`queueFor`) to the queue the dispatcher sends it to. Empty while no route exists. */
+const OUTBOX_QUEUES: ReadonlyMap<string, JobQueue> = new Map<string, JobQueue>();
 const OUTBOX_INTERVAL_MS = 2_000;
 const OUTBOX_TENANT_PAGE = 100;
 const OUTBOX_BATCH = 50;
 /** At most this, and at most half the shutdown grace, so a stalled send cannot outlast it. */
 const OUTBOX_SEND_TIMEOUT_MS = 5_000;
 const DISPATCHER_POOL_MAX = 2;
-const DISPATCHER_ROLE = 'moin_dispatcher';
 
 const POOL_MAX_CONNECTIONS = 10;
 const CONNECTION_TIMEOUT_MS = 5_000;
@@ -108,7 +110,6 @@ class OutboxDispatcherService implements OnApplicationBootstrap, OnModuleDestroy
   public constructor(
     @Inject(WORKER_POOL) appPool: Pool,
     @Inject(DISPATCHER_POOL) private readonly dispatcherPool: Pool | null,
-    @Inject(JOB_QUEUES) queues: SqsQueues,
     @Inject(LOGGER) private readonly logger: Logger,
     @Inject(SHUTDOWN_STATE) shutdownState: ShutdownState,
     @Inject(CONFIG) config: Config,
@@ -119,7 +120,7 @@ class OutboxDispatcherService implements OnApplicationBootstrap, OnModuleDestroy
         : new OutboxDispatcher({
             appPool,
             dispatcherPool,
-            queueFor: () => queues.jobs,
+            queues: OUTBOX_QUEUES,
             routes: OUTBOX_ROUTES,
             logger,
             isShuttingDown: () => shutdownState.isShuttingDown(),
@@ -140,17 +141,13 @@ class OutboxDispatcherService implements OnApplicationBootstrap, OnModuleDestroy
       );
       return;
     }
-    // A credential for another role refuses startup, with a fixed message: the driver's error can
-    // carry the host and the user (INV-12, INV-15).
-    const role = await this.dispatcherPool
-      .query<{ name: string }>('select current_user as name')
-      .then(
-        (result) => result.rows[0]?.name,
-        () => undefined,
-      );
-    if (role !== DISPATCHER_ROLE) {
+    // A credential for another role, or one whose grants are wider than migration 0085 leaves
+    // them (a database not yet migrated), refuses startup with a fixed message: the driver's
+    // error can carry the host and the user (INV-12, INV-15).
+    const restricted = await dispatcherPoolIsRestricted(this.dispatcherPool).catch(() => false);
+    if (!restricted) {
       throw new ConfigurationError([
-        'DISPATCHER_DATABASE_URL: the pool is not moin_dispatcher, or the database is unreachable',
+        'DISPATCHER_DATABASE_URL: the pool is not moin_dispatcher limited to the outbox (migration 0085), or the database is unreachable',
       ]);
     }
     this.#dispatcher.start();

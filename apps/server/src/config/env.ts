@@ -377,13 +377,25 @@ const schema = baseSchema.superRefine((value, ctx) => {
   }
 
   if (value.DISPATCHER_DATABASE_URL !== undefined) {
-    const dispatcher = new URL(value.DISPATCHER_DATABASE_URL);
     if (value.SERVER_ROLE !== 'worker') {
       ctx.addIssue({
         code: 'custom',
         path: ['DISPATCHER_DATABASE_URL'],
         message: "is the worker role's outbox credential and must not reach any other role",
       });
+    }
+    // Checked only once both parse: the messages name the variable and never echo a value.
+    const dispatcher = URL.canParse(value.DISPATCHER_DATABASE_URL)
+      ? new URL(value.DISPATCHER_DATABASE_URL)
+      : undefined;
+    const app = URL.canParse(value.DATABASE_URL) ? new URL(value.DATABASE_URL) : undefined;
+    if (dispatcher === undefined || app === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [dispatcher === undefined ? 'DISPATCHER_DATABASE_URL' : 'DATABASE_URL'],
+        message: 'is not a connection URL',
+      });
+      return;
     }
     // As for the identity URL: these parameters would connect as a role the username check never
     // saw.
@@ -399,8 +411,26 @@ const schema = baseSchema.superRefine((value, ctx) => {
       });
     }
     // One database: the dispatcher marks an event in the database where the app pool writes its
-    // job. Two databases that share a tenant id would mark in one and enqueue in the other.
-    const app = new URL(value.DATABASE_URL);
+    // job. Two databases that share a tenant id would mark in one and enqueue in the other. The
+    // driver lets query parameters override the host, port and database, so neither URL may carry
+    // them; the URL components are then the connection's.
+    for (const [name, url] of [
+      ['DISPATCHER_DATABASE_URL', dispatcher],
+      ['DATABASE_URL', app],
+    ] as const) {
+      if (
+        [...url.searchParams.keys()].some((key) =>
+          ['host', 'hostaddr', 'port', 'dbname', 'database'].includes(key.toLowerCase()),
+        )
+      ) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [name],
+          message:
+            'must not carry host, hostaddr, port, dbname or database query parameters while the outbox dispatcher is configured',
+        });
+      }
+    }
     if (
       dispatcher.hostname !== app.hostname ||
       dispatcher.port !== app.port ||

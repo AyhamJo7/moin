@@ -167,7 +167,7 @@ export async function dispatchOutboxBatch(
       const backoff = BACKOFF_S[Math.min(row.attempts, BACKOFF_S.length - 1)] ?? 1800;
       await client.query(
         `update outbox set attempts = attempts + 1,
-           next_attempt_at = now() + ($1::integer || ' seconds')::interval
+           next_attempt_at = clock_timestamp() + ($1::integer || ' seconds')::interval
          where id = $2::uuid`,
         [backoff, row.id],
       );
@@ -179,15 +179,31 @@ export async function dispatchOutboxBatch(
 /**
  * Per-aggregate ordering at the consumer (P08.02.04). True when a newer version of the same
  * aggregate has already been handled: its event's job (job id and correlation id are the event
- * id, see the worker's outbox dispatcher) succeeded. A handler of a routed outbox event calls this
- * first, inside its tenant transaction, and does nothing when it returns true, so an event that
- * backed off and arrives after a newer one cannot overwrite it. Unknown ids answer false.
+ * id, see the worker's outbox dispatcher) succeeded.
+ *
+ * A handler of a routed outbox event calls this first, inside the transaction that applies its
+ * effect, and does nothing when it returns true. The call takes a transaction lock on the
+ * aggregate, held until that transaction ends, so handlers of one aggregate run one at a time: an
+ * older event that passed the check cannot apply its effect after a newer one committed, and one
+ * that waits sees the newer job's success once the lock is released (the job's status commits with
+ * its effect). Unknown ids answer false.
  */
 export async function outboxEventSuperseded(
   client: TenantClient,
   eventId: string,
 ): Promise<boolean> {
   if (!UUID_RE.test(eventId)) throw new RangeError('event id must be a uuid');
+  const source = await client.query<{ aggregate: string; aggregate_id: string }>(
+    `select aggregate, aggregate_id::text from outbox where id = $1::uuid`,
+    [eventId],
+  );
+  const event = source.rows[0];
+  if (event === undefined) return false;
+  await client.query(
+    `select pg_advisory_xact_lock(hashtext(app.current_org()::text || ':' || $1 || ':' || $2))`,
+    [event.aggregate, event.aggregate_id],
+  );
+  // A new statement, so it sees what committed while this one waited for the lock.
   const found = await client.query<{ superseded: boolean }>(
     `select exists (
        select 1
@@ -202,4 +218,35 @@ export async function outboxEventSuperseded(
     [eventId],
   );
   return found.rows[0]?.superseded === true;
+}
+
+/**
+ * Whether a pool connects as `moin_dispatcher` with exactly the outbox grants of migration 0085:
+ * SELECT on the outbox and UPDATE of its dispatch state only, nothing on the job ledger, timers or
+ * provider inbox, and no privileged role attribute. The worker refuses to dispatch otherwise, so
+ * a credential that reaches a database without 0085 never starts (P08.02.02).
+ */
+export async function dispatcherPoolIsRestricted(pool: {
+  query: (sql: string) => Promise<{ rows: unknown[] }>;
+}): Promise<boolean> {
+  const result = await pool.query(`
+    select current_user = 'moin_dispatcher'
+       and not r.rolsuper and not r.rolbypassrls and not r.rolcreaterole and not r.rolcreatedb
+       and has_table_privilege('outbox', 'SELECT')
+       and not has_table_privilege('outbox', 'INSERT')
+       and not has_table_privilege('outbox', 'DELETE')
+       and has_column_privilege('outbox', 'dispatched_at', 'UPDATE')
+       and not has_column_privilege('outbox', 'event_type', 'UPDATE')
+       and not has_column_privilege('outbox', 'payload', 'UPDATE')
+       and not has_column_privilege('outbox', 'organisation_id', 'UPDATE')
+       and not has_table_privilege('job_runs', 'SELECT')
+       and not has_table_privilege('job_runs', 'UPDATE')
+       and not has_table_privilege('job_runs', 'INSERT')
+       and not has_table_privilege('timers', 'SELECT')
+       and not has_table_privilege('timers', 'UPDATE')
+       and not has_table_privilege('provider_inbox', 'SELECT')
+       and not has_table_privilege('provider_inbox', 'UPDATE') as ok
+      from pg_roles r where r.rolname = current_user`);
+  const row = result.rows[0] as { ok?: unknown } | undefined;
+  return row?.ok === true;
 }

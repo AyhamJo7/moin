@@ -215,6 +215,27 @@ describe('worker process', () => {
     },
   );
 
+  evidenceTest(
+    'refuses to start when the dispatcher credential still has the grants 0085 removes',
+    async () => {
+      const dispatcherUrl = database.dispatcherUrl;
+      if (dispatcherUrl === undefined) {
+        throw new Error('TEST_DATABASE_DISPATCHER_URL is not set; it is in .env.example');
+      }
+      await admin.query('grant select, update on job_runs to moin_dispatcher');
+      try {
+        const proc = await startWorker({ DISPATCHER_DATABASE_URL: dispatcherUrl });
+        // The logger redacts the message; the type says why it stopped.
+        expect(await exited(proc)).toBe(1);
+        expect(output).toContain('"type":"ConfigurationError"');
+        expect(output).not.toContain('local-development-only');
+        expect(output).not.toContain('outbox dispatcher off');
+      } finally {
+        await admin.query('revoke select, update on job_runs from moin_dispatcher');
+      }
+    },
+  );
+
   evidenceTest('refuses to start without a queue, naming the variables and no value', async () => {
     const proc = await startWorker({ SQS_QUEUE_JOBS: '' });
     const code = await exited(proc);

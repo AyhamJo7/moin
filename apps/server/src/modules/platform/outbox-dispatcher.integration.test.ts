@@ -5,7 +5,13 @@
  * The event type, its route and the handler are test fixtures.
  */
 import { createPool, type Pool } from '@moin/db/pool';
-import { insertOutboxEvent, outboxEventSuperseded, withTenant, type JobHandler } from '@moin/db';
+import {
+  dispatcherPoolIsRestricted,
+  insertOutboxEvent,
+  outboxEventSuperseded,
+  withTenant,
+  type JobHandler,
+} from '@moin/db';
 import { lintEnvelope, type JobEnvelope, type JobType } from '@moin/kernel';
 import type { JobQueue } from '@moin/integrations';
 import type { Logger } from '@moin/observability';
@@ -111,26 +117,11 @@ async function emit(
   );
 }
 
-/** Records which workload queue each send was resolved for. */
-function recordingQueues(queue: JobQueue): {
-  queueFor: (name: string) => JobQueue;
-  asked: string[];
-} {
-  const asked: string[] = [];
-  return {
-    asked,
-    queueFor: (name) => {
-      asked.push(name);
-      return queue;
-    },
-  };
-}
-
 function dispatcher(overrides: Partial<OutboxDispatcherDeps> = {}): OutboxDispatcher {
   return new OutboxDispatcher({
     appPool: app,
     dispatcherPool,
-    queueFor: () => queues.queues.jobs,
+    queues: new Map([['sweeps', queues.queues.jobs]]),
     routes: ROUTES,
     logger,
     options: { intervalMs: 200, tenantPageSize: 1, batchSize: 50, sendTimeoutMs: SEND_TIMEOUT_MS },
@@ -186,8 +177,7 @@ describe('outbox dispatcher', () => {
     async () => {
       const a = await emit(ORG_A);
       const b = await emit(ORG_B);
-      const resolver = recordingQueues(queues.queues.jobs);
-      const report = await dispatcher({ queueFor: resolver.queueFor }).tick();
+      const report = await dispatcher().tick();
       expect(report).toEqual({ tenants: 2, published: 2, failedTenants: 0 });
       const sent = await drain(queues.queues.jobs);
       expect(sent.map((envelope) => [envelope.jobId, envelope.organisationId]).sort()).toEqual(
@@ -203,8 +193,7 @@ describe('outbox dispatcher', () => {
       expect(await jobRow(b)).toEqual([
         { organisation_id: ORG_B, type: 'sweep-run', status: 'queued', queue_name: 'sweeps' },
       ]);
-      // Sent to the workload queue the ledger row names, under a UUIDv7 job id.
-      expect(resolver.asked).toEqual(['sweeps', 'sweeps']);
+      // A UUIDv7 job id, like every job (P08.01.01).
       expect(a).toMatch(UUID_V7);
       expect(await outboxRow(a)).toEqual({ dispatched: true, attempts: 0 });
       expect((await dispatcher().tick()).published).toBe(0);
@@ -230,7 +219,7 @@ describe('outbox dispatcher', () => {
         },
       };
       const dying = dispatcher({
-        queueFor: () => hangAfterSend,
+        queues: new Map([['sweeps', hangAfterSend]]),
         options: { intervalMs: 200, tenantPageSize: 1, batchSize: 50, sendTimeoutMs: 30_000 },
       });
       const tick = dying.tick();
@@ -294,10 +283,18 @@ describe('outbox dispatcher', () => {
         ...bind(queues.queues.jobs),
         send: () => Promise.reject(new Error('queue unreachable')),
       };
-      expect((await dispatcher({ queueFor: () => unreachable }).tick()).published).toBe(0);
+      expect(
+        (await dispatcher({ queues: new Map([['sweeps', unreachable]]) }).tick()).published,
+      ).toBe(0);
       expect(await jobRow(id)).toHaveLength(1);
       await due(id);
-      const rerouted = dispatcher({ routes: new Map([[ROUTED, 'notification-send']]) });
+      const rerouted = dispatcher({
+        routes: new Map([[ROUTED, 'notification-send']]),
+        queues: new Map([
+          ['sweeps', queues.queues.jobs],
+          ['notifications', queues.queues.jobs],
+        ]),
+      });
       expect((await rerouted.tick()).published).toBe(0);
       expect(await outboxRow(id)).toEqual({ dispatched: false, attempts: 2 });
       expect((await jobRow(id))[0]?.type).toBe('sweep-run');
@@ -312,20 +309,24 @@ describe('outbox dispatcher', () => {
       const first = await emit(ORG_A);
       const second = await emit(ORG_A);
       let sends = 0;
+      let signal: AbortSignal | undefined;
       const stalled: JobQueue = {
         ...bind(queues.queues.jobs),
-        send: () => {
+        send: (_body, _attributes, options) => {
           sends += 1;
+          signal = options?.signal;
           return new Promise<void>(() => undefined);
         },
       };
-      const running = dispatcher({ queueFor: () => stalled });
+      const running = dispatcher({ queues: new Map([['sweeps', stalled]]) });
       running.start();
       await until(() => Promise.resolve(sends === 1));
       const stopping = Date.now();
       await running.stop();
       expect(Date.now() - stopping).toBeLessThan(SEND_TIMEOUT_MS + 2_000);
       expect(sends).toBe(1);
+      // The request itself is cancelled, not only the wait for it.
+      expect(signal?.aborted).toBe(true);
       expect(await outboxRow(first)).toEqual({ dispatched: false, attempts: 1 });
       expect(await outboxRow(second)).toEqual({ dispatched: false, attempts: 0 });
     },
@@ -344,7 +345,7 @@ describe('outbox dispatcher', () => {
           await queues.queues.jobs.send(body, attributes);
         },
       };
-      const flaky = dispatcher({ queueFor: () => failFirst });
+      const flaky = dispatcher({ queues: new Map([['sweeps', failFirst]]) });
       expect((await flaky.tick()).published).toBe(0);
       expect(await jobRow(id)).toHaveLength(1);
       expect(await drain(queues.queues.jobs)).toEqual([]);
@@ -365,6 +366,179 @@ describe('outbox dispatcher', () => {
     expect(await drain(queues.queues.jobs)).toEqual([]);
     expect(logLines.join('\n')).toContain('unrouted');
   });
+
+  evidenceTest(
+    'each workload reaches its own queue, and an unmapped route is refused',
+    async () => {
+      const other = await createTestQueues('outbox-notify', VISIBILITY_S);
+      try {
+        const routes: ReadonlyMap<string, JobType> = new Map([
+          [ROUTED, 'sweep-run'],
+          ['test.notify', 'notification-send'],
+        ]);
+        const sweep = await emit(ORG_A);
+        const notify = await emit(ORG_A, 'test.notify');
+        const split = dispatcher({
+          routes,
+          queues: new Map([
+            ['sweeps', queues.queues.jobs],
+            ['notifications', other.queues.jobs],
+          ]),
+        });
+        expect((await split.tick()).published).toBe(2);
+        expect((await drain(queues.queues.jobs)).map((envelope) => envelope.jobId)).toEqual([
+          sweep,
+        ]);
+        expect((await drain(other.queues.jobs)).map((envelope) => envelope.jobId)).toEqual([
+          notify,
+        ]);
+        expect((await jobRow(notify))[0]?.queue_name).toBe('notifications');
+        expect(() => dispatcher({ routes })).toThrow(/notifications workload/u);
+      } finally {
+        await other.drop();
+      }
+    },
+  );
+
+  evidenceTest(
+    'a retry whose stored job payload differs from the event, or is not ids, sends nothing',
+    async () => {
+      for (const stored of [{ taskId: crypto.randomUUID() }, { taskId: 'Maria Schmidt' }]) {
+        const id = await emit(ORG_A);
+        const unreachable: JobQueue = {
+          ...bind(queues.queues.jobs),
+          send: () => Promise.reject(new Error('queue unreachable')),
+        };
+        await dispatcher({ queues: new Map([['sweeps', unreachable]]) }).tick();
+        await admin.query('update job_runs set payload = $2::jsonb where id = $1', [
+          id,
+          JSON.stringify(stored),
+        ]);
+        await due(id);
+        expect((await dispatcher().tick()).published).toBe(0);
+        expect(await outboxRow(id)).toEqual({ dispatched: false, attempts: 2 });
+        expect(await drain(queues.queues.jobs)).toEqual([]);
+      }
+      expect(logLines.join('\n')).not.toContain('Maria Schmidt');
+    },
+  );
+
+  evidenceTest(
+    'a failed row backs off from the moment it failed, not from the batch start',
+    async () => {
+      await emit(ORG_A);
+      const failing = await emit(ORG_A);
+      let sends = 0;
+      // The first row's send is slow and succeeds; the second fails 1.5 s into the batch.
+      const slowThenFailing: JobQueue = {
+        ...bind(queues.queues.jobs),
+        send: async (body, attributes) => {
+          sends += 1;
+          if (sends === 2) throw new Error('queue unreachable');
+          await sleep(1_500);
+          await queues.queues.jobs.send(body, attributes);
+        },
+      };
+      await dispatcher({ queues: new Map([['sweeps', slowThenFailing]]) }).tick();
+      // The backoff is 30 s from the failure, which came at the end of the batch. Timed from the
+      // batch's start, 1.5 s of it would be gone by the commit.
+      const due30 = await admin.query<{ ok: boolean }>(
+        `select next_attempt_at > now() + interval '29 seconds' as ok from outbox where id = $1`,
+        [failing],
+      );
+      expect(due30.rows[0]?.ok).toBe(true);
+    },
+  );
+
+  evidenceTest('startup accepts the restricted dispatcher pool and no other', async () => {
+    expect(await dispatcherPoolIsRestricted(dispatcherPool)).toBe(true);
+    expect(await dispatcherPoolIsRestricted(app)).toBe(false);
+    // Each grant migration 0085 removes, or never gives, refuses the pool on its own.
+    for (const [grant, revoke] of [
+      [
+        'grant select on job_runs to moin_dispatcher',
+        'revoke select on job_runs from moin_dispatcher',
+      ],
+      [
+        'grant update on job_runs to moin_dispatcher',
+        'revoke update on job_runs from moin_dispatcher',
+      ],
+      [
+        'grant insert on job_runs to moin_dispatcher',
+        'revoke insert on job_runs from moin_dispatcher',
+      ],
+      ['grant select on timers to moin_dispatcher', 'revoke select on timers from moin_dispatcher'],
+      ['grant update on timers to moin_dispatcher', 'revoke update on timers from moin_dispatcher'],
+      [
+        'grant select on provider_inbox to moin_dispatcher',
+        'revoke select on provider_inbox from moin_dispatcher',
+      ],
+      [
+        'grant update on provider_inbox to moin_dispatcher',
+        'revoke update on provider_inbox from moin_dispatcher',
+      ],
+      ['grant insert on outbox to moin_dispatcher', 'revoke insert on outbox from moin_dispatcher'],
+      ['grant delete on outbox to moin_dispatcher', 'revoke delete on outbox from moin_dispatcher'],
+      [
+        'grant update (event_type) on outbox to moin_dispatcher',
+        'revoke update (event_type) on outbox from moin_dispatcher',
+      ],
+      [
+        'grant update (payload) on outbox to moin_dispatcher',
+        'revoke update (payload) on outbox from moin_dispatcher',
+      ],
+      [
+        'grant update (organisation_id) on outbox to moin_dispatcher',
+        'revoke update (organisation_id) on outbox from moin_dispatcher',
+      ],
+    ] as const) {
+      await admin.query(grant);
+      try {
+        expect(await dispatcherPoolIsRestricted(dispatcherPool), grant).toBe(false);
+      } finally {
+        await admin.query(revoke);
+      }
+    }
+    expect(await dispatcherPoolIsRestricted(dispatcherPool)).toBe(true);
+  });
+
+  evidenceTest(
+    'handlers of one aggregate take turns: an older one waits and then sees the newer success',
+    async () => {
+      const aggregate = crypto.randomUUID();
+      const v1 = await emit(ORG_A, ROUTED, { id: aggregate, version: 1 });
+      const v2 = await emit(ORG_A, ROUTED, { id: aggregate, version: 2 });
+      await dispatcher().tick();
+      let releaseNewer: () => void = () => undefined;
+      const newerHeld = new Promise<void>((resolve) => {
+        releaseNewer = resolve;
+      });
+      let newerChecked = false;
+      // The newer handler checks, applies its effect (its job succeeds) and has not committed.
+      const newer = withTenant(app, ORG_A, async (client) => {
+        const superseded = await outboxEventSuperseded(client, v2);
+        newerChecked = true;
+        await client.query(
+          `update job_runs set status = 'succeeded', finished_at = now() where id = $1`,
+          [v2],
+        );
+        await newerHeld;
+        return superseded;
+      });
+      await until(() => Promise.resolve(newerChecked));
+      let olderDone = false;
+      const older = withTenant(app, ORG_A, async (client) => {
+        const superseded = await outboxEventSuperseded(client, v1);
+        olderDone = true;
+        return superseded;
+      });
+      await sleep(500);
+      expect(olderDone).toBe(false);
+      releaseNewer();
+      expect(await newer).toBe(false);
+      expect(await older).toBe(true);
+    },
+  );
 
   evidenceTest('the dispatcher role reaches the outbox and cannot write a job row', async () => {
     const who = await dispatcherPool.query<{ name: string }>('select current_user as name');
