@@ -49,6 +49,11 @@ export interface TestDatabase {
    * functions (P06.06, ADR-0003). Undefined when `TEST_DATABASE_IDENTITY_URL` is not set.
    */
   readonly identityUrl: string | undefined;
+  /**
+   * The same database as `moin_dispatcher`, which reaches the outbox and nothing else (P08.02.02).
+   * Undefined when `TEST_DATABASE_DISPATCHER_URL` is not set.
+   */
+  readonly dispatcherUrl: string | undefined;
   readonly name: string;
   /** A pool as the application role. Closed by `drop()`. */
   pool(): Pool;
@@ -116,6 +121,11 @@ export async function createTestDatabase(label = 'test'): Promise<TestDatabase> 
     identityBase === undefined || identityBase.length === 0
       ? undefined
       : urlForDatabase(identityBase, name);
+  const dispatcherBase = process.env['TEST_DATABASE_DISPATCHER_URL'];
+  const dispatcherUrl =
+    dispatcherBase === undefined || dispatcherBase.length === 0
+      ? undefined
+      : urlForDatabase(dispatcherBase, name);
   let fixtures: Pool | undefined;
   let identity: Pool | undefined;
 
@@ -124,6 +134,7 @@ export async function createTestDatabase(label = 'test'): Promise<TestDatabase> 
     appUrl,
     migrationUrl,
     identityUrl,
+    dispatcherUrl,
     pool(): Pool {
       appPool ??= createPool({ connectionString: appUrl, max: 4 });
       return appPool;

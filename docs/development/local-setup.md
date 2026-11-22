@@ -60,6 +60,14 @@ one mattered would be in staging with real data.
 
 `moin_migrator` is the only role permitted to run DDL. `pnpm db:migrate` uses it.
 
+The worker dispatches the outbox only when it is given **`moin_dispatcher`**
+(`DISPATCHER_DATABASE_URL`, for example
+`postgres://moin_dispatcher:local-development-only@127.0.0.1:5432/moin`). That role may read and
+mark outbox rows and reach no other table; the job rows it creates are written as `moin_app`. The
+configuration refuses it for any role but the worker, so it is not in the example environment file,
+which configures the api. Without it the worker logs `outbox dispatcher off` and leaves the outbox
+alone.
+
 The api also connects as **`moin_identity`** (`IDENTITY_DATABASE_URL`), the only role that may
 execute the sign-in and session functions; voice and worker must never be given it (ADR-0003). It is
 created by `docker/postgres/init/00-roles.sql`, which also moves `TEMPORARY` from `PUBLIC` to the

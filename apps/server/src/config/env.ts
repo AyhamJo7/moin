@@ -114,6 +114,17 @@ const baseSchema = z.object({
     z.url({ protocol: /^postgres(ql)?$/ }).optional(),
   ),
 
+  /**
+   * The worker role's outbox pool: `moin_dispatcher`, which may read and mark outbox rows and reach
+   * no other table (P08.02.02). Unset, the worker runs no outbox dispatcher; it never falls back to
+   * the `moin_app` credential. Holds the resolved credential; the task definition references the
+   * ARN.
+   */
+  DISPATCHER_DATABASE_URL: secret(
+    'DISPATCHER_DATABASE_URL',
+    z.url({ protocol: /^postgres(ql)?$/ }).optional(),
+  ),
+
   /** P06.05.04: one OIDC contract, selected by deployment rather than by business logic. */
   OIDC_PROVIDER: z.enum(OIDC_PROVIDERS).optional(),
   OIDC_ISSUER_URL: secret('OIDC_ISSUER_URL', z.url({ protocol: /^https?$/ }).optional()),
@@ -363,6 +374,37 @@ const schema = baseSchema.superRefine((value, ctx) => {
       message:
         'must connect as moin_identity, the only role that may execute the session functions',
     });
+  }
+
+  if (value.DISPATCHER_DATABASE_URL !== undefined) {
+    const dispatcher = new URL(value.DISPATCHER_DATABASE_URL);
+    if (value.SERVER_ROLE !== 'worker') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['DISPATCHER_DATABASE_URL'],
+        message: "is the worker role's outbox credential and must not reach any other role",
+      });
+    }
+    // As for the identity URL: these parameters would connect as a role the username check never
+    // saw.
+    if (
+      [...dispatcher.searchParams.keys()].some((key) =>
+        ['user', 'options', 'role'].includes(key.toLowerCase()),
+      )
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['DISPATCHER_DATABASE_URL'],
+        message: 'must not carry user, options or role query parameters, which override its role',
+      });
+    }
+    if (dispatcher.username !== 'moin_dispatcher') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['DISPATCHER_DATABASE_URL'],
+        message: 'must connect as moin_dispatcher, the role limited to the outbox',
+      });
+    }
   }
 
   if (

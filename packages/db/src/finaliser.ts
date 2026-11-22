@@ -399,6 +399,25 @@ export async function reconcileOrphans(
   return { tenants, finalised, failed, orphaned: orphans.length, orphans, deliveryErrors };
 }
 
+/**
+ * Every registered tenant, a page at a time, from the same reviewed global register the orphan
+ * sweep pages (`app.claim_audit_chains`): identifiers only, no lease, nothing tenant-scoped read.
+ * A tenant registered after the call started is left for the next pass (the high-water mark).
+ */
+export async function* registeredTenants(pool: Pool, pageSize: number): AsyncGenerator<string> {
+  if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 1000) {
+    throw new RangeError('tenant page size must be 1..1000');
+  }
+  const highWater = await registerHighWater(pool);
+  let after = '0';
+  for (;;) {
+    const page = await claimTenantPage(pool, pageSize, after, highWater);
+    yield* page.tenants;
+    if (page.tenants.length < pageSize) return;
+    after = page.cursor;
+  }
+}
+
 async function registerHighWater(pool: Pool): Promise<string> {
   const client = await pool.connect();
   try {

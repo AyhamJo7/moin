@@ -13,7 +13,7 @@ import { existsSync } from 'node:fs';
 import { createServer } from 'node:net';
 import path from 'node:path';
 import { createPool, type Pool } from '@moin/db/pool';
-import { enqueueJob, withTenant } from '@moin/db';
+import { enqueueJob, insertOutboxEvent, withTenant } from '@moin/db';
 import { uuidv7, type JobEnvelope } from '@moin/kernel';
 import { createTestDatabase, evidenceTest, type TestDatabase } from '@moin/testing';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect } from 'vitest';
@@ -177,6 +177,43 @@ describe('worker process', () => {
     expect(code).toBe(0);
     expect(output).toContain('job consumer stopped');
   });
+
+  evidenceTest('without a dispatcher credential, says the outbox is not dispatched', async () => {
+    await startWorker();
+    await until(() => output.includes('outbox dispatcher off'));
+  });
+
+  evidenceTest(
+    'with the dispatcher credential, claims outbox rows and publishes no unrouted event',
+    async () => {
+      const dispatcherUrl = database.dispatcherUrl;
+      if (dispatcherUrl === undefined) {
+        throw new Error('TEST_DATABASE_DISPATCHER_URL is not set; it is in .env.example');
+      }
+      const id = await withTenant(database.pool(), ORG, (client) =>
+        insertOutboxEvent(client, {
+          aggregate: 'task',
+          aggregateId: uuidv7(),
+          aggregateVersion: 1,
+          eventType: 'test.no-route',
+        }),
+      );
+      await startWorker({ DISPATCHER_DATABASE_URL: dispatcherUrl });
+      // Production routes no event type yet: the row is claimed, backs off and stays undispatched.
+      await until(async () => {
+        const row = await admin.query<{ attempts: number }>(
+          'select attempts from outbox where id = $1',
+          [id],
+        );
+        return row.rows[0]?.attempts === 1;
+      });
+      const row = await admin.query('select dispatched_at from outbox where id = $1', [id]);
+      expect(row.rows[0]).toEqual({ dispatched_at: null });
+      expect(output).toContain('unrouted');
+      expect(output).not.toContain('outbox dispatcher off');
+      expect(await queues.counts('jobs')).toEqual({ visible: 0, leased: 0 });
+    },
+  );
 
   evidenceTest('refuses to start without a queue, naming the variables and no value', async () => {
     const proc = await startWorker({ SQS_QUEUE_JOBS: '' });
