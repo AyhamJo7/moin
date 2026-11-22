@@ -22,6 +22,13 @@
 
 export const DISCLOSURE_STATUS = 'PROPOSED — pending EXT-02 (external counsel)' as const;
 
+/**
+ * The version of the template below, stored with every call it is issued to
+ * (`call_disclosures.disclosure_version`). Change it whenever the wording changes, so the record
+ * says which words a caller was given.
+ */
+export const DISCLOSURE_VERSION = 'de-1-proposed' as const;
+
 /** Builds the disclosure for a business. The name is the only tenant-controlled part. */
 export function buildDisclosure(businessName: string): string {
   const name = businessName.trim();
@@ -35,6 +42,3 @@ export function buildDisclosure(businessName: string): string {
     'Wenn Sie lieber mit einer Person sprechen möchten, sagen Sie einfach "Mitarbeiter".'
   );
 }
-
-/** The business the feasibility calls are made on behalf of, until a tenant registry exists (P06). */
-export const FEASIBILITY_BUSINESS_NAME = 'dem Testanschluss';

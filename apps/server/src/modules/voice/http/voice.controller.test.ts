@@ -11,10 +11,11 @@ import {
 import { CONFIG } from '../../../config/config.module.ts';
 import { loadConfig, type Config } from '../../../config/env.ts';
 import { LOGGER } from '../../../observability/logger.module.ts';
+import { FALLBACK_CALL_AGAIN } from '../application/fallback.ts';
 import { noMeasurementSink } from '../application/relay-connection.ts';
 import { ROUTE_RESOLVER } from '../../platform/route-resolver.module.ts';
-import { createInMemoryCallDedup } from '../application/call-dedup.ts';
-import { CALL_DEDUP, CLOCK, MEASUREMENT_SINK, SESSION_TOKENS } from '../voice.tokens.ts';
+import { VoiceCalls } from '../../platform/voice-calls.ts';
+import { CLOCK, MEASUREMENT_SINK, SESSION_TOKENS } from '../voice.tokens.ts';
 import { TwilioSignatureGuard } from './twilio-signature.guard.ts';
 import { VoiceController } from './voice.controller.ts';
 
@@ -34,9 +35,11 @@ const CONFIG_VALUE: Config = loadConfig({
 
 let app: NestFastifyApplication;
 let tokens: SessionTokenStore;
+let calls: { recordInbound: ReturnType<typeof vi.fn>; confirm: ReturnType<typeof vi.fn> };
 
 beforeEach(async () => {
   tokens = createInMemorySessionTokenStore();
+  calls = { recordInbound: vi.fn(), confirm: vi.fn() };
   const moduleRef = await Test.createTestingModule({
     controllers: [VoiceController],
     providers: [
@@ -56,7 +59,7 @@ beforeEach(async () => {
         provide: ROUTE_RESOLVER,
         useValue: null,
       },
-      { provide: CALL_DEDUP, useValue: createInMemoryCallDedup() },
+      { provide: VoiceCalls, useValue: calls },
     ],
   }).compile();
 
@@ -136,6 +139,8 @@ describe('POST /voice/inbound', () => {
     expect(second.body).toBe(first.body);
     const store = tokens as ReturnType<typeof createInMemorySessionTokenStore>;
     expect(store.size).toBe(0);
+    // An unassigned number has no tenant to store a call in.
+    expect(calls.recordInbound).not.toHaveBeenCalled();
   });
 
   it('rejects a tampered body and a wrong account URL (P11.03.01/.04)', async () => {
@@ -247,5 +252,71 @@ describe('POST /voice/session-end', () => {
     const signature = computeSignature(AUTH_TOKEN, `${PUBLIC_ORIGIN}/voice/session-end`, odd);
     const response = await post('/voice/session-end', odd, signature);
     expect(response.statusCode).toBe(204);
+  });
+});
+
+// INV-19: a routed call whose tenant write fails hears why the call ends; the provider never gets
+// an error status (which it would play as an error tone) and no session token is minted.
+describe('POST /voice/inbound when the call cannot be stored', () => {
+  const ORG = 'a1b2c3d4-0000-4000-8000-000000000001';
+  let failing: NestFastifyApplication;
+  let failingTokens: ReturnType<typeof createInMemorySessionTokenStore>;
+
+  async function start(routeCall: () => Promise<unknown>): Promise<void> {
+    failingTokens = createInMemorySessionTokenStore();
+    const moduleRef = await Test.createTestingModule({
+      controllers: [VoiceController],
+      providers: [
+        TwilioSignatureGuard,
+        { provide: CONFIG, useValue: CONFIG_VALUE },
+        {
+          provide: LOGGER,
+          useValue: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+        },
+        { provide: SESSION_TOKENS, useValue: failingTokens },
+        { provide: CLOCK, useValue: systemClock },
+        { provide: MEASUREMENT_SINK, useValue: noMeasurementSink },
+        {
+          provide: ROUTE_RESOLVER,
+          useValue: { resolve: routeCall, routeCall, end: () => Promise.resolve() },
+        },
+        {
+          provide: VoiceCalls,
+          useValue: { recordInbound: () => Promise.reject(new Error('database unavailable')) },
+        },
+      ],
+    }).compile();
+    failing = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
+    await failing.init();
+    await failing.getHttpAdapter().getInstance().ready();
+  }
+
+  afterEach(async () => {
+    await failing.close();
+  });
+
+  it.each([
+    ['the tenant write fails', () => Promise.resolve([{ organisationId: ORG, locationId: ORG }])],
+    ['the route lookup fails', () => Promise.reject(new Error('database unavailable'))],
+  ])('answers with the spoken call-again message and mints no token when %s', async (_n, route) => {
+    await start(route);
+    const response = await failing.inject({
+      method: 'POST',
+      url: '/voice/inbound',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        'x-twilio-signature': computeSignature(
+          AUTH_TOKEN,
+          `${PUBLIC_ORIGIN}/voice/inbound`,
+          INBOUND_PARAMS,
+        ),
+      },
+      payload: form(INBOUND_PARAMS),
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain(FALLBACK_CALL_AGAIN);
+    expect(response.body).toContain('<Hangup />');
+    expect(response.body).not.toContain('<ConversationRelay');
+    expect(failingTokens.size).toBe(0);
   });
 });

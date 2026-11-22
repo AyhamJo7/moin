@@ -97,6 +97,8 @@ export type {
   OutcomeInput,
   OutcomeResult,
 } from './conversations.ts';
+export { recordCallDisclosure, spokenBusinessName } from './call-disclosures.ts';
+export type { IssuedDisclosure } from './call-disclosures.ts';
 export {
   VersionConflictError as TaskVersionConflictError,
   assignTask,

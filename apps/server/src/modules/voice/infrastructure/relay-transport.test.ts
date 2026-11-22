@@ -107,7 +107,7 @@ describe('the relay WebSocket endpoint', () => {
   it('is reachable and answers an authenticated setup with the first ask', async () => {
     const issued = await issueSessionToken(
       tokens,
-      'a1b2c3d4-0000-4000-8000-000000000001',
+      { tenantId: 'a1b2c3d4-0000-4000-8000-000000000001', callSid: 'CA1' },
       Date.now(),
     );
     const client = connect();

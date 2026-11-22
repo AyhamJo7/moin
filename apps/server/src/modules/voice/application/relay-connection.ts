@@ -15,7 +15,8 @@
  *
  * The `CallSid` in `setup` is deliberately *not* used for this. It is not a secret — it is in
  * every webhook body and in the tenant's own provider console — and the threat model rejected it
- * as an authentication factor.
+ * as an authentication factor. The token is bound to the call it was minted for, so `setup` must
+ * also name that CallSid: a token for one call cannot open another call's session.
  *
  * ## Close codes carry no detail
  *
@@ -161,6 +162,17 @@ export class RelayConnection {
     if (!verdict.ok) {
       this.deps.logger.warn(
         { reason: `session-token-${verdict.reason}`, outcome: 'closed' },
+        'rejected a relay socket',
+      );
+      this.#closeWith(CLOSE_UNAUTHENTICATED);
+      return;
+    }
+
+    // The token was minted for one call; a setup naming another (even in the same tenant) is not
+    // that call's session.
+    if (verdict.callSid !== decoded.message.callSid) {
+      this.deps.logger.warn(
+        { reason: 'session-token-call-mismatch', outcome: 'closed' },
         'rejected a relay socket',
       );
       this.#closeWith(CLOSE_UNAUTHENTICATED);

@@ -23,19 +23,21 @@ import { CONFIG } from '../../config/config.module.ts';
 import type { Config } from '../../config/env.ts';
 import { LOGGER } from '../../observability/logger.module.ts';
 import { RouteResolverModule } from '../platform/route-resolver.module.ts';
+import { TenantPoolModule } from '../platform/tenant-pool.module.ts';
+import { VoiceCalls } from '../platform/voice-calls.ts';
 import { noMeasurementSink, type MeasurementSink } from './application/relay-connection.ts';
 import { VoiceController } from './http/voice.controller.ts';
 import { TwilioSignatureGuard } from './http/twilio-signature.guard.ts';
 import { createFileMeasurementSink } from './infrastructure/measurement-sink.ts';
 import { registerRelayTransport } from './infrastructure/relay-transport.ts';
-import { createInMemoryCallDedup } from './application/call-dedup.ts';
-import { CALL_DEDUP, CLOCK, MEASUREMENT_SINK, SESSION_TOKENS } from './voice.tokens.ts';
+import { CLOCK, MEASUREMENT_SINK, SESSION_TOKENS } from './voice.tokens.ts';
 
 @Module({
-  imports: [RouteResolverModule],
+  imports: [RouteResolverModule, TenantPoolModule],
   controllers: [VoiceController],
   providers: [
     TwilioSignatureGuard,
+    VoiceCalls,
     { provide: CLOCK, useValue: systemClock },
     {
       // In-process for the spike. A second voice instance would not see the first one's tokens,
@@ -50,12 +52,6 @@ import { CALL_DEDUP, CLOCK, MEASUREMENT_SINK, SESSION_TOKENS } from './voice.tok
         config.VOICE_MEASUREMENT_SINK === undefined
           ? noMeasurementSink
           : createFileMeasurementSink(config.VOICE_MEASUREMENT_SINK),
-    },
-    {
-      // In-process CallSid claims. Same scaling note as the session tokens:
-      // a second voice instance needs Valkey; the port is already the one.
-      provide: CALL_DEDUP,
-      useFactory: () => createInMemoryCallDedup(),
     },
   ],
 })

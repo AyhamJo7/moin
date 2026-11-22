@@ -32,22 +32,21 @@ import { LOGGER } from '../../../observability/logger.module.ts';
  *
  * The parser can yield an array when a parameter repeats. Twilio's voice webhooks do not repeat
  * parameters, so rather than invent a join, the last value wins and the signature check is what
- * notices if that assumption was ever wrong.
+ * notices if that assumption was ever wrong. The controllers read this same record, so they act on
+ * exactly the values the signature covered.
  */
-function formParams(body: unknown): Record<string, string> {
+export function formParams(body: unknown): Record<string, string> {
   if (typeof body !== 'object' || body === null) {
     return {};
   }
-  const params: Record<string, string> = {};
-  for (const [name, value] of Object.entries(body as Record<string, unknown>)) {
-    if (Array.isArray(value)) {
-      const last: unknown = value.at(-1);
-      params[name] = typeof last === 'string' ? last : String(last);
-    } else {
-      params[name] = typeof value === 'string' ? value : String(value);
-    }
-  }
-  return params;
+  // `fromEntries` defines own properties: a field named `__proto__` is a key like any other,
+  // never a write to the prototype.
+  return Object.fromEntries(
+    Object.entries(body as Record<string, unknown>).map(([name, value]) => {
+      const last: unknown = Array.isArray(value) ? value.at(-1) : value;
+      return [name, typeof last === 'string' ? last : String(last)];
+    }),
+  );
 }
 
 function firstHeader(value: string | string[] | undefined): string | undefined {

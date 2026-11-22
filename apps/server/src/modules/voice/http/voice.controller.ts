@@ -26,6 +26,7 @@ import type { Clock } from '@moin/kernel';
 import type { Logger } from '@moin/observability';
 import {
   buildConversationRelayTwiML,
+  buildUnassignedTwiML,
   issueSessionToken,
   type SessionTokenStore,
 } from '@moin/telephony';
@@ -34,14 +35,28 @@ import type { Config } from '../../../config/env.ts';
 import { LOGGER } from '../../../observability/logger.module.ts';
 import type { RouteResolver } from '../../platform/route-resolver.ts';
 import { ROUTE_RESOLVER } from '../../platform/route-resolver.module.ts';
-import type { CallDedupStore } from '../application/call-dedup.ts';
-import { routeInboundCall } from '../application/inbound-route.ts';
-import { buildDisclosure } from '../domain/disclosure.ts';
+import { VoiceCalls } from '../../platform/voice-calls.ts';
+import { buildCallAgainTwiML } from '../application/fallback.ts';
+import { classifyCallerId } from '../application/caller-id.ts';
+import {
+  isCallSid,
+  routeInboundCall,
+  SYNTHETIC_ACCOUNT_SID,
+} from '../application/inbound-route.ts';
+import { buildDisclosure, DISCLOSURE_VERSION } from '../domain/disclosure.ts';
 import { RELAY_PATH, SESSION_TOKEN_PARAMETER } from '../domain/relay-contract.ts';
-import { CALL_DEDUP, CLOCK, SESSION_TOKENS } from '../voice.tokens.ts';
-import { TwilioSignatureGuard } from './twilio-signature.guard.ts';
+import { CLOCK, SESSION_TOKENS } from '../voice.tokens.ts';
+import { formParams, TwilioSignatureGuard } from './twilio-signature.guard.ts';
 
 const HTTP_OK = 200;
+const SQLSTATE = /^[0-9A-Z]{5}$/u;
+
+/** What failed, without anything the error says about the data: an SQLSTATE or an error class. */
+function errorClass(error: unknown): string {
+  const code: unknown = (error as { code?: unknown } | null)?.code;
+  if (typeof code === 'string' && SQLSTATE.test(code)) return `sqlstate-${code}`;
+  return error instanceof Error ? error.name : 'unknown';
+}
 const HTTP_NO_CONTENT = 204;
 
 @Controller('voice')
@@ -52,18 +67,20 @@ export class VoiceController {
     @Inject(LOGGER) private readonly logger: Logger,
     @Inject(SESSION_TOKENS) private readonly tokens: SessionTokenStore,
     @Inject(CLOCK) private readonly clock: Clock,
+    private readonly calls: VoiceCalls,
     @Optional() @Inject(ROUTE_RESOLVER) private readonly resolver?: RouteResolver | null,
-    @Optional() @Inject(CALL_DEDUP) private readonly dedup?: CallDedupStore | null,
   ) {}
 
   /**
    * Answers an inbound call.
    *
-   * The dialled number (`To`) resolves to its tenant first (P11.01): unknown
-   * or quarantined numbers get the neutral message, never another tenant.
-   * Routed calls mint a per-call session token (sixty seconds, single use)
-   * and answer with the disclosure TwiML. INV-12: the dialled number never
-   * reaches the logs.
+   * Synthetic traffic only for now (S1): genuine provider traffic gets the
+   * neutral message and stores nothing. The dialled number (`To`) resolves to
+   * its tenant first (P11.01): unknown or quarantined numbers get the neutral
+   * message, never another tenant. Routed calls store the call and the
+   * disclosure it is issued, mint a session token for this call (sixty
+   * seconds, single use) and answer with the disclosure TwiML in the tenant's
+   * name. INV-12: the dialled number never reaches the logs.
    */
   @Post('inbound')
   // Nest answers POST with 201 by default. TwiML is a representation of the call's next step, not
@@ -78,67 +95,112 @@ export class VoiceController {
       throw new Error('voice role started without its telephony configuration');
     }
 
-    const body = (request.body ?? {}) as Record<string, string>;
-    const dialled = body['To'] ?? '';
-    // INV-11: a retried webhook for the same CallSid replays the recorded
-    // TwiML shape without minting a second token or a second effect. The
-    // replay carries a fresh token (single-use tokens cannot be reused), but
-    // the dedup claim is written once — first write wins.
+    const body = formParams(request.body);
     const callSid = body['CallSid'] ?? '';
-    const seen =
-      callSid !== '' && this.dedup !== undefined && this.dedup !== null
-        ? await this.dedup.find(callSid)
-        : null;
-    if (seen !== null) {
+    // Synthetic traffic only (S1): genuine provider traffic carries its own account id and is
+    // answered with the neutral message, storing nothing, until the finaliser (S4) and call-data
+    // retention, erasure and export (P1) exist. A body that is not a provider call likewise.
+    if (body['AccountSid'] !== SYNTHETIC_ACCOUNT_SID || !isCallSid(callSid)) {
       this.logger.info(
-        { route: '/voice/inbound', outcome: `${seen.outcome}-replay`, direction: 'inbound' },
-        'replaying a duplicate webhook',
+        { route: '/voice/inbound', outcome: 'not-synthetic-traffic', direction: 'inbound' },
+        'answering a call this release does not serve',
       );
-      if (seen.outcome === 'unassigned-number') {
-        const unassigned = await routeInboundCall('invalid', {
-          resolveRoute: () => Promise.resolve([]),
-          // Replay of a counted outcome: the metric was emitted on the
-          // first delivery, not again here.
-          countUnassigned: () => undefined,
-        });
-        if (!unassigned.routed) return unassigned.twiml;
-      }
-      return this.buildRoutedTwiML(websocketOrigin, publicOrigin);
-    }
-    const decision = await routeInboundCall(dialled, {
-      resolveRoute: (e164) =>
-        this.resolver === undefined || this.resolver === null
-          ? Promise.resolve([])
-          : this.resolver.resolve(e164),
-      countUnassigned: () => {
-        this.logger.info(
-          { route: '/voice/inbound', outcome: 'unassigned-number', direction: 'inbound' },
-          'answering an unassigned number',
-        );
-      },
-    });
-    if (!decision.routed) {
-      if (callSid !== '' && this.dedup !== undefined && this.dedup !== null) {
-        await this.dedup.claim({ callSid, outcome: 'unassigned-number', token: null });
-      }
-      return decision.twiml;
+      return buildUnassignedTwiML();
     }
 
-    const issued = await issueSessionToken(
-      this.tokens,
-      decision.organisationId,
-      this.clock.now().getTime(),
+    const answer = await this.#answer(
+      websocketOrigin,
+      publicOrigin,
+      body['To'] ?? '',
+      callSid,
+      body['From'],
     );
-    if (callSid !== '' && this.dedup !== undefined && this.dedup !== null) {
-      await this.dedup.claim({ callSid, outcome: 'twiml-issued', token: issued.token });
+    const fields = { route: '/voice/inbound', outcome: answer.outcome, direction: 'inbound' };
+    if (answer.outcome === 'store-failed' || answer.outcome === 'disclosure-retired') {
+      this.logger.error(
+        answer.reason === undefined ? fields : { ...fields, reason: answer.reason },
+        'answering a routed call without a session',
+      );
+    } else if (answer.outcome !== 'unassigned-number') {
+      this.logger.info(fields, 'answering an inbound call');
     }
+    return answer.twiml;
+  }
 
-    this.logger.info(
-      { route: '/voice/inbound', outcome: 'twiml-issued', direction: 'inbound' },
-      'answering an inbound call',
-    );
+  /**
+   * The TwiML for one delivery of an inbound webhook. Every failure is answered with speech,
+   * never a provider error (INV-19): the spoken call-again message.
+   *
+   * 1. INV-01, INV-11: `app.route_call` resolves the dialled number and records the first routing
+   *    decision for the CallSid in one call. A delivery whose number no longer routes to the
+   *    organisation of that first decision (activated, reassigned or released since) gets the
+   *    neutral message and stores nothing anywhere.
+   * 2. The call row is the dedup: a retry finds it and writes nothing, and gets back the
+   *    disclosure inputs first issued, so it speaks the same words. A retry after a deploy that
+   *    retired that disclosure version is refused rather than spoken in different words.
+   * 3. The caller id is classified first; only a presented E.164 number is stored.
+   * 4. A single-use token for this tenant and this call; only one token per call opens a session.
+   */
+  async #answer(
+    websocketOrigin: string,
+    publicOrigin: string,
+    dialled: string,
+    callSid: string,
+    from: string | undefined,
+  ): Promise<{
+    readonly outcome:
+      | 'twiml-issued'
+      | 'twiml-issued-replay'
+      | 'unassigned-number'
+      | 'disclosure-retired'
+      | 'store-failed';
+    readonly twiml: string;
+    readonly reason?: string;
+  }> {
+    const resolver = this.resolver;
+    try {
+      const decision = await routeInboundCall(dialled, {
+        resolveRoute: (e164) =>
+          resolver === undefined || resolver === null
+            ? Promise.resolve([])
+            : resolver.routeCall(e164, callSid),
+        countUnassigned: () => {
+          this.logger.info(
+            { route: '/voice/inbound', outcome: 'unassigned-number', direction: 'inbound' },
+            'answering an unassigned number',
+          );
+        },
+      });
+      if (!decision.routed) return { outcome: 'unassigned-number', twiml: decision.twiml };
 
-    return this.buildRoutedTwiML(websocketOrigin, publicOrigin, issued.token);
+      const caller = from === undefined ? 'withheld' : classifyCallerId(from, new Set([dialled]));
+      const recorded = await this.calls.recordInbound({
+        organisationId: decision.organisationId,
+        callSid,
+        from: caller === 'present' ? from?.trim() : undefined,
+        to: dialled,
+        disclosureVersion: DISCLOSURE_VERSION,
+      });
+      if (recorded.disclosure.version !== DISCLOSURE_VERSION) {
+        return { outcome: 'disclosure-retired', twiml: buildCallAgainTwiML() };
+      }
+      const issued = await issueSessionToken(
+        this.tokens,
+        { tenantId: decision.organisationId, callSid },
+        this.clock.now().getTime(),
+      );
+      return {
+        outcome: recorded.created ? 'twiml-issued' : 'twiml-issued-replay',
+        twiml: this.buildRoutedTwiML(
+          websocketOrigin,
+          publicOrigin,
+          issued.token,
+          recorded.disclosure.businessName,
+        ),
+      };
+    } catch (error) {
+      return { outcome: 'store-failed', twiml: buildCallAgainTwiML(), reason: errorClass(error) };
+    }
   }
 
   /**
@@ -146,17 +208,16 @@ export class VoiceController {
    * travels as a value the type system requires, and there is no other way
    * to emit `<ConversationRelay>` from this controller.
    */
-  private async buildRoutedTwiML(
+  private buildRoutedTwiML(
     websocketOrigin: string,
     publicOrigin: string,
-    token?: string,
-  ): Promise<string> {
-    const sessionToken =
-      token ?? (await issueSessionToken(this.tokens, 'replay', this.clock.now().getTime())).token;
+    sessionToken: string,
+    businessName: string,
+  ): string {
     return buildConversationRelayTwiML({
       websocketUrl: `${websocketOrigin}${RELAY_PATH}`,
       actionUrl: `${publicOrigin}/voice/session-end`,
-      disclosure: buildDisclosure(this.config.VOICE_BUSINESS_NAME),
+      disclosure: buildDisclosure(businessName),
       language: this.config.VOICE_LANGUAGE,
       transcription: {
         provider: this.config.VOICE_TRANSCRIPTION_PROVIDER,

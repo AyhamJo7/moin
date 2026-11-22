@@ -19,6 +19,7 @@ import type { SessionSummary } from './relay-session.ts';
 
 const T0 = Date.UTC(2026, 8, 29, 9, 0, 0);
 const TENANT = 'a1b2c3d4-0000-4000-8000-000000000001';
+const CALL = { tenantId: TENANT, callSid: 'CA1' };
 
 function fakeLogger(): Logger {
   return { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as unknown as Logger;
@@ -47,11 +48,11 @@ function harness(store: SessionTokenStore = createInMemorySessionTokenStore()) {
   return { connection, sent, closed, recorded, clock, store };
 }
 
-function setupFrame(token: string | undefined): string {
+function setupFrame(token: string | undefined, callSid = 'CA1'): string {
   return JSON.stringify({
     type: 'setup',
     sessionId: 'VX1',
-    callSid: 'CA1',
+    callSid,
     ...(token === undefined ? {} : { customParameters: { [SESSION_TOKEN_PARAMETER]: token } }),
   });
 }
@@ -64,7 +65,7 @@ describe('RelayConnection authentication', () => {
   });
 
   it('opens the session when the setup message carries a valid token', async () => {
-    const issued = await issueSessionToken(h.store, TENANT, T0);
+    const issued = await issueSessionToken(h.store, CALL, T0);
     await h.connection.onFrame(setupFrame(issued.token), T0);
 
     expect(h.connection.state).toBe('open');
@@ -101,15 +102,37 @@ describe('RelayConnection authentication', () => {
   });
 
   it('rejects a token that has expired', async () => {
-    const issued = await issueSessionToken(h.store, TENANT, T0);
+    const issued = await issueSessionToken(h.store, CALL, T0);
     h.clock.advance(SESSION_TOKEN_TTL_MS);
     await h.connection.onFrame(setupFrame(issued.token), T0);
     expect(h.closed).toStrictEqual([CLOSE_UNAUTHENTICATED]);
   });
 
+  // The token is bound to one call: a setup that names another CallSid is not that call's session.
+  it('rejects a token minted for another call in the same tenant', async () => {
+    const issued = await issueSessionToken(h.store, CALL, T0);
+    await h.connection.onFrame(setupFrame(issued.token, 'CA2'), T0);
+    expect(h.closed).toStrictEqual([CLOSE_UNAUTHENTICATED]);
+    expect(h.sent).toStrictEqual([]);
+    expect(h.connection.state).toBe('closed');
+  });
+
+  // Every webhook delivery of a call mints a token. Only one of them opens a session.
+  it('rejects a second session for the same call, from another delivery’s token', async () => {
+    const first = await issueSessionToken(h.store, CALL, T0);
+    const second = await issueSessionToken(h.store, CALL, T0);
+    await h.connection.onFrame(setupFrame(first.token), T0);
+    expect(h.connection.state).toBe('open');
+
+    const other = harness(h.store);
+    await other.connection.onFrame(setupFrame(second.token), T0);
+    expect(other.closed).toStrictEqual([CLOSE_UNAUTHENTICATED]);
+    expect(other.sent).toStrictEqual([]);
+  });
+
   // The property a single-use token exists for: a second socket with the same TwiML gets nothing.
   it('rejects a second connection replaying the same token', async () => {
-    const issued = await issueSessionToken(h.store, TENANT, T0);
+    const issued = await issueSessionToken(h.store, CALL, T0);
     await h.connection.onFrame(setupFrame(issued.token), T0);
     expect(h.connection.state).toBe('open');
 
@@ -124,7 +147,7 @@ describe('RelayConnection authentication', () => {
   });
 
   it('does nothing when the setup timeout fires after authentication', async () => {
-    const issued = await issueSessionToken(h.store, TENANT, T0);
+    const issued = await issueSessionToken(h.store, CALL, T0);
     await h.connection.onFrame(setupFrame(issued.token), T0);
     h.connection.onSetupTimeout();
     expect(h.closed).toStrictEqual([]);
@@ -141,7 +164,7 @@ describe('RelayConnection authentication', () => {
 describe('RelayConnection session flow', () => {
   async function opened() {
     const h = harness();
-    const issued = await issueSessionToken(h.store, TENANT, T0);
+    const issued = await issueSessionToken(h.store, CALL, T0);
     await h.connection.onFrame(setupFrame(issued.token), T0);
     h.sent.length = 0;
     return h;

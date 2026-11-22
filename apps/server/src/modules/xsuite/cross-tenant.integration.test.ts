@@ -226,7 +226,7 @@ afterAll(async () => {
 });
 
 /** Tenant tables in the migrated schema; the write matrix in packages/db covers all of them. */
-const LIVE_TENANT_TABLES = 55;
+const LIVE_TENANT_TABLES = 56;
 
 describe('route inventory covers the whole API surface (P06.13.02)', () => {
   evidenceTest(
@@ -699,7 +699,7 @@ describe('the tenant comes from the session, never from the request (P06.03.02, 
 describe('DB layer: every tenant table isolates A from B (P06.13.03)', () => {
   evidenceTest('tenant tables expose no foreign rows to the app role', async () => {
     // The nine tables below are the ones with a seeded world row of B (the HTTP-facing
-    // tables); the live schema has 55 tenant tables, and the write matrix over all of them
+    // tables); the live schema has 56 tenant tables, and the write matrix over all of them
     // (SELECT, INSERT, tenant-moving UPDATE, DELETE, from the catalog) is
     // packages/db/src/tenant-write-matrix.integration.test.ts. The count is pinned here so a
     // new tenant table cannot arrive without this suite being looked at.

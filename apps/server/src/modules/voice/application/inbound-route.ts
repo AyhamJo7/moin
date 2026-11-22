@@ -14,6 +14,18 @@ import { buildUnassignedTwiML } from '@moin/telephony';
 
 export const UNASSIGNED_NUMBER_METRIC = 'voice.unassigned_number' as const;
 
+/**
+ * The account id of synthetic traffic: the local call driver and the tests sign their webhooks
+ * with it. Genuine provider traffic carries the provider account's own id, never this one, and
+ * stores nothing until the call-data controls exist (S4, P1); see the voice controller.
+ */
+export const SYNTHETIC_ACCOUNT_SID = 'AC00000000000000000000000000000001' as const;
+
+/** The provider's CallSid shape; anything else is not a provider call. */
+export function isCallSid(value: string): boolean {
+  return /^CA[0-9a-f]{32}$/.test(value);
+}
+
 export interface RoutePorts {
   /** Zero rows when unknown or quarantined; exactly one row when active. */
   readonly resolveRoute: (
