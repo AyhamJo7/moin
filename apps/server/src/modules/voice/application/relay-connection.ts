@@ -51,16 +51,6 @@ export const noMeasurementSink: MeasurementSink = {
   },
 };
 
-/**
- * Where the evidence that the disclosure played goes (S1, INV-03). A caller turn arrives only
- * after the non-interruptible greeting has finished, so the first one confirms it. Resolves true
- * when stored (or already stored), false when the call has no issued disclosure in that tenant;
- * rejects when the write failed, and the connection tries again.
- */
-export interface DisclosureConfirmations {
-  confirm(tenantId: string, callSid: string): Promise<boolean>;
-}
-
 export interface ConnectionIo {
   send(frame: string): void;
   close(code: number): void;
@@ -72,7 +62,6 @@ export interface RelayConnectionDeps {
   readonly clock: Clock;
   readonly logger: Logger;
   readonly sink: MeasurementSink;
-  readonly confirmations?: DisclosureConfirmations | undefined;
 }
 
 type State = 'awaiting-auth' | 'open' | 'closed';
@@ -80,10 +69,6 @@ type State = 'awaiting-auth' | 'open' | 'closed';
 export class RelayConnection {
   #state: State = 'awaiting-auth';
   #session: RelaySession | undefined;
-  #call: { readonly tenantId: string; readonly callSid: string } | undefined;
-  #callerSpoke = false;
-  #confirmed = false;
-  #confirming: Promise<void> | undefined;
 
   constructor(private readonly deps: RelayConnectionDeps) {}
 
@@ -121,10 +106,6 @@ export class RelayConnection {
       return;
     }
 
-    if (decoded.kind === 'message' && decoded.message.type === 'prompt') {
-      this.#callerSpoke = true;
-      this.#confirm();
-    }
     const step = session.handleFrame(decoded, receivedAtMs);
     for (const message of step.send) {
       this.deps.io.send(encodeOutbound(message));
@@ -148,50 +129,6 @@ export class RelayConnection {
   /** Called when the socket closes for any reason, including the far end hanging up. */
   onClose(): void {
     this.#state = 'closed';
-    // A caller who spoke once and hung up while that write failed still gets a last attempt.
-    if (this.#callerSpoke) {
-      void this.settled().then(() => {
-        this.#confirm();
-      });
-    }
-  }
-
-  /** Resolves when no confirmation write is in flight. */
-  settled(): Promise<void> {
-    return this.#confirming ?? Promise.resolve();
-  }
-
-  /**
-   * Stores the confirmation once. It counts as done only when the write succeeded; a failed write
-   * is retried on the next caller turn and at close.
-   * ponytail: in-process retries only; evidence is lost if the database is unreachable for the
-   * whole call. The degraded-capture queue (P11.08) is the durable path when it is wired.
-   */
-  #confirm(): void {
-    const call = this.#call;
-    const port = this.deps.confirmations;
-    if (call === undefined || port === undefined) return;
-    if (this.#confirmed || this.#confirming !== undefined) return;
-    this.#confirming = port
-      .confirm(call.tenantId, call.callSid)
-      .then((stored) => {
-        this.#confirmed = true;
-        if (!stored) {
-          this.deps.logger.warn(
-            { reason: 'no-issued-disclosure', outcome: 'not-recorded' },
-            'disclosure confirmation had no issued disclosure to attach to',
-          );
-        }
-      })
-      .catch(() => {
-        this.deps.logger.error(
-          { reason: 'disclosure-confirmation-failed', outcome: 'retry-pending' },
-          'could not store the disclosure confirmation',
-        );
-      })
-      .finally(() => {
-        this.#confirming = undefined;
-      });
   }
 
   async #authenticate(
@@ -243,7 +180,6 @@ export class RelayConnection {
     }
 
     this.#state = 'open';
-    this.#call = { tenantId: verdict.tenantId, callSid: verdict.callSid };
     const session = new RelaySession(verdict.tenantId, this.deps.clock);
     this.#session = session;
     this.deps.logger.info(

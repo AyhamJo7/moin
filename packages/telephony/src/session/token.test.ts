@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CALL_CLAIM_TTL_MS,
   SESSION_TOKEN_TTL_MS,
   consumeSessionToken,
   createInMemorySessionTokenStore,
@@ -96,5 +97,30 @@ describe('session tokens', () => {
     await expect(issueSessionToken(store, binding, NOW)).rejects.toThrow(
       /tenant id and a CallSid/u,
     );
+  });
+
+  // Each webhook delivery of a call mints a token; only one may ever open a session.
+  it('opens one session per call: a second token for the same call is refused', async () => {
+    const store = createInMemorySessionTokenStore();
+    const first = await issueSessionToken(store, BINDING, NOW);
+    const second = await issueSessionToken(store, BINDING, NOW);
+    const other = await issueSessionToken(store, { tenantId: TENANT, callSid: `${CALL}x` }, NOW);
+    expect((await consumeSessionToken(store, second.token, NOW)).ok).toBe(true);
+    expect(await consumeSessionToken(store, first.token, NOW)).toStrictEqual({
+      ok: false,
+      reason: 'call-claimed',
+    });
+    expect((await consumeSessionToken(store, other.token, NOW)).ok).toBe(true);
+  });
+
+  it('keeps the call claimed for longer than any call lasts', async () => {
+    const store = createInMemorySessionTokenStore();
+    await consumeSessionToken(store, (await issueSessionToken(store, BINDING, NOW)).token, NOW);
+    const late = NOW + CALL_CLAIM_TTL_MS - 1;
+    const again = await issueSessionToken(store, BINDING, late);
+    expect(await consumeSessionToken(store, again.token, late)).toStrictEqual({
+      ok: false,
+      reason: 'call-claimed',
+    });
   });
 });

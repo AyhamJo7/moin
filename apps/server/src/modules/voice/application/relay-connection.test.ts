@@ -14,11 +14,7 @@ import {
   SESSION_TOKEN_PARAMETER,
 } from '../domain/relay-contract.ts';
 import { MEASUREMENT_SCRIPT } from '../domain/measurement-script.ts';
-import {
-  RelayConnection,
-  type MeasurementSink,
-  type DisclosureConfirmations,
-} from './relay-connection.ts';
+import { RelayConnection, type MeasurementSink } from './relay-connection.ts';
 import type { SessionSummary } from './relay-session.ts';
 
 const T0 = Date.UTC(2026, 8, 29, 9, 0, 0);
@@ -29,25 +25,10 @@ function fakeLogger(): Logger {
   return { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as unknown as Logger;
 }
 
-function harness(store: SessionTokenStore = createInMemorySessionTokenStore(), failures = 0) {
+function harness(store: SessionTokenStore = createInMemorySessionTokenStore()) {
   const sent: string[] = [];
   const closed: number[] = [];
   const recorded: SessionSummary[] = [];
-  /** Every confirmation attempt, and the ones that were stored. */
-  const attempts: [string, string][] = [];
-  const confirmed: [string, string][] = [];
-  let failing = failures;
-  const confirmations: DisclosureConfirmations = {
-    confirm(tenantId, callSid) {
-      attempts.push([tenantId, callSid]);
-      if (failing > 0) {
-        failing -= 1;
-        return Promise.reject(new Error('database unavailable'));
-      }
-      confirmed.push([tenantId, callSid]);
-      return Promise.resolve(true);
-    },
-  };
   const clock = fixedClock(new Date(T0));
   const sink: MeasurementSink = {
     record(summary) {
@@ -63,9 +44,8 @@ function harness(store: SessionTokenStore = createInMemorySessionTokenStore(), f
     clock,
     logger: fakeLogger(),
     sink,
-    confirmations,
   });
-  return { connection, sent, closed, recorded, attempts, confirmed, clock, store };
+  return { connection, sent, closed, recorded, clock, store };
 }
 
 function setupFrame(token: string | undefined, callSid = 'CA1'): string {
@@ -135,6 +115,19 @@ describe('RelayConnection authentication', () => {
     expect(h.closed).toStrictEqual([CLOSE_UNAUTHENTICATED]);
     expect(h.sent).toStrictEqual([]);
     expect(h.connection.state).toBe('closed');
+  });
+
+  // Every webhook delivery of a call mints a token. Only one of them opens a session.
+  it('rejects a second session for the same call, from another delivery’s token', async () => {
+    const first = await issueSessionToken(h.store, CALL, T0);
+    const second = await issueSessionToken(h.store, CALL, T0);
+    await h.connection.onFrame(setupFrame(first.token), T0);
+    expect(h.connection.state).toBe('open');
+
+    const other = harness(h.store);
+    await other.connection.onFrame(setupFrame(second.token), T0);
+    expect(other.closed).toStrictEqual([CLOSE_UNAUTHENTICATED]);
+    expect(other.sent).toStrictEqual([]);
   });
 
   // The property a single-use token exists for: a second socket with the same TwiML gets nothing.
@@ -222,88 +215,5 @@ describe('RelayConnection session flow', () => {
       );
     }
     expect(h.recorded[0]?.tenantId).toBe(TENANT);
-  });
-});
-
-describe('RelayConnection disclosure confirmation (S1, INV-03)', () => {
-  const prompt = JSON.stringify({ type: 'prompt', voicePrompt: 'Hallo', last: true });
-
-  async function opened(failures = 0) {
-    const h = harness(createInMemorySessionTokenStore(), failures);
-    const issued = await issueSessionToken(h.store, CALL, T0);
-    await h.connection.onFrame(setupFrame(issued.token), T0);
-    return h;
-  }
-
-  it('confirms on the first caller turn, once', async () => {
-    const h = await opened();
-    expect(h.attempts).toStrictEqual([]);
-    await h.connection.onFrame(prompt, T0 + 1);
-    await h.connection.settled();
-    await h.connection.onFrame(prompt, T0 + 2);
-    h.connection.onClose();
-    await h.connection.settled();
-    expect(h.confirmed).toStrictEqual([[TENANT, 'CA1']]);
-    expect(h.attempts).toHaveLength(1);
-  });
-
-  // A session that closes before any caller turn is unknown, not a verdict: the caller may have
-  // heard the whole greeting and said nothing.
-  it('stores nothing when the session closes before any caller turn', async () => {
-    const h = await opened();
-    h.connection.onClose();
-    await h.connection.settled();
-    expect(h.attempts).toStrictEqual([]);
-  });
-
-  it('retries a failed write on the next caller turn', async () => {
-    const h = await opened(1);
-    await h.connection.onFrame(prompt, T0 + 1);
-    await h.connection.settled();
-    expect(h.confirmed).toStrictEqual([]);
-    await h.connection.onFrame(prompt, T0 + 2);
-    await h.connection.settled();
-    expect(h.confirmed).toStrictEqual([[TENANT, 'CA1']]);
-  });
-
-  it('retries a failed write once more when the caller hangs up', async () => {
-    const h = await opened(1);
-    await h.connection.onFrame(prompt, T0 + 1);
-    h.connection.onClose();
-    await h.connection.settled();
-    await new Promise((resolve) => setImmediate(resolve));
-    await h.connection.settled();
-    expect(h.attempts).toHaveLength(2);
-    expect(h.confirmed).toStrictEqual([[TENANT, 'CA1']]);
-  });
-
-  it.each([
-    ['never sends setup', () => Promise.resolve()],
-    [
-      'presents no token',
-      async (h: ReturnType<typeof harness>) => {
-        await h.connection.onFrame(setupFrame(undefined), T0);
-      },
-    ],
-    [
-      'presents a forged token',
-      async (h: ReturnType<typeof harness>) => {
-        await h.connection.onFrame(setupFrame('Z'.repeat(43)), T0);
-      },
-    ],
-    [
-      "presents another call's token in the same tenant",
-      async (h: ReturnType<typeof harness>) => {
-        const other = await issueSessionToken(h.store, CALL, T0);
-        await h.connection.onFrame(setupFrame(other.token, 'CA2'), T0);
-      },
-    ],
-  ])('stores nothing for a socket that %s', async (_label, act) => {
-    const h = harness();
-    await act(h);
-    await h.connection.onFrame(prompt, T0 + 1);
-    h.connection.onClose();
-    await h.connection.settled();
-    expect(h.attempts).toStrictEqual([]);
   });
 });

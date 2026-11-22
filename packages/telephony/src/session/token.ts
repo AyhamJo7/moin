@@ -43,7 +43,18 @@ export interface SessionTokenStore {
   put(record: StoredSessionToken): Promise<void>;
   /** Atomically returns and removes the record. A second call for the same id returns undefined. */
   take(id: string): Promise<StoredSessionToken | undefined>;
+  /**
+   * Atomically claims the call's one relay session: true for the first claim of `callSid` until
+   * `untilMs`, false for every later one (Valkey: `SET NX PX`).
+   */
+  claimCall(callSid: string, nowMs: number, untilMs: number): Promise<boolean>;
 }
+
+/**
+ * How long a call's session claim outlives its redemption: longer than any call, so a second
+ * token for the same call (each webhook delivery mints one) can never open a second session.
+ */
+export const CALL_CLAIM_TTL_MS = 24 * 60 * 60_000;
 
 export interface IssuedSessionToken {
   /** The value that goes into the TwiML `<Parameter>`. Never logged, never persisted. */
@@ -88,7 +99,7 @@ export type SessionTokenVerdict =
   | { readonly ok: true; readonly tenantId: string; readonly callSid: string }
   | {
       readonly ok: false;
-      readonly reason: 'malformed' | 'unknown-or-used' | 'expired' | 'mismatch';
+      readonly reason: 'malformed' | 'unknown-or-used' | 'expired' | 'mismatch' | 'call-claimed';
     };
 
 /**
@@ -119,6 +130,11 @@ export async function consumeSessionToken(
   if (!constantTimeEquals(hashSecret(secret), record.secretHash)) {
     return { ok: false, reason: 'mismatch' };
   }
+  // One session per call: every webhook delivery mints a token, and only the first one redeemed
+  // opens a session.
+  if (!(await store.claimCall(record.callSid, nowMs, nowMs + CALL_CLAIM_TTL_MS))) {
+    return { ok: false, reason: 'call-claimed' };
+  }
   return { ok: true, tenantId: record.tenantId, callSid: record.callSid };
 }
 
@@ -131,6 +147,7 @@ export async function consumeSessionToken(
  */
 export function createInMemorySessionTokenStore(): SessionTokenStore & { readonly size: number } {
   const records = new Map<string, StoredSessionToken>();
+  const claims = new Map<string, number>();
   return {
     get size(): number {
       return records.size;
@@ -143,6 +160,13 @@ export function createInMemorySessionTokenStore(): SessionTokenStore & { readonl
       const record = records.get(id);
       records.delete(id);
       return Promise.resolve(record);
+    },
+    // ponytail: prunes by a full scan per claim; Valkey's key expiry replaces it (P11).
+    claimCall(callSid: string, nowMs: number, untilMs: number): Promise<boolean> {
+      for (const [sid, expiresAtMs] of claims) if (expiresAtMs <= nowMs) claims.delete(sid);
+      if (claims.has(callSid)) return Promise.resolve(false);
+      claims.set(callSid, untilMs);
+      return Promise.resolve(true);
     },
   };
 }

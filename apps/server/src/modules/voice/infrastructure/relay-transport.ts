@@ -16,18 +16,13 @@ import type { Clock } from '@moin/kernel';
 import type { Logger } from '@moin/observability';
 import type { SessionTokenStore } from '@moin/telephony';
 import { RELAY_PATH, SETUP_TIMEOUT_MS } from '../domain/relay-contract.ts';
-import {
-  RelayConnection,
-  type MeasurementSink,
-  type DisclosureConfirmations,
-} from '../application/relay-connection.ts';
+import { RelayConnection, type MeasurementSink } from '../application/relay-connection.ts';
 
 export interface RelayTransportDeps {
   readonly tokens: SessionTokenStore;
   readonly clock: Clock;
   readonly logger: Logger;
   readonly sink: MeasurementSink;
-  readonly confirmations?: DisclosureConfirmations | undefined;
 }
 
 export async function registerRelayTransport(
@@ -50,7 +45,6 @@ export async function registerRelayTransport(
       clock: deps.clock,
       logger: deps.logger,
       sink: deps.sink,
-      confirmations: deps.confirmations,
     });
 
     const timer = setTimeout(() => {

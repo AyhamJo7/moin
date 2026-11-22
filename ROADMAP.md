@@ -81,23 +81,25 @@ instead of raising; `claim_check` then refuses every completion or progress clai
 (no checkout's evidence covers work done in a removed worktree; four review rounds showed that
 judging whether the work landed elsewhere can be defeated). A worktree that exists but belongs to
 another repository, a malformed record, or no checkout to fall back to still raises.
-S1: `/voice/inbound` binds each CallSid to the tenant its first delivery was routed to
-(`call_routes`, `app.bind_call_route`), so a retry after the number moved to another tenant
-stores nothing. It stores the call with a `call.ingest` audit (idempotent by CallSid; the
-database is the dedup, the in-memory claim store is gone) and the disclosure it issued: version
-and spoken business name (profile name, else registered name; `VOICE_BUSINESS_NAME` is gone).
-A retry speaks those stored words, or is refused if that version was retired. A write that fails
-is answered with a spoken call-again message, not an error. Session tokens are bound to their
-call, so a token cannot open another call's session in the same tenant. A confirmation that the
-disclosure played is stored apart (`call_disclosure_confirmations`, audited) on the first caller
-turn of an authenticated session, retried on later turns and at close; no row means unknown.
-Because the finaliser (S4), degraded capture (P11.08) and call-data retention and erasure (P1)
-are not wired, the voice role refuses to start outside development and test.
+S1: `/voice/inbound` serves synthetic traffic only (the reserved synthetic account id; genuine
+provider traffic gets the neutral message and stores nothing), and the voice role refuses to start
+outside development and test, until the finaliser (S4), degraded capture (P11.08) and call-data
+retention, erasure and export (P1) exist. `app.route_call` resolves the dialled number and
+records the first routing decision for the CallSid in one call (`call_routes`, refusals
+included, route row read `FOR SHARE`), so a retry after the number was activated, reassigned or
+released stores nothing. A routed call is stored with a `call.ingest` audit (idempotent by
+CallSid; the in-memory claim store is gone), a classified caller id (only a presented E.164
+number), and the disclosure it issued: version and spoken business name (profile name, else
+registered name; `VOICE_BUSINESS_NAME` is gone). A retry speaks those stored words, or is refused
+if that version was retired. A database failure anywhere is answered with a spoken call-again
+message. Session tokens are bound to their call, and only one token per call opens a session.
+Playback evidence moved to S1b: the provider documents no message tied to the end of the
+greeting.
 
 | Area                                                              | Truth                                                                                                                                                                                                                                                                                 |
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Runs end to end                                                   | Keycloak sign-in, Heute (`GET /api/today`, 15 s poll), Erledigt (`POST /api/tasks/:id/complete`); a dev-only simulated call that writes call, outcome, task and audit in one transaction. Browser E2E in CI.                                                                          |
-| Voice                                                             | `/voice/inbound` stores the call and the disclosure it issued, in the tenant's name, and returns disclosure TwiML; the relay session runs the P04 measurement script and stores the playback confirmation. Development and test only until S4 and P1.                                 |
+| Voice                                                             | `/voice/inbound` stores synthetic calls and the disclosure each was issued, in the tenant's name, and returns disclosure TwiML; the relay session runs the P04 measurement script. No playback evidence yet (S1b). Development and test only until S4 and P1.                         |
 | Worker                                                            | Starts a real consumer (#245), but the handler registry is empty and nothing publishes. Outbox, timers, inbox, idempotency keys, flags, finaliser and reconciler exist as tested DB code with no runtime caller.                                                                      |
 | Tenancy and identity (P06)                                        | The strongest area: FORCE RLS, catalog check, sessions, CSRF, step-up, RBAC, audit chain are wired and CI-tested. 13 fix PRs are open against it. No login page in the web app, no invitation accept route, `provision_tenant` has no caller outside tests, `db:seed` applies 0 rows. |
 | Business model (P07)                                              | Contacts, leads, requests, notes, search, merge: DB functions with tests, no API route. Only "complete task" is exposed.                                                                                                                                                              |
@@ -118,6 +120,7 @@ done-criterion holds on `main` with CI green on the merge SHA.
 
 | ID  | Item                            | Done when                                                                                                                                                                                                                                                                                                                                                                              | Depends on             | Size | Par |
 | --- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- | ---- | --- |
+| S1b | Disclosure playback evidence    | capture real ConversationRelay sessions with `events="speaker-events tokens-played"` into recorded fixtures; store evidence tied to the end of the issued greeting (interrupted, completed, absent), and validate the WebSocket upgrade signature against the captured handshake                                                                                                       | H3                     | M    |     |
 | S2  | Demo tenant seed                | `pnpm db:seed` creates the demo tenant, owner, hours and approved FAQ cards through `provision_tenant`; idempotent; test asserts row counts                                                                                                                                                                                                                                            | C4                     | S    | b   |
 | S3  | Deterministic turn loop         | relay session answers from an approved card verbatim, detects callback, lead and appointment intents, reads the number back, handles silence and barge-in, routes life-safety phrases to the script                                                                                                                                                                                    | S1, S2                 | L    |     |
 | S4  | Capture and finalise            | session end writes outcome and task through the P07 services; the finaliser closes dropped sessions; a confirmed callback that arrives after finalisation adopts the fallback task (either order converges); no interaction without outcome or open task (test kills the session mid-call); a failed inbound write captures a callback (degraded capture, P11.08)                      | S3                     | M    |     |

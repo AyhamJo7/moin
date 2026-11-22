@@ -262,7 +262,7 @@ describe('POST /voice/inbound when the call cannot be stored', () => {
   let failing: NestFastifyApplication;
   let failingTokens: ReturnType<typeof createInMemorySessionTokenStore>;
 
-  beforeEach(async () => {
+  async function start(routeCall: () => Promise<unknown>): Promise<void> {
     failingTokens = createInMemorySessionTokenStore();
     const moduleRef = await Test.createTestingModule({
       controllers: [VoiceController],
@@ -278,11 +278,7 @@ describe('POST /voice/inbound when the call cannot be stored', () => {
         { provide: MEASUREMENT_SINK, useValue: noMeasurementSink },
         {
           provide: ROUTE_RESOLVER,
-          useValue: {
-            resolve: () => Promise.resolve([{ organisationId: ORG, locationId: ORG }]),
-            bindCall: () => Promise.resolve(ORG),
-            end: () => Promise.resolve(),
-          },
+          useValue: { resolve: routeCall, routeCall, end: () => Promise.resolve() },
         },
         {
           provide: VoiceCalls,
@@ -293,13 +289,17 @@ describe('POST /voice/inbound when the call cannot be stored', () => {
     failing = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
     await failing.init();
     await failing.getHttpAdapter().getInstance().ready();
-  });
+  }
 
   afterEach(async () => {
     await failing.close();
   });
 
-  it('answers with the spoken call-again message and mints no token', async () => {
+  it.each([
+    ['the tenant write fails', () => Promise.resolve([{ organisationId: ORG, locationId: ORG }])],
+    ['the route lookup fails', () => Promise.reject(new Error('database unavailable'))],
+  ])('answers with the spoken call-again message and mints no token when %s', async (_n, route) => {
+    await start(route);
     const response = await failing.inject({
       method: 'POST',
       url: '/voice/inbound',

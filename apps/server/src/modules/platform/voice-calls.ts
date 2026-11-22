@@ -10,7 +10,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
   appendAuditEvent,
-  confirmDisclosurePlayed,
   ingestCall,
   recordCallDisclosure,
   spokenBusinessName,
@@ -67,13 +66,6 @@ export class VoiceCalls {
       }
       return { created, disclosure };
     });
-  }
-
-  /** Confirms the issued disclosure played; false when the call has none in this tenant. */
-  confirm(organisationId: string, callSid: string): Promise<boolean> {
-    return withTenant(this.#pool(), organisationId, (client) =>
-      confirmDisclosurePlayed(client, callSid),
-    );
   }
 
   #pool(): Pool {

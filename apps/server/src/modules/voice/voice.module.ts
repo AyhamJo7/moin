@@ -62,7 +62,6 @@ export class VoiceModule implements OnModuleInit {
     @Inject(SESSION_TOKENS) private readonly tokens: SessionTokenStore,
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(MEASUREMENT_SINK) private readonly sink: MeasurementSink,
-    private readonly calls: VoiceCalls,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -72,7 +71,6 @@ export class VoiceModule implements OnModuleInit {
       clock: this.clock,
       logger: this.logger,
       sink: this.sink,
-      confirmations: this.calls,
     });
   }
 }

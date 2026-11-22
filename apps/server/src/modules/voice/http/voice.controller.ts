@@ -26,6 +26,7 @@ import type { Clock } from '@moin/kernel';
 import type { Logger } from '@moin/observability';
 import {
   buildConversationRelayTwiML,
+  buildUnassignedTwiML,
   issueSessionToken,
   type SessionTokenStore,
 } from '@moin/telephony';
@@ -36,11 +37,16 @@ import type { RouteResolver } from '../../platform/route-resolver.ts';
 import { ROUTE_RESOLVER } from '../../platform/route-resolver.module.ts';
 import { VoiceCalls } from '../../platform/voice-calls.ts';
 import { buildCallAgainTwiML } from '../application/fallback.ts';
-import { routeInboundCall } from '../application/inbound-route.ts';
+import { classifyCallerId } from '../application/caller-id.ts';
+import {
+  isCallSid,
+  routeInboundCall,
+  SYNTHETIC_ACCOUNT_SID,
+} from '../application/inbound-route.ts';
 import { buildDisclosure, DISCLOSURE_VERSION } from '../domain/disclosure.ts';
 import { RELAY_PATH, SESSION_TOKEN_PARAMETER } from '../domain/relay-contract.ts';
 import { CLOCK, SESSION_TOKENS } from '../voice.tokens.ts';
-import { TwilioSignatureGuard } from './twilio-signature.guard.ts';
+import { formParams, TwilioSignatureGuard } from './twilio-signature.guard.ts';
 
 const HTTP_OK = 200;
 const SQLSTATE = /^[0-9A-Z]{5}$/u;
@@ -68,12 +74,13 @@ export class VoiceController {
   /**
    * Answers an inbound call.
    *
-   * The dialled number (`To`) resolves to its tenant first (P11.01): unknown
-   * or quarantined numbers get the neutral message, never another tenant.
-   * Routed calls are bound to their tenant, store the call and the
-   * disclosure it is issued (S1), mint a session token for this call (sixty
-   * seconds, single use) and answer with the disclosure TwiML in the
-   * tenant's name. INV-12: the dialled number never reaches the logs.
+   * Synthetic traffic only for now (S1): genuine provider traffic gets the
+   * neutral message and stores nothing. The dialled number (`To`) resolves to
+   * its tenant first (P11.01): unknown or quarantined numbers get the neutral
+   * message, never another tenant. Routed calls store the call and the
+   * disclosure it is issued, mint a session token for this call (sixty
+   * seconds, single use) and answer with the disclosure TwiML in the tenant's
+   * name. INV-12: the dialled number never reaches the logs.
    */
   @Post('inbound')
   // Nest answers POST with 201 by default. TwiML is a representation of the call's next step, not
@@ -88,98 +95,111 @@ export class VoiceController {
       throw new Error('voice role started without its telephony configuration');
     }
 
-    const body = (request.body ?? {}) as Record<string, string>;
-    const dialled = body['To'] ?? '';
-    const decision = await routeInboundCall(dialled, {
-      resolveRoute: (e164) =>
-        this.resolver === undefined || this.resolver === null
-          ? Promise.resolve([])
-          : this.resolver.resolve(e164),
-      countUnassigned: () => {
-        this.logger.info(
-          { route: '/voice/inbound', outcome: 'unassigned-number', direction: 'inbound' },
-          'answering an unassigned number',
-        );
-      },
-    });
-    // An unassigned number stores nothing (there is no tenant to store it in), and the neutral
-    // answer is the same for every delivery of the webhook.
-    if (!decision.routed) return decision.twiml;
+    const body = formParams(request.body);
+    const callSid = body['CallSid'] ?? '';
+    // Synthetic traffic only (S1): genuine provider traffic carries its own account id and is
+    // answered with the neutral message, storing nothing, until the finaliser (S4) and call-data
+    // retention, erasure and export (P1) exist. A body that is not a provider call likewise.
+    if (body['AccountSid'] !== SYNTHETIC_ACCOUNT_SID || !isCallSid(callSid)) {
+      this.logger.info(
+        { route: '/voice/inbound', outcome: 'not-synthetic-traffic', direction: 'inbound' },
+        'answering a call this release does not serve',
+      );
+      return buildUnassignedTwiML();
+    }
 
-    const answer = await this.#answerRouted(
-      decision.organisationId,
-      (body['CallSid'] ?? '').trim(),
+    const answer = await this.#answer(
+      websocketOrigin,
+      publicOrigin,
+      body['To'] ?? '',
+      callSid,
       body['From'],
-      dialled,
     );
     const fields = { route: '/voice/inbound', outcome: answer.outcome, direction: 'inbound' };
-    if (!('token' in answer)) {
+    if (answer.outcome === 'store-failed' || answer.outcome === 'disclosure-retired') {
       this.logger.error(
         answer.reason === undefined ? fields : { ...fields, reason: answer.reason },
         'answering a routed call without a session',
       );
-      return buildCallAgainTwiML();
+    } else if (answer.outcome !== 'unassigned-number') {
+      this.logger.info(fields, 'answering an inbound call');
     }
-    this.logger.info(fields, 'answering an inbound call');
-    return this.buildRoutedTwiML(websocketOrigin, publicOrigin, answer.token, answer.businessName);
+    return answer.twiml;
   }
 
   /**
-   * Everything a routed call needs before its TwiML, or the reason it cannot have one. Every
-   * reason is answered with the spoken call-again message, never a provider error (INV-19).
+   * The TwiML for one delivery of an inbound webhook. Every failure is answered with speech,
+   * never a provider error (INV-19): the spoken call-again message.
    *
-   * 1. INV-11, INV-01: the CallSid is bound to the organisation its first delivery was routed to.
-   *    A retry that now routes elsewhere (the number was reassigned) stores nothing anywhere.
+   * 1. INV-01, INV-11: `app.route_call` resolves the dialled number and records the first routing
+   *    decision for the CallSid in one call. A delivery whose number no longer routes to the
+   *    organisation of that first decision (activated, reassigned or released since) gets the
+   *    neutral message and stores nothing anywhere.
    * 2. The call row is the dedup: a retry finds it and writes nothing, and gets back the
    *    disclosure inputs first issued, so it speaks the same words. A retry after a deploy that
    *    retired that disclosure version is refused rather than spoken in different words.
-   * 3. A fresh single-use token for this tenant and this call (tokens are single use).
+   * 3. The caller id is classified first; only a presented E.164 number is stored.
+   * 4. A single-use token for this tenant and this call; only one token per call opens a session.
    */
-  async #answerRouted(
-    organisationId: string,
+  async #answer(
+    websocketOrigin: string,
+    publicOrigin: string,
+    dialled: string,
     callSid: string,
     from: string | undefined,
-    to: string,
-  ): Promise<
-    | {
-        readonly outcome: 'twiml-issued' | 'twiml-issued-replay';
-        readonly token: string;
-        readonly businessName: string;
-      }
-    | {
-        readonly outcome:
-          'no-call-sid' | 'bound-to-another-tenant' | 'disclosure-retired' | 'store-failed';
-        readonly reason?: string;
-      }
-  > {
-    if (callSid === '' || this.resolver === undefined || this.resolver === null) {
-      return { outcome: 'no-call-sid' };
-    }
+  ): Promise<{
+    readonly outcome:
+      | 'twiml-issued'
+      | 'twiml-issued-replay'
+      | 'unassigned-number'
+      | 'disclosure-retired'
+      | 'store-failed';
+    readonly twiml: string;
+    readonly reason?: string;
+  }> {
+    const resolver = this.resolver;
     try {
-      const bound = await this.resolver.bindCall(callSid, organisationId);
-      if (bound !== organisationId) return { outcome: 'bound-to-another-tenant' };
+      const decision = await routeInboundCall(dialled, {
+        resolveRoute: (e164) =>
+          resolver === undefined || resolver === null
+            ? Promise.resolve([])
+            : resolver.routeCall(e164, callSid),
+        countUnassigned: () => {
+          this.logger.info(
+            { route: '/voice/inbound', outcome: 'unassigned-number', direction: 'inbound' },
+            'answering an unassigned number',
+          );
+        },
+      });
+      if (!decision.routed) return { outcome: 'unassigned-number', twiml: decision.twiml };
+
+      const caller = from === undefined ? 'withheld' : classifyCallerId(from, new Set([dialled]));
       const recorded = await this.calls.recordInbound({
-        organisationId,
+        organisationId: decision.organisationId,
         callSid,
-        from,
-        to,
+        from: caller === 'present' ? from?.trim() : undefined,
+        to: dialled,
         disclosureVersion: DISCLOSURE_VERSION,
       });
       if (recorded.disclosure.version !== DISCLOSURE_VERSION) {
-        return { outcome: 'disclosure-retired' };
+        return { outcome: 'disclosure-retired', twiml: buildCallAgainTwiML() };
       }
       const issued = await issueSessionToken(
         this.tokens,
-        { tenantId: organisationId, callSid },
+        { tenantId: decision.organisationId, callSid },
         this.clock.now().getTime(),
       );
       return {
         outcome: recorded.created ? 'twiml-issued' : 'twiml-issued-replay',
-        token: issued.token,
-        businessName: recorded.disclosure.businessName,
+        twiml: this.buildRoutedTwiML(
+          websocketOrigin,
+          publicOrigin,
+          issued.token,
+          recorded.disclosure.businessName,
+        ),
       };
     } catch (error) {
-      return { outcome: 'store-failed', reason: errorClass(error) };
+      return { outcome: 'store-failed', twiml: buildCallAgainTwiML(), reason: errorClass(error) };
     }
   }
 
