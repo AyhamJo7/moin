@@ -5,7 +5,8 @@
  *
  * The async failure scenarios run here against the real consumer (P08.11.01): duplicate and
  * delayed delivery (the worker side of FS-01), two workers racing one job (FS-10), a crash after
- * the commit and before the delete, and a backend killed before the commit (FS-18), a backlog that
+ * the commit and before the delete, and a backend killed before the commit (the database side of
+ * FS-18), a backlog that
  * drains without loss within the concurrency limit (the worker side of FS-14), a handler failure
  * recorded and hidden for the backoff, and the dead-letter paths. What each test proves, and what
  * stays open, is in `docs/verification/failure-injection-report.md`.
@@ -29,6 +30,8 @@ const CONCURRENCY = 2;
 const BACKLOG_JOBS = 7;
 /** Long enough for the consumer to poll again, short of the visibility timeout. */
 const HOLD_MS = 1_200;
+/** Far longer than the test: the held-back copy surfaces only when the test releases it. */
+const LATE_LEASE_S = 60;
 
 let database: TestDatabase;
 let app: Pool;
@@ -184,6 +187,42 @@ function registry(handler: JobHandler, type: 'sweep-run' | 'postcall-finalise' =
   return new JobHandlerRegistry().register(type, 1, handler);
 }
 
+/** A queue that records which messages a consumer received and deleted. */
+function watched(queue: JobQueue): {
+  queue: JobQueue;
+  received: string[];
+  removed: string[];
+} {
+  const received: string[] = [];
+  const removed: string[] = [];
+  return {
+    received,
+    removed,
+    queue: {
+      receive: async (options) => {
+        const messages = await queue.receive(options);
+        received.push(...messages.map((message) => message.messageId));
+        return messages;
+      },
+      remove: async (message) => {
+        await queue.remove(message);
+        removed.push(message.messageId);
+      },
+      hide: (message, seconds) => queue.hide(message, seconds),
+      send: (body, attributes) => queue.send(body, attributes),
+    },
+  };
+}
+
+/** A promise a test opens explicitly, and always opens in `finally`. */
+function barrier(): { wait: Promise<void>; open: () => void } {
+  let open: () => void = () => undefined;
+  const wait = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return { wait, open };
+}
+
 async function receiveOne(queue: JobQueue, waitSeconds = 5): Promise<QueueMessage | undefined> {
   const [message] = await queue.receive({ max: 1, waitSeconds });
   return message;
@@ -215,18 +254,30 @@ describe('job consumer over SQS and PostgreSQL', () => {
     expect(await queues.queues.jobs.receive({ max: 10, waitSeconds: 0 })).toHaveLength(0);
   });
 
-  // FS-10.
+  // FS-10: one slot per worker, and the first holds the job inside its handler, so the copies the
+  // other worker receives arrive while the job is held.
   evidenceTest('two workers racing on one logical job create one effect', async () => {
     const job = await seed();
     let runs = 0;
-    const slow: JobHandler = async (ctx) => {
+    const gate = barrier();
+    const held: JobHandler = async (ctx) => {
       runs += 1;
-      await sleep(600);
+      await gate.wait;
       await writeEffect(ctx);
     };
     for (let i = 0; i < 4; i += 1) await queues.queues.jobs.send(job.body);
-    makeConsumer(registry(slow)).start();
-    makeConsumer(registry(slow)).start();
+    const first = watched(queues.queues.jobs);
+    const second = watched(queues.queues.jobs);
+    try {
+      makeConsumer(registry(held), { concurrency: 1 }, first.queue).start();
+      makeConsumer(registry(held), { concurrency: 1 }, second.queue).start();
+      await until(() =>
+        Promise.resolve(runs === 1 && first.received.length > 0 && second.received.length > 0),
+      );
+      expect(runs).toBe(1);
+    } finally {
+      gate.open();
+    }
     await until(async () => (await ledger(job.envelope.jobId))?.status === 'succeeded');
     await sleep(VISIBILITY_S * 1000 + 1500);
     expect(runs).toBe(1);
@@ -257,23 +308,24 @@ describe('job consumer over SQS and PostgreSQL', () => {
     let running = 0;
     let started = 0;
     let peak = 0;
-    let release: () => void = () => undefined;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
+    const gate = barrier();
     const held: JobHandler = async (ctx) => {
       running += 1;
       started += 1;
       peak = Math.max(peak, running);
-      await gate;
+      await gate.wait;
       await writeEffect(ctx);
       running -= 1;
     };
-    makeConsumer(registry(held)).start();
-    await until(() => Promise.resolve(started === CONCURRENCY));
-    await sleep(HOLD_MS);
-    expect(started).toBe(CONCURRENCY);
-    release();
+    try {
+      makeConsumer(registry(held)).start();
+      await until(() => Promise.resolve(started === CONCURRENCY));
+      await sleep(HOLD_MS);
+      expect(started).toBe(CONCURRENCY);
+    } finally {
+      // Opened on failure too, so held handlers give their connections back before teardown.
+      gate.open();
+    }
     await until(async () => {
       const states = await Promise.all(jobs.map((job) => ledger(job.envelope.jobId)));
       return states.every((state) => state?.status === 'succeeded');
@@ -283,23 +335,24 @@ describe('job consumer over SQS and PostgreSQL', () => {
   });
 
   // FS-01, delayed delivery: a copy that arrives after the job finished is acknowledged and
-  // changes nothing. The delay is injected at the queue: the copy's lease is held, so it surfaces
-  // only when its visibility timeout ends.
+  // changes nothing. The delay is injected at the queue: the test holds the copy under a long
+  // lease and releases it only after the job committed.
   evidenceTest('a copy delivered late is acknowledged without a second effect', async () => {
     const job = await seed();
     await queues.queues.jobs.send(job.body);
     await queues.queues.jobs.send(job.body);
-    const late = await receiveOne(queues.queues.jobs);
-    const leasedAt = Date.now();
-    expect(late).toBeDefined();
-    makeConsumer(registry(writeEffect)).start();
-    await until(async () => (await ledger(job.envelope.jobId))?.status === 'succeeded');
-    // The job finished while the late copy was still held back.
-    expect(Date.now() - leasedAt).toBeLessThan(VISIBILITY_S * 1000);
-    await until(async () => {
-      const counts = await queues.counts('jobs');
-      return counts.visible === 0 && counts.leased === 0;
+    const [late] = await queues.queues.jobs.receive({
+      max: 1,
+      waitSeconds: 5,
+      visibilitySeconds: LATE_LEASE_S,
     });
+    if (late === undefined) throw new Error('no copy to hold back');
+    const consumer = watched(queues.queues.jobs);
+    makeConsumer(registry(writeEffect), {}, consumer.queue).start();
+    await until(async () => (await ledger(job.envelope.jobId))?.status === 'succeeded');
+    expect(consumer.received).not.toContain(late.messageId);
+    await queues.queues.jobs.hide(late, 0);
+    await until(() => Promise.resolve(consumer.removed.includes(late.messageId)));
     expect(await effects(job.envelope.jobId)).toBe(1);
     expect((await ledger(job.envelope.jobId))?.attempt).toBe(1);
     expect(await queues.counts('deadLetter')).toEqual({ visible: 0, leased: 0 });
