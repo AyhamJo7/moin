@@ -190,32 +190,51 @@ function registry(handler: JobHandler, type: 'sweep-run' | 'postcall-finalise' =
 }
 
 /** A queue that records which messages a consumer received, hid (for how long) and deleted. */
+interface Lease {
+  readonly messageId: string;
+  readonly receiptHandle: string;
+}
+
 function watched(queue: JobQueue): {
   queue: JobQueue;
   received: string[];
-  hidden: { messageId: string; seconds: number }[];
+  /** Every receipt, in order: a message delivered again comes with a new receipt handle. */
+  receipts: Lease[];
+  hidden: (Lease & { seconds: number })[];
   removed: string[];
+  /** Every delete attempt, with the receipt it used, whether or not the queue accepted it. */
+  removals: Lease[];
 } {
   const received: string[] = [];
-  const hidden: { messageId: string; seconds: number }[] = [];
+  const receipts: Lease[] = [];
+  const hidden: (Lease & { seconds: number })[] = [];
   const removed: string[] = [];
+  const removals: Lease[] = [];
+  const lease = (message: QueueMessage): Lease => ({
+    messageId: message.messageId,
+    receiptHandle: message.receiptHandle,
+  });
   return {
     received,
+    receipts,
     hidden,
     removed,
+    removals,
     queue: {
       receive: async (options) => {
         const messages = await queue.receive(options);
         received.push(...messages.map((message) => message.messageId));
+        receipts.push(...messages.map(lease));
         return messages;
       },
       remove: async (message) => {
+        removals.push(lease(message));
         await queue.remove(message);
         removed.push(message.messageId);
       },
       hide: async (message, seconds) => {
         await queue.hide(message, seconds);
-        hidden.push({ messageId: message.messageId, seconds });
+        hidden.push({ ...lease(message), seconds });
       },
       send: (body, attributes) => queue.send(body, attributes),
     },
@@ -262,9 +281,11 @@ describe('job consumer over SQS and PostgreSQL', () => {
     expect(await queues.queues.jobs.receive({ max: 10, waitSeconds: 0 })).toHaveLength(0);
   });
 
-  // FS-10: one slot per worker, and the first holds the job inside its handler until the other has
-  // found the job row locked and rescheduled its copy as busy (a hide for the busy delay; the
-  // heartbeat hides for the visibility timeout, so the two are told apart).
+  // FS-10: one slot per worker. The first worker enters the handler and holds the job; only then
+  // does the second start, so its copy can only find the job row locked. It reschedules that copy
+  // as busy (a hide for the busy delay; the heartbeat hides for the visibility timeout, so the two
+  // are told apart). While the job is held no copy may be deleted at all; after the commit the busy
+  // copy must come back with a fresh receipt before it is deleted.
   evidenceTest('two workers racing on one logical job create one effect', async () => {
     const job = await seed();
     let runs = 0;
@@ -277,31 +298,49 @@ describe('job consumer over SQS and PostgreSQL', () => {
     for (let i = 0; i < 4; i += 1) await queues.queues.jobs.send(job.body);
     const first = watched(queues.queues.jobs);
     const second = watched(queues.queues.jobs);
-    const acknowledged = (): string[] => [...first.removed, ...second.removed];
-    let busy: string | undefined;
+    const workers = [first, second];
+    let busy: Lease | undefined;
+    let receiptsAtRelease: number | undefined;
     try {
       const options = { concurrency: 1, busyRetrySeconds: BUSY_RETRY_S };
       makeConsumer(registry(held), options, first.queue).start();
+      await until(() => Promise.resolve(runs === 1));
       makeConsumer(registry(held), options, second.queue).start();
-      const busyCopy = (): string | undefined =>
-        [...first.hidden, ...second.hidden].find((hide) => hide.seconds === BUSY_RETRY_S)
-          ?.messageId;
+      const busyHide = (): Lease | undefined =>
+        second.hidden.find((hide) => hide.seconds === BUSY_RETRY_S);
       // A second handler entry ends the wait at once, so a duplicate run fails on the count below
       // rather than as a timeout.
-      await until(() => Promise.resolve(runs > 1 || busyCopy() !== undefined));
+      await until(() => Promise.resolve(runs > 1 || busyHide() !== undefined));
       expect(runs).toBe(1);
-      busy = busyCopy();
-      // Held: the busy copy is neither acknowledged nor dead-lettered while the job is running.
+      busy = busyHide();
+      // Held: no copy is deleted, none is dead-lettered, and no effect exists yet.
       await sleep(HOLD_MS);
-      expect(acknowledged()).not.toContain(busy);
+      expect(workers.flatMap((worker) => worker.removals)).toStrictEqual([]);
       expect(await queues.counts('deadLetter')).toEqual({ visible: 0, leased: 0 });
       expect(await effects(job.envelope.jobId)).toBe(0);
+      receiptsAtRelease = second.receipts.length;
     } finally {
       gate.open();
     }
     await until(async () => (await ledger(job.envelope.jobId))?.status === 'succeeded');
-    // After the commit, the busy copy comes back and is acknowledged, not dead-lettered.
-    await until(() => Promise.resolve(acknowledged().includes(busy ?? '')));
+    // After the commit the busy copy is delivered again, under a new receipt, and that delivery is
+    // the one deleted: it was rescheduled, never acknowledged while the job was running.
+    await until(() =>
+      Promise.resolve(
+        workers.some((worker) =>
+          worker.removals.some((removal) => removal.messageId === busy?.messageId),
+        ),
+      ),
+    );
+    const deleted = workers
+      .flatMap((worker) => worker.removals)
+      .filter((removal) => removal.messageId === busy?.messageId);
+    expect(deleted).toHaveLength(1);
+    expect(deleted[0]?.receiptHandle).not.toBe(busy?.receiptHandle);
+    const redelivered = [...first.receipts, ...second.receipts.slice(receiptsAtRelease)];
+    expect(redelivered.map((receipt) => receipt.receiptHandle)).toContain(
+      deleted[0]?.receiptHandle,
+    );
     await until(async () => {
       const counts = await queues.counts('jobs');
       return counts.visible === 0 && counts.leased === 0;
