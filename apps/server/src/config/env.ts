@@ -471,6 +471,20 @@ const schema = baseSchema.superRefine((value, ctx) => {
         });
       }
     }
+    // The voice role stores callers' data (S1), but the paths that make that safe for real
+    // callers are not wired yet: the finaliser that gives every call an outcome or open task
+    // (S4, INV-06), the degraded capture for a failed write (P11.08, INV-19) and retention,
+    // erasure and export of call data (P1, QG-12). Until they land it serves synthetic traffic
+    // only, which means development and test.
+    if (value.NODE_ENV !== 'development' && value.NODE_ENV !== 'test') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['NODE_ENV'],
+        message:
+          'the voice role runs only in development and test until the finaliser (S4), degraded ' +
+          'capture (P11.08) and call-data retention and erasure (P1) are wired',
+      });
+    }
   }
 
   // `pino-pretty` is a devDependency and is absent from the runtime image, so LOG_PRETTY=true

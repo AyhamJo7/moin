@@ -98,11 +98,11 @@ export type {
   OutcomeResult,
 } from './conversations.ts';
 export {
+  confirmDisclosurePlayed,
   recordCallDisclosure,
-  recordDisclosurePlayback,
   spokenBusinessName,
 } from './call-disclosures.ts';
-export type { DisclosurePlayback } from './call-disclosures.ts';
+export type { IssuedDisclosure } from './call-disclosures.ts';
 export {
   VersionConflictError as TaskVersionConflictError,
   assignTask,

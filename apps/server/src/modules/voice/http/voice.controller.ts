@@ -35,6 +35,7 @@ import { LOGGER } from '../../../observability/logger.module.ts';
 import type { RouteResolver } from '../../platform/route-resolver.ts';
 import { ROUTE_RESOLVER } from '../../platform/route-resolver.module.ts';
 import { VoiceCalls } from '../../platform/voice-calls.ts';
+import { buildCallAgainTwiML } from '../application/fallback.ts';
 import { routeInboundCall } from '../application/inbound-route.ts';
 import { buildDisclosure, DISCLOSURE_VERSION } from '../domain/disclosure.ts';
 import { RELAY_PATH, SESSION_TOKEN_PARAMETER } from '../domain/relay-contract.ts';
@@ -42,6 +43,14 @@ import { CLOCK, SESSION_TOKENS } from '../voice.tokens.ts';
 import { TwilioSignatureGuard } from './twilio-signature.guard.ts';
 
 const HTTP_OK = 200;
+const SQLSTATE = /^[0-9A-Z]{5}$/u;
+
+/** What failed, without anything the error says about the data: an SQLSTATE or an error class. */
+function errorClass(error: unknown): string {
+  const code: unknown = (error as { code?: unknown } | null)?.code;
+  if (typeof code === 'string' && SQLSTATE.test(code)) return `sqlstate-${code}`;
+  return error instanceof Error ? error.name : 'unknown';
+}
 const HTTP_NO_CONTENT = 204;
 
 @Controller('voice')
@@ -61,11 +70,10 @@ export class VoiceController {
    *
    * The dialled number (`To`) resolves to its tenant first (P11.01): unknown
    * or quarantined numbers get the neutral message, never another tenant.
-   * Routed calls store the call and the disclosure version it is issued
-   * (S1), mint a per-call session token (sixty seconds, single use) and
-   * answer with the disclosure TwiML in the tenant's name. INV-12: the
-   * dialled number never
-   * reaches the logs.
+   * Routed calls are bound to their tenant, store the call and the
+   * disclosure it is issued (S1), mint a session token for this call (sixty
+   * seconds, single use) and answer with the disclosure TwiML in the
+   * tenant's name. INV-12: the dialled number never reaches the logs.
    */
   @Post('inbound')
   // Nest answers POST with 201 by default. TwiML is a representation of the call's next step, not
@@ -98,37 +106,81 @@ export class VoiceController {
     // answer is the same for every delivery of the webhook.
     if (!decision.routed) return decision.twiml;
 
-    // INV-11: the call row is the dedup. A retried webhook for the same CallSid finds it and
-    // writes nothing; the disclosure version stays the one first issued. The replay still mints a
-    // fresh token for the same tenant, because tokens are single use.
-    const recorded = await this.calls.recordInbound({
-      organisationId: decision.organisationId,
-      callSid: body['CallSid'] ?? '',
-      from: body['From'],
-      to: dialled,
-      disclosureVersion: DISCLOSURE_VERSION,
-    });
-    const issued = await issueSessionToken(
-      this.tokens,
+    const answer = await this.#answerRouted(
       decision.organisationId,
-      this.clock.now().getTime(),
+      (body['CallSid'] ?? '').trim(),
+      body['From'],
+      dialled,
     );
+    const fields = { route: '/voice/inbound', outcome: answer.outcome, direction: 'inbound' };
+    if (!('token' in answer)) {
+      this.logger.error(
+        answer.reason === undefined ? fields : { ...fields, reason: answer.reason },
+        'answering a routed call without a session',
+      );
+      return buildCallAgainTwiML();
+    }
+    this.logger.info(fields, 'answering an inbound call');
+    return this.buildRoutedTwiML(websocketOrigin, publicOrigin, answer.token, answer.businessName);
+  }
 
-    this.logger.info(
-      {
-        route: '/voice/inbound',
+  /**
+   * Everything a routed call needs before its TwiML, or the reason it cannot have one. Every
+   * reason is answered with the spoken call-again message, never a provider error (INV-19).
+   *
+   * 1. INV-11, INV-01: the CallSid is bound to the organisation its first delivery was routed to.
+   *    A retry that now routes elsewhere (the number was reassigned) stores nothing anywhere.
+   * 2. The call row is the dedup: a retry finds it and writes nothing, and gets back the
+   *    disclosure inputs first issued, so it speaks the same words. A retry after a deploy that
+   *    retired that disclosure version is refused rather than spoken in different words.
+   * 3. A fresh single-use token for this tenant and this call (tokens are single use).
+   */
+  async #answerRouted(
+    organisationId: string,
+    callSid: string,
+    from: string | undefined,
+    to: string,
+  ): Promise<
+    | {
+        readonly outcome: 'twiml-issued' | 'twiml-issued-replay';
+        readonly token: string;
+        readonly businessName: string;
+      }
+    | {
+        readonly outcome:
+          'no-call-sid' | 'bound-to-another-tenant' | 'disclosure-retired' | 'store-failed';
+        readonly reason?: string;
+      }
+  > {
+    if (callSid === '' || this.resolver === undefined || this.resolver === null) {
+      return { outcome: 'no-call-sid' };
+    }
+    try {
+      const bound = await this.resolver.bindCall(callSid, organisationId);
+      if (bound !== organisationId) return { outcome: 'bound-to-another-tenant' };
+      const recorded = await this.calls.recordInbound({
+        organisationId,
+        callSid,
+        from,
+        to,
+        disclosureVersion: DISCLOSURE_VERSION,
+      });
+      if (recorded.disclosure.version !== DISCLOSURE_VERSION) {
+        return { outcome: 'disclosure-retired' };
+      }
+      const issued = await issueSessionToken(
+        this.tokens,
+        { tenantId: organisationId, callSid },
+        this.clock.now().getTime(),
+      );
+      return {
         outcome: recorded.created ? 'twiml-issued' : 'twiml-issued-replay',
-        direction: 'inbound',
-      },
-      'answering an inbound call',
-    );
-
-    return this.buildRoutedTwiML(
-      websocketOrigin,
-      publicOrigin,
-      issued.token,
-      recorded.businessName,
-    );
+        token: issued.token,
+        businessName: recorded.disclosure.businessName,
+      };
+    } catch (error) {
+      return { outcome: 'store-failed', reason: errorClass(error) };
+    }
   }
 
   /**

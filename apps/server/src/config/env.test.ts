@@ -197,6 +197,31 @@ describe('configuration loader (P02.03.03)', () => {
     expect(config.SERVER_ROLE).toBe('voice');
   });
 
+  // S1: the voice role stores callers' data before the finaliser, degraded capture and call-data
+  // retention exist, so it serves synthetic traffic only.
+  evidenceTest('refuses the voice role in staging and production', () => {
+    for (const NODE_ENV of ['staging', 'production']) {
+      let problems: readonly string[] = [];
+      try {
+        loadConfig({
+          ...VALID,
+          NODE_ENV,
+          APP_ORIGIN: 'https://app.example.de',
+          SERVER_ROLE: 'voice',
+          TWILIO_AUTH_TOKEN: 'a'.repeat(32),
+          VOICE_PUBLIC_ORIGIN: 'https://voice.example.de',
+          VOICE_WEBSOCKET_ORIGIN: 'wss://voice.example.de',
+        });
+      } catch (error) {
+        problems = error instanceof ConfigurationError ? error.problems : [];
+      }
+      expect(
+        problems.some((problem) => problem.startsWith('NODE_ENV:')),
+        NODE_ENV,
+      ).toBe(true);
+    }
+  });
+
   it('does not require telephony configuration for the other roles', () => {
     for (const role of ['api', 'migrate'] as const) {
       expect(loadConfig({ ...VALID, SERVER_ROLE: role }).SERVER_ROLE).toBe(role);

@@ -8,21 +8,24 @@ import {
 
 const NOW = Date.UTC(2026, 8, 29, 9, 0, 0);
 const TENANT = 'a1b2c3d4-0000-4000-8000-000000000001';
+const CALL = 'CA00000000000000000000000000000001';
+const BINDING = { tenantId: TENANT, callSid: CALL };
 
 describe('session tokens', () => {
-  it('issues a token that resolves to its tenant', async () => {
+  it('issues a token that resolves to its tenant and call', async () => {
     const store = createInMemorySessionTokenStore();
-    const issued = await issueSessionToken(store, TENANT, NOW);
+    const issued = await issueSessionToken(store, BINDING, NOW);
     expect(await consumeSessionToken(store, issued.token, NOW)).toStrictEqual({
       ok: true,
       tenantId: TENANT,
+      callSid: CALL,
     });
   });
 
   // The property that makes a leaked TwiML document almost worthless: one connection, once.
   it('cannot be used twice', async () => {
     const store = createInMemorySessionTokenStore();
-    const issued = await issueSessionToken(store, TENANT, NOW);
+    const issued = await issueSessionToken(store, BINDING, NOW);
     expect((await consumeSessionToken(store, issued.token, NOW)).ok).toBe(true);
     expect(await consumeSessionToken(store, issued.token, NOW)).toStrictEqual({
       ok: false,
@@ -33,12 +36,12 @@ describe('session tokens', () => {
 
   it('expires exactly at the TTL boundary', async () => {
     const store = createInMemorySessionTokenStore();
-    const a = await issueSessionToken(store, TENANT, NOW);
+    const a = await issueSessionToken(store, BINDING, NOW);
     expect((await consumeSessionToken(store, a.token, NOW + SESSION_TOKEN_TTL_MS - 1)).ok).toBe(
       true,
     );
 
-    const b = await issueSessionToken(store, TENANT, NOW);
+    const b = await issueSessionToken(store, BINDING, NOW);
     expect(await consumeSessionToken(store, b.token, NOW + SESSION_TOKEN_TTL_MS)).toStrictEqual({
       ok: false,
       reason: 'expired',
@@ -47,7 +50,7 @@ describe('session tokens', () => {
 
   it('rejects a correct id with the wrong secret', async () => {
     const store = createInMemorySessionTokenStore();
-    const issued = await issueSessionToken(store, TENANT, NOW);
+    const issued = await issueSessionToken(store, BINDING, NOW);
     const id = issued.token.slice(0, issued.token.indexOf('.'));
     expect(await consumeSessionToken(store, `${id}.wrong-secret`, NOW)).toStrictEqual({
       ok: false,
@@ -70,7 +73,7 @@ describe('session tokens', () => {
   // A store dump must not yield anything usable.
   it('stores a hash, never the secret', async () => {
     const store = createInMemorySessionTokenStore();
-    const issued = await issueSessionToken(store, TENANT, NOW);
+    const issued = await issueSessionToken(store, BINDING, NOW);
     const secret = issued.token.slice(issued.token.indexOf('.') + 1);
     expect(issued.record.secretHash).not.toContain(secret);
     expect(JSON.stringify(issued.record)).not.toContain(secret);
@@ -80,13 +83,18 @@ describe('session tokens', () => {
     const store = createInMemorySessionTokenStore();
     const tokens = new Set<string>();
     for (let i = 0; i < 64; i += 1) {
-      tokens.add((await issueSessionToken(store, TENANT, NOW)).token);
+      tokens.add((await issueSessionToken(store, BINDING, NOW)).token);
     }
     expect(tokens.size).toBe(64);
   });
 
-  it('refuses to mint a token with no tenant', async () => {
+  it.each([
+    ['no tenant', { tenantId: '', callSid: CALL }],
+    ['no call', { tenantId: TENANT, callSid: '' }],
+  ])('refuses to mint a token with %s', async (_name, binding) => {
     const store = createInMemorySessionTokenStore();
-    await expect(issueSessionToken(store, '', NOW)).rejects.toThrow(/tenant id/u);
+    await expect(issueSessionToken(store, binding, NOW)).rejects.toThrow(
+      /tenant id and a CallSid/u,
+    );
   });
 });

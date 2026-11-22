@@ -15,7 +15,8 @@
  *
  * The `CallSid` in `setup` is deliberately *not* used for this. It is not a secret — it is in
  * every webhook body and in the tenant's own provider console — and the threat model rejected it
- * as an authentication factor.
+ * as an authentication factor. The token is bound to the call it was minted for, so `setup` must
+ * also name that CallSid: a token for one call cannot open another call's session.
  *
  * ## Close codes carry no detail
  *
@@ -51,13 +52,13 @@ export const noMeasurementSink: MeasurementSink = {
 };
 
 /**
- * Where disclosure playback evidence goes (S1, INV-03). `confirmed`: a caller turn arrived, which
- * the provider sends only after the non-interruptible greeting has finished. `interrupted`: the
- * session authenticated and then closed before any caller turn. A socket that never authenticated
- * records nothing: no greeting was played (absent). Must not throw or block the call.
+ * Where the evidence that the disclosure played goes (S1, INV-03). A caller turn arrives only
+ * after the non-interruptible greeting has finished, so the first one confirms it. Resolves true
+ * when stored (or already stored), false when the call has no issued disclosure in that tenant;
+ * rejects when the write failed, and the connection tries again.
  */
-export interface PlaybackRecorder {
-  record(tenantId: string, callSid: string, outcome: 'confirmed' | 'interrupted'): void;
+export interface DisclosureConfirmations {
+  confirm(tenantId: string, callSid: string): Promise<boolean>;
 }
 
 export interface ConnectionIo {
@@ -71,7 +72,7 @@ export interface RelayConnectionDeps {
   readonly clock: Clock;
   readonly logger: Logger;
   readonly sink: MeasurementSink;
-  readonly playback?: PlaybackRecorder | undefined;
+  readonly confirmations?: DisclosureConfirmations | undefined;
 }
 
 type State = 'awaiting-auth' | 'open' | 'closed';
@@ -80,7 +81,9 @@ export class RelayConnection {
   #state: State = 'awaiting-auth';
   #session: RelaySession | undefined;
   #call: { readonly tenantId: string; readonly callSid: string } | undefined;
-  #playbackRecorded = false;
+  #callerSpoke = false;
+  #confirmed = false;
+  #confirming: Promise<void> | undefined;
 
   constructor(private readonly deps: RelayConnectionDeps) {}
 
@@ -119,7 +122,8 @@ export class RelayConnection {
     }
 
     if (decoded.kind === 'message' && decoded.message.type === 'prompt') {
-      this.#recordPlayback('confirmed');
+      this.#callerSpoke = true;
+      this.#confirm();
     }
     const step = session.handleFrame(decoded, receivedAtMs);
     for (const message of step.send) {
@@ -144,14 +148,50 @@ export class RelayConnection {
   /** Called when the socket closes for any reason, including the far end hanging up. */
   onClose(): void {
     this.#state = 'closed';
-    this.#recordPlayback('interrupted');
+    // A caller who spoke once and hung up while that write failed still gets a last attempt.
+    if (this.#callerSpoke) {
+      void this.settled().then(() => {
+        this.#confirm();
+      });
+    }
   }
 
-  /** Once per session, and only for an authenticated one: the first verdict stands. */
-  #recordPlayback(outcome: 'confirmed' | 'interrupted'): void {
-    if (this.#call === undefined || this.#playbackRecorded) return;
-    this.#playbackRecorded = true;
-    this.deps.playback?.record(this.#call.tenantId, this.#call.callSid, outcome);
+  /** Resolves when no confirmation write is in flight. */
+  settled(): Promise<void> {
+    return this.#confirming ?? Promise.resolve();
+  }
+
+  /**
+   * Stores the confirmation once. It counts as done only when the write succeeded; a failed write
+   * is retried on the next caller turn and at close.
+   * ponytail: in-process retries only; evidence is lost if the database is unreachable for the
+   * whole call. The degraded-capture queue (P11.08) is the durable path when it is wired.
+   */
+  #confirm(): void {
+    const call = this.#call;
+    const port = this.deps.confirmations;
+    if (call === undefined || port === undefined) return;
+    if (this.#confirmed || this.#confirming !== undefined) return;
+    this.#confirming = port
+      .confirm(call.tenantId, call.callSid)
+      .then((stored) => {
+        this.#confirmed = true;
+        if (!stored) {
+          this.deps.logger.warn(
+            { reason: 'no-issued-disclosure', outcome: 'not-recorded' },
+            'disclosure confirmation had no issued disclosure to attach to',
+          );
+        }
+      })
+      .catch(() => {
+        this.deps.logger.error(
+          { reason: 'disclosure-confirmation-failed', outcome: 'retry-pending' },
+          'could not store the disclosure confirmation',
+        );
+      })
+      .finally(() => {
+        this.#confirming = undefined;
+      });
   }
 
   async #authenticate(
@@ -191,8 +231,19 @@ export class RelayConnection {
       return;
     }
 
+    // The token was minted for one call; a setup naming another (even in the same tenant) is not
+    // that call's session.
+    if (verdict.callSid !== decoded.message.callSid) {
+      this.deps.logger.warn(
+        { reason: 'session-token-call-mismatch', outcome: 'closed' },
+        'rejected a relay socket',
+      );
+      this.#closeWith(CLOSE_UNAUTHENTICATED);
+      return;
+    }
+
     this.#state = 'open';
-    this.#call = { tenantId: verdict.tenantId, callSid: decoded.message.callSid };
+    this.#call = { tenantId: verdict.tenantId, callSid: verdict.callSid };
     const session = new RelaySession(verdict.tenantId, this.deps.clock);
     this.#session = session;
     this.deps.logger.info(

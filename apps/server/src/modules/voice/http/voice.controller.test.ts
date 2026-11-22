@@ -11,6 +11,7 @@ import {
 import { CONFIG } from '../../../config/config.module.ts';
 import { loadConfig, type Config } from '../../../config/env.ts';
 import { LOGGER } from '../../../observability/logger.module.ts';
+import { FALLBACK_CALL_AGAIN } from '../application/fallback.ts';
 import { noMeasurementSink } from '../application/relay-connection.ts';
 import { ROUTE_RESOLVER } from '../../platform/route-resolver.module.ts';
 import { VoiceCalls } from '../../platform/voice-calls.ts';
@@ -34,11 +35,11 @@ const CONFIG_VALUE: Config = loadConfig({
 
 let app: NestFastifyApplication;
 let tokens: SessionTokenStore;
-let calls: { recordInbound: ReturnType<typeof vi.fn>; recordPlayback: ReturnType<typeof vi.fn> };
+let calls: { recordInbound: ReturnType<typeof vi.fn>; confirm: ReturnType<typeof vi.fn> };
 
 beforeEach(async () => {
   tokens = createInMemorySessionTokenStore();
-  calls = { recordInbound: vi.fn(), recordPlayback: vi.fn() };
+  calls = { recordInbound: vi.fn(), confirm: vi.fn() };
   const moduleRef = await Test.createTestingModule({
     controllers: [VoiceController],
     providers: [
@@ -251,5 +252,71 @@ describe('POST /voice/session-end', () => {
     const signature = computeSignature(AUTH_TOKEN, `${PUBLIC_ORIGIN}/voice/session-end`, odd);
     const response = await post('/voice/session-end', odd, signature);
     expect(response.statusCode).toBe(204);
+  });
+});
+
+// INV-19: a routed call whose tenant write fails hears why the call ends; the provider never gets
+// an error status (which it would play as an error tone) and no session token is minted.
+describe('POST /voice/inbound when the call cannot be stored', () => {
+  const ORG = 'a1b2c3d4-0000-4000-8000-000000000001';
+  let failing: NestFastifyApplication;
+  let failingTokens: ReturnType<typeof createInMemorySessionTokenStore>;
+
+  beforeEach(async () => {
+    failingTokens = createInMemorySessionTokenStore();
+    const moduleRef = await Test.createTestingModule({
+      controllers: [VoiceController],
+      providers: [
+        TwilioSignatureGuard,
+        { provide: CONFIG, useValue: CONFIG_VALUE },
+        {
+          provide: LOGGER,
+          useValue: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+        },
+        { provide: SESSION_TOKENS, useValue: failingTokens },
+        { provide: CLOCK, useValue: systemClock },
+        { provide: MEASUREMENT_SINK, useValue: noMeasurementSink },
+        {
+          provide: ROUTE_RESOLVER,
+          useValue: {
+            resolve: () => Promise.resolve([{ organisationId: ORG, locationId: ORG }]),
+            bindCall: () => Promise.resolve(ORG),
+            end: () => Promise.resolve(),
+          },
+        },
+        {
+          provide: VoiceCalls,
+          useValue: { recordInbound: () => Promise.reject(new Error('database unavailable')) },
+        },
+      ],
+    }).compile();
+    failing = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
+    await failing.init();
+    await failing.getHttpAdapter().getInstance().ready();
+  });
+
+  afterEach(async () => {
+    await failing.close();
+  });
+
+  it('answers with the spoken call-again message and mints no token', async () => {
+    const response = await failing.inject({
+      method: 'POST',
+      url: '/voice/inbound',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        'x-twilio-signature': computeSignature(
+          AUTH_TOKEN,
+          `${PUBLIC_ORIGIN}/voice/inbound`,
+          INBOUND_PARAMS,
+        ),
+      },
+      payload: form(INBOUND_PARAMS),
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain(FALLBACK_CALL_AGAIN);
+    expect(response.body).toContain('<Hangup />');
+    expect(response.body).not.toContain('<ConversationRelay');
+    expect(failingTokens.size).toBe(0);
   });
 });

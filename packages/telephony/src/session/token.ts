@@ -34,6 +34,8 @@ export interface StoredSessionToken {
   /** SHA-256 of the secret, hex. */
   readonly secretHash: string;
   readonly tenantId: string;
+  /** The call the token was minted for: `setup` must name the same CallSid. */
+  readonly callSid: string;
   readonly expiresAtMs: number;
 }
 
@@ -59,14 +61,15 @@ function constantTimeEquals(a: string, b: string): boolean {
   return timingSafeEqual(left, right);
 }
 
-/** Mints a token bound to a tenant, valid for {@link SESSION_TOKEN_TTL_MS}. */
+/** Mints a token bound to a tenant and a call, valid for {@link SESSION_TOKEN_TTL_MS}. */
 export async function issueSessionToken(
   store: SessionTokenStore,
-  tenantId: string,
+  binding: { readonly tenantId: string; readonly callSid: string },
   nowMs: number,
 ): Promise<IssuedSessionToken> {
-  if (tenantId === '') {
-    throw new Error('issueSessionToken requires a tenant id');
+  const { tenantId, callSid } = binding;
+  if (tenantId === '' || callSid === '') {
+    throw new Error('issueSessionToken requires a tenant id and a CallSid');
   }
   const id = randomBytes(TOKEN_ID_BYTES).toString('base64url');
   const secret = randomBytes(TOKEN_SECRET_BYTES).toString('base64url');
@@ -74,6 +77,7 @@ export async function issueSessionToken(
     id,
     secretHash: hashSecret(secret),
     tenantId,
+    callSid,
     expiresAtMs: nowMs + SESSION_TOKEN_TTL_MS,
   };
   await store.put(record);
@@ -81,7 +85,7 @@ export async function issueSessionToken(
 }
 
 export type SessionTokenVerdict =
-  | { readonly ok: true; readonly tenantId: string }
+  | { readonly ok: true; readonly tenantId: string; readonly callSid: string }
   | {
       readonly ok: false;
       readonly reason: 'malformed' | 'unknown-or-used' | 'expired' | 'mismatch';
@@ -115,7 +119,7 @@ export async function consumeSessionToken(
   if (!constantTimeEquals(hashSecret(secret), record.secretHash)) {
     return { ok: false, reason: 'mismatch' };
   }
-  return { ok: true, tenantId: record.tenantId };
+  return { ok: true, tenantId: record.tenantId, callSid: record.callSid };
 }
 
 /**

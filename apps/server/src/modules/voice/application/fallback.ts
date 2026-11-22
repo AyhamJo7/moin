@@ -13,6 +13,8 @@
  * module is the layer table the tests pin.
  */
 
+import { escapeXml } from '@moin/telephony';
+
 export type FailedLayer =
   'nlu' | 'gateway' | 'stt' | 'ws' | 'db' | 'valkey' | 'app-down' | 'app-slow';
 
@@ -26,6 +28,22 @@ export type FallbackAnswer =
 export const FALLBACK_APOLOGY = 'Es tut uns leid, gerade ist etwas schiefgelaufen.' as const;
 export const FALLBACK_CALLBACK_ASK =
   'Drücken Sie die 1, wenn wir Sie unter dieser Nummer zurückrufen dürfen.' as const;
+
+export const FALLBACK_CALL_AGAIN = 'Bitte rufen Sie in ein paar Minuten noch einmal an.' as const;
+
+/**
+ * Spoken when the inbound webhook cannot store the call (S1, INV-19): the caller hears why the
+ * call ends and what to do, never a provider error tone. No callback capture yet: that needs the
+ * degraded-capture queue (P11.08), and until it is wired the voice role refuses to start outside
+ * development and test (`config/env.ts`).
+ */
+export function buildCallAgainTwiML(): string {
+  return (
+    '<?xml version="1.0" encoding="UTF-8"?>' +
+    `<Response><Say language="de-DE">${escapeXml(`${FALLBACK_APOLOGY} ${FALLBACK_CALL_AGAIN}`)}</Say>` +
+    '<Hangup /></Response>'
+  );
+}
 
 export function fallbackFor(failures: ReadonlySet<FailedLayer>): FallbackAnswer {
   // Total outage answers from the hosted fallback — nothing local can speak.

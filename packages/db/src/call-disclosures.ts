@@ -1,49 +1,54 @@
 /**
- * The disclosure a call was issued, and evidence that it was played (ROADMAP S1, P11.02.04,
- * INV-03). Tables in migration 0085. Every function runs inside `withTenant`.
+ * The disclosure a call was issued, and evidence that the caller heard it (ROADMAP S1,
+ * P11.02.04, INV-03, INV-10). Tables in migration 0085. Every function runs inside `withTenant`.
  */
 
 import { randomUUID } from 'node:crypto';
+import { appendAuditEvent } from './audit.ts';
 import type { TenantClient } from './tenant.ts';
-
-export type DisclosurePlayback = 'confirmed' | 'interrupted';
 
 const VERSION_SHAPE = /^[a-z0-9][a-z0-9.-]{0,63}$/u;
 
+export interface IssuedDisclosure {
+  readonly version: string;
+  readonly businessName: string;
+}
+
 /**
- * Records which disclosure version `callId` was issued. First issue wins: a retried webhook
- * leaves the stored version as it was. Returns the stored version.
+ * Records the disclosure inputs `callId` was issued. First issue wins: a retried webhook leaves
+ * them as they were and gets them back, so it can speak exactly the words first issued.
  */
 export async function recordCallDisclosure(
   client: TenantClient,
   callId: string,
-  version: string,
-): Promise<string> {
-  if (!VERSION_SHAPE.test(version)) throw new RangeError('disclosure version has the wrong shape');
+  issue: IssuedDisclosure,
+): Promise<IssuedDisclosure> {
+  if (!VERSION_SHAPE.test(issue.version)) {
+    throw new RangeError('disclosure version has the wrong shape');
+  }
   await client.query(
-    `insert into call_disclosures (organisation_id, id, call_id, disclosure_version)
-     values (app.current_org(), $1, $2, $3)
+    `insert into call_disclosures (organisation_id, id, call_id, disclosure_version, business_name)
+     values (app.current_org(), $1, $2, $3, $4)
      on conflict (organisation_id, call_id) do nothing`,
-    [randomUUID(), callId, version],
+    [randomUUID(), callId, issue.version, issue.businessName],
   );
-  const stored = await client.query<{ disclosure_version: string }>(
-    'select disclosure_version from call_disclosures where call_id = $1',
+  const stored = await client.query<{ disclosure_version: string; business_name: string }>(
+    'select disclosure_version, business_name from call_disclosures where call_id = $1',
     [callId],
   );
   const row = stored.rows[0];
   if (row === undefined) throw new Error('call disclosure row is missing after insert');
-  return row.disclosure_version;
+  return { version: row.disclosure_version, businessName: row.business_name };
 }
 
 /**
- * Records playback evidence for the call with this provider SID. The first verdict stands, so a
- * close after a confirmation never downgrades it. Returns false when no disclosure was issued
- * for that SID in this tenant (nothing to attach the evidence to).
+ * Records that the disclosure issued to the call with this provider SID played in full, once.
+ * Returns false when no disclosure was issued for that SID in this tenant (nothing to confirm).
+ * A repeat is a no-op that returns true, so a retry after an ambiguous failure is safe.
  */
-export async function recordDisclosurePlayback(
+export async function confirmDisclosurePlayed(
   client: TenantClient,
   providerCallSid: string,
-  outcome: DisclosurePlayback,
 ): Promise<boolean> {
   const issued = await client.query<{ call_id: string }>(
     `select d.call_id from call_disclosures d join calls c on c.id = d.call_id
@@ -52,12 +57,21 @@ export async function recordDisclosurePlayback(
   );
   const callId = issued.rows[0]?.call_id;
   if (callId === undefined) return false;
-  await client.query(
-    `insert into call_disclosure_playbacks (organisation_id, id, call_id, outcome)
-     values (app.current_org(), $1, $2, $3)
+  const inserted = await client.query(
+    `insert into call_disclosure_confirmations (organisation_id, id, call_id)
+     values (app.current_org(), $1, $2)
      on conflict (organisation_id, call_id) do nothing`,
-    [randomUUID(), callId, outcome],
+    [randomUUID(), callId],
   );
+  if ((inserted.rowCount ?? 0) > 0) {
+    await appendAuditEvent(client, {
+      source: 'voice',
+      operation: 'call.disclosure_confirmed',
+      targetKind: 'call',
+      targetId: callId,
+      result: 'succeeded',
+    });
+  }
   return true;
 }
 

@@ -19,7 +19,7 @@ import { RELAY_PATH, SETUP_TIMEOUT_MS } from '../domain/relay-contract.ts';
 import {
   RelayConnection,
   type MeasurementSink,
-  type PlaybackRecorder,
+  type DisclosureConfirmations,
 } from '../application/relay-connection.ts';
 
 export interface RelayTransportDeps {
@@ -27,7 +27,7 @@ export interface RelayTransportDeps {
   readonly clock: Clock;
   readonly logger: Logger;
   readonly sink: MeasurementSink;
-  readonly playback?: PlaybackRecorder | undefined;
+  readonly confirmations?: DisclosureConfirmations | undefined;
 }
 
 export async function registerRelayTransport(
@@ -50,7 +50,7 @@ export async function registerRelayTransport(
       clock: deps.clock,
       logger: deps.logger,
       sink: deps.sink,
-      playback: deps.playback,
+      confirmations: deps.confirmations,
     });
 
     const timer = setTimeout(() => {

@@ -9,12 +9,13 @@
 
 import { Inject, Injectable } from '@nestjs/common';
 import {
+  appendAuditEvent,
+  confirmDisclosurePlayed,
   ingestCall,
   recordCallDisclosure,
-  recordDisclosurePlayback,
   spokenBusinessName,
   withTenant,
-  type DisclosurePlayback,
+  type IssuedDisclosure,
 } from '@moin/db';
 import type { Pool } from '@moin/db/pool';
 import { TENANT_POOL } from './tenant-pool.module.ts';
@@ -30,10 +31,8 @@ export interface InboundCall {
 export interface RecordedInbound {
   /** False when this CallSid was already stored: the webhook is a provider retry. */
   readonly created: boolean;
-  /** The disclosure version stored for the call (the first one issued). */
-  readonly disclosureVersion: string;
-  /** The name the disclosure speaks, from the tenant. */
-  readonly businessName: string;
+  /** The disclosure inputs stored for the call: the first ones issued, on every delivery. */
+  readonly disclosure: IssuedDisclosure;
 }
 
 @Injectable()
@@ -41,9 +40,9 @@ export class VoiceCalls {
   constructor(@Inject(TENANT_POOL) private readonly pool: Pool | null) {}
 
   /**
-   * Stores the call and the disclosure it is issued in one transaction, idempotent by CallSid
-   * (the database is the dedup: a retry finds the row and writes nothing), and reads the name the
-   * disclosure speaks.
+   * Stores the call, its creation audit and the disclosure it is issued in one transaction,
+   * idempotent by CallSid (the database is the dedup: a retry finds the rows, writes nothing and
+   * gets the stored disclosure inputs back).
    */
   recordInbound(call: InboundCall): Promise<RecordedInbound> {
     return withTenant(this.#pool(), call.organisationId, async (client) => {
@@ -52,24 +51,28 @@ export class VoiceCalls {
         fromNumber: call.from,
         toNumber: call.to,
       });
-      const disclosureVersion = await recordCallDisclosure(
-        client,
-        stored.id,
-        call.disclosureVersion,
-      );
-      const businessName = await spokenBusinessName(client);
-      return { created, disclosureVersion, businessName };
+      const disclosure = await recordCallDisclosure(client, stored.id, {
+        version: call.disclosureVersion,
+        businessName: await spokenBusinessName(client),
+      });
+      if (created) {
+        await appendAuditEvent(client, {
+          source: 'voice',
+          operation: 'call.ingest',
+          targetKind: 'call',
+          targetId: stored.id,
+          versions: { template: disclosure.version },
+          result: 'succeeded',
+        });
+      }
+      return { created, disclosure };
     });
   }
 
-  /** Records playback evidence; false when the call has no issued disclosure in this tenant. */
-  recordPlayback(
-    organisationId: string,
-    callSid: string,
-    outcome: DisclosurePlayback,
-  ): Promise<boolean> {
+  /** Confirms the issued disclosure played; false when the call has none in this tenant. */
+  confirm(organisationId: string, callSid: string): Promise<boolean> {
     return withTenant(this.#pool(), organisationId, (client) =>
-      recordDisclosurePlayback(client, callSid, outcome),
+      confirmDisclosurePlayed(client, callSid),
     );
   }
 

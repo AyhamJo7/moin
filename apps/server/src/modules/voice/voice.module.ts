@@ -25,11 +25,7 @@ import { LOGGER } from '../../observability/logger.module.ts';
 import { RouteResolverModule } from '../platform/route-resolver.module.ts';
 import { TenantPoolModule } from '../platform/tenant-pool.module.ts';
 import { VoiceCalls } from '../platform/voice-calls.ts';
-import {
-  noMeasurementSink,
-  type MeasurementSink,
-  type PlaybackRecorder,
-} from './application/relay-connection.ts';
+import { noMeasurementSink, type MeasurementSink } from './application/relay-connection.ts';
 import { VoiceController } from './http/voice.controller.ts';
 import { TwilioSignatureGuard } from './http/twilio-signature.guard.ts';
 import { createFileMeasurementSink } from './infrastructure/measurement-sink.ts';
@@ -76,34 +72,7 @@ export class VoiceModule implements OnModuleInit {
       clock: this.clock,
       logger: this.logger,
       sink: this.sink,
-      playback: this.#playback(),
+      confirmations: this.calls,
     });
-  }
-
-  /**
-   * Playback evidence (S1, INV-03) is written off the call's real-time path: the caller never
-   * waits for it, and a failed write is logged, never thrown into the relay session.
-   */
-  #playback(): PlaybackRecorder {
-    return {
-      record: (tenantId, callSid, outcome) => {
-        this.calls.recordPlayback(tenantId, callSid, outcome).then(
-          (stored) => {
-            if (!stored) {
-              this.logger.warn(
-                { outcome: 'playback-without-disclosure' },
-                'no issued disclosure for the session',
-              );
-            }
-          },
-          () => {
-            this.logger.error(
-              { outcome: 'playback-not-recorded' },
-              'disclosure playback evidence was not stored',
-            );
-          },
-        );
-      },
-    };
   }
 }

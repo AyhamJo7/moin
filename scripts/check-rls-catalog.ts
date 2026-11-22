@@ -198,6 +198,7 @@ const REVIEWED_BODIES: Readonly<Record<string, string>> = {
   'app.revoke_sessions_on_membership_change': '7327cf1abdbb5e1b9a08452780f82c44',
   'app.unassign_member_tasks': 'a3b165fb4ab8fd567dd0916b74c5135c',
   'app.resolve_route': 'c3601d8e5093f32bfc1da1a2220f31ed',
+  'app.bind_call_route': '4fc99ff8ddd3b87f1e8fa0a1a7ee3607',
   'app.delete_orphan_conversation': '5f3521c945e93b5d4b2eaae66d9cd3fd',
   'app.approve_knowledge_version': '5f23a9b9ec78ee23f527e11387a831e5',
 };
@@ -364,6 +365,12 @@ const APPROVED_DEFINERS: Readonly<
   },
   'app.resolve_route': {
     arguments: 'text',
+    owners: ['moin_migrator', 'moin_owner'],
+    searchPath: 'search_path=pg_catalog, public, app, pg_temp',
+    executeGrantees: ['moin_app'],
+  },
+  'app.bind_call_route': {
+    arguments: 'text, uuid',
     owners: ['moin_migrator', 'moin_owner'],
     searchPath: 'search_path=pg_catalog, public, app, pg_temp',
     executeGrantees: ['moin_app'],
