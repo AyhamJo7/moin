@@ -2,6 +2,11 @@
  * The job consumer against real PostgreSQL (as `moin_app`, FORCE RLS) and a real SQS-compatible
  * emulator (P08.05.01–.04, INV-11, INV-19). The job type and every handler here are test fixtures:
  * they prove the worker infrastructure, not a production callback-to-outbox pipeline.
+ *
+ * The async failure scenarios run here against the real consumer (P08.11.01): duplicate delivery
+ * (FS-01), two workers racing one job (FS-10), a crash after the commit and before the delete,
+ * and one before the commit (FS-18), a backlog that drains without loss (FS-14), a transient
+ * database failure retried under the policy, and the dead-letter paths.
  */
 import { createPool, type Pool } from '@moin/db/pool';
 import { enqueueJob, withTenant, type JobHandler } from '@moin/db';
@@ -17,6 +22,8 @@ const ORG_A = '11111111-1111-4111-8111-111111111111';
 const ORG_B = '22222222-2222-4222-8222-222222222222';
 const SENTINEL = 'caller-Maria-Schmidt-+4930123456';
 const VISIBILITY_S = 2;
+/** More jobs than the consumer's concurrency (2), so draining takes several receives. */
+const BACKLOG_JOBS = 7;
 
 let database: TestDatabase;
 let app: Pool;
@@ -191,6 +198,7 @@ describe('job consumer over SQS and PostgreSQL', () => {
     },
   );
 
+  // FS-01.
   evidenceTest('duplicate deliveries of one message do not repeat the effect', async () => {
     const job = await seed();
     for (let i = 0; i < 3; i += 1) await queues.queues.jobs.send(job.body);
@@ -202,6 +210,7 @@ describe('job consumer over SQS and PostgreSQL', () => {
     expect(await queues.queues.jobs.receive({ max: 10, waitSeconds: 0 })).toHaveLength(0);
   });
 
+  // FS-10.
   evidenceTest('two workers racing on one logical job create one effect', async () => {
     const job = await seed();
     let runs = 0;
@@ -218,6 +227,21 @@ describe('job consumer over SQS and PostgreSQL', () => {
     expect(runs).toBe(1);
     expect(await effects(job.envelope.jobId)).toBe(1);
     expect(await queues.queues.jobs.receive({ max: 10, waitSeconds: 0 })).toHaveLength(0);
+  });
+
+  // FS-14: a backlog larger than the consumer's concurrency drains completely, each job once.
+  evidenceTest('a backlog drains without loss, one effect per job', async () => {
+    const jobs = await Promise.all(Array.from({ length: BACKLOG_JOBS }, () => seed()));
+    for (const job of jobs) await queues.queues.jobs.send(job.body);
+    makeConsumer(registry(writeEffect)).start();
+    await until(async () => {
+      const states = await Promise.all(jobs.map((job) => ledger(job.envelope.jobId)));
+      return states.every((state) => state?.status === 'succeeded');
+    });
+    for (const job of jobs) expect(await effects(job.envelope.jobId)).toBe(1);
+    await sleep(VISIBILITY_S * 1000 + 500);
+    expect(await queues.counts('jobs')).toEqual({ visible: 0, leased: 0 });
+    expect(await queues.counts('deadLetter')).toEqual({ visible: 0, leased: 0 });
   });
 
   evidenceTest(
@@ -384,6 +408,7 @@ describe('job consumer over SQS and PostgreSQL', () => {
     },
   );
 
+  // FS-18.
   evidenceTest(
     'a crash after the commit and before the delete does not repeat the effect',
     async () => {
@@ -418,6 +443,7 @@ describe('job consumer over SQS and PostgreSQL', () => {
     },
   );
 
+  // FS-18, the other side of the commit.
   evidenceTest(
     'a crash before the commit leaves the message for redelivery and no effect behind',
     async () => {
