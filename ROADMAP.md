@@ -81,11 +81,14 @@ instead of raising; `claim_check` then refuses every completion or progress clai
 (no checkout's evidence covers work done in a removed worktree; four review rounds showed that
 judging whether the work landed elsewhere can be defeated). A worktree that exists but belongs to
 another repository, a malformed record, or no checkout to fall back to still raises.
-A1a (first part of A1): the duplicate-delivery and crash scenarios (FS-01, FS-10, FS-18) and the
-backlog drain (FS-14) run against `JobConsumer` on real Postgres and the SQS emulator; the
-superseded `platform/worker.ts` loop and its test are deleted, and `fault-injection.test.ts`
-keeps only the Valkey limiter case. Still open in A1: outbox dispatch (A1b), the
-Idempotency-Key middleware (A1c) and the chaos test (A1d).
+A1a (first part of A1): the worker-side fault scenarios run against `JobConsumer` on real
+Postgres and the SQS emulator: duplicate and late delivery, racing workers (FS-10), crashes around
+the commit (FS-18), and a backlog that drains within the concurrency limit. The superseded
+`platform/worker.ts` loop and its test are deleted. `docs/verification/failure-injection-report.md`
+marks FS-01 and FS-14 as partial and lists what stays open in P08.11: the callback path (S4, N1),
+database failover, the backlog alarm and autoscaling (T1), and the SSE switch to polling (A2).
+Still open in A1: outbox dispatch (A1b), the Idempotency-Key middleware (A1c) and the chaos test
+(A1d).
 
 | Area                                                              | Truth                                                                                                                                                                                                                                                                                 |
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

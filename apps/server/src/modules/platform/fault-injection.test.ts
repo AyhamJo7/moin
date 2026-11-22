@@ -1,20 +1,19 @@
 /**
- * Async failure injection (P08.11.01–.02), the part that is not the job consumer: a Valkey outage
- * makes SSE fall back to polling and the rate limiter fail closed.
+ * Async failure injection (P08.11.01–.02), the part that is not the job consumer: with Valkey
+ * down, the rate limiter fails closed (P08.09.01). An SSE client switching to polling is not
+ * tested here; it stays open (A2).
  *
- * The worker-side faults (duplicate delivery FS-01, racing workers FS-10, crash around the commit
- * FS-18, backlog FS-14, transient failure) run against the real consumer, database and queue in
- * `job-consumer.integration.test.ts`. The report is docs/verification/failure-injection-report.md
- * (P08.11.03).
+ * The worker-side faults run against the real consumer, database and queue in
+ * `job-consumer.integration.test.ts`. The report, with what each test proves and what stays open,
+ * is docs/verification/failure-injection-report.md (P08.11.03).
  */
 import { describe, expect, it } from 'vitest';
 import { MemoryRateStore, checkRate, type RateStore } from './rate-limiter.ts';
 
 describe('fault-injection', () => {
-  it('Valkey outage: SSE falls back to polling, limiter fails closed', async () => {
-    // Valkey down → SSE clients poll the store (P08.08.03 proven in the SSE
-    // suite; here the worker side: no live fan-out, rows still land), and the
-    // limiter refuses rather than opening (P08.09.01).
+  it('Valkey outage: the limiter fails closed', async () => {
+    // A failing store refuses rather than opening (P08.09.01); the in-memory store enforces the
+    // same budget.
     const down: RateStore = {
       hit: () => Promise.reject(new Error('valkey unreachable')),
     };
